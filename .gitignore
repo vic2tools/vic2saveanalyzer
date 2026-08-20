@@ -1,0 +1,24 @@
+# Generated report output. `vic2_report/` is the tool's default -o folder, so it
+# reappears on every run; everything in it is derived from saves.
+vic2_report/
+legacybackup/vic2_report/
+*.csv
+!legacybackup/mob_readings.txt
+
+# Reports are regenerated from the CSVs; the one kept example is forced back in.
+report.html
+!legacybackup/example_report.html
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Victoria 2 saves are 20-30 MB each and belong to the game, not the tool
+*.v2
+
+# Editor and OS noise
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
