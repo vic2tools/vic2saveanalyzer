@@ -119,8 +119,10 @@ svg{display:block;width:100%;height:auto}
 @media(max-width:640px){
   figure{overflow-x:auto}
   figure svg{min-width:640px}
-  .mapwrap{width:100%;overflow:auto;background:var(--ground);border:1px solid var(--grid)}
-.mapwrap canvas{display:block;width:100%;height:auto;image-rendering:pixelated;cursor:crosshair}
+  .mapwrap{position:relative;width:100%;overflow:hidden;background:var(--ground);
+  border:1px solid var(--grid)}
+.mapwrap canvas{position:absolute;inset:0;width:100%;height:100%;
+  image-rendering:pixelated;cursor:grab;touch-action:none}
 .readout{position:sticky;left:0}
 }
 .axis text{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;fill:var(--ink-dim)}
@@ -281,6 +283,8 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         <label for="mapsave">Save</label>
         <select id="mapsave"></select>
         <button id="mapocc" aria-pressed="true" title="Shade land by who currently controls it rather than who owns it">Control</button>
+        <button id="mapreset" title="Back to the whole world">Reset</button>
+        <span class="rk" id="mapzoom">1.0&times;</span>
         <span id="pick-map"></span>
       </div>
       <figure>
@@ -294,7 +298,9 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         of. Narrow the nation list to strip the map back to the ones you care
         about &mdash; the land stays shaded, only the markers are filtered.
         Land is shaded by whoever controls it; press <strong>Control</strong> to
-        switch to who owns it, which separates occupied ground from annexed.</p>
+        switch to who owns it, which separates occupied ground from annexed.
+        Scroll to zoom, drag to pan, double-click to zoom in, and click a marker
+        to pin its readout while you look elsewhere.</p>
     </section>
   </div>
 
@@ -1683,8 +1689,13 @@ const MAP = DATA.map;
 let mapTags = null;          // null means every nation
 let mapByControl = true;
 let mapProv = null;          // province id for every pixel
-let mapOwners = null;        // date -> Map(province -> tag index)
+let mapOwners = null;        // date -> {own: Map, occ: Map}
 let mapDots = [];            // what is currently drawn, for hit testing
+let mapBase = null;          // the political map, painted once per view
+let mapBaseKey = '';
+let mapZoom = 1;             // 1 fits the whole world to the panel width
+let mapOX = 0, mapOY = 0;    // map coordinate sitting at the panel's top left
+let mapPinned = null;        // a marker clicked, so the readout stays put
 
 function mapDecode() {
   const grid = new Int32Array(MAP.w * MAP.h);
@@ -1725,62 +1736,79 @@ const mapSea = new Set((MAP && MAP.sea) || []);
 const MAP_WATER = [16, 34, 54], MAP_WILD = [42, 50, 58], MAP_EDGE = [10, 18, 28];
 
 function mapPalette(date) {
-  // province id -> packed rgb, so the pixel loop is one array lookup
   const book = mapOwners[date] || {own: new Map(), occ: new Map()};
   const owners = new Map(book.own);
   if (mapByControl) book.occ.forEach((idx, pid) => owners.set(pid, idx));
-  const top = Math.max(...MAP.sea, ...owners.keys(), 0) + 1;
-  const table = new Int32Array(top);
-  for (let p = 0; p < top; p++) {
-    const rgb = mapSea.has(p) ? MAP_WATER : MAP_WILD;
-    table[p] = (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
-  }
+  let top = 0;
+  mapSea.forEach(p => { if (p > top) top = p; });
+  owners.forEach((_i, p) => { if (p > top) top = p; });
+  const table = new Int32Array(top + 1);
+  const wild = (MAP_WILD[0] << 16) | (MAP_WILD[1] << 8) | MAP_WILD[2];
+  const water = (MAP_WATER[0] << 16) | (MAP_WATER[1] << 8) | MAP_WATER[2];
+  for (let p = 0; p <= top; p++) table[p] = mapSea.has(p) ? water : wild;
   owners.forEach((idx, pid) => {
-    if (pid >= top) return;
     const hex = MAP.colours[MAP.tags[idx]];
-    if (!hex) return;
-    table[pid] = parseInt(hex.slice(1), 16);
+    if (hex) table[pid] = parseInt(hex.slice(1), 16);
   });
   return table;
 }
 
-function drawMap() {
-  if (!MAP) return;
-  const canvas = document.getElementById('mapcanvas');
-  const date = document.getElementById('mapsave').value || DATA.lastDate;
-  document.getElementById('mapdate').textContent = date;
-  canvas.width = MAP.w; canvas.height = MAP.h;
-  const ctx = canvas.getContext('2d');
-
+/* The political map only changes with the save or the shading, so it is painted
+   into an offscreen canvas and then blitted at whatever zoom is in force. */
+function mapPaintBase(date) {
+  const key = date + '|' + mapByControl;
+  if (mapBase && mapBaseKey === key) return;
   if (!mapProv) { mapProv = mapDecode(); mapOwners = mapOwnerTables(); }
-  const table = mapPalette(date);
+  mapBase = document.createElement('canvas');
+  mapBase.width = MAP.w; mapBase.height = MAP.h;
+  const ctx = mapBase.getContext('2d');
   const img = ctx.createImageData(MAP.w, MAP.h);
   const px = img.data;
+  const table = mapPalette(date);
   const top = table.length;
+  const wild = (MAP_WILD[0] << 16) | (MAP_WILD[1] << 8) | MAP_WILD[2];
   for (let i = 0, o = 0; i < mapProv.length; i++, o += 4) {
     const pid = mapProv[i];
-    const c = pid < top ? table[pid] : ((MAP_WILD[0] << 16) | (MAP_WILD[1] << 8) | MAP_WILD[2]);
-    px[o] = (c >> 16) & 255; px[o + 1] = (c >> 8) & 255; px[o + 2] = c & 255; px[o + 3] = 255;
+    const c = pid < top ? table[pid] : wild;
+    px[o] = (c >> 16) & 255; px[o + 1] = (c >> 8) & 255; px[o + 2] = c & 255;
+    px[o + 3] = 255;
   }
-  // one-pixel outline wherever neighbouring pixels belong to different provinces,
-  // which is what makes borders readable at this scale
+  // a one-pixel edge wherever neighbouring pixels sit in different provinces
   for (let y = 0; y < MAP.h; y++) {
     for (let x = 0; x < MAP.w; x++) {
       const i = y * MAP.w + x;
       const p = mapProv[i];
-      const right = x + 1 < MAP.w ? mapProv[i + 1] : p;
-      const down = y + 1 < MAP.h ? mapProv[i + MAP.w] : p;
-      if (p !== right || p !== down) {
+      if (p !== (x + 1 < MAP.w ? mapProv[i + 1] : p) ||
+          p !== (y + 1 < MAP.h ? mapProv[i + MAP.w] : p)) {
         const o = i * 4;
         px[o] = MAP_EDGE[0]; px[o + 1] = MAP_EDGE[1]; px[o + 2] = MAP_EDGE[2];
       }
     }
   }
   ctx.putImageData(img, 0, 0);
+  mapBaseKey = key;
+}
 
+function mapFit() {          // screen pixels per map pixel at zoom 1
+  const canvas = document.getElementById('mapcanvas');
+  return (canvas.clientWidth || MAP.w) / MAP.w;
+}
+
+function mapClamp() {
+  const canvas = document.getElementById('mapcanvas');
+  const s = mapFit() * mapZoom;
+  const viewW = (canvas.clientWidth || MAP.w) / s;
+  const viewH = (canvas.clientHeight || MAP.h) / s;
+  mapOX = viewW >= MAP.w ? (MAP.w - viewW) / 2
+                         : Math.min(Math.max(mapOX, 0), MAP.w - viewW);
+  mapOY = viewH >= MAP.h ? (MAP.h - viewH) / 2
+                         : Math.min(Math.max(mapOY, 0), MAP.h - viewH);
+}
+
+function mapStacks(date) {
   const armies = (MAP.armies || {})[date] || {};
   const wanted = mapTags && mapTags.length ? new Set(mapTags) : null;
-  mapDots = [];
+  const dots = [];
   for (const pid in armies) {
     const spot = MAP.spots[pid];
     if (!spot) continue;
@@ -1789,38 +1817,75 @@ function drawMap() {
       .filter(a => !wanted || wanted.has(a.tag));
     if (!stacks.length) continue;
     stacks.sort((a, b) => b.n - a.n);
-    const total = stacks.reduce((s, a) => s + a.n, 0);
-    mapDots.push({x: spot[0], y: spot[1], pid: +pid, total, stacks,
-                  r: Math.max(2.2, Math.min(16, Math.sqrt(total) * 1.35))});
+    dots.push({x: spot[0], y: spot[1], pid: +pid, stacks,
+               total: stacks.reduce((s, a) => s + a.n, 0)});
   }
-  mapDots.sort((a, b) => b.r - a.r);          // small stacks draw on top
+  dots.sort((a, b) => b.total - a.total);   // small stacks draw last, on top
+  return dots;
+}
+
+function mapRender() {
+  if (!MAP) return;
+  const canvas = document.getElementById('mapcanvas');
+  const date = document.getElementById('mapsave').value || DATA.lastDate;
+  document.getElementById('mapdate').textContent = date;
+  mapPaintBase(date);
+
+  const dpr = window.devicePixelRatio || 1;
+  const cw = canvas.clientWidth || MAP.w, ch = canvas.clientHeight || MAP.h;
+  if (canvas.width !== Math.round(cw * dpr) || canvas.height !== Math.round(ch * dpr)) {
+    canvas.width = Math.round(cw * dpr);
+    canvas.height = Math.round(ch * dpr);
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cw, ch);
+
+  mapClamp();
+  const s = mapFit() * mapZoom;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(mapBase, -mapOX * s, -mapOY * s, MAP.w * s, MAP.h * s);
+
+  mapDots = mapStacks(date);
+  // markers grow with zoom, but slower than the map, so a dense theatre thins
+  // out as you go in instead of turning into one blob
+  const grow = Math.pow(mapZoom, 0.45);
   for (const dot of mapDots) {
+    dot.sx = (dot.x - mapOX) * s;
+    dot.sy = (dot.y - mapOY) * s;
+    dot.sr = Math.max(2.2, Math.min(26, Math.sqrt(dot.total) * 1.3 * grow));
+    if (dot.sx < -20 || dot.sy < -20 || dot.sx > cw + 20 || dot.sy > ch + 20) continue;
     ctx.beginPath();
-    ctx.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2);
+    ctx.arc(dot.sx, dot.sy, dot.sr, 0, Math.PI * 2);
     ctx.fillStyle = MAP.colours[dot.stacks[0].tag] || '#ffffff';
-    ctx.globalAlpha = .9;
+    ctx.globalAlpha = .88;
     ctx.fill();
     ctx.globalAlpha = 1;
-    ctx.lineWidth = .8;
-    ctx.strokeStyle = 'rgba(0,0,0,.75)';
+    ctx.lineWidth = Math.min(1.6, .6 * grow);
+    ctx.strokeStyle = 'rgba(0,0,0,.8)';
     ctx.stroke();
+    if (mapPinned && mapPinned.pid === dot.pid) {
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+    }
   }
-  mapIdle();
+  document.getElementById('mapzoom').textContent = mapZoom.toFixed(1) + '×';
+  mapShow(mapPinned);
 }
 
 function mapIdle() {
-  const date = document.getElementById('mapsave').value || DATA.lastDate;
   const shown = mapDots.reduce((s, d) => s + d.total, 0);
   document.getElementById('mapreadout').innerHTML =
     `<span class="rk">stacks</span> <b>${mapDots.length.toLocaleString()}</b>`
     + `<span><span class="rk">brigades shown</span> <b>${shown.toLocaleString()}</b></span>`
     + `<span><span class="rk">shading</span> <b>${mapByControl ? 'controller' : 'owner'}</b></span>`
-    + `<span class="rk">hover a marker</span>`;
+    + `<span class="rk">hover a marker, click to pin it</span>`;
 }
 
-function mapHover(dot) {
+function mapShow(dot) {
   if (!dot) return mapIdle();
-  const name = MAP.names[dot.pid] || ('province ' + dot.pid);
+  const name = (MAP.names && MAP.names[dot.pid]) || ('province ' + dot.pid);
   const bits = dot.stacks.map(s => {
     const mix = s.mix.split(';').map(part => {
       const c = part.lastIndexOf(':');
@@ -1835,41 +1900,98 @@ function mapHover(dot) {
     + bits.join('');
 }
 
+function mapAt(e) {
+  const canvas = document.getElementById('mapcanvas');
+  const box = canvas.getBoundingClientRect();
+  return {x: e.clientX - box.left, y: e.clientY - box.top};
+}
+
+function mapPick(p) {
+  let best = null, bestD = 1e9;
+  for (const dot of mapDots) {
+    if (dot.sx === undefined) continue;
+    const dx = dot.sx - p.x, dy = dot.sy - p.y;
+    const d = dx * dx + dy * dy;
+    const reach = Math.max(dot.sr, 5) + 2;
+    if (d < reach * reach && d < bestD) { best = dot; bestD = d; }
+  }
+  return best;
+}
+
 if (MAP) {
+  const wrap = document.querySelector('.mapwrap');
+  wrap.style.aspectRatio = MAP.w + ' / ' + MAP.h;
+
   const mapSave = document.getElementById('mapsave');
   DATA.dates.forEach(d => {
     const o = document.createElement('option'); o.value = d; o.textContent = d;
     mapSave.appendChild(o);
   });
   mapSave.value = DATA.lastDate;
-  mapSave.onchange = drawMap;
+  mapSave.onchange = () => { mapPinned = null; mapRender(); };
 
   const occBtn = document.getElementById('mapocc');
   occBtn.onclick = () => {
     mapByControl = !mapByControl;
     occBtn.setAttribute('aria-pressed', mapByControl);
     occBtn.textContent = mapByControl ? 'Control' : 'Ownership';
-    drawMap();
+    mapRender();
+  };
+  document.getElementById('mapreset').onclick = () => {
+    mapZoom = 1; mapOX = 0; mapOY = 0; mapPinned = null; mapRender();
   };
 
   makePicker(document.getElementById('pick-map'),
-    tagPickerCfg(DATA.tags.slice(), sel => { mapTags = sel; drawMap(); }));
+    tagPickerCfg(DATA.tags.slice(), sel => { mapTags = sel; mapRender(); }));
 
   const canvas = document.getElementById('mapcanvas');
-  canvas.addEventListener('pointermove', e => {
-    const box = canvas.getBoundingClientRect();
-    const x = (e.clientX - box.left) * (MAP.w / box.width);
-    const y = (e.clientY - box.top) * (MAP.h / box.height);
-    let best = null, bestD = 1e9;
-    for (const dot of mapDots) {
-      const dx = dot.x - x, dy = dot.y - y;
-      const d = dx * dx + dy * dy;
-      const reach = Math.max(dot.r, 4) + 2;
-      if (d < reach * reach && d < bestD) { best = dot; bestD = d; }
-    }
-    mapHover(best);
+
+  function mapZoomTo(factor, at) {
+    const before = mapFit() * mapZoom;
+    const mx = mapOX + at.x / before, my = mapOY + at.y / before;
+    mapZoom = Math.min(24, Math.max(1, mapZoom * factor));
+    const after = mapFit() * mapZoom;
+    mapOX = mx - at.x / after;
+    mapOY = my - at.y / after;
+    mapRender();
+  }
+
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    mapZoomTo(Math.exp(-e.deltaY * 0.0016), mapAt(e));
+  }, {passive: false});
+
+  canvas.addEventListener('dblclick', e => mapZoomTo(2, mapAt(e)));
+
+  let drag = null;
+  canvas.addEventListener('pointerdown', e => {
+    drag = {...mapAt(e), ox: mapOX, oy: mapOY, moved: false};
+    canvas.setPointerCapture(e.pointerId);
+    canvas.style.cursor = 'grabbing';
   });
-  canvas.addEventListener('pointerleave', mapIdle);
+  canvas.addEventListener('pointermove', e => {
+    const p = mapAt(e);
+    if (drag) {
+      const s = mapFit() * mapZoom;
+      if (Math.abs(p.x - drag.x) + Math.abs(p.y - drag.y) > 3) drag.moved = true;
+      mapOX = drag.ox - (p.x - drag.x) / s;
+      mapOY = drag.oy - (p.y - drag.y) / s;
+      mapRender();
+      return;
+    }
+    if (!mapPinned) mapShow(mapPick(p));
+  });
+  canvas.addEventListener('pointerup', e => {
+    const moved = drag && drag.moved;
+    drag = null;
+    canvas.style.cursor = 'grab';
+    if (moved) return;
+    const hit = mapPick(mapAt(e));
+    mapPinned = (mapPinned && hit && mapPinned.pid === hit.pid) ? null : hit;
+    mapRender();
+  });
+  canvas.addEventListener('pointerleave', () => { if (!mapPinned) mapIdle(); });
+  window.addEventListener('resize', () => { if (mapBase) mapRender(); });
 } else {
   const tab = document.getElementById('tab-map');
   if (tab) tab.hidden = true;
@@ -1902,7 +2024,7 @@ drawMilPies(); drawMilTable(); drawTechTable();
 drawFleetChart(); drawFleetTable(); drawNavy();
 drawPopTable(); drawCultureTable(); drawPopChart();
 drawMarketTable();
-if (MAP) drawMap();
+if (MAP) mapRender();
 </script>
 </body>
 </html>

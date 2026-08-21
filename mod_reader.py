@@ -546,7 +546,11 @@ def province_raster(path, scale=4):
         runs = []
         prev, count = -1, 0
         for oy in range(out_h):
-            fh.seek(offset + (height - 1 - oy * scale) * stride)
+            # Rows are stored top-down here despite the positive height a
+            # bottom-up BMP declares: file row 168 holds Sitka, whose own
+            # position is 168 rows from the top. Flipping would put Alaska in
+            # the southern ocean.
+            fh.seek(offset + (oy * scale) * stride)
             row = fh.read(stride)
             for ox in range(out_w):
                 i = ox * scale * 3

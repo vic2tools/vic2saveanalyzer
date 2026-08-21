@@ -112,9 +112,23 @@ It is built to stay light enough to carry every save in a campaign:
   shading between who holds ground and who owns it, which separates a front line
   from an annexation.
 
-Roughly 300 KB for two saves, and the browser repaints in about 15 ms. Narrow
-the nation list to strip the markers back to the nations you care about; the
-land stays shaded so the geography does not move under you.
+Roughly 300 KB for two saves. Narrow the nation list to strip the markers back
+to the nations you care about; the land stays shaded so the geography does not
+move under you.
+
+**Zoom and pan.** Scroll to zoom on the cursor, drag to pan, double-click to zoom
+in, **Reset** for the whole world. Markers grow more slowly than the map, so a
+crowded theatre thins out as you go in rather than turning into one blob: at
+6.8x only 88 of 371 stacks are on screen. Click a marker to pin its readout while
+you look elsewhere. The political map is painted once per save into an offscreen
+canvas and blitted at whatever zoom is in force, so panning does not repeat the
+per-pixel work.
+
+One trap worth recording. The province bitmap declares a positive height, which
+in a BMP means the rows are stored bottom-up, but this one is stored top-down:
+file row 168 holds Sitka, whose own position is 168 rows from the top. Trusting
+the header puts Alaska in the southern ocean. Check orientation against a
+province you can place rather than against the spec.
 
 `--map-scale` trades size against sharpness: the default 5 gives 1123x432, 4 is
 sharper and adds about 70 KB, 8 saves about 90 KB. Without `--mod-path` there is
