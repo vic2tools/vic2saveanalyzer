@@ -297,3 +297,32 @@ runs it.
 | `template.py` | The report's HTML, CSS and JavaScript |
 | `tech_groups.py` | Which technologies count as army or navy |
 | `build_exe.py` | Draws the icon and packs the executable |
+
+---
+
+## Licence
+
+**GNU Affero General Public License v3.0.** The full text is in
+[LICENSE](LICENSE).
+
+In plain terms, you may use this for anything, change it, and pass it on. What
+you may not do is take it private. If you distribute a modified version, or run
+one as a service other people use, you have to give them the source under this
+same licence.
+
+That is the deal in both directions: nobody can wall this off behind a paywall
+or a login and keep the improvements to themselves, and by the same token
+anything you build on it stays available to everyone who comes after. Selling
+copies is not forbidden and never has been under this kind of licence — it is
+simply futile, because whoever buys one gets the source with it and may give it
+away.
+
+### A note on game files
+
+The analyzer ships no Victoria 2 content. It reads the game and mod files
+already on your machine, and the reports it generates embed things drawn from
+them — nation flags, the province map, country and state names. Those belong to
+Paradox Interactive and to the mod's authors, not to this project and not to
+you. Keep that in mind before publishing a generated report somewhere public;
+sharing one with the people you played the campaign with is a different matter
+entirely.

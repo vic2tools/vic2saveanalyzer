@@ -1,3 +1,13 @@
+# Victoria 2 campaign analyzer
+# Copyright (C) 2026 vic2tools
+#
+# This program is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version. It is distributed WITHOUT ANY WARRANTY; without even the
+# implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
+# <https://www.gnu.org/licenses/> for the full text, or the LICENSE file beside
+# this one.
 """HTML template for the report. Kept apart so report.py stays readable."""
 
 TEMPLATE = r"""<!DOCTYPE html>

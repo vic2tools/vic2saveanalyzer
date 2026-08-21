@@ -29,3 +29,7 @@ build/
 dist/
 dist_new/
 vic2.ico
+
+# Working notes and superseded files from before the first release. They stay
+# on disk and in git history; they are not part of what ships.
+legacybackup/

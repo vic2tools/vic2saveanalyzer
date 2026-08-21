@@ -2,3 +2,6 @@
 # written. Without this, core.autocrlf rewrites every file on checkout and the
 # first diff after a clone is the whole tree.
 * text=auto eol=lf
+
+# The licence is a verbatim document; never let it be rewritten.
+LICENSE -text
