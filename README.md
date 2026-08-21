@@ -149,7 +149,7 @@ the page.
 ## Great powers
 
 Below the map, the eight great powers of the selected save, in rank order, with
-prestige.
+their flag and prestige.
 
 Both come straight out of the save. A save carries a `great_nations` list --
 eight 1-based indices into the country array `common/countries.txt` defines --
@@ -157,6 +157,15 @@ and it is the game's own ranking: across this campaign Turkey drops out between
 1888 and 1908 and the United States enters, and the order is not prestige order
 (Italy outscores Britain on prestige in 1908 and still ranks second). `prestige`
 is a top-level country field, read directly.
+
+Flags come out of the mod's own `gfx/flags/*.tga`, converted to PNG and inlined
+as data URIs -- about 2.4 KB a flag, 26 KB for a campaign, and 10 ms to decode.
+Which variant a nation flies follows `flagType` in `governments.txt`, so a
+communist Russia flies the communist flag, and one image is kept per tag and
+variant rather than per save. The mod's folder wins over the base game's, which
+is how a mod replaces a flag without shipping all 1,300. Vic2 flags are TGA in
+four shapes -- run-length encoded or not, 24 or 32 bit -- and all four are read;
+the five 8-bit greyscale files fall back to a plain colour chip.
 
 **Industrial and military score are not in a save.** Nothing resembling them
 appears in any country block or anywhere else in the file; the engine derives

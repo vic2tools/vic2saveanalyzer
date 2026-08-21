@@ -25,6 +25,8 @@ driven to zero by a dependency on an unobtainable invention are excluded.
 import os
 import re
 import struct
+import zlib
+import base64
 
 from v2parse import Tokens, as_list, parse_block, to_float, unquote
 
@@ -595,6 +597,130 @@ def province_raster(path, scale=4):
         if count:
             runs.append((prev, count))
     return out_w, out_h, runs
+
+
+def government_flag_types(path):
+    """{government: flag variant}, from `flagType` in common/governments.txt."""
+    target = os.path.join(path, "common", "governments.txt")
+    if not os.path.isfile(target):
+        return {}
+    out = {}
+    for name, block in _read_clausewitz(target):
+        if isinstance(block, dict) and "flagType" in block:
+            out[name] = unquote(str(block["flagType"]))
+    return out
+
+
+def _read_tga(target):
+    """
+    (width, height, rgb bytes) from a Vic2 flag.
+
+    Flags come as uncompressed (type 2) or run-length encoded (type 10) TGA at
+    24 or 32 bits. A handful are 8-bit greyscale, which nothing here wants, and
+    those return None so the caller can fall back to a plain colour.
+    """
+    with open(target, "rb") as fh:
+        blob = fh.read()
+    if len(blob) < 18:
+        return None
+    idlen, cmaptype, imgtype = blob[0], blob[1], blob[2]
+    width, height, bpp, descriptor = struct.unpack("<HHBB", blob[12:18])
+    if imgtype not in (2, 10) or bpp not in (24, 32) or not width or not height:
+        return None
+    at = 18 + idlen
+    if cmaptype:
+        at += struct.unpack("<H", blob[5:7])[0] * (blob[7] // 8)
+    step = bpp // 8
+    want = width * height
+    if imgtype == 2:
+        px = blob[at:at + want * step]
+    else:
+        buf = bytearray()
+        while len(buf) < want * step and at < len(blob):
+            packet = blob[at]
+            at += 1
+            count = (packet & 0x7F) + 1
+            if packet & 0x80:
+                buf += blob[at:at + step] * count
+                at += step
+            else:
+                buf += blob[at:at + count * step]
+                at += count * step
+        px = bytes(buf)
+    if len(px) < want * step:
+        return None
+    rgb = bytearray(want * 3)
+    for i in range(want):                       # stored BGR(A)
+        s = i * step
+        rgb[i * 3] = px[s + 2]
+        rgb[i * 3 + 1] = px[s + 1]
+        rgb[i * 3 + 2] = px[s]
+    if not (descriptor & 0x20):                 # rows run bottom-up
+        stride = width * 3
+        rgb = bytearray(b"".join(
+            bytes(rgb[y * stride:(y + 1) * stride])
+            for y in range(height - 1, -1, -1)))
+    return width, height, bytes(rgb)
+
+
+def _write_png(width, height, rgb):
+    """Minimal truecolour PNG: IHDR, one IDAT, IEND, no row filtering."""
+    raw = b"".join(b"\x00" + rgb[y * width * 3:(y + 1) * width * 3]
+                   for y in range(height))
+
+    def chunk(tag, data):
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw, 9))
+            + chunk(b"IEND", b""))
+
+
+def _flag_roots(path):
+    """The mod's flag folder, then the base game's, which is where most live."""
+    roots = [os.path.join(path, "gfx", "flags")]
+    parts = os.path.normpath(path).split(os.sep)
+    if len(parts) >= 2 and parts[-2].lower() == "mod":
+        roots.append(os.path.join(os.sep.join(parts[:-2]), "gfx", "flags"))
+    return [r for r in roots if os.path.isdir(r)]
+
+
+def flag_images(path, wanted, governments=None):
+    """
+    {tag: PNG data URI} for the tags asked for, converted from the mod's TGAs.
+
+    Which variant a country flies depends on its government -- `flagType` in
+    governments.txt names it -- so a communist Russia gets the communist flag.
+    The mod's own folder wins over the base game's, which is how a mod replaces
+    a flag without shipping all 1,300.
+    """
+    governments = governments or {}
+    types = government_flag_types(path)
+    roots = _flag_roots(path)
+    out = {}
+    for tag in wanted:
+        variant = types.get(governments.get(tag, ""), "")
+        names = ([tag + "_" + variant] if variant else []) + [tag]
+        for name in names:
+            found = None
+            for root in roots:
+                candidate = os.path.join(root, name + ".tga")
+                if os.path.isfile(candidate):
+                    found = candidate
+                    break
+            if not found:
+                continue
+            try:
+                image = _read_tga(found)
+            except (OSError, struct.error, IndexError):
+                image = None
+            if image:
+                out[tag] = ("data:image/png;base64,"
+                            + base64.b64encode(_write_png(*image)).decode())
+                break
+    return out
 
 
 def load_mod(path):

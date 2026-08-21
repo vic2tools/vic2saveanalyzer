@@ -124,7 +124,8 @@ svg{display:block;width:100%;height:auto}
   border:1px solid var(--rule);background:rgba(8,25,44,.72)}
 .gprank{font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:600;
   color:var(--ink-dim);min-width:26px;text-align:right}
-.gpflag{width:34px;height:23px;border:1px solid rgba(0,0,0,.6);flex:none}
+.gpflag{width:34px;height:23px;border:1px solid rgba(0,0,0,.6);flex:none;
+  object-fit:fill;image-rendering:auto;display:block}
 .gpbody{min-width:0;flex:1}
 .gpname{font-family:'Barlow Condensed',sans-serif;font-size:18px;color:var(--ink);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2047,16 +2048,19 @@ function drawGreatPowers() {
   if (section) section.hidden = !list.length;
   grid.innerHTML = '';
   const facts = DATA.facts[date] || {};
-  list.forEach((tag, i) => {
+  list.forEach((entry, i) => {
+    const [tag, flagKey] = Array.isArray(entry) ? entry : [entry, ''];
     const f = facts[tag] || {};
     const colour = (DATA.map && DATA.map.colours[tag]) || colourFor(tag);
+    const flag = (DATA.flags || {})[flagKey];
     const card = document.createElement('div');
     card.className = 'gpcard';
     const stat = (label, v, fmt) =>
       `<span><span class="rk">${label}</span> <b>${v == null ? '—' : (fmt ? fmt(v) : v.toLocaleString())}</b></span>`;
     card.innerHTML =
       `<div class="gprank">${i + 1}</div>`
-      + `<div class="gpflag" style="background:${colour}"></div>`
+      + (flag ? `<img class="gpflag" src="${flag}" alt="">`
+              : `<div class="gpflag" style="background:${colour}"></div>`)
       + `<div class="gpbody">`
       +   `<div class="gpname">${nameOf(tag)} <span class="rk">${tag}</span></div>`
       +   `<div class="gpstats">`

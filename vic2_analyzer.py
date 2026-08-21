@@ -1796,11 +1796,28 @@ def main():
         # turn them back into tags.
         order = (mod or {}).get("country_order") or []
         great_powers = {}
-        for meta_i, _nations_i in parsed:
-            picks = [order[i - 1] for i in meta_i.get("great_nations", ())
-                     if 0 < i <= len(order)]
-            if picks:
-                great_powers[meta_i.get("date") or ""] = picks
+        flags = {}
+        if order:
+            from mod_reader import flag_images, government_flag_types
+            variants = government_flag_types(mod["path"])
+            for meta_i, nations_i in parsed:
+                picks = [order[i - 1] for i in meta_i.get("great_nations", ())
+                         if 0 < i <= len(order)]
+                if not picks:
+                    continue
+                row = []
+                for tag in picks:
+                    gov = str((nations_i.get(tag) or {}).get("government") or "")
+                    # One flag per tag and flag variant, so a nation that turns
+                    # communist mid-campaign flies both in turn without the
+                    # image being stored twice.
+                    key = tag + "|" + variants.get(gov, "")
+                    if key not in flags:
+                        got = flag_images(mod["path"], [tag], {tag: gov})
+                        if tag in got:
+                            flags[key] = got[tag]
+                    row.append([tag, key])
+                great_powers[meta_i.get("date") or ""] = row
         html_path = build_report(
             rows, ship_rows, pop_rows, culture_rows, price_rows, snapshot_rows,
             brigade_rows, tech_rows, args.out,
@@ -1809,6 +1826,7 @@ def main():
             map_data=map_data,
             base_prices=(mod or {}).get("base_prices"),
             great_powers=great_powers,
+            flags=flags,
         )
         paths.insert(0, html_path)
 
