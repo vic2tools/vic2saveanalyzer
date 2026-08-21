@@ -437,6 +437,31 @@ def base_prices(path):
     return out
 
 
+def regions(path):
+    """
+    {state name: [province ids]} from `map/region.txt`.
+
+    A war goal names one province, but it wants the whole state, so testing
+    whether a goal was met means knowing which provinces travel together.
+    """
+    target = os.path.join(path, "map", "region.txt")
+    if not os.path.isfile(target):
+        return {}
+    out = {}
+    for line in _plain(target).splitlines():
+        hit = re.match(r"\s*([A-Za-z0-9_]+)\s*=\s*\{([^}]*)\}", line)
+        if hit:
+            ids = [int(n) for n in hit.group(2).split() if n.isdigit()]
+            if ids:
+                out[hit.group(1)] = ids
+    return out
+
+
+def province_regions(path):
+    """{province id: state name}, the reverse of `regions`."""
+    return {pid: name for name, ids in regions(path).items() for pid in ids}
+
+
 def country_order(path):
     """
     Tags in `common/countries.txt` order, which is the engine's country array.
@@ -992,6 +1017,8 @@ def load_mod(path):
         "localisation": read_localisation(path),
         "base_prices": base_prices(path),
         "country_order": country_order(path),
+        "province_names": province_names(path),
+        "province_regions": province_regions(path),
         "technology": technology_tree(path),
         "mob_impacts": mobilization_impacts(path),
         "modifier_impacts": modifier_mob_impacts(path),

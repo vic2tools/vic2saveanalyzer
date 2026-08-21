@@ -172,6 +172,14 @@ svg{display:block;width:100%;height:auto}
 .techcols2 li{margin:1px 0}
 #techdetail{display:block}
 @media(max-width:760px){.techgrid{grid-template-columns:1fr !important}}
+.warrow{cursor:pointer}
+.warrow.on{background:rgba(231,196,100,.14)}
+.warname{white-space:normal;min-width:230px}
+.warhead{font-family:'Playfair Display',Georgia,serif;font-size:19px;
+  color:var(--brass);margin-bottom:6px}
+table.mini{width:auto;min-width:100%}
+table.mini td{vertical-align:top}
+table.mini td .rk{font-size:11px;white-space:normal}
 .selsearch{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;
   background:linear-gradient(180deg,var(--panel),#431B26);color:var(--ink);
   border:1px solid var(--rule);border-radius:0;padding:7px 11px;width:150px}
@@ -256,6 +264,7 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
     <button class="tab" role="tab" id="tab-nations" aria-controls="panel-nations" aria-selected="true">Nations</button>
     <button class="tab" role="tab" id="tab-military" aria-controls="panel-military" aria-selected="false">Military</button>
     <button class="tab" role="tab" id="tab-tech" aria-controls="panel-tech" aria-selected="false">Technology</button>
+    <button class="tab" role="tab" id="tab-wars" aria-controls="panel-wars" aria-selected="false">Wars</button>
     <button class="tab" role="tab" id="tab-fleets" aria-controls="panel-fleets" aria-selected="false">Fleets</button>
     <button class="tab" role="tab" id="tab-pops" aria-controls="panel-pops" aria-selected="false">Pops</button>
     <button class="tab" role="tab" id="tab-market" aria-controls="panel-market" aria-selected="false">Market</button>
@@ -390,6 +399,24 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         out: one column per research area, in order. Filled boxes are researched
         at the chosen save. Click one for its effects and the inventions it
         makes available.</p>
+    </section>
+  </div>
+
+
+  <!-- ============ WARS ============ -->
+  <div role="tabpanel" id="panel-wars" aria-labelledby="tab-wars" hidden>
+    <section>
+      <h2>Wars &middot; <span id="warcount"></span></h2>
+      <div class="controls">
+        <input type="search" id="warfind" class="selsearch" style="width:230px"
+               placeholder="search wars or nations" aria-label="search wars or nations">
+      </div>
+      <div class="tablewrap"><table id="wartable"></table></div>
+      <p class="note">Click a heading to sort, a row for the detail. Casualties
+        are the sum of both sides' losses across every recorded battle.</p>
+    </section>
+    <section>
+      <div id="wardetail"></div>
     </section>
   </div>
 
@@ -2284,6 +2311,169 @@ if (TECH) {
   if (tab) tab.hidden = true;
 }
 
+/* =============== WARS =============== */
+const WARS = DATA.wars || [];
+let warPick = null;
+let warSort = {key: 'losses', dir: -1};
+
+function warLosses(w) { return w.losses[0] + w.losses[1]; }
+function warSide(list) {
+  return list.map(t => `<b style="color:${colourFor(t)}">${t}</b>`).join(' ');
+}
+
+function drawWarTable() {
+  if (!WARS.length) return;
+  const q = (document.getElementById('warfind').value || '').trim().toLowerCase();
+  const rows = WARS.filter(w => !q
+    || w.name.toLowerCase().includes(q)
+    || w.attackers.concat(w.defenders).some(t =>
+         t.toLowerCase() === q || nameOf(t).toLowerCase().includes(q)));
+  const get = {
+    name: w => w.name.toLowerCase(),
+    start: w => w.start || '',
+    losses: warLosses,
+    battles: w => w.battles.length,
+    land: w => w.transfers.length,
+    outcome: w => w.outcome || 'zz',
+  }[warSort.key] || warLosses;
+  rows.sort((a, b) => {
+    const x = get(a), y = get(b);
+    return (x < y ? -1 : x > y ? 1 : 0) * warSort.dir;
+  });
+
+  const head = [['name', 'War'], ['start', 'From'], ['start', 'To'],
+                ['losses', 'Casualties'], ['battles', 'Battles'],
+                ['land', 'Provinces'], ['outcome', 'Goals met']];
+  const body = rows.map((w, i) => {
+    const idx = WARS.indexOf(w);
+    return `<tr class="warrow${warPick === idx ? ' on' : ''}" data-war="${idx}">`
+      + `<td class="warname">${w.name}`
+      + `<div class="rk">${warSide(w.attackers)} <span class="rk">v</span> `
+      + `${warSide(w.defenders)}</div></td>`
+      + `<td>${w.start || '—'}</td>`
+      + `<td>${w.active ? '<b>ongoing</b>' : (w.end || '—')}</td>`
+      + `<td>${warLosses(w).toLocaleString()}</td>`
+      + `<td>${w.battles.length}${w.battles.length && w.dated < w.battles.length
+            ? ` <span class="rk">(${w.dated} dated)</span>` : ''}</td>`
+      + `<td>${w.transfers.length || '—'}</td>`
+      + `<td>${w.outcome || '<span class="rk">—</span>'}</td></tr>`;
+  }).join('');
+  document.getElementById('wartable').innerHTML =
+    `<thead><tr>${head.map(([k, label]) =>
+      `<th data-k="${k}"${warSort.key === k ? ' aria-sort="' +
+        (warSort.dir < 0 ? 'descending' : 'ascending') + '"' : ''}>${label}</th>`)
+      .join('')}</tr></thead><tbody>${body}</tbody>`;
+  document.querySelectorAll('#wartable th').forEach(th => {
+    th.onclick = () => {
+      const k = th.dataset.k;
+      if (warSort.key === k) warSort.dir *= -1;
+      else warSort = {key: k, dir: k === 'name' || k === 'start' ? 1 : -1};
+      drawWarTable();
+    };
+  });
+  document.querySelectorAll('#wartable tbody tr').forEach(tr => {
+    tr.onclick = () => {
+      const idx = +tr.dataset.war;
+      warPick = warPick === idx ? null : idx;
+      drawWarTable(); drawWarDetail();
+    };
+  });
+  document.getElementById('warcount').textContent =
+    `${rows.length} of ${WARS.length} wars`;
+  drawWarDetail();
+}
+
+function drawWarDetail() {
+  const box = document.getElementById('wardetail');
+  if (warPick === null || !WARS[warPick]) {
+    box.innerHTML = '<p class="note">Pick a war for its battles and the land it moved.</p>';
+    return;
+  }
+  const w = WARS[warPick];
+  const goal = w.goal.casus_belli
+    ? `<span class="rk">goal</span> <b>${w.goal.casus_belli.replace(/_/g, ' ')}</b>`
+      + (w.goal.actor ? ` <span class="rk">for</span> <b>${w.goal.actor}</b>` : '')
+      + (w.goal.receiver ? ` <span class="rk">against</span> <b>${w.goal.receiver}</b>` : '')
+    : '<span class="rk">no recorded war goal</span>';
+
+  const verdict = w.goals.length
+    ? `<table class="mini"><thead><tr><th>Demand</th><th>By</th><th>On</th>`
+      + `<th>State</th><th>Met</th><th>Provinces</th><th>Source</th></tr></thead><tbody>`
+      + w.goals.map(g =>
+          `<tr><td>${g.cb.replace(/_/g, ' ')}</td>`
+          + `<td><b style="color:${colourFor(g.actor)}">${g.actor}</b></td>`
+          + `<td><b style="color:${colourFor(g.receiver)}">${g.receiver}</b></td>`
+          + `<td>${g.state || '—'}</td>`
+          + `<td class="${g.met ? 'up' : 'down'}">${g.met ? 'yes' : 'no'}</td>`
+          + `<td>${g.took || '—'}</td>`
+          + `<td class="rk">${g.source === 'recorded' ? 'the save says so'
+              : g.source === 'ledger' ? 'from who held the state' : 'not checkable'}</td></tr>`)
+        .join('')
+      + `</tbody></table>`
+      + `<p class="note">A war carries more than one demand: the one it opened `
+      + `with, plus any added while it ran. Added demands are dropped from the `
+      + `save when the war ends, so they survive only where a save caught the `
+      + `war still being fought &mdash; that is where <em>the save says so</em> `
+      + `comes from, including its own <code>is_fulfilled</code> flag. `
+      + `Otherwise the answer is read off who held the state either side of the `
+      + `war, which cannot see a demand that was dropped.</p>`
+    : `<p class="note">No war goal was recorded for this war.</p>`;
+  const land = w.transfers.length
+    ? `<table class="mini"><thead><tr><th>Province</th><th>From</th><th>To</th></tr></thead><tbody>`
+      + w.transfers.map(t =>
+          `<tr><td>${t[1] || ('#' + t[0])}${t[4] ? ' <span class="rk">war goal</span>' : ''}</td>`
+          + `<td><b style="color:${colourFor(t[2])}">${t[2]}</b></td>`
+          + `<td><b style="color:${colourFor(t[3])}">${t[3]}</b></td></tr>`).join('')
+      + `</tbody></table>`
+    : '';
+
+  const undated = w.battles.length - w.dated;
+  const battles = w.battles.length
+    ? `<table class="mini"><thead><tr><th>Date</th><th>Battle</th><th>Winner</th>`
+      + `<th>Attacker</th><th>lost</th><th>Defender</th><th>lost</th></tr></thead><tbody>`
+      + w.battles.map(b => {
+          const win = b.won ? b.a[0] : b.d[0];
+          const force = s => s[3] ? s[3].split(';').map(p => p.replace(':', ' ')).join(', ') : '';
+          return `<tr><td>${b.date || '<span class="rk">unknown</span>'}</td>`
+            + `<td>${b.name}</td>`
+            + `<td><b style="color:${colourFor(win)}">${win}</b></td>`
+            + `<td><b style="color:${colourFor(b.a[0])}">${b.a[0]}</b>`
+            + `<div class="rk">${b.a[1] || '—'} · ${force(b.a)}</div></td>`
+            + `<td>${b.a[2].toLocaleString()}</td>`
+            + `<td><b style="color:${colourFor(b.d[0])}">${b.d[0]}</b>`
+            + `<div class="rk">${b.d[1] || '—'} · ${force(b.d)}</div></td>`
+            + `<td>${b.d[2].toLocaleString()}</td></tr>`;
+        }).join('')
+      + `</tbody></table>`
+      + (undated ? `<p class="note">${undated} of these have no date. A save keeps `
+          + `dates only on its most recent battles, so a battle is dated here when `
+          + `some save in the folder still remembered it.</p>` : '')
+    : '<p class="note">No battle was recorded in this war.</p>';
+
+  box.innerHTML =
+    `<div class="warhead">${w.name}</div>`
+    + `<div class="readout" style="border:0;padding:0 0 8px">`
+    +   `<span><span class="rk">from</span> <b>${w.start || '—'}</b></span>`
+    +   `<span><span class="rk">to</span> <b>${w.active ? 'ongoing' : (w.end || '—')}</b></span>`
+    +   `<span><span class="rk">casualties</span> <b>${warLosses(w).toLocaleString()}</b></span>`
+    +   `<span>${goal}</span>`
+    + `</div>`
+    + `<div class="readout" style="border:0;padding:0 0 10px">`
+    +   `<span><span class="rk">attackers</span> ${warSide(w.attackers)}</span>`
+    +   `<span><span class="rk">defenders</span> ${warSide(w.defenders)}</span>`
+    + `</div>`
+    + `<div class="techsub">War goals</div>${verdict}`
+    + (land ? `<div class="techsub" style="margin-top:12px">Provinces that changed hands</div>${land}` : '')
+    + `<div class="techsub" style="margin-top:12px">Battles</div>${battles}`;
+}
+
+if (WARS.length) {
+  document.getElementById('warfind').oninput = () => { warPick = null; drawWarTable(); };
+} else {
+  const tab = document.getElementById('tab-wars');
+  if (tab) tab.hidden = true;
+}
+
 /* =============== TABS =============== */
 const tabs = [...document.querySelectorAll('.tab')];
 function selectTab(id) {
@@ -2314,6 +2504,7 @@ searchSelect(document.getElementById('cultagsel'), 'search nations');
 searchSelect(document.getElementById('poptag'), 'search nations');
 drawMarketTable();
 if (TECH) drawTechTree();
+if (WARS.length) drawWarTable();
 searchSelect(document.getElementById('techtag'), 'search nations');
 if (MAP) mapRender();
 drawGreatPowers();

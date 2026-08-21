@@ -19,6 +19,7 @@ import csv
 import math
 import json
 import os
+import re
 import sys
 from collections import Counter, defaultdict
 
@@ -433,6 +434,121 @@ def count_units(node, nat, where=None):
                 count_units(block, nat, here if here > 0 else where)
 
 
+def _side(block):
+    """One side of a battle: country, leader, losses and the units engaged."""
+    if not isinstance(block, dict):
+        return None
+    out = {"country": unquote(str(block.get("country", ""))),
+           "leader": unquote(str(block.get("leader", ""))),
+           "losses": to_int(block.get("losses"), 0),
+           "units": {}}
+    for key, val in block.items():
+        if key in ("country", "leader", "losses") or key.startswith("_"):
+            continue
+        n = to_int(val, 0)
+        if n:
+            out["units"][key] = n
+    return out
+
+
+def read_war(block, active):
+    """
+    One `previous_war` or `active_war` block, flattened.
+
+    `history` mixes two kinds of entry. Dated keys carry who joined or left and,
+    while the war is recent enough, the battles themselves. Battles that have
+    aged out of that window sit bare at the top of the history with no date at
+    all, which is why dating them takes more than one save.
+    """
+    if not isinstance(block, dict):
+        return None
+    history = block.get("history")
+    history = history if isinstance(history, dict) else {}
+
+    joined, left, battles = [], [], []
+
+    def take_battle(raw, when):
+        if not isinstance(raw, dict):
+            return
+        battles.append({
+            "name": unquote(str(raw.get("name", ""))),
+            "location": to_int(raw.get("location"), 0),
+            "date": when,
+            # `result=yes` is an attacker victory; 889 of 1310 in one save.
+            "attacker_won": str(raw.get("result", "")).lower() == "yes",
+            "attacker": _side(raw.get("attacker")),
+            "defender": _side(raw.get("defender")),
+        })
+
+    for key, value in history.items():
+        if key == "battle":
+            for raw in as_list(value):
+                take_battle(raw, None)
+            continue
+        if not re.match(r"^\d{3,4}\.\d{1,2}\.\d{1,2}$", str(key)):
+            continue
+        for entry in as_list(value):
+            if not isinstance(entry, dict):
+                continue
+            for what, who in entry.items():
+                if what == "battle":
+                    for raw in as_list(who):
+                        take_battle(raw, key)
+                elif what in ("add_attacker", "add_defender"):
+                    joined.append((key, unquote(str(who)),
+                                   what == "add_attacker"))
+                elif what in ("rem_attacker", "rem_defender"):
+                    left.append((key, unquote(str(who))))
+
+    def read_goal(raw):
+        if not isinstance(raw, dict):
+            return None
+        return {
+            "casus_belli": unquote(str(raw.get("casus_belli", ""))),
+            "actor": unquote(str(raw.get("actor", ""))),
+            "receiver": unquote(str(raw.get("receiver", ""))),
+            "province": to_int(raw.get("state_province_id"), 0),
+            "added": unquote(str(raw.get("date", ""))),
+            # The game records this itself while the war runs, so a fulfilled
+            # goal needs no inference from who owns what afterwards.
+            "fulfilled": str(raw.get("is_fulfilled", "")).lower() == "yes",
+        }
+
+    # Goals added during the war live at the top level of an ACTIVE war and are
+    # dropped when it ends, exactly as battle dates are. A war read only from
+    # the final save keeps its original goal and nothing else -- the USA's claim
+    # on Georgia inside the French Conquest of Friesland survives only in a save
+    # taken while that war was still being fought.
+    goals = [g for g in (read_goal(raw) for raw in as_list(block.get("war_goal")))
+             if g and (g["actor"] or g["receiver"])]
+
+    goal = block.get("original_wargoal")
+    goal = goal if isinstance(goal, dict) else {}
+    # `action` is not the war's start -- one war runs 1854 to 1858 with an
+    # action of 1858.3.30, another has an action in the middle of its history.
+    # The history's own dates are the reliable bounds.
+    dates = ([d for d, _w, _a in joined] + [d for d, _w in left]
+             + [b["date"] for b in battles if b["date"]])
+    return {
+        "name": unquote(str(block.get("name", ""))),
+        "active": active,
+        "start": min(dates, key=date_key) if dates else "",
+        "end": max(dates, key=date_key) if dates and not active else "",
+        "original_attacker": unquote(str(block.get("original_attacker", ""))),
+        "original_defender": unquote(str(block.get("original_defender", ""))),
+        "attackers": sorted({w for _d, w, a in joined if a}),
+        "defenders": sorted({w for _d, w, a in joined if not a}),
+        "goals": goals,
+        "goal": {
+            "casus_belli": unquote(str(goal.get("casus_belli", ""))),
+            "actor": unquote(str(goal.get("actor", ""))),
+            "receiver": unquote(str(goal.get("receiver", ""))),
+            "province": to_int(goal.get("state_province_id"), 0),
+        },
+        "battles": battles,
+    }
+
+
 def read_country(tok, tag, nations):
     """Consume one country block."""
     nat = nations[tag]
@@ -559,6 +675,7 @@ def analyze_save(path, verbose=True):
     meta = {"file": os.path.basename(path), "date": "", "player": "", "market": None}
     province_owner = {}
     great_nations = []
+    wars = []
     market_block = None
 
     while True:
@@ -584,6 +701,10 @@ def analyze_save(path, verbose=True):
                               province_id=int(key), owner_map=province_owner)
             elif looks_like_country_tag(key):
                 read_country(tok, key, nations)
+            elif key in ("active_war", "previous_war"):
+                war = read_war(parse_block(tok), key == "active_war")
+                if war:
+                    wars.append(war)
             elif key == "great_nations":
                 # The engine's own great power list, in rank order, as 1-based
                 # indices into the country array that common/countries.txt
@@ -615,6 +736,7 @@ def analyze_save(path, verbose=True):
 
     meta["province_owner"] = province_owner
     meta["great_nations"] = great_nations
+    meta["wars"] = wars
 
     if isinstance(market_block, dict):
         meta["market"] = read_worldmarket(market_block, meta["date"])
@@ -1773,7 +1895,7 @@ def main():
                           args.out)
 
     if not args.no_html:
-        from report import build_map, build_report
+        from report import build_map, build_report, build_wars
         # Country names come from the mod's own localisation, which is where the
         # game gets them: a bare TAG, overridden by TAG_<government> when one
         # exists -- IGoR's PBC is "Peru-Bolivia" but "Andine Federation" while
@@ -1831,6 +1953,8 @@ def main():
             great_powers=great_powers,
             flags=flags,
             technology=(mod or {}).get("technology"),
+            wars=build_wars(parsed, (mod or {}).get("province_names"),
+                            (mod or {}).get("province_regions")),
         )
         paths.insert(0, html_path)
 

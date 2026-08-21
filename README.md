@@ -184,6 +184,37 @@ carry the real quantities instead -- factory levels, brigades and ships -- all
 of which are counted from the save. If you want the game's own two numbers they
 have to be read off the in-game ledger.
 
+## Wars
+
+Every war in the campaign, its battles, and what it actually took.
+
+**Battle dates take the whole folder.** A save dates only its most recent
+battles and drops the dates from older ones -- the 1908 save can date 33 of its
+1,310. Reading all 38 saves lifts that to **1,217 of 1,359, about 90%**, because
+each save catches a different window and the windows tile the campaign. What is
+still undated is shown as unknown.
+
+The obvious shortcut does not work. Scanning the file and stamping each battle
+with the last date seen -- which is what the one other tool of this kind does --
+is **3% correct here**: in a finished war the battles are written *before* the
+dated events, so every battle inherits a date from the war above it in the file.
+Three battles of Dresden come out as 1836.8.25 against a true 1836.9.13,
+1836.9.18 and 1836.9.26; Gharyan lands eleven months out.
+
+**War goals are recorded, not inferred.** A war carries more than one demand:
+the one it opened with plus any added while it ran, each naming a claimant, a
+target and a state, and each carrying the game's own `is_fulfilled` flag. Added
+demands are dropped when the war ends, so like battle dates they survive only in
+a save taken while the war was live -- 52 of 270 wars here. Where that record
+exists the report uses it; otherwise it compares who held the target state
+either side of the war, and says which of the two it did.
+
+This matters more than it sounds. The French Conquest of Friesland looks like a
+Franco-Prussian affair, and its original goal is exactly that. Caught mid-war in
+an 1857 save it turns out to carry three demands, the third an American claim on
+Mexico for Georgia -- which is why Atlanta, Savannah and four more provinces
+change hands in a war named after a Dutch province.
+
 ## Picking nations
 
 Every chart that compares nations uses a searchable dropdown rather than a wall
