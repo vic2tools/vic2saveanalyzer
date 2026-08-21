@@ -28,7 +28,7 @@ import struct
 import zlib
 import base64
 
-from v2parse import Tokens, as_list, parse_block, to_float, unquote
+from v2parse import Tokens, as_list, parse_block, to_float, to_int, unquote
 
 _COMMENT = re.compile(r"#[^\r\n]*")
 
@@ -759,6 +759,159 @@ def flag_images(path, wanted, governments=None):
     return out
 
 
+def text_localisation(path, wanted):
+    """
+    {key: english} for an arbitrary set of localisation keys.
+
+    `read_localisation` keeps only country-shaped keys because that is all the
+    map needs; the technology tree wants tech names, area headings and modifier
+    labels, which look like anything.
+    """
+    folder = os.path.join(path, "localisation")
+    if not os.path.isdir(folder):
+        return {}
+    wanted = set(wanted)
+    out = {}
+    for name in sorted(os.listdir(folder)):
+        if not name.lower().endswith(".csv"):
+            continue
+        try:
+            with open(os.path.join(folder, name), "rb") as fh:
+                text = fh.read().decode("cp1252", "replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            key, _, rest = line.partition(";")
+            key = key.strip()
+            if key in wanted and key not in out:
+                english = rest.split(";", 1)[0].strip()
+                if english:
+                    out[key] = english
+    return out
+
+
+# Bookkeeping rather than an effect a player would read off the tech.
+_TECH_SKIP = {"area", "year", "cost", "ai_chance", "unciv_military",
+              "unciv_naval", "unciv_economic", "unciv_culture"}
+
+
+def _effects(block, prefix=""):
+    """[(label key, value)] for everything on a tech that is an actual effect."""
+    out = []
+    for key, val in block.items():
+        if key.startswith("_") or key in _TECH_SKIP:
+            continue
+        if isinstance(val, dict):
+            out.extend(_effects(val, prefix + key + ": "))
+        elif isinstance(val, list):
+            for item in val:
+                if not isinstance(item, (dict, list)):
+                    out.append((prefix + key, str(item)))
+        else:
+            out.append((prefix + key, str(val)))
+    return out
+
+
+def invention_index(path):
+    """
+    {invention: set of techs its `limit` requires}, for every invention.
+
+    `invention_rules` deliberately holds only the inventions that grant
+    mobilisation size. The technology tree wants all of them, so it can show
+    what each tech unlocks.
+    """
+    folder = os.path.join(path, "inventions")
+    out = {}
+    if not os.path.isdir(folder):
+        return out
+    for fname in _files(folder):
+        target = os.path.join(folder, fname)
+        raw = _COMMENT.sub("", open(target, "rb").read().decode("latin-1"))
+        for name, _block in _read_clausewitz(target):
+            reqs, _tags, _invs = _limit_of(_block_text(raw, name))
+            if reqs:
+                out[name] = reqs
+    return out
+
+
+def technology_tree(path, rules=None):
+    """
+    The tech tree as the game draws it: five folders, columns, then techs.
+
+    `technologies/*.txt` gives one file per category -- army, navy, commerce,
+    culture, industry -- and every tech names the `area` it sits in, which is
+    the column of the in-game screen. File order inside an area is the order the
+    techs appear down that column, so it is kept.
+
+    Each tech carries its year, cost, its effects, and the inventions gated
+    behind it, which come from the invention `limit` blocks already parsed for
+    mobilisation.
+    """
+    folder = os.path.join(path, "technologies")
+    if not os.path.isdir(folder):
+        return {}
+
+    gated = {}
+    for name, techs in (rules if rules is not None
+                        else invention_index(path)).items():
+        for tech in techs:
+            gated.setdefault(tech, []).append(name)
+
+    tree = {}
+    keys = set()
+    for fname in sorted(os.listdir(folder)):
+        if not fname.lower().endswith(".txt"):
+            continue
+        category = fname[:-4].replace("_tech", "")
+        areas = []
+        index = {}
+        for key, block in _read_clausewitz(os.path.join(folder, fname)):
+            if not isinstance(block, dict):
+                continue
+            area = unquote(str(block.get("area", "other")))
+            if area not in index:
+                index[area] = {"area": area, "techs": []}
+                areas.append(index[area])
+            effects = _effects(block)
+            index[area]["techs"].append({
+                "key": key,
+                "year": to_int(block.get("year"), 0),
+                "cost": to_int(block.get("cost"), 0),
+                "effects": effects,
+                "inventions": sorted(gated.get(key, [])),
+            })
+            keys.add(key)
+            keys.add(area)
+            for label, _v in effects:
+                keys.add(label.split(":")[0].strip())
+            for inv in gated.get(key, ()):
+                keys.add(inv)
+        if areas:
+            tree[category] = areas
+            keys.add(category)
+
+    names = text_localisation(path, keys)
+    for category, areas in tree.items():
+        for column in areas:
+            column["label"] = names.get(column["area"]) or _pretty(column["area"])
+            for tech in column["techs"]:
+                tech["name"] = names.get(tech["key"]) or _pretty(tech["key"])
+                tech["effects"] = [
+                    [names.get(label) or _pretty(label), value]
+                    for label, value in tech["effects"]
+                ]
+                tech["inventions"] = [
+                    [inv, names.get(inv) or _pretty(inv)] for inv in tech["inventions"]
+                ]
+    return {"tree": tree,
+            "categories": {c: names.get(c) or _pretty(c) for c in tree}}
+
+
+def _pretty(key):
+    """A readable label for a key the localisation files do not carry."""
+    return key.replace("_", " ").strip().capitalize()
+
+
 def load_mod(path):
     """
     Returns {
@@ -839,6 +992,7 @@ def load_mod(path):
         "localisation": read_localisation(path),
         "base_prices": base_prices(path),
         "country_order": country_order(path),
+        "technology": technology_tree(path),
         "mob_impacts": mobilization_impacts(path),
         "modifier_impacts": modifier_mob_impacts(path),
         "revanchism_impact_ladder": impact_ladder,

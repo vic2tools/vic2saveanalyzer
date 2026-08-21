@@ -148,6 +148,30 @@ svg{display:block;width:100%;height:auto}
 .gpstats{display:flex;flex-wrap:wrap;gap:10px;font-family:'IBM Plex Mono',ui-monospace,monospace;
   font-size:11px;color:var(--ink)}
 .gpstats .rk{color:var(--ink-dim)}
+.techgrid{display:grid;gap:6px;align-items:start;margin-bottom:12px}
+.techcol{display:flex;flex-direction:column;gap:5px;min-width:0}
+.techhead{font-family:'Playfair Display',Georgia,serif;font-size:12px;
+  text-transform:uppercase;letter-spacing:.1em;color:var(--brass);
+  text-align:center;padding:5px 4px;border:1px solid var(--rule);
+  background:linear-gradient(180deg,#6B2E3C,#4A1C28)}
+.techbox{font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:12px;
+  text-align:left;padding:7px 8px;border:1px solid var(--grid);
+  background:rgba(42,15,23,.55);color:var(--ink-dim);cursor:pointer;
+  white-space:normal;line-height:1.25;min-height:34px}
+.techbox.done{background:linear-gradient(180deg,#4C6B3A,#38502A);
+  color:var(--ink);border-color:var(--rule)}
+.techbox.open{outline:2px solid var(--brass);outline-offset:-2px}
+.techbox:hover{border-color:var(--brass)}
+.techtitle{font-family:'Playfair Display',Georgia,serif;font-size:16px;
+  color:var(--brass);width:100%;margin-bottom:4px}
+.techcols2{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:14px;width:100%}
+.techsub{font-family:'Playfair Display',Georgia,serif;font-size:11px;
+  text-transform:uppercase;letter-spacing:.14em;color:var(--ink-dim);margin-bottom:4px}
+.techcols2 ul{margin:0;padding-left:16px}
+.techcols2 li{margin:1px 0}
+#techdetail{display:block}
+@media(max-width:760px){.techgrid{grid-template-columns:1fr !important}}
 .selsearch{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;
   background:linear-gradient(180deg,var(--panel),#431B26);color:var(--ink);
   border:1px solid var(--rule);border-radius:0;padding:7px 11px;width:150px}
@@ -231,6 +255,7 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
   <div class="tabs" role="tablist" aria-label="Views">
     <button class="tab" role="tab" id="tab-nations" aria-controls="panel-nations" aria-selected="true">Nations</button>
     <button class="tab" role="tab" id="tab-military" aria-controls="panel-military" aria-selected="false">Military</button>
+    <button class="tab" role="tab" id="tab-tech" aria-controls="panel-tech" aria-selected="false">Technology</button>
     <button class="tab" role="tab" id="tab-fleets" aria-controls="panel-fleets" aria-selected="false">Fleets</button>
     <button class="tab" role="tab" id="tab-pops" aria-controls="panel-pops" aria-selected="false">Pops</button>
     <button class="tab" role="tab" id="tab-market" aria-controls="panel-market" aria-selected="false">Market</button>
@@ -346,6 +371,27 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
     </section>
   </div>
 
+
+
+  <!-- ============ TECHNOLOGY ============ -->
+  <div role="tabpanel" id="panel-tech" aria-labelledby="tab-tech" hidden>
+    <section>
+      <h2>Technology &middot; <span id="techwho"></span></h2>
+      <div class="controls">
+        <label class="tb-label" for="techtag" style="margin:0">Nation</label>
+        <select id="techtag"></select>
+        <label class="tb-label" for="techsave" style="margin:0">Save</label>
+        <select id="techsave"></select>
+      </div>
+      <div class="controls" id="techcats"></div>
+      <div class="techgrid" id="techgrid"></div>
+      <div class="readout" id="techdetail"></div>
+      <p class="note">Every technology in the mod, laid out as the game lays it
+        out: one column per research area, in order. Filled boxes are researched
+        at the chosen save. Click one for its effects and the inventions it
+        makes available.</p>
+    </section>
+  </div>
 
   <!-- ============ FLEETS ============ -->
   <div role="tabpanel" id="panel-fleets" aria-labelledby="tab-fleets" hidden>
@@ -2124,6 +2170,120 @@ function searchSelect(select, placeholder) {
   };
 }
 
+/* =============== TECHNOLOGY =============== */
+const TECH = DATA.technology && DATA.technology.tree ? DATA.technology : null;
+let techCat = null;
+let techPick = null;          // {category, area, index} of the opened tech
+
+function techResearched(tag, date) {
+  const have = new Set();
+  const idx = ((DATA.techsBy[tag] || {})[date]) || [];
+  for (const i of idx) have.add(DATA.techOrder[i]);
+  return have;
+}
+
+function drawTechTree() {
+  if (!TECH) return;
+  const tag = document.getElementById('techtag').value;
+  const date = document.getElementById('techsave').value;
+  document.getElementById('techwho').textContent =
+    (nameOf(tag) === tag ? tag : nameOf(tag) + ' · ' + tag) + ' at ' + date;
+  const have = techResearched(tag, date);
+
+  // category buttons, with a researched count each
+  const bar = document.getElementById('techcats');
+  bar.innerHTML = '';
+  const cats = Object.keys(TECH.tree);
+  if (!techCat || !TECH.tree[techCat]) techCat = cats[0];
+  for (const cat of cats) {
+    let total = 0, done = 0;
+    for (const col of TECH.tree[cat])
+      for (const t of col.techs) { total++; if (have.has(t.key)) done++; }
+    const b = document.createElement('button');
+    b.textContent = (TECH.categories[cat] || cat) + '  ' + done + '/' + total;
+    b.setAttribute('aria-pressed', cat === techCat);
+    b.onclick = () => { techCat = cat; techPick = null; drawTechTree(); };
+    bar.appendChild(b);
+  }
+
+  const grid = document.getElementById('techgrid');
+  grid.innerHTML = '';
+  grid.style.gridTemplateColumns =
+    'repeat(' + TECH.tree[techCat].length + ',minmax(0,1fr))';
+  TECH.tree[techCat].forEach((col, ci) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'techcol';
+    const head = document.createElement('div');
+    head.className = 'techhead';
+    head.textContent = col.label;
+    wrap.appendChild(head);
+    col.techs.forEach((t, ti) => {
+      const box = document.createElement('button');
+      const done = have.has(t.key);
+      box.className = 'techbox' + (done ? ' done' : '');
+      const open = techPick && techPick.category === techCat
+                && techPick.area === ci && techPick.index === ti;
+      if (open) box.classList.add('open');
+      box.textContent = t.name;
+      box.title = t.name + ' · ' + t.year + ' · ' + t.cost.toLocaleString() + ' research points';
+      box.onclick = () => {
+        techPick = open ? null : {category: techCat, area: ci, index: ti};
+        drawTechTree();
+      };
+      wrap.appendChild(box);
+    });
+    grid.appendChild(wrap);
+  });
+
+  const panel = document.getElementById('techdetail');
+  if (!techPick) {
+    panel.innerHTML = '<span class="rk">Click a technology for its effects and '
+                    + 'the inventions it unlocks.</span>';
+    return;
+  }
+  const t = TECH.tree[techPick.category][techPick.area].techs[techPick.index];
+  const done = have.has(t.key);
+  const effects = t.effects.length
+    ? t.effects.map(([label, value]) =>
+        `<li><span class="rk">${label}</span> <b>${value}</b></li>`).join('')
+    : '<li class="rk">No direct modifiers.</li>';
+  const invs = t.inventions.length
+    ? t.inventions.map(([, name]) => `<li>${name}</li>`).join('')
+    : '<li class="rk">Nothing gated behind it.</li>';
+  panel.innerHTML =
+    `<div class="techtitle">${t.name}`
+    + `<span class="rk"> ${t.year} · ${t.cost.toLocaleString()} rp · `
+    + `${done ? 'researched' : 'not researched'}</span></div>`
+    + `<div class="techcols2">`
+    +   `<div><div class="techsub">Effects</div><ul>${effects}</ul></div>`
+    +   `<div><div class="techsub">Inventions it makes available</div>`
+    +     `<ul>${invs}</ul>`
+    +     `<p class="note">These are the inventions the technology makes`
+    +     ` available, not the ones this nation has rolled.</p></div>`
+    + `</div>`;
+}
+
+if (TECH) {
+  const tagSel = document.getElementById('techtag');
+  DATA.tags.forEach(t => {
+    const o = document.createElement('option'); o.value = t;
+    o.textContent = nameOf(t) === t ? t : `${t} · ${nameOf(t)}`;
+    tagSel.appendChild(o);
+  });
+  tagSel.value = largestBy('total_pop');
+  tagSel.onchange = () => { techPick = null; drawTechTree(); };
+  const saveSel = document.getElementById('techsave');
+  DATA.dates.forEach(d => {
+    const o = document.createElement('option'); o.value = d; o.textContent = d;
+    saveSel.appendChild(o);
+  });
+  saveSel.value = DATA.lastDate;
+  saveSel.onchange = () => { techPick = null; drawTechTree(); };
+} else {
+  const tab = document.getElementById('tab-tech');
+  if (tab) tab.hidden = true;
+}
+
 /* =============== TABS =============== */
 const tabs = [...document.querySelectorAll('.tab')];
 function selectTab(id) {
@@ -2153,6 +2313,8 @@ drawPopTable(); drawCultureTable(); drawPopChart();
 searchSelect(document.getElementById('cultagsel'), 'search nations');
 searchSelect(document.getElementById('poptag'), 'search nations');
 drawMarketTable();
+if (TECH) drawTechTree();
+searchSelect(document.getElementById('techtag'), 'search nations');
 if (MAP) mapRender();
 drawGreatPowers();
 </script>

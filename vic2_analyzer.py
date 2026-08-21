@@ -1830,6 +1830,7 @@ def main():
             base_prices=(mod or {}).get("base_prices"),
             great_powers=great_powers,
             flags=flags,
+            technology=(mod or {}).get("technology"),
         )
         paths.insert(0, html_path)
 
