@@ -24,6 +24,7 @@ driven to zero by a dependency on an unobtainable invention are excluded.
 
 import os
 import re
+import struct
 
 from v2parse import Tokens, as_list, parse_block, to_float, unquote
 
@@ -417,6 +418,150 @@ def name_for(tag, government, localisation):
     return localisation.get(tag) or tag
 
 
+def country_colours(path):
+    """{tag: '#rrggbb'} from each country file's `color = { r g b }`."""
+    listing = os.path.join(path, "common", "countries.txt")
+    if not os.path.isfile(listing):
+        return {}
+    out = {}
+    entry = re.compile(r'^\s*([A-Z0-9]{3})\s*=\s*"?([^"\r\n]+?)"?\s*$', re.M)
+    for tag, rel in entry.findall(_plain(listing)):
+        target = os.path.join(path, "common", rel.strip().replace("/", os.sep))
+        if not os.path.isfile(target):
+            continue
+        hit = re.search(r"color\s*=\s*\{\s*(\d+)\s+(\d+)\s+(\d+)\s*\}", _plain(target))
+        if hit:
+            out[tag] = "#%02x%02x%02x" % tuple(int(g) for g in hit.groups())
+    return out
+
+
+def unit_positions(path):
+    """
+    {province: (x, y)} in map pixels, from `map/positions.txt`.
+
+    This is the anchor the game itself draws army stacks on, so counters land
+    where a player expects rather than at a computed centroid. The file's y runs
+    from the bottom of the map, matching the province bitmap, and is flipped to
+    screen orientation by the caller that knows the height.
+    """
+    target = os.path.join(path, "map", "positions.txt")
+    if not os.path.isfile(target):
+        return {}
+    out = {}
+    for key, block in _read_clausewitz(target):
+        if not isinstance(block, dict):
+            continue
+        # A handful of provinces carry a positions block with no `unit` entry --
+        # Ghazni and Manila among them -- so fall back through the other
+        # anchors the file gives before giving up on the province.
+        spot = None
+        for anchor in ("unit", "text_position", "building_construction",
+                       "military_construction", "factory", "city", "town"):
+            candidate = block.get(anchor)
+            if isinstance(candidate, dict) and "x" in candidate:
+                spot = candidate
+                break
+        if spot is None:
+            continue
+        try:
+            out[int(key)] = (to_float(spot.get("x"), 0.0), to_float(spot.get("y"), 0.0))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def sea_provinces(path):
+    """Province ids the map treats as water, from `map/default.map`."""
+    target = os.path.join(path, "map", "default.map")
+    if not os.path.isfile(target):
+        return frozenset()
+    hit = re.search(r"sea_starts\s*=\s*\{([^}]*)\}", _plain(target))
+    if not hit:
+        return frozenset()
+    return frozenset(int(n) for n in hit.group(1).split() if n.isdigit())
+
+
+def province_names(path):
+    """{province id: name} from `map/definition.csv`."""
+    target = os.path.join(path, "map", "definition.csv")
+    if not os.path.isfile(target):
+        return {}
+    out = {}
+    with open(target, "rb") as fh:
+        next(fh, None)
+        for line in fh:
+            bits = line.decode("latin-1").split(";")
+            if len(bits) < 5:
+                continue
+            try:
+                pid = int(bits[0])
+            except ValueError:
+                continue
+            name = bits[4].strip()
+            if name and name.lower() != "x":
+                out[pid] = name
+    return out
+
+
+def province_raster(path, scale=4):
+    """
+    The province bitmap, downsampled, as (width, height, runs).
+
+    `runs` is [(province id, pixel count), ...] in reading order, which is how
+    the report ships a map small enough to embed: the bitmap is 5616x2160 and
+    36 MB, but province areas are contiguous, so a quarter-scale grid run-length
+    encodes to about 130 KB and still shows every province in the game.
+
+    Only the sampled rows are read, so this costs a tenth of a second rather
+    than the minute a full decode would take.
+    """
+    bmp = os.path.join(path, "map", "provinces.bmp")
+    csv_path = os.path.join(path, "map", "definition.csv")
+    if not (os.path.isfile(bmp) and os.path.isfile(csv_path)):
+        return 0, 0, []
+
+    colour = {}
+    with open(csv_path, "rb") as fh:
+        next(fh, None)
+        for line in fh:
+            bits = line.decode("latin-1").split(";")
+            if len(bits) < 4:
+                continue
+            try:
+                colour[(int(bits[1]), int(bits[2]), int(bits[3]))] = int(bits[0])
+            except ValueError:
+                continue
+
+    with open(bmp, "rb") as fh:
+        head = fh.read(54)
+        if head[:2] != b"BM":
+            return 0, 0, []
+        offset = struct.unpack("<I", head[10:14])[0]
+        width, height = struct.unpack("<ii", head[18:26])
+        bpp = struct.unpack("<H", head[28:30])[0]
+        if bpp != 24:
+            return 0, 0, []
+        stride = ((width * bpp + 31) // 32) * 4
+        out_w, out_h = width // scale, height // scale
+        runs = []
+        prev, count = -1, 0
+        for oy in range(out_h):
+            fh.seek(offset + (height - 1 - oy * scale) * stride)
+            row = fh.read(stride)
+            for ox in range(out_w):
+                i = ox * scale * 3
+                pid = colour.get((row[i + 2], row[i + 1], row[i]), 0)
+                if pid == prev:
+                    count += 1
+                else:
+                    if count:
+                        runs.append((prev, count))
+                    prev, count = pid, 1
+        if count:
+            runs.append((prev, count))
+    return out_w, out_h, runs
+
+
 def load_mod(path):
     """
     Returns {
@@ -491,6 +636,7 @@ def load_mod(path):
     strata = read_poptypes(path)
 
     return {
+        "path": path,
         "invention_sequence": invention_sequence(path),
         "party_sequence": party_sequence(path),
         "localisation": read_localisation(path),

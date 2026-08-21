@@ -20,7 +20,7 @@ import math
 import json
 import os
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from v2parse import (
     POP_TYPES,
@@ -234,6 +234,8 @@ def blank_nation():
         "ships_by_type": defaultdict(int),
         "regiments_by_type": defaultdict(int),
         "regiment_pops": [],
+        # province id -> {unit type: brigades}, for the deployment map
+        "units_at": defaultdict(Counter),
         "mobilized_brigades": 0,
         "regular_brigades": 0,
         "mobilizing": 0,
@@ -300,7 +302,7 @@ def building_level(value):
 
 
 def read_province(tok, nations, province_owner_sink, pop_registry=None,
-                  province_id=None):
+                  province_id=None, owner_map=None):
     """Consume one province block, attributing its pops to the owner."""
     owner = None
     controller = None
@@ -335,6 +337,10 @@ def read_province(tok, nations, province_owner_sink, pop_registry=None,
 
     if not owner:
         return
+    if owner_map is not None and province_id is not None:
+        # Both, because the map shades occupied land by whoever holds it while
+        # still knowing whose it is.
+        owner_map[province_id] = (owner, controller or owner)
     province_owner_sink[owner] += 1
     nat = nations[owner]
     nat["provinces"] += 1
@@ -378,7 +384,7 @@ def sub_blocks(value):
     return []
 
 
-def count_units(node, nat):
+def count_units(node, nat, where=None):
     """
     Tally armies, navies, regiments and ships anywhere inside a unit block.
 
@@ -411,6 +417,8 @@ def count_units(node, nat):
                 except ValueError:
                     pass
                 nat["regiments_by_type"][rtype or "unknown"] += 1
+                if where is not None:
+                    nat["units_at"][where][rtype or "unknown"] += 1
         elif key == "ship":
             for ship in sub_blocks(value):
                 nat["ships"] += 1
@@ -419,7 +427,10 @@ def count_units(node, nat):
             blocks = sub_blocks(value)
             nat["armies" if key == "army" else "navies"] += len(blocks)
             for block in blocks:
-                count_units(block, nat)
+                # An embarked army sits inside the navy carrying it and has no
+                # location of its own, so the navy's province is inherited.
+                here = to_int(block.get("location"), -1)
+                count_units(block, nat, here if here > 0 else where)
 
 
 def read_country(tok, tag, nations):
@@ -546,6 +557,7 @@ def analyze_save(path, verbose=True):
     province_counts = defaultdict(int)
     pop_registry = {}
     meta = {"file": os.path.basename(path), "date": "", "player": "", "market": None}
+    province_owner = {}
     market_block = None
 
     while True:
@@ -568,7 +580,7 @@ def analyze_save(path, verbose=True):
         if val == "{":
             if key.isdigit():
                 read_province(tok, nations, province_counts, pop_registry,
-                              province_id=int(key))
+                              province_id=int(key), owner_map=province_owner)
             elif looks_like_country_tag(key):
                 read_country(tok, key, nations)
             elif key == "worldmarket" and market_block is None:
@@ -591,6 +603,8 @@ def analyze_save(path, verbose=True):
                 nat["regular_brigades"] += 1
             else:
                 nat["mobilized_brigades"] += 1
+
+    meta["province_owner"] = province_owner
 
     if isinstance(market_block, dict):
         meta["market"] = read_worldmarket(market_block, meta["date"])
@@ -1473,6 +1487,11 @@ def main():
                          "moves nations under siege a lot -- Russia in 1908 "
                          "reads 558 without them and 612 with -- so it is worth "
                          "checking against the game when a nation is at war.")
+    ap.add_argument("--map-scale", type=int, default=5, metavar="N",
+                    help="how far to shrink the province bitmap for the map tab "
+                         "(default 5, so 1123x432 from a 5616x2160 map). Lower "
+                         "is sharper and bigger: 4 adds about 70KB to the "
+                         "report, 8 saves about 90KB.")
     ap.add_argument("--player-nations", nargs="*", metavar="TAG", default=None,
                     help="tags that were run by a human. Only matters for "
                          "UNCIVILIZED nations, which in IGoR pick up "
@@ -1743,7 +1762,7 @@ def main():
                           args.out)
 
     if not args.no_html:
-        from report import build_report
+        from report import build_map, build_report
         # Country names come from the mod's own localisation, which is where the
         # game gets them: a bare TAG, overridden by TAG_<government> when one
         # exists -- IGoR's PBC is "Peru-Bolivia" but "Andine Federation" while
@@ -1758,11 +1777,15 @@ def main():
                 for _tag, _nat in _nations.items():
                     report_names[_tag] = name_for(
                         _tag, str(_nat.get("government") or ""), loc)
+        # The map needs the mod's province bitmap; without --mod-path the tab
+        # is dropped rather than shown empty.
+        map_data = build_map(mod, parsed, args.map_scale) if mod else None
         html_path = build_report(
             rows, ship_rows, pop_rows, culture_rows, price_rows, snapshot_rows,
             brigade_rows, tech_rows, args.out,
             tag_names=report_names,
             player_tags=args.players if args.players else DEFAULT_PLAYER_TAGS,
+            map_data=map_data,
         )
         paths.insert(0, html_path)
 

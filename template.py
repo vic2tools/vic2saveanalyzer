@@ -119,7 +119,9 @@ svg{display:block;width:100%;height:auto}
 @media(max-width:640px){
   figure{overflow-x:auto}
   figure svg{min-width:640px}
-  .readout{position:sticky;left:0}
+  .mapwrap{width:100%;overflow:auto;background:var(--ground);border:1px solid var(--grid)}
+.mapwrap canvas{display:block;width:100%;height:auto;image-rendering:pixelated;cursor:crosshair}
+.readout{position:sticky;left:0}
 }
 .axis text{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;fill:var(--ink-dim)}
 .gridline{stroke:var(--grid);stroke-width:1}
@@ -190,6 +192,7 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
   <div class="tabs" role="tablist" aria-label="Views">
     <button class="tab" role="tab" id="tab-nations" aria-controls="panel-nations" aria-selected="true">Nations</button>
     <button class="tab" role="tab" id="tab-military" aria-controls="panel-military" aria-selected="false">Military</button>
+    <button class="tab" role="tab" id="tab-map" aria-controls="panel-map" aria-selected="false">Map</button>
     <button class="tab" role="tab" id="tab-fleets" aria-controls="panel-fleets" aria-selected="false">Fleets</button>
     <button class="tab" role="tab" id="tab-pops" aria-controls="panel-pops" aria-selected="false">Pops</button>
     <button class="tab" role="tab" id="tab-market" aria-controls="panel-market" aria-selected="false">Market</button>
@@ -266,6 +269,32 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
       <div class="tablewrap pinned"><table id="techtable"><thead><tr></tr></thead><tbody></tbody></table></div>
       <p class="note" id="technote">Rows follow research order within each line, so progress reads top to
         bottom. Columns are ordered by military tech, so scroll sideways for the nations with least.</p>
+    </section>
+  </div>
+
+
+  <!-- ============ MAP ============ -->
+  <div role="tabpanel" id="panel-map" aria-labelledby="tab-map" hidden>
+    <section>
+      <h2>Deployment at <span id="mapdate"></span></h2>
+      <div class="controls">
+        <label for="mapsave">Save</label>
+        <select id="mapsave"></select>
+        <button id="mapocc" aria-pressed="true" title="Shade land by who currently controls it rather than who owns it">Control</button>
+        <span id="pick-map"></span>
+      </div>
+      <figure>
+        <div class="mapwrap"><canvas id="mapcanvas" role="img"
+             aria-label="Political map with army positions"></canvas></div>
+        <div class="readout" id="mapreadout"></div>
+      </figure>
+      <p class="note">Every army in the save is drawn at the province the game
+        stacks it on, sized by brigade count and coloured by its nation. Hover a
+        marker for the province, the nations stacked there and what they are made
+        of. Narrow the nation list to strip the map back to the ones you care
+        about &mdash; the land stays shaded, only the markers are filtered.
+        Land is shaded by whoever controls it; press <strong>Control</strong> to
+        switch to who owns it, which separates occupied ground from annexed.</p>
     </section>
   </div>
 
@@ -1649,6 +1678,203 @@ function drawMarketTable() {
               row => goodsPicker.set([row.good]));
 }
 
+/* =============== MAP =============== */
+const MAP = DATA.map;
+let mapTags = null;          // null means every nation
+let mapByControl = true;
+let mapProv = null;          // province id for every pixel
+let mapOwners = null;        // date -> Map(province -> tag index)
+let mapDots = [];            // what is currently drawn, for hit testing
+
+function mapDecode() {
+  const grid = new Int32Array(MAP.w * MAP.h);
+  let at = 0;
+  for (const token of MAP.runs.split(' ')) {
+    if (!token) continue;
+    const dot = token.indexOf('.');
+    const pid = parseInt(dot < 0 ? token : token.slice(0, dot), 36);
+    const run = dot < 0 ? 1 : parseInt(token.slice(dot + 1), 36);
+    grid.fill(pid, at, at + run);
+    at += run;
+  }
+  return grid;
+}
+
+/* Ownership ships as a delta per save, so replay them in order. */
+function mapOwnerTables() {
+  const out = {};
+  let cur = new Map();
+  for (const step of MAP.owners) {
+    if (step.base) cur = new Map();
+    if (step.clear) for (const p of step.clear.split(',')) cur.delete(+p);
+    if (step.set) for (const pair of step.set.split(',')) {
+      const c = pair.indexOf(':');
+      cur.set(+pair.slice(0, c), +pair.slice(c + 1));
+    }
+    const occ = new Map();
+    if (step.occ) for (const pair of step.occ.split(',')) {
+      const c = pair.indexOf(':');
+      occ.set(+pair.slice(0, c), +pair.slice(c + 1));
+    }
+    out[step.date] = {own: new Map(cur), occ};
+  }
+  return out;
+}
+
+const mapSea = new Set((MAP && MAP.sea) || []);
+const MAP_WATER = [16, 34, 54], MAP_WILD = [42, 50, 58], MAP_EDGE = [10, 18, 28];
+
+function mapPalette(date) {
+  // province id -> packed rgb, so the pixel loop is one array lookup
+  const book = mapOwners[date] || {own: new Map(), occ: new Map()};
+  const owners = new Map(book.own);
+  if (mapByControl) book.occ.forEach((idx, pid) => owners.set(pid, idx));
+  const top = Math.max(...MAP.sea, ...owners.keys(), 0) + 1;
+  const table = new Int32Array(top);
+  for (let p = 0; p < top; p++) {
+    const rgb = mapSea.has(p) ? MAP_WATER : MAP_WILD;
+    table[p] = (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
+  }
+  owners.forEach((idx, pid) => {
+    if (pid >= top) return;
+    const hex = MAP.colours[MAP.tags[idx]];
+    if (!hex) return;
+    table[pid] = parseInt(hex.slice(1), 16);
+  });
+  return table;
+}
+
+function drawMap() {
+  if (!MAP) return;
+  const canvas = document.getElementById('mapcanvas');
+  const date = document.getElementById('mapsave').value || DATA.lastDate;
+  document.getElementById('mapdate').textContent = date;
+  canvas.width = MAP.w; canvas.height = MAP.h;
+  const ctx = canvas.getContext('2d');
+
+  if (!mapProv) { mapProv = mapDecode(); mapOwners = mapOwnerTables(); }
+  const table = mapPalette(date);
+  const img = ctx.createImageData(MAP.w, MAP.h);
+  const px = img.data;
+  const top = table.length;
+  for (let i = 0, o = 0; i < mapProv.length; i++, o += 4) {
+    const pid = mapProv[i];
+    const c = pid < top ? table[pid] : ((MAP_WILD[0] << 16) | (MAP_WILD[1] << 8) | MAP_WILD[2]);
+    px[o] = (c >> 16) & 255; px[o + 1] = (c >> 8) & 255; px[o + 2] = c & 255; px[o + 3] = 255;
+  }
+  // one-pixel outline wherever neighbouring pixels belong to different provinces,
+  // which is what makes borders readable at this scale
+  for (let y = 0; y < MAP.h; y++) {
+    for (let x = 0; x < MAP.w; x++) {
+      const i = y * MAP.w + x;
+      const p = mapProv[i];
+      const right = x + 1 < MAP.w ? mapProv[i + 1] : p;
+      const down = y + 1 < MAP.h ? mapProv[i + MAP.w] : p;
+      if (p !== right || p !== down) {
+        const o = i * 4;
+        px[o] = MAP_EDGE[0]; px[o + 1] = MAP_EDGE[1]; px[o + 2] = MAP_EDGE[2];
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+
+  const armies = (MAP.armies || {})[date] || {};
+  const wanted = mapTags && mapTags.length ? new Set(mapTags) : null;
+  mapDots = [];
+  for (const pid in armies) {
+    const spot = MAP.spots[pid];
+    if (!spot) continue;
+    const stacks = armies[pid]
+      .map(a => ({tag: MAP.tags[a[0]], n: a[1], mix: a[2]}))
+      .filter(a => !wanted || wanted.has(a.tag));
+    if (!stacks.length) continue;
+    stacks.sort((a, b) => b.n - a.n);
+    const total = stacks.reduce((s, a) => s + a.n, 0);
+    mapDots.push({x: spot[0], y: spot[1], pid: +pid, total, stacks,
+                  r: Math.max(2.2, Math.min(16, Math.sqrt(total) * 1.35))});
+  }
+  mapDots.sort((a, b) => b.r - a.r);          // small stacks draw on top
+  for (const dot of mapDots) {
+    ctx.beginPath();
+    ctx.arc(dot.x, dot.y, dot.r, 0, Math.PI * 2);
+    ctx.fillStyle = MAP.colours[dot.stacks[0].tag] || '#ffffff';
+    ctx.globalAlpha = .9;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = .8;
+    ctx.strokeStyle = 'rgba(0,0,0,.75)';
+    ctx.stroke();
+  }
+  mapIdle();
+}
+
+function mapIdle() {
+  const date = document.getElementById('mapsave').value || DATA.lastDate;
+  const shown = mapDots.reduce((s, d) => s + d.total, 0);
+  document.getElementById('mapreadout').innerHTML =
+    `<span class="rk">stacks</span> <b>${mapDots.length.toLocaleString()}</b>`
+    + `<span><span class="rk">brigades shown</span> <b>${shown.toLocaleString()}</b></span>`
+    + `<span><span class="rk">shading</span> <b>${mapByControl ? 'controller' : 'owner'}</b></span>`
+    + `<span class="rk">hover a marker</span>`;
+}
+
+function mapHover(dot) {
+  if (!dot) return mapIdle();
+  const name = MAP.names[dot.pid] || ('province ' + dot.pid);
+  const bits = dot.stacks.map(s => {
+    const mix = s.mix.split(';').map(part => {
+      const c = part.lastIndexOf(':');
+      return `${part.slice(0, c)} ${part.slice(c + 1)}`;
+    }).join(', ');
+    return `<span><b style="color:${MAP.colours[s.tag] || '#fff'}">${s.tag}</b> `
+         + `<b>${s.n.toLocaleString()}</b> <span class="rk">${mix}</span></span>`;
+  });
+  document.getElementById('mapreadout').innerHTML =
+    `<span class="rk">${name}</span>`
+    + `<span><b>${dot.total.toLocaleString()}</b> <span class="rk">brigades</span></span>`
+    + bits.join('');
+}
+
+if (MAP) {
+  const mapSave = document.getElementById('mapsave');
+  DATA.dates.forEach(d => {
+    const o = document.createElement('option'); o.value = d; o.textContent = d;
+    mapSave.appendChild(o);
+  });
+  mapSave.value = DATA.lastDate;
+  mapSave.onchange = drawMap;
+
+  const occBtn = document.getElementById('mapocc');
+  occBtn.onclick = () => {
+    mapByControl = !mapByControl;
+    occBtn.setAttribute('aria-pressed', mapByControl);
+    occBtn.textContent = mapByControl ? 'Control' : 'Ownership';
+    drawMap();
+  };
+
+  makePicker(document.getElementById('pick-map'),
+    tagPickerCfg(DATA.tags.slice(), sel => { mapTags = sel; drawMap(); }));
+
+  const canvas = document.getElementById('mapcanvas');
+  canvas.addEventListener('pointermove', e => {
+    const box = canvas.getBoundingClientRect();
+    const x = (e.clientX - box.left) * (MAP.w / box.width);
+    const y = (e.clientY - box.top) * (MAP.h / box.height);
+    let best = null, bestD = 1e9;
+    for (const dot of mapDots) {
+      const dx = dot.x - x, dy = dot.y - y;
+      const d = dx * dx + dy * dy;
+      const reach = Math.max(dot.r, 4) + 2;
+      if (d < reach * reach && d < bestD) { best = dot; bestD = d; }
+    }
+    mapHover(best);
+  });
+  canvas.addEventListener('pointerleave', mapIdle);
+} else {
+  const tab = document.getElementById('tab-map');
+  if (tab) tab.hidden = true;
+}
+
 /* =============== TABS =============== */
 const tabs = [...document.querySelectorAll('.tab')];
 function selectTab(id) {
@@ -1676,6 +1902,7 @@ drawMilPies(); drawMilTable(); drawTechTable();
 drawFleetChart(); drawFleetTable(); drawNavy();
 drawPopTable(); drawCultureTable(); drawPopChart();
 drawMarketTable();
+if (MAP) drawMap();
 </script>
 </body>
 </html>

@@ -88,6 +88,38 @@ rather than building the whole tree, so a 150 MB save won't exhaust RAM.
 - **pop_poor / pop_middle / pop_rich** — strata rollups
 - **pop_farmers**, **pop_craftsmen**, … — all twelve pop types
 
+## The deployment map
+
+With `--mod-path` the report gains a **Map** tab: a political map of the campaign
+with every army drawn where the game stacks it, sized by brigade count and
+coloured by its nation, using the nation colours out of the mod's own
+`common/countries/*.txt`. Hovering a marker names the province and breaks the
+stack down by nation and unit type — "Bern, 113 brigades, KUK 85 artillery 71
+hussar 14, FRA 28 artillery 28".
+
+It is built to stay light enough to carry every save in a campaign:
+
+- The province bitmap is 5616x2160 and 36 MB. It ships as a run-length encoded
+  grid of province ids at 1/5 scale, which is about 220 KB of base36 text and
+  still shows every province in the game. Only sampled rows are read, so
+  building it costs a tenth of a second rather than the minute a full decode
+  would take.
+- One raster serves every save. Only ownership changes, and that ships as a
+  delta against the previous save: an 1836 base of 2,297 provinces is followed
+  by a few hundred changes per snapshot.
+- Occupation rides along as a full list each save, because it is a couple of
+  dozen provinces rather than thousands. The **Control** button switches the
+  shading between who holds ground and who owns it, which separates a front line
+  from an annexation.
+
+Roughly 300 KB for two saves, and the browser repaints in about 15 ms. Narrow
+the nation list to strip the markers back to the nations you care about; the
+land stays shaded so the geography does not move under you.
+
+`--map-scale` trades size against sharpness: the default 5 gives 1123x432, 4 is
+sharper and adds about 70 KB, 8 saves about 90 KB. Without `--mod-path` there is
+no bitmap to read and the tab is dropped rather than shown empty.
+
 ## Picking nations
 
 Every chart that compares nations uses a searchable dropdown rather than a wall

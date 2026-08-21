@@ -73,9 +73,123 @@ def year_fraction(date):
         return 0.0
 
 
+_B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def _b36(n):
+    if n <= 0:
+        return "0"
+    out = ""
+    while n:
+        out = _B36[n % 36] + out
+        n //= 36
+    return out
+
+
+def build_map(mod, parsed, scale=5):
+    """
+    Everything the deployment map needs, small enough to embed.
+
+    The province bitmap is 36 MB, so it ships as a run-length encoded grid of
+    province ids at 1/`scale` resolution -- about 220 KB of base36 text, painted
+    to a canvas in the browser by looking each province up in the owner table.
+    That means one raster covers every save: only ownership and unit positions
+    change, and ownership ships as a delta against the previous save because a
+    campaign rarely moves more than a few hundred provinces between snapshots.
+    """
+    from mod_reader import (country_colours, province_names, province_raster,
+                            sea_provinces, unit_positions)
+
+    if not mod or not mod.get("path"):
+        return None
+    width, height, runs = province_raster(mod["path"], scale)
+    if not width:
+        return None
+
+    colours = country_colours(mod["path"])
+    sea = sea_provinces(mod["path"])
+    full_height = height * scale
+
+    # Only provinces that ever hold troops need an anchor, which is a fraction
+    # of the 3,000-odd the file lists.
+    garrisoned = {pid
+                  for _meta, nations in parsed
+                  for nat in nations.values()
+                  for pid in nat.get("units_at", {})
+                  if pid > 0}
+    spots = {}
+    for pid, (x, y) in unit_positions(mod["path"]).items():
+        if pid not in garrisoned:
+            continue
+        # positions.txt measures y from the bottom, like the bitmap
+        spots[pid] = [round(x / scale, 1), round((full_height - y) / scale, 1)]
+
+    # one tag table for every save, so ownership is a list of small integers
+    tags = sorted({owner
+                   for meta, _nations in parsed
+                   for owner, _ctrl in meta.get("province_owner", {}).values()}
+                  | {ctrl
+                     for meta, _nations in parsed
+                     for _owner, ctrl in meta.get("province_owner", {}).values()})
+    index = {tag: i for i, tag in enumerate(tags)}
+
+    owners, armies, previous = [], {}, {}
+    for meta, nations in parsed:
+        date = meta.get("date") or ""
+        book = meta.get("province_owner", {})
+        held = {pid: index[owner] for pid, (owner, _ctrl) in book.items()}
+        changed = {pid: i for pid, i in held.items() if previous.get(pid) != i}
+        gone = [pid for pid in previous if pid not in held]
+        # Occupation is the exception rather than the rule -- a couple of dozen
+        # provinces in a save at war -- so it rides along as a full list each
+        # time instead of a delta.
+        occupied = {pid: index[ctrl] for pid, (owner, ctrl) in book.items()
+                    if ctrl != owner}
+        owners.append({
+            "date": date,
+            "base": not previous,
+            "set": ",".join(f"{p}:{i}" for p, i in sorted(changed.items())),
+            "clear": ",".join(str(p) for p in sorted(gone)),
+            "occ": ",".join(f"{p}:{i}" for p, i in sorted(occupied.items())),
+        })
+        previous = held
+
+        here = {}
+        for tag, nat in nations.items():
+            for pid, types in nat.get("units_at", {}).items():
+                if pid <= 0:
+                    continue
+                total = sum(types.values())
+                if not total:
+                    continue
+                here.setdefault(str(pid), []).append([
+                    index.get(tag, -1), total,
+                    ";".join(f"{t}:{n}" for t, n in
+                             sorted(types.items(), key=lambda kv: -kv[1])),
+                ])
+        armies[date] = here
+
+    return {
+        "w": width,
+        "h": height,
+        "scale": scale,
+        "runs": " ".join(_b36(p) if c == 1 else _b36(p) + "." + _b36(c)
+                         for p, c in runs),
+        "tags": tags,
+        "colours": {t: colours[t] for t in tags if t in colours},
+        "sea": sorted(sea),
+        "spots": spots,
+        "names": {p: n for p, n in province_names(mod["path"]).items()
+                  if p in spots},
+        "owners": owners,
+        "armies": armies,
+    }
+
+
 def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
                  snapshot_rows, brigade_rows, tech_rows, outdir,
-                 tag_names=None, player_tags=None, filename="report.html"):
+                 tag_names=None, player_tags=None, map_data=None,
+                 filename="report.html"):
     os.makedirs(outdir, exist_ok=True)
     tag_names = tag_names or {}
     player_tags = player_tags or []
@@ -241,6 +355,7 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
         "popTypes": sorted(pop_types),
         "cultures": cultures,
         "colours": SERIES_COLOURS,
+        "map": map_data,
         "priceDates": price_dates,
         "priceYears": [year_fraction(d) for d in price_dates],
         "prices": prices,
