@@ -148,8 +148,9 @@ the page.
 
 ## Great powers
 
-Below the map, the eight great powers of the selected save, in rank order, with
-their flag and prestige.
+Below the map, the eight great powers of the selected save, arranged as the
+game arranges them -- first to fourth down the left, fifth to eighth down the
+right -- with their flag, prestige and craftsmen.
 
 Both come straight out of the save. A save carries a `great_nations` list --
 eight 1-based indices into the country array `common/countries.txt` defines --
@@ -160,9 +161,15 @@ is a top-level country field, read directly.
 
 Flags come out of the mod's own `gfx/flags/*.tga`, converted to PNG and inlined
 as data URIs -- about 2.4 KB a flag, 26 KB for a campaign, and 10 ms to decode.
-Which variant a nation flies follows `flagType` in `governments.txt`, so a
+Which variant a nation flies mostly follows `flagType` in `governments.txt`, so a
 communist Russia flies the communist flag, and one image is kept per tag and
-variant rather than per save. The mod's folder wins over the base game's, which
+variant rather than per save. One case the file cannot express: absolute
+monarchy, Prussian constitutionalism and HM's Government all declare
+`flagType = monarchy`, yet the game does not fly the same flag for them --
+France under HM's Government shows the tricolour while `FRA_monarchy.tga` is the
+white Bourbon flag. The two constitutional governments therefore take the plain
+`TAG.tga` and only absolute monarchy takes `_monarchy`. Democracy declares no
+flagType at all and takes `_republic`. The mod's folder wins over the base game's, which
 is how a mod replaces a flag without shipping all 1,300. Vic2 flags are TGA in
 four shapes -- run-length encoded or not, 24 or 32 bit -- and all four are read;
 the five 8-bit greyscale files fall back to a plain colour chip.

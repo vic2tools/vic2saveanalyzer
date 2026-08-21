@@ -119,7 +119,11 @@ svg{display:block;width:100%;height:auto}
 /* The map is a fixed-aspect box with the canvas stretched over it. Without the
    explicit CSS size the canvas falls back to its width/height attributes, which
    are the raster's -- 2808px -- and it bursts straight out of the page. */
-.gpgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:8px}
+/* 1-4 down the left, 5-8 down the right, the way the game arranges them */
+.gpgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+  grid-template-rows:repeat(4,auto);grid-auto-flow:column;gap:8px}
+@media(max-width:760px){.gpgrid{grid-template-columns:1fr;grid-template-rows:none;
+  grid-auto-flow:row}}
 .gpcard{display:flex;align-items:center;gap:10px;padding:8px 10px;
   border:1px solid var(--rule);background:rgba(8,25,44,.72)}
 .gprank{font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:600;
@@ -2065,6 +2069,7 @@ function drawGreatPowers() {
       +   `<div class="gpname">${nameOf(tag)} <span class="rk">${tag}</span></div>`
       +   `<div class="gpstats">`
       +     stat('prestige', f.prestige, v => Math.round(v).toLocaleString())
+      +     stat('craftsmen', ((DATA.pops[tag] || {})[date] || {}).craftsmen)
       +     stat('factories', f.factory_levels)
       +     stat('brigades', f.brigades)
       +     stat('ships', f.ships)
