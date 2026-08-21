@@ -314,21 +314,27 @@ def build_wars(parsed, province_names=None, province_regions=None):
             took = [p for p in wanted
                     if before.get(p) == receiver and after.get(p) == actor]
             had = [p for p in wanted if before.get(p) == receiver]
-            recorded = "fulfilled" in g
-            met = g.get("fulfilled") if recorded else (bool(took) and len(took) == len(had))
+            # `is_fulfilled` is NOT the outcome. It says the claimant currently
+            # holds the state by siege at the moment that save was taken, which
+            # is a live condition during the war and says nothing about the
+            # peace: the French claim on Prussia in the Friesland war reads
+            # fulfilled and moved no province at all. Whether a goal was
+            # actually met is only answerable from who owned the state either
+            # side of the war.
             goals.append({
                 "cb": g["casus_belli"], "actor": actor, "receiver": receiver,
                 "state": state or "", "added": g.get("added", ""),
-                "met": bool(met),
-                # The game records the answer for a goal caught mid-war; for the
-                # rest it is read off who owned the state either side.
-                "source": "recorded" if recorded else ("ledger" if had else "unknown"),
-                "took": len(took),
+                "took": len(took), "of": len(had),
+                "met": bool(had) and len(took) == len(had),
+                "part": bool(took) and len(took) < len(had),
+                "sieged": g.get("fulfilled") if "fulfilled" in g else None,
+                "checkable": bool(had),
             })
             for p in sorted(took):
                 transfers.append([p, province_names.get(p, ""), receiver, actor, 1])
-        met = sum(1 for g in goals if g["met"])
-        outcome = (f"{met} of {len(goals)} met" if goals else "")
+        checkable = [g for g in goals if g["checkable"]]
+        won = sum(1 for g in checkable if g["met"] or g["part"])
+        outcome = (f"{won} of {len(checkable)} taken" if checkable else "")
         out.append({
             "name": war["name"],
             "start": war["start"],

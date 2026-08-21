@@ -201,19 +201,25 @@ dated events, so every battle inherits a date from the war above it in the file.
 Three battles of Dresden come out as 1836.8.25 against a true 1836.9.13,
 1836.9.18 and 1836.9.26; Gharyan lands eleven months out.
 
-**War goals are recorded, not inferred.** A war carries more than one demand:
-the one it opened with plus any added while it ran, each naming a claimant, a
-target and a state, and each carrying the game's own `is_fulfilled` flag. Added
-demands are dropped when the war ends, so like battle dates they survive only in
-a save taken while the war was live -- 52 of 270 wars here. Where that record
-exists the report uses it; otherwise it compares who held the target state
-either side of the war, and says which of the two it did.
+**War goals are read, not inferred.** A war carries more than one demand: the
+one it opened with plus any added while it ran, each naming a claimant, a target
+and a state. Added demands are dropped when the war ends, so like battle dates
+they survive only in a save taken while the war was live -- 52 of 270 wars here.
+
+Those demands carry an `is_fulfilled` flag, and it is worth being clear about
+what it is not. It means the claimant held the state **by siege at the moment
+that save was taken** -- a live condition, not the peace. Across the goals where
+both a flag and a territorial answer exist, the two agree only **44%** of the
+time, and 26 goals were occupied mid-war and took nothing at all. So the report
+shows them as separate columns: *taken at the peace*, from who owned the state
+either side of the war, and *occupied mid-war*, from the flag.
 
 This matters more than it sounds. The French Conquest of Friesland looks like a
 Franco-Prussian affair, and its original goal is exactly that. Caught mid-war in
 an 1857 save it turns out to carry three demands, the third an American claim on
 Mexico for Georgia -- which is why Atlanta, Savannah and four more provinces
-change hands in a war named after a Dutch province.
+change hands in a war named after a Dutch province. All three demands read as
+occupied; only that third one took anything.
 
 ## Picking nations
 

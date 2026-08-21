@@ -2343,7 +2343,7 @@ function drawWarTable() {
 
   const head = [['name', 'War'], ['start', 'From'], ['start', 'To'],
                 ['losses', 'Casualties'], ['battles', 'Battles'],
-                ['land', 'Provinces'], ['outcome', 'Goals met']];
+                ['land', 'Provinces'], ['outcome', 'Goals taken']];
   const body = rows.map((w, i) => {
     const idx = WARS.indexOf(w);
     return `<tr class="warrow${warPick === idx ? ' on' : ''}" data-war="${idx}">`
@@ -2398,25 +2398,26 @@ function drawWarDetail() {
 
   const verdict = w.goals.length
     ? `<table class="mini"><thead><tr><th>Demand</th><th>By</th><th>On</th>`
-      + `<th>State</th><th>Met</th><th>Provinces</th><th>Source</th></tr></thead><tbody>`
+      + `<th>State</th><th>Taken at the peace</th><th>Occupied mid-war</th></tr></thead><tbody>`
       + w.goals.map(g =>
           `<tr><td>${g.cb.replace(/_/g, ' ')}</td>`
           + `<td><b style="color:${colourFor(g.actor)}">${g.actor}</b></td>`
           + `<td><b style="color:${colourFor(g.receiver)}">${g.receiver}</b></td>`
           + `<td>${g.state || '—'}</td>`
-          + `<td class="${g.met ? 'up' : 'down'}">${g.met ? 'yes' : 'no'}</td>`
-          + `<td>${g.took || '—'}</td>`
-          + `<td class="rk">${g.source === 'recorded' ? 'the save says so'
-              : g.source === 'ledger' ? 'from who held the state' : 'not checkable'}</td></tr>`)
+          + `<td class="${g.met ? 'up' : g.part ? '' : g.checkable ? 'down' : ''}">`
+          +   (!g.checkable ? '<span class="rk">not checkable</span>'
+               : g.met ? `all ${g.of}` : g.part ? `${g.took} of ${g.of}` : 'none')
+          + `</td>`
+          + `<td class="rk">${g.sieged === null ? '—' : g.sieged ? 'yes' : 'no'}</td></tr>`)
         .join('')
       + `</tbody></table>`
       + `<p class="note">A war carries more than one demand: the one it opened `
       + `with, plus any added while it ran. Added demands are dropped from the `
       + `save when the war ends, so they survive only where a save caught the `
-      + `war still being fought &mdash; that is where <em>the save says so</em> `
-      + `comes from, including its own <code>is_fulfilled</code> flag. `
-      + `Otherwise the answer is read off who held the state either side of the `
-      + `war, which cannot see a demand that was dropped.</p>`
+      + `war still being fought. <strong>Taken at the peace</strong> compares who `
+      + `held the state either side of the war. <strong>Occupied mid-war</strong> is `
+      + `the save's own <code>is_fulfilled</code> flag: the claimant held the state `
+      + `by siege at that moment, a live condition rather than an outcome. A demand `+ `can be occupied and still yield nothing, which is what the French claim `+ `on Prussia does here.</p>`
     : `<p class="note">No war goal was recorded for this war.</p>`;
   const land = w.transfers.length
     ? `<table class="mini"><thead><tr><th>Province</th><th>From</th><th>To</th></tr></thead><tbody>`
