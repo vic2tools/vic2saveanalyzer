@@ -6,6 +6,40 @@ type, industry, naval bases — as CSVs plus a single self-contained HTML report
 
 No dependencies. Python 3.8 or newer.
 
+## The executable
+
+`dist/vic2saveanalyzer.exe` is the whole thing in one file, with no Python
+install needed on the machine that runs it. Double click it and a window asks
+for two folders:
+
+- **Saves folder** — where this campaign's `.v2` files are.
+- **Mod folder** — the mod's own folder, the one with `common/`, `map/` and
+  `history/` inside. Without it the report loses the map, the technology tree,
+  the great powers and the war goals, and mobilisation size falls back to a
+  fixed guess, so it is worth pointing at.
+
+Both paths are remembered for next time. Progress goes to the box at the bottom,
+the same lines the command line prints, and the report opens in a browser when
+it finishes.
+
+Given arguments it skips the window and behaves exactly like the command line
+below, every flag included. It attaches to the shell it was launched from to
+print, and since Windows does not make a shell wait for a windowed program, the
+prompt returns before the output does.
+
+Rebuild it with:
+
+```bash
+python build_exe.py
+```
+
+That needs PyInstaller (`pip install pyinstaller`). It draws the icon, bundles
+the seven modules and writes `dist/vic2saveanalyzer.exe`, about 13 MB. Neither
+`build/` nor `dist/` is in the repository, since both are regenerated. A one-file
+build unpacks itself into a temp folder on each launch, which costs a second or
+two of startup, and the visible window belongs to a child process — worth knowing
+if you ever go looking for it in Task Manager.
+
 ## Use
 
 ```bash
@@ -708,4 +742,6 @@ uncreated-nation stubs.
 - `mod_reader.py` — reads the mod: defines, poptypes, inventions, parties,
   modifiers and localisation
 - `tech_groups.py` — which techs count as army or navy, and their research lines
+- `gui.py` — the window: the two folder pickers and the log box
+- `build_exe.py` — draws the icon and packs everything into the executable
 - `tests/make_campaign.py` — generates fake saves to test against

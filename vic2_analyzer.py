@@ -801,6 +801,16 @@ def _parser_fingerprint():
     the only version counter nobody forgets to bump.
     """
     digest = hashlib.md5()
+    if getattr(sys, "frozen", False):
+        # In the packaged exe the modules live inside the archive rather than on
+        # disk, so the build itself is the version: one executable, one parser.
+        try:
+            stat = os.stat(sys.executable)
+        except OSError:
+            return ""
+        digest.update(f"{sys.executable}|{stat.st_size}|{int(stat.st_mtime)}"
+                      .encode("utf-8"))
+        return digest.hexdigest()[:10]
     for module in (__file__, v2parse.__file__):
         try:
             with open(module, "rb") as fh:

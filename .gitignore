@@ -22,3 +22,9 @@ __pycache__/
 *.swp
 Thumbs.db
 desktop.ini
+
+# The executable and everything that makes it: `python build_exe.py` rebuilds
+# all of it, and a 13 MB binary does not belong in a source repository.
+build/
+dist/
+vic2.ico
