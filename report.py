@@ -480,13 +480,12 @@ def build_succession(parsed, formations=None):
 
 def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
                  snapshot_rows, brigade_rows, tech_rows, outdir,
-                 tag_names=None, player_tags=None, map_data=None,
+                 tag_names=None, map_data=None,
                  base_prices=None, great_powers=None, flags=None,
                  technology=None, wars=None, succession=None,
                  filename="report.html"):
     os.makedirs(outdir, exist_ok=True)
     tag_names = tag_names or {}
-    player_tags = player_tags or []
 
     dates, seen = [], set()
     for row in rows:
@@ -624,14 +623,12 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
             "navy_techs": int(float(row.get("navy_techs") or 0)),
         }
 
-    present_players = [t for t in player_tags if t in tags]
 
     payload = {
         "dates": dates,
         "years": [year_fraction(d) for d in dates],
         "tags": tags,
         "tagNames": {t: tag_names.get(t, t) for t in tags},
-        "playerTags": present_players,
         "metrics": [
             {"key": key, "label": label, "fmt": fmt}
             for key, label, fmt in METRICS if key in metric_keys

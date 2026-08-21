@@ -237,6 +237,28 @@ tbody tr:hover{background:rgba(231,196,100,.10)}
 .tablewrap.pinned td:first-child{z-index:1}
 .tablewrap.pinned thead th:first-child{z-index:3}
 .tablewrap.pinned tbody tr:hover td:first-child{background:#5A2532}
+/* Wars are read, not scrubbed: a war and a battle have to be legible without
+   dragging sideways, so these tables give up `min-width:max-content` and let
+   their cells wrap instead. Numbers still refuse to break mid-figure. */
+.tablewrap.fit{overflow-x:hidden}
+.tablewrap.fit table{min-width:0;width:100%}
+.tablewrap.fit th,.tablewrap.fit td{white-space:normal;overflow-wrap:anywhere}
+.tablewrap.fit td.num,.tablewrap.fit th.num{white-space:nowrap;text-align:right}
+/* Each side of a battle is a column of its own: nation, then who led it, then
+   what it was made of, one line each. Laid out across, the unit list alone was
+   wider than the screen. */
+.side{display:flex;flex-direction:column;gap:2px;align-items:flex-start;
+  text-align:left}
+.side .unit{color:var(--ink-dim);font-size:11px;line-height:1.35}
+.side .who{color:var(--ink-dim);font-size:11px;font-style:italic}
+/* The belligerent list keeps its "A v B" reading order and wraps within the
+   column rather than stretching it. */
+.sides{white-space:normal;line-height:1.7}
+/* The war-goal and land tables sit outside a .tablewrap, so they need the
+   same release from max-content on their own. */
+table.mini.fitmini{width:100%;min-width:0;table-layout:auto}
+table.mini.fitmini th,table.mini.fitmini td{white-space:normal;
+  overflow-wrap:anywhere}
 .groupcell{color:var(--brass);background:#54212E !important;position:static !important}
 /* A full-width colspan cell cannot stick, so pin the label inside it. */
 .groupcell span{position:sticky;left:9px;display:inline-block}
@@ -414,7 +436,7 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         <input type="search" id="warfind" class="selsearch" style="width:230px"
                placeholder="search wars or nations" aria-label="search wars or nations">
       </div>
-      <div class="tablewrap"><table id="wartable"></table></div>
+      <div class="tablewrap fit"><table id="wartable"></table></div>
       <p class="note">Click a heading to sort, a row for the detail. Casualties
         are the sum of both sides' losses across every recorded battle.</p>
     </section>
@@ -547,7 +569,81 @@ const el = (n, a) => { const e = document.createElementNS(SVGNS, n);
 const W = 1000, H = 460, M = {t: 20, r: 20, b: 40, l: 80};
 
 const nameOf = t => DATA.tagNames[t] || t;
-const colourFor = t => C[DATA.tags.indexOf(t) % C.length];
+/* A nation is drawn in its own colour out of the mod, so the report reads like
+   the game. Half of them are unusable as ink on a burgundy page, though --
+   Prussia is nearly black, Russia a deep green -- so each is lifted until it
+   clears a contrast ratio against the ground, keeping its hue and saturation
+   and moving only its lightness. A nation with no colour, or no mod to read one
+   from, falls back to the report's own palette. */
+const GROUND_RGB = [0x4A, 0x1C, 0x28];
+
+function _chan(v) {
+  const s = v / 255;
+  return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+}
+function _luminance([r, g, b]) {
+  return 0.2126 * _chan(r) + 0.7152 * _chan(g) + 0.0722 * _chan(b);
+}
+function _contrast(rgb) {
+  const a = _luminance(rgb), b = _luminance(GROUND_RGB);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+function _toHsl([r, g, b]) {
+  r /= 255; g /= 255; b /= 255;
+  const hi = Math.max(r, g, b), lo = Math.min(r, g, b), d = hi - lo;
+  let h = 0;
+  if (d) {
+    if (hi === r) h = ((g - b) / d) % 6;
+    else if (hi === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  const l = (hi + lo) / 2;
+  const s = d ? d / (1 - Math.abs(2 * l - 1)) : 0;
+  return [h, s, l];
+}
+function _fromHsl([h, s, l]) {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x]
+    : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  return [r, g, b].map(v => Math.round((v + m) * 255));
+}
+
+const READABLE = 3.4;          // enough for a bold tag and a 2px chart line
+function _readable(hex) {
+  const m = /^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(hex || '');
+  if (!m) return null;
+  let rgb = [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+  if (_contrast(rgb) >= READABLE) return '#' + m[1] + m[2] + m[3];
+  const [h, s] = _toHsl(rgb);
+  // Saturation gets a floor so near-greys do not lift into flat white, and a
+  // ceiling so a fully saturated dark -- Prussia's navy, Russia's bottle green
+  // -- comes up as ink rather than as neon. Lightness climbs from low, and the
+  // first value that clears the threshold wins, so nothing is lifted further
+  // than it has to be.
+  const sat = Math.min(Math.max(s, 0.22), 0.58);
+  for (let l = 0.38; l <= 0.9; l += 0.03) {
+    const lifted = _fromHsl([h, sat, l]);
+    if (_contrast(lifted) >= READABLE) {
+      return '#' + lifted.map(v => v.toString(16).padStart(2, '0')).join('');
+    }
+  }
+  return null;
+}
+
+const NATION_INK = {};
+(() => {
+  const own = (DATA.map && DATA.map.colours) || {};
+  DATA.tags.forEach(t => {
+    const ink = _readable(own[t]);
+    NATION_INK[t] = ink || C[DATA.tags.indexOf(t) % C.length];
+  });
+})();
+
+const colourFor = t => NATION_INK[t] || C[DATA.tags.indexOf(t) % C.length];
 const goodColour = g => C[DATA.goods.indexOf(g) % C.length];
 
 const fmtCount = v => {
@@ -907,7 +1003,28 @@ const xOfSave = y => M.l + (xMax === xMin ? 0 : (y - xMin) / (xMax - xMin)) * (W
 const saveTicks = DATA.dates.map((d, i) => ({v: years[i], label: d.split('.')[0]}));
 const saveHovers = DATA.dates.map((d, i) => ({v: years[i], label: d}));
 
-const defaultTags = (DATA.playerTags.length ? DATA.playerTags : DATA.tags).slice(0, 8);
+/* The eight great powers, in the game's own rank order, at whichever save is
+   being looked at. This is the same list the Nations tab ranks, read from the
+   save's `great_nations`, so a picker and the ranking never disagree. */
+function greatPowersAt(date) {
+  const list = (DATA.greatPowers || {})[date] || [];
+  return list.map(([tag]) => tag);
+}
+function greatPowersNear(date) {
+  const found = greatPowersAt(date);
+  if (found.length) return found;
+  // Not every save carries the list; fall back to the nearest one that does.
+  const order = DATA.dates.slice().reverse();
+  for (const d of order) {
+    const some = greatPowersAt(d);
+    if (some.length) return some.filter(t => tagsAt(date).includes(t));
+  }
+  return [];
+}
+
+const defaultTags = (greatPowersAt(DATA.dates[DATA.dates.length - 1]).length
+  ? greatPowersAt(DATA.dates[DATA.dates.length - 1])
+  : DATA.tags).slice(0, 8);
 // For single-nation dropdowns, opening on the largest example is more useful
 // than opening on whatever sorts first.
 function largestBy(key) {
@@ -944,11 +1061,7 @@ function tagPickerCfg(selected, onChange, dateOf) {
     available: dateOf ? () => tagsAt(dateOf()) : null,
     fallback: dateOf ? () => biggestAt(dateOf(), 'total_pop', 1) : null,
     presets: [
-      ['Players', () => {
-        const live = dateOf ? tagsAt(dateOf()) : DATA.tags;
-        const players = DATA.playerTags.filter(t => live.includes(t));
-        return players.length ? players : live.slice(0, 8);
-      }],
+      ['Great powers', () => greatPowersNear(dateOf ? dateOf() : DATA.lastDate)],
       ['Top 8 by pop', () => dateOf ? biggestAt(dateOf(), 'total_pop', 8)
         : [...DATA.tags].sort((a, b) =>
             (DATA.series[b].total_pop[DATA.lastDate] || 0) -
@@ -1076,8 +1189,12 @@ let milTags = defaultTags.slice(0, 6);
 let milMode = 'army';       // army | navy
 let milView = 'totals';     // totals | composition
 let milWithMob = true;      // add the mobilization ceiling to army totals
-const MOB_COLOUR = '#C9AC80';
-const SIDE_COLOUR = ['#E7C464', '#8FB98C'];
+// Horizon blue against field grey: the two uniforms the period ended in, and
+// far enough apart on a burgundy ground to read at a glance. Mobilization is
+// the same blue and grey held back to a khaki, so an added ceiling reads as
+// part of the same army rather than a third force.
+const MOB_COLOUR = '#B79B6E';
+const SIDE_COLOUR = ['#5E8CB8', '#9DA08D'];
 
 const milSave = document.getElementById('milsave');
 DATA.dates.forEach(d => {
@@ -2475,23 +2592,24 @@ function drawWarTable() {
   const head = [['name', 'War'], ['start', 'From'], ['start', 'To'],
                 ['losses', 'Casualties'], ['battles', 'Battles'],
                 ['land', 'States'], ['outcome', 'Goals taken']];
+  const wide = k => k === 'name' ? '' : ' class="num"';
   const body = rows.map((w, i) => {
     const idx = WARS.indexOf(w);
     return `<tr class="warrow${warPick === idx ? ' on' : ''}" data-war="${idx}">`
       + `<td class="warname">${w.name}`
-      + `<div class="rk">${warSide(w.attackers)} <span class="rk">v</span> `
+      + `<div class="rk sides">${warSide(w.attackers)} <span class="rk">v</span> `
       + `${warSide(w.defenders)}</div></td>`
-      + `<td>${w.start || '—'}</td>`
-      + `<td>${w.active ? '<b>ongoing</b>' : (w.end || '—')}</td>`
-      + `<td>${warLosses(w).toLocaleString()}</td>`
-      + `<td>${w.battles.length}${w.battles.length && w.dated < w.battles.length
+      + `<td class="num">${w.start || '—'}</td>`
+      + `<td class="num">${w.active ? '<b>ongoing</b>' : (w.end || '—')}</td>`
+      + `<td class="num">${warLosses(w).toLocaleString()}</td>`
+      + `<td class="num">${w.battles.length}${w.battles.length && w.dated < w.battles.length
             ? ` <span class="rk">(${w.dated} dated)</span>` : ''}</td>`
-      + `<td>${w.transfers.length || '—'}</td>`
-      + `<td>${w.outcome || '<span class="rk">—</span>'}</td></tr>`;
+      + `<td class="num">${w.transfers.length || '—'}</td>`
+      + `<td class="num">${w.outcome || '<span class="rk">—</span>'}</td></tr>`;
   }).join('');
   document.getElementById('wartable').innerHTML =
     `<thead><tr>${head.map(([k, label]) =>
-      `<th data-k="${k}"${warSort.key === k ? ' aria-sort="' +
+      `<th data-k="${k}"${wide(k)}${warSort.key === k ? ' aria-sort="' +
         (warSort.dir < 0 ? 'descending' : 'ascending') + '"' : ''}>${label}</th>`)
       .join('')}</tr></thead><tbody>${body}</tbody>`;
   document.querySelectorAll('#wartable th').forEach(th => {
@@ -2541,24 +2659,37 @@ function warBattleTable(list, title) {
   const head = [['date', 'Date'], ['name', 'Battle'], ['', 'Winner'],
                 ['', 'Attacker'], ['alost', 'Lost'],
                 ['', 'Defender'], ['dlost', 'Lost'], ['total', 'Total']];
-  const force = s => s[3] ? s[3].split(';').map(p => p.replace(':', ' ')).join(', ') : '';
+  // A side reads down, not across: nation, then its general, then one line per
+  // unit type. Strung along a row instead, a single battle was wider than the
+  // window and everything after it had to be scrolled to.
+  const side = s => `<div class="side">${warTag(s[0])}`
+    + `<span class="who">${s[1] || '—'}</span>`
+    + (s[3] ? s[3].split(';').map(p => {
+        const [kind, n] = p.split(':');
+        return `<span class="unit">${kind.replace(/_/g, ' ')} `
+          + `${(+n).toLocaleString()}</span>`;
+      }).join('') : '')
+    + `</div>`;
   return `<div class="techsub" style="margin-top:12px">${title} `
     + `<span class="rk">${list.length}</span></div>`
-    + `<div class="tablewrap"><table class="mini"><thead><tr>`
-    + head.map(([k, label]) => k
-        ? `<th data-bk="${k}"${warBattleSort.key === k ? ' aria-sort="' +
-            (warBattleSort.dir < 0 ? 'descending' : 'ascending') + '"' : ''}>${label}</th>`
-        : `<th>${label}</th>`).join('')
+    + `<div class="tablewrap fit"><table class="mini"><thead><tr>`
+    + head.map(([k, label], i) => {
+        const cls = i >= 4 || i === 0 ? ' class="num"' : '';
+        return k
+          ? `<th data-bk="${k}"${cls}${warBattleSort.key === k ? ' aria-sort="' +
+              (warBattleSort.dir < 0 ? 'descending' : 'ascending') + '"' : ''}>${label}</th>`
+          : `<th${cls}>${label}</th>`;
+      }).join('')
     + `</tr></thead><tbody>`
     + rows.map(b => {
         const win = b.won ? b.a[0] : b.d[0];
-        return `<tr><td>${b.date || '<span class="rk">unknown</span>'}</td>`
+        return `<tr><td class="num">${b.date || '<span class="rk">unknown</span>'}</td>`
           + `<td>${b.name}</td><td>${warTag(win)}</td>`
-          + `<td>${warTag(b.a[0])}<div class="rk">${b.a[1] || '—'} · ${force(b.a)}</div></td>`
-          + `<td>${b.a[2].toLocaleString()}</td>`
-          + `<td>${warTag(b.d[0])}<div class="rk">${b.d[1] || '—'} · ${force(b.d)}</div></td>`
-          + `<td>${b.d[2].toLocaleString()}</td>`
-          + `<td>${(b.a[2] + b.d[2]).toLocaleString()}</td></tr>`;
+          + `<td>${side(b.a)}</td>`
+          + `<td class="num">${b.a[2].toLocaleString()}</td>`
+          + `<td>${side(b.d)}</td>`
+          + `<td class="num">${b.d[2].toLocaleString()}</td>`
+          + `<td class="num">${(b.a[2] + b.d[2]).toLocaleString()}</td></tr>`;
       }).join('')
     + `</tbody></table></div>`;
 }
@@ -2571,7 +2702,7 @@ function drawWarDetail() {
   }
   const w = WARS[warPick];
   const goals = w.goals.length
-    ? `<table class="mini"><thead><tr><th>Demand</th><th>By</th><th>On</th>`
+    ? `<table class="mini fitmini"><thead><tr><th>Demand</th><th>By</th><th>On</th>`
       + `<th>State</th><th>Taken at the peace</th><th>Occupied mid-war</th>`
       + `</tr></thead><tbody>`
       + w.goals.map(g =>
@@ -2596,7 +2727,7 @@ function drawWarDetail() {
 
   const land = w.transfers.length
     ? `<div class="techsub" style="margin-top:12px">States that changed hands</div>`
-      + `<table class="mini"><thead><tr><th>State</th><th>Provinces</th>`
+      + `<table class="mini fitmini"><thead><tr><th>State</th><th>Provinces</th>`
       + `<th>From</th><th>To</th></tr></thead><tbody>`
       + w.transfers.map(t =>
           `<tr><td>${t[1] || t[0] || '—'}</td>`

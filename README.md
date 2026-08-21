@@ -161,6 +161,17 @@ left that way. Filling it from its neighbours was tried and reverted: the map
 would have shown someone owning ground nobody owns, which is worse than a blank
 patch that matches what the game itself shows.
 
+**Nations are drawn in their own colours.** Tags, chart lines and picker
+swatches take the colour the mod gives the nation in `common/countries/*.txt`,
+so the report reads like the game. About a third of them are unusable as ink on
+a burgundy page -- Prussia ships a near-black navy, Russia a bottle green -- so
+each is checked against the ground and lifted only if it fails, keeping its hue
+and moving its lightness until it clears a contrast ratio of 3.4. Saturation is
+floored so near-greys do not wash out and capped so a fully saturated dark comes
+up as ink rather than neon. On one campaign 91 of 126 nations keep their exact
+game colour and the worst contrast on the page is 3.42. The map itself is
+untouched: it paints the raw colours, because there it is the map.
+
 **Nations in a picker are the ones in the save.** Anything read at one date --
 the tech tree, the culture table, the force comparison, the map -- offers only
 the nations that hold land in the save selected beside it, which on a late save
@@ -297,6 +308,23 @@ in the war tab came out as "Earth". A province now belongs to the **first**
 region that claims it, the same rule the country array follows, which leaves
 mods without metaregions untouched -- IGoR reads 528 regions either way.
 
+### Nothing scrolls sideways
+
+The war tables are read, not scrubbed, so they are laid out to fit the page
+rather than to fit their content. Two changes did it.
+
+The belligerent list under a war keeps its `A B C v D E F` reading order but
+wraps inside its column instead of stretching the table -- the widest war in one
+campaign lists thirty-one nations, which was pushing every other column off the
+right of the screen.
+
+And each side of a battle became a column of its own: the nation, then who led
+it, then one line per unit type. Laid out across, as `Herbert Kitchener ·
+artillery 172539, infantry 91352, hussar 31494, cuirassier 5652`, a single
+battle was wider than the window, which put the two sides so far apart that
+nobody could compare them without dragging. Stacked, both sides and both
+casualty columns sit inside one screen.
+
 ## Wars
 
 Every war in the campaign, its battles, and what it actually took.
@@ -412,8 +440,14 @@ part worth keeping.
 ## Picking nations
 
 Every chart that compares nations uses a searchable dropdown rather than a wall
-of tags: type into it to filter by tag or by name, and use the **Players**,
-**Top 8 by pop**, **All** and **None** presets.
+of tags: type into it to filter by tag or by name, and use the **Great powers**,
+**Top 8 by pop**, **All** and **None** presets. **Great powers** is the save's
+own `great_nations` list -- the same eight the Nations tab ranks, at whichever
+save the picker is tied to, so on the map at 1860 it selects the North German
+Federation and at 1908 it selects Germany. It replaced a **Players** preset that
+selected from a list of tags written by hand in the source, which was a guess
+about one campaign rather than anything read out of a save, and was wrong for
+every other campaign.
 
 With `--mod-path`, country names come from the mod's own `localisation/*.csv`,
 which is where the game gets them, so every tag gets its proper name — including
@@ -430,15 +464,6 @@ game handles them:
   Andean Republic" in a later file, and the game shows the first.
 
 Without `--mod-path` there is nothing to read and tags stand in for names.
-
-`DEFAULT_PLAYER_TAGS` in `vic2_analyzer.py` is the list behind the **Players**
-preset, which is also the default selection — a convenience for one campaign
-rather than data, so it is the one name list still written by hand. Override it
-for a single run without editing anything:
-
-```bash
-python3 vic2_analyzer.py saves/ --players ENG FRA GER RUS USA JAP
-```
 
 ## What each tab holds
 

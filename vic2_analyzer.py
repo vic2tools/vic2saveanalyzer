@@ -89,16 +89,6 @@ POP_SIZE_PER_REGIMENT = 3000
 # each fitted to in-game readings and each failed somewhere; they are gone, and
 # the README records what they were and how they broke.
 
-# The nations the report pre-selects under its "Players" button. Purely a
-# convenience default for this campaign; override per run with --players.
-DEFAULT_PLAYER_TAGS = [
-    "CHI", "JAP", "USA", "ENG", "NGF", "PRU", "GER", "KUK", "AUS", "RUS",
-    "SPA", "ITA", "FRA", "SAR", "SIC", "TUR", "EGY", "COM", "MEX", "NET",
-    "PBC", "ARG", "GCO", "BRZ", "POR", "BOL", "CLM", "SWE", "SCA", "PER",
-    "BEL",
-]
-
-
 
 def shift_months(date, back):
     """Step a `YYYY.M.D` date backwards by `back` months."""
@@ -1461,9 +1451,6 @@ def main():
     ap.add_argument("saves", help="folder of .v2 saves, or a single .v2 file")
     ap.add_argument("-o", "--out", default="vic2_report", help="output folder")
     ap.add_argument("--tags", nargs="*", help="only keep these country tags")
-    ap.add_argument("--players", nargs="*",
-                    help="tags the report pre-selects and lists under Players "
-                         "(defaults to DEFAULT_PLAYER_TAGS)")
     ap.add_argument("--mod-path",
                     help="game or mod folder containing technologies/ and "
                          "inventions/. When given, each nation's mobilisation "
@@ -1836,7 +1823,6 @@ def main():
             rows, ship_rows, pop_rows, culture_rows, price_rows, snapshot_rows,
             brigade_rows, tech_rows, args.out,
             tag_names=report_names,
-            player_tags=args.players if args.players else DEFAULT_PLAYER_TAGS,
             map_data=map_data,
             base_prices=(mod or {}).get("base_prices"),
             great_powers=great_powers,
