@@ -225,6 +225,25 @@ def _ledger_at(books, date, before):
     return fit[0] if fit else (books[-1][1] if books else {})
 
 
+def _state_label(region, pid, state_names, province_names):
+    """
+    What to call the state a war goal names.
+
+    Most have a name in the mod's localisation. Six in IGoR do not -- Goa, Diu,
+    Pondicherry, Trankebar and the two canal zones, each a state of one province
+    -- and the game itself falls back to naming them after that province, which
+    is why one of these wars is called the Italian Colonial Conquest of Goa
+    Region. Same fallback here, and the region key only if even that is missing.
+    """
+    named = state_names.get(region)
+    if named:
+        return named
+    province = province_names.get(pid)
+    if province:
+        return f"{province} Region"
+    return region or ""
+
+
 def build_wars(parsed, province_names=None, province_regions=None,
                state_names=None, unit_kinds=None):
     """
@@ -337,7 +356,11 @@ def build_wars(parsed, province_names=None, province_regions=None,
             # side of the war.
             goals.append({
                 "cb": g["casus_belli"], "actor": actor, "receiver": receiver,
-                "state": state or "", "added": g.get("added", ""),
+                # The name the game shows, not the region key it is filed
+                # under: NET_385 is Friesland, and the war is already called
+                # the French Conquest of Friesland two lines above it.
+                "state": _state_label(state, pid, state_names, province_names),
+                "added": g.get("added", ""),
                 "took": len(took), "of": len(had),
                 "met": bool(had) and len(took) == len(had),
                 "part": bool(took) and len(took) < len(had),
@@ -347,8 +370,9 @@ def build_wars(parsed, province_names=None, province_regions=None,
             if took:
                 # A war takes a state, not a scattered handful of provinces:
                 # five names under Tabriz is one line, not five.
-                transfers.append([state or "", state_names.get(state, "")
-                                  or province_names.get(took[0], ""),
+                transfers.append([state or "",
+                                  _state_label(state, took[0], state_names,
+                                               province_names),
                                   receiver, actor, len(took), len(had)])
         checkable = [g for g in goals if g["checkable"]]
         won = sum(1 for g in checkable if g["met"] or g["part"])

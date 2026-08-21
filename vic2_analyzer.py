@@ -1026,9 +1026,17 @@ def explain_mob_pool(tag, nat, meta, rate, args):
     mob_types = frozenset(args.mob_types)
     accepted = accepted_cultures_of(nat)
     occ = args.mob_include_occupied
-    per_pop, pool, entries = mobilization_clusters(nat, mob_types, "pop", occ)
-    per_pt, _pool, _entries = mobilization_clusters(
-        nat, mob_types, "province-type", occ)
+    per_pop, pool, entries = mobilization_clusters(nat, mob_types, occ)
+    # The other grouping the engine might have used: one bucket per province
+    # and pop type rather than one per pop. It is not an option any anymore --
+    # the engine groups per pop -- but the gap between the two is the whole
+    # point of this readout, so it is rebuilt here from the same buckets.
+    merged, first = defaultdict(int), {}
+    for province, state, poptype, size in per_pop:
+        key = (province, poptype)
+        first.setdefault(key, (province, state, poptype))
+        merged[key] += size
+    per_pt = [first[k] + (v,) for k, v in merged.items()]
 
     dropped = defaultdict(int)
     for poptype, culture, size, province_id in nat["mobilizable_pops"]:
@@ -1059,8 +1067,8 @@ def explain_mob_pool(tag, nat, meta, rate, args):
     per_pop_n = brigades_from_clusters(per_pop, rate, args.pop_per_regiment)
     per_pt_n = brigades_from_clusters(per_pt, rate, args.pop_per_regiment)
     untruncated = pool * rate / args.pop_per_regiment
-    print(f"\n  ceiling, --mob-grouping pop            {per_pop_n:>6}")
-    print(f"  ceiling, --mob-grouping province-type  {per_pt_n:>6}"
+    print(f"\n  ceiling, grouped per pop               {per_pop_n:>6}")
+    print(f"  ceiling, grouped per province and type {per_pt_n:>6}"
           f"   ({'+' if per_pt_n >= per_pop_n else ''}{per_pt_n - per_pop_n})")
     print(f"  no truncation at all                   {untruncated:>6.0f}")
     print(f"  standing brigades                      {nat['brigades']:>6}"

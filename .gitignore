@@ -27,4 +27,5 @@ desktop.ini
 # all of it, and a 13 MB binary does not belong in a source repository.
 build/
 dist/
+dist_new/
 vic2.ico
