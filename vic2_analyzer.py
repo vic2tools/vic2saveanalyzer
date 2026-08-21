@@ -1798,8 +1798,9 @@ def main():
         great_powers = {}
         flags = {}
         if order:
-            from mod_reader import flag_images, government_flag_types
-            variants = government_flag_types(mod["path"])
+            from mod_reader import (flag_images, flag_suffixes,
+                                    government_flag_types)
+            styles = government_flag_types(mod["path"])
             for meta_i, nations_i in parsed:
                 picks = [order[i - 1] for i in meta_i.get("great_nations", ())
                          if 0 < i <= len(order)]
@@ -1810,8 +1811,10 @@ def main():
                     gov = str((nations_i.get(tag) or {}).get("government") or "")
                     # One flag per tag and flag variant, so a nation that turns
                     # communist mid-campaign flies both in turn without the
-                    # image being stored twice.
-                    key = tag + "|" + variants.get(gov, "")
+                    # image being stored twice. The suffix that will actually be
+                    # used is the discriminator, since two governments can share
+                    # a flagType and still fly different flags.
+                    key = tag + "|" + (flag_suffixes(gov, styles)[0] or "base")
                     if key not in flags:
                         got = flag_images(mod["path"], [tag], {tag: gov})
                         if tag in got:

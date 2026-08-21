@@ -46,10 +46,12 @@ METRICS = [
     ("pop_rich", "Rich strata", "count"),
 ]
 
+# Muted jewel tones and gilt, so series stay apart from each other and from the
+# burgundy ground without turning the page into a pie chart.
 SERIES_COLOURS = [
-    "#F2B441", "#E0644F", "#5FCBB4", "#A8B9F0",
-    "#F08FB0", "#9BD65E", "#D9A0E0", "#EDE3C8",
-    "#7FD9E8", "#F58B4C", "#B7C97A", "#C9A2F2",
+    "#E7C464", "#D4553F", "#8FB98C", "#8FA8C8",
+    "#D48FA8", "#B5A85C", "#B48FC0", "#EADFC2",
+    "#6FA8A0", "#E09A4C", "#9BAF6F", "#A87FA0",
 ]
 
 CATEGORY_LABELS = {

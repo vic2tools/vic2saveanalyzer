@@ -8,13 +8,16 @@ TEMPLATE = r"""<!DOCTYPE html>
 <title>Campaign returns</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600&family=Playfair+Display:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
-  --ground:#0C2440; --ground-deep:#08192C; --panel:#10314F;
-  --rule:#3E6E96; --grid:#1B4266;
-  --ink:#E4EFF7; --ink-dim:#8FB4CE;
-  --brass:#F2B441; --minium:#E0644F;
+  /* Burgundy, parchment and gilt, after the Victoria 2 interface. */
+  --ground:#4A1C28; --ground-deep:#2A0F17; --panel:#5E2733;
+  --rule:#B08D3F; --grid:#6E3341;
+  --ink:#F4E7CC; --ink-dim:#C9AC80;
+  --brass:#E7C464; --minium:#D4553F;
+  --gilt-hi:#F0D68C; --gilt-lo:#7C5E22;
+  --parchment:#EADFC2;
   --sheet-pad:clamp(16px,4vw,44px);
 }
 *{box-sizing:border-box}
@@ -26,12 +29,12 @@ body{
 }
 .sheet{
   max-width:1180px;margin:0 auto;padding:var(--sheet-pad);
-  background:var(--ground);
-  background-image:
-    linear-gradient(var(--grid) 1px,transparent 1px),
-    linear-gradient(90deg,var(--grid) 1px,transparent 1px);
-  background-size:28px 28px;min-height:100vh;
-  border-left:1px solid var(--rule);border-right:1px solid var(--rule);
+  background:
+    radial-gradient(120% 60% at 50% 0%,rgba(231,196,100,.10),transparent 60%),
+    linear-gradient(180deg,#54212E 0%,var(--ground) 32%,#3E1622 100%);
+  min-height:100vh;
+  border-left:3px double var(--rule);border-right:3px double var(--rule);
+  box-shadow:0 0 0 1px rgba(124,94,34,.55) inset;
 }
 .titleblock{
   border:1px solid var(--rule);background:rgba(8,25,44,.86);
@@ -48,42 +51,48 @@ body{
   font-family:'Barlow Condensed','Arial Narrow',sans-serif;
   font-size:clamp(19px,2.4vw,27px);font-weight:500;letter-spacing:.02em;line-height:1.1;
 }
-h1.tb-value{margin:0;font-weight:600;letter-spacing:.04em}
+h1.tb-value{margin:0;font-weight:700;letter-spacing:.03em;
+  font-family:'Playfair Display',Georgia,serif;color:var(--brass);
+  text-shadow:0 1px 0 rgba(0,0,0,.55)}
 .tb-value.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:19px}
 @media(max-width:760px){.titleblock{grid-template-columns:1fr 1fr}
   .titleblock>div{border-bottom:1px solid var(--rule)}}
 
 .tabs{display:flex;flex-wrap:wrap;margin:0 0 26px;border-bottom:1px solid var(--rule)}
 .tab{
-  font-family:'Barlow Condensed','Arial Narrow',sans-serif;
-  text-transform:uppercase;letter-spacing:.19em;font-size:13px;font-weight:600;
-  background:transparent;border:1px solid var(--rule);border-bottom:0;
+  font-family:'Playfair Display',Georgia,serif;
+  text-transform:uppercase;letter-spacing:.14em;font-size:13px;font-weight:600;
+  background:linear-gradient(180deg,rgba(94,39,51,.85),rgba(42,15,23,.85));
+  border:1px solid var(--rule);border-bottom:0;
   color:var(--ink-dim);padding:11px 20px;cursor:pointer;
   margin-right:-1px;margin-bottom:-1px;
 }
 .tab[aria-selected="true"]{
-  background:var(--ground);color:var(--brass);box-shadow:inset 0 3px 0 var(--brass)}
+  background:linear-gradient(180deg,#6B2E3C,var(--ground));color:var(--brass);
+  box-shadow:inset 0 3px 0 var(--brass)}
 .tab:focus-visible{outline:2px solid var(--brass);outline-offset:-4px}
 [role="tabpanel"][hidden]{display:none}
 
 section{margin-bottom:34px}
 h2{
-  font-family:'Barlow Condensed','Arial Narrow',sans-serif;
-  text-transform:uppercase;letter-spacing:.2em;font-size:13px;font-weight:600;
-  color:var(--ink-dim);margin:0 0 12px;padding-bottom:7px;
+  font-family:'Playfair Display',Georgia,serif;
+  text-transform:uppercase;letter-spacing:.16em;font-size:15px;font-weight:600;
+  color:var(--brass);margin:0 0 12px;padding-bottom:7px;
   border-bottom:1px solid var(--rule);
+  text-shadow:0 1px 0 rgba(0,0,0,.5);
 }
 .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
 select,button,input[type=search]{
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;
-  background:var(--panel);color:var(--ink);
+  background:linear-gradient(180deg,var(--panel),#431B26);color:var(--ink);
   border:1px solid var(--rule);border-radius:0;padding:7px 11px;
 }
 select,button{cursor:pointer}
 select:focus-visible,button:focus-visible,input:focus-visible{
   outline:2px solid var(--brass);outline-offset:2px}
 .controls > button[aria-pressed="true"]{
-  background:var(--brass);color:var(--ground-deep);border-color:var(--brass)}
+  background:linear-gradient(180deg,var(--gilt-hi),var(--brass));
+  color:#3A1420;border-color:var(--gilt-hi);font-weight:500}
 
 /* ---- searchable picker ---- */
 .picker{position:relative;display:inline-block}
@@ -91,7 +100,7 @@ select:focus-visible,button:focus-visible,input:focus-visible{
 .picker-toggle .caret{margin-left:auto;color:var(--ink-dim)}
 .picker-panel{
   position:absolute;z-index:20;top:calc(100% + 3px);left:0;width:330px;max-width:88vw;
-  background:#0A2138;border:1px solid var(--rule);padding:10px;
+  background:#3A1420;border:1px solid var(--rule);padding:10px;
   box-shadow:0 10px 28px rgba(0,0,0,.5);
 }
 .picker-panel[hidden]{display:none}
@@ -114,7 +123,8 @@ select:focus-visible,button:focus-visible,input:focus-visible{
 .picker-opt .nm{color:var(--ink-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .picker-empty{padding:12px 6px;color:var(--ink-dim);font-size:12.5px}
 
-figure{margin:0;border:1px solid var(--rule);background:rgba(8,25,44,.72)}
+figure{margin:0;border:1px solid var(--rule);background:rgba(42,15,23,.62);
+  box-shadow:0 0 0 1px rgba(124,94,34,.35) inset}
 svg{display:block;width:100%;height:auto}
 /* The map is a fixed-aspect box with the canvas stretched over it. Without the
    explicit CSS size the canvas falls back to its width/height attributes, which
@@ -125,19 +135,21 @@ svg{display:block;width:100%;height:auto}
 @media(max-width:760px){.gpgrid{grid-template-columns:1fr;grid-template-rows:none;
   grid-auto-flow:row}}
 .gpcard{display:flex;align-items:center;gap:10px;padding:8px 10px;
-  border:1px solid var(--rule);background:rgba(8,25,44,.72)}
-.gprank{font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:600;
-  color:var(--ink-dim);min-width:26px;text-align:right}
+  border:1px solid var(--rule);
+  background:linear-gradient(180deg,rgba(94,39,51,.9),rgba(42,15,23,.9));
+  box-shadow:0 0 0 1px rgba(124,94,34,.4) inset}
+.gprank{font-family:'Playfair Display',Georgia,serif;font-size:26px;font-weight:700;
+  color:var(--brass);min-width:26px;text-align:right;text-shadow:0 1px 0 rgba(0,0,0,.6)}
 .gpflag{width:34px;height:23px;border:1px solid rgba(0,0,0,.6);flex:none;
   object-fit:fill;image-rendering:auto;display:block}
 .gpbody{min-width:0;flex:1}
-.gpname{font-family:'Barlow Condensed',sans-serif;font-size:18px;color:var(--ink);
+.gpname{font-family:'Playfair Display',Georgia,serif;font-size:17px;color:var(--ink);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gpstats{display:flex;flex-wrap:wrap;gap:10px;font-family:'IBM Plex Mono',ui-monospace,monospace;
   font-size:11px;color:var(--ink)}
 .gpstats .rk{color:var(--ink-dim)}
-.mapwrap{position:relative;width:100%;overflow:hidden;background:var(--ground);
-  border:1px solid var(--grid)}
+.mapwrap{position:relative;width:100%;overflow:hidden;background:var(--ground-deep);
+  border:1px solid var(--rule);box-shadow:0 0 0 1px rgba(124,94,34,.35) inset}
 .mapwrap canvas{position:absolute;inset:0;width:100%!important;height:100%!important;
   image-rendering:pixelated;cursor:grab;touch-action:none}
 @media(max-width:640px){
@@ -173,20 +185,21 @@ th{
 }
 th:hover{color:var(--ink)}
 th[aria-sort]{color:var(--brass)}
-tbody tr:hover{background:rgba(63,110,150,.16)}
+tbody tr:hover{background:rgba(231,196,100,.10)}
 .tablewrap{overflow:auto;max-height:560px;
-  border:1px solid var(--rule);background:rgba(8,25,44,.72)}
+  border:1px solid var(--rule);background:rgba(42,15,23,.62);
+  box-shadow:0 0 0 1px rgba(124,94,34,.35) inset}
 /* Without this the table shrinks to the wrapper instead of overflowing, so
    wide tables clip their right-hand columns with nothing to scroll to. */
 .tablewrap table{min-width:max-content}
-.tablewrap thead th{position:sticky;top:0;background:#0A2138;z-index:2}
+.tablewrap thead th{position:sticky;top:0;background:#3A1420;z-index:2}
 /* Pin the label column so nation columns stay identifiable when scrolled. */
 .tablewrap.pinned td:first-child,
-.tablewrap.pinned th:first-child{position:sticky;left:0;background:#0A2138}
+.tablewrap.pinned th:first-child{position:sticky;left:0;background:#3A1420}
 .tablewrap.pinned td:first-child{z-index:1}
 .tablewrap.pinned thead th:first-child{z-index:3}
-.tablewrap.pinned tbody tr:hover td:first-child{background:#123048}
-.groupcell{color:var(--brass);background:#132C46 !important;position:static !important}
+.tablewrap.pinned tbody tr:hover td:first-child{background:#5A2532}
+.groupcell{color:var(--brass);background:#54212E !important;position:static !important}
 /* A full-width colspan cell cannot stick, so pin the label inside it. */
 .groupcell span{position:sticky;left:9px;display:inline-block}
 .up{color:#9BD65E}.down{color:var(--minium)}
@@ -609,7 +622,7 @@ function plot(svg, cfg) {
   const readout = cfg.readout;
   const idle = cfg.idle || 'Hover the plot to read values.';
   if (!cfg.series.length || !cfg.series.some(s => s.pts.length)) {
-    const t = el('text', {x: W/2, y: H/2, 'text-anchor': 'middle', fill: '#8FB4CE',
+    const t = el('text', {x: W/2, y: H/2, 'text-anchor': 'middle', fill: '#C9AC80',
       'font-family': 'IBM Plex Mono, monospace', 'font-size': 14});
     t.textContent = cfg.emptyMsg || 'Nothing to plot.';
     svg.appendChild(t);
@@ -621,7 +634,7 @@ function plot(svg, cfg) {
   let vals = [];
   cfg.series.forEach(s => s.pts.forEach(([, v]) => { if (!log || v > 0) vals.push(v); }));
   if (!vals.length) {
-    const t = el('text', {x: W/2, y: H/2, 'text-anchor': 'middle', fill: '#8FB4CE',
+    const t = el('text', {x: W/2, y: H/2, 'text-anchor': 'middle', fill: '#C9AC80',
       'font-family': 'IBM Plex Mono, monospace', 'font-size': 14});
     t.textContent = 'No positive values to show on a log scale.';
     svg.appendChild(t);
@@ -870,8 +883,8 @@ let milTags = defaultTags.slice(0, 6);
 let milMode = 'army';       // army | navy
 let milView = 'totals';     // totals | composition
 let milWithMob = true;      // add the mobilization ceiling to army totals
-const MOB_COLOUR = '#8FB4CE';
-const SIDE_COLOUR = ['#F2B441', '#5FCBB4'];
+const MOB_COLOUR = '#C9AC80';
+const SIDE_COLOUR = ['#E7C464', '#8FB98C'];
 
 const milSave = document.getElementById('milsave');
 DATA.dates.forEach(d => {
@@ -1030,7 +1043,7 @@ function drawMilPies() {
   const mobs = [groupMob(sideA, date), groupMob(sideB, date)];
   const totals = [raised[0] + mobs[0], raised[1] + mobs[1]];
   if (!sideA.length && !sideB.length) {
-    const t = el('text', {x: 500, y: 200, 'text-anchor': 'middle', fill: '#8FB4CE',
+    const t = el('text', {x: 500, y: 200, 'text-anchor': 'middle', fill: '#C9AC80',
       'font-family': 'IBM Plex Mono, monospace', 'font-size': 14});
     t.textContent = 'Pick at least one nation for a side.';
     svg.appendChild(t);
@@ -1417,7 +1430,7 @@ function stackedBars(svgId, legendId, byDate, keys, emptyMsg) {
   const peak = Math.max(1, ...totals);
 
   if (!used.length) {
-    const t = el('text', {x: NW/2, y: NH/2, 'text-anchor': 'middle', fill: '#8FB4CE',
+    const t = el('text', {x: NW/2, y: NH/2, 'text-anchor': 'middle', fill: '#C9AC80',
       'font-family': 'IBM Plex Mono, monospace', 'font-size': 14});
     t.textContent = emptyMsg;
     svg.appendChild(t);
@@ -1459,8 +1472,8 @@ function stackedBars(svgId, legendId, byDate, keys, emptyMsg) {
       t.setAttribute('font-size', size); t.setAttribute('fill', fill);
       t.textContent = txt; svg.appendChild(t);
     };
-    mk(d.split('.')[0], NH - NM.b + 17, 10, '#8FB4CE');
-    if (totals[i]) mk(fmtCount(totals[i]), y - 6, 10.5, '#E4EFF7');
+    mk(d.split('.')[0], NH - NM.b + 17, 10, '#C9AC80');
+    if (totals[i]) mk(fmtCount(totals[i]), y - 6, 10.5, '#F4E7CC');
   });
 
   used.forEach((k, si) => {
@@ -1768,7 +1781,7 @@ function mapOwnerTables() {
 }
 
 const mapSea = new Set((MAP && MAP.sea) || []);
-const MAP_WATER = [16, 34, 54], MAP_WILD = [42, 50, 58], MAP_EDGE = [10, 18, 28];
+const MAP_WATER = [38, 54, 74], MAP_WILD = [122, 106, 78], MAP_EDGE = [32, 18, 14];
 
 function mapPalette(date) {
   const book = mapOwners[date] || {own: new Map(), occ: new Map()};

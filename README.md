@@ -163,13 +163,20 @@ Flags come out of the mod's own `gfx/flags/*.tga`, converted to PNG and inlined
 as data URIs -- about 2.4 KB a flag, 26 KB for a campaign, and 10 ms to decode.
 Which variant a nation flies mostly follows `flagType` in `governments.txt`, so a
 communist Russia flies the communist flag, and one image is kept per tag and
-variant rather than per save. One case the file cannot express: absolute
-monarchy, Prussian constitutionalism and HM's Government all declare
-`flagType = monarchy`, yet the game does not fly the same flag for them --
-France under HM's Government shows the tricolour while `FRA_monarchy.tga` is the
-white Bourbon flag. The two constitutional governments therefore take the plain
-`TAG.tga` and only absolute monarchy takes `_monarchy`. Democracy declares no
-flagType at all and takes `_republic`. The mod's folder wins over the base game's, which
+variant rather than per save. One case `flagType` cannot express on its
+own: absolute monarchy, Prussian constitutionalism and HM's Government all
+declare `flagType = monarchy`, in the mod and in vanilla alike, yet the game
+does not fly the same flag for all three. What separates them in the file is
+whether the government holds elections, and that is the line taken here -- a
+crowned republic takes `_republic`, an autocracy takes `_monarchy`. Germany is
+the case that settles it: black-red-gold under a constitutional monarchy against
+the black-white-red empire flag under an absolute one.
+
+That rule is inferred from two observed flags rather than from anything the
+files state outright, and there is one case it may get wrong. Japan under a
+constitutional monarchy comes out as `JAP_republic.tga`, a blue civil ensign,
+where the Hinomaru might be expected. If the game shows the Hinomaru there, the
+rule needs a third branch rather than a straight election test. The mod's folder wins over the base game's, which
 is how a mod replaces a flag without shipping all 1,300. Vic2 flags are TGA in
 four shapes -- run-length encoded or not, 24 or 32 bit -- and all four are read;
 the five 8-bit greyscale files fall back to a plain colour chip.

@@ -600,15 +600,40 @@ def province_raster(path, scale=4):
 
 
 def government_flag_types(path):
-    """{government: flag variant}, from `flagType` in common/governments.txt."""
+    """
+    {government: (flag variant, holds elections)} from common/governments.txt.
+
+    Both halves matter. `flagType` alone cannot pick a flag, because absolute
+    monarchy, Prussian constitutionalism and HM's Government all declare
+    `flagType = monarchy` -- vanilla does the same -- while the game plainly
+    flies different flags for them. What separates them is whether the
+    government holds elections, and that is the line the game draws: a
+    constitutional monarchy flies the national flag, an absolute one the
+    imperial or legitimist variant. Germany is the clean case, black-red-gold
+    under a constitutional monarchy against the black-white-red empire flag
+    under an absolute one.
+    """
     target = os.path.join(path, "common", "governments.txt")
     if not os.path.isfile(target):
         return {}
     out = {}
     for name, block in _read_clausewitz(target):
-        if isinstance(block, dict) and "flagType" in block:
-            out[name] = unquote(str(block["flagType"]))
+        if not isinstance(block, dict):
+            continue
+        out[name] = (unquote(str(block.get("flagType", ""))),
+                     str(block.get("election", "no")).lower() == "yes")
     return out
+
+
+def flag_suffixes(government, styles):
+    """Flag file suffixes to try, best first, for a government."""
+    variant, elects = styles.get(government, ("", True))
+    if variant == "monarchy":
+        # A crowned republic flies the national flag, a real autocracy does not.
+        return ["_republic", ""] if elects else ["_monarchy", ""]
+    if variant:
+        return ["_" + variant, ""]
+    return ["_republic", ""]      # democracy declares no flagType at all
 
 
 def _read_tga(target):
@@ -685,26 +710,6 @@ def _flag_roots(path):
     if len(parts) >= 2 and parts[-2].lower() == "mod":
         roots.append(os.path.join(os.sep.join(parts[:-2]), "gfx", "flags"))
     return [r for r in roots if os.path.isdir(r)]
-
-
-# governments.txt gives absolute monarchy, Prussian constitutionalism and HM's
-# Government the same `flagType = monarchy`, but the game does not fly the same
-# flag for them: a constitutional monarchy shows the national flag while an
-# absolute one shows the legitimist variant. France is the clear case, where
-# FRA.tga is the tricolour and FRA_monarchy.tga is the white Bourbon flag. The
-# file cannot express that difference, so the government's own name settles it.
-_CROWNED_REPUBLICS = ("hms_government", "prussian_constitutionalism")
-
-
-def flag_suffixes(government, types):
-    """Flag file suffixes to try, best first, for a government."""
-    if government in _CROWNED_REPUBLICS:
-        return ["", "_monarchy"]
-    variant = types.get(government, "")
-    if variant:
-        return ["_" + variant, ""]
-    # democracy declares no flagType, and a democracy flies the republic flag
-    return ["_republic", ""]
 
 
 def flag_images(path, wanted, governments=None):
