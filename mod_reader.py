@@ -22,6 +22,7 @@ meets that invention's `limit`, and inventions whose acquisition chance is
 driven to zero by a dependency on an unobtainable invention are excluded.
 """
 
+import array
 import os
 import re
 import struct
@@ -299,6 +300,31 @@ def _plain(path):
         return _COMMENT.sub("", fh.read().decode("latin-1"))
 
 
+def _country_entries(path):
+    """
+    [(tag, its country file), ...] in the engine's own array order.
+
+    A mod can name the same tag twice in `common/countries.txt` -- Divergences
+    of Darkness lists eight of them, ARC and AZL among them -- and the engine
+    keeps only the first. Anything counting positions has to drop the repeats
+    or every index past the first one is off by however many came before it.
+    Dropped, this list matches the order a save writes its country blocks in,
+    tag for tag, which is the engine's array by definition.
+    """
+    listing = os.path.join(path, "common", "countries.txt")
+    if not os.path.isfile(listing):
+        return []
+    entry = re.compile(r'^\s*([A-Z0-9]{3})\s*=\s*"?([^"\r\n]+?)"?\s*$', re.M)
+    seen = set()
+    out = []
+    for tag, rel in entry.findall(_plain(listing)):
+        if tag in seen:
+            continue
+        seen.add(tag)
+        out.append((tag, rel.strip()))
+    return out
+
+
 def party_sequence(path):
     """
     Every party in engine load order, so a save's `ruling_party` index decodes.
@@ -314,13 +340,9 @@ def party_sequence(path):
     regiments gives the 32 the game offers. One-based indexing decodes to a
     pro-military party and predicts 24, which the game does not show.
     """
-    listing = os.path.join(path, "common", "countries.txt")
-    if not os.path.isfile(listing):
-        return []
     out = []
-    entry = re.compile(r'^\s*([A-Z0-9]{3})\s*=\s*"?([^"\r\n]+?)"?\s*$', re.M)
-    for tag, rel in entry.findall(_plain(listing)):
-        target = os.path.join(path, "common", rel.strip().replace("/", os.sep))
+    for tag, rel in _country_entries(path):
+        target = os.path.join(path, "common", rel.replace("/", os.sep))
         if not os.path.isfile(target):
             continue
         for block in _named_blocks(_plain(target), "party"):
@@ -479,8 +501,20 @@ def state_names(path):
 
 
 def province_regions(path):
-    """{province id: state name}, the reverse of `regions`."""
-    return {pid: name for name, ids in regions(path).items() for pid in ids}
+    """
+    {province id: state name}, the reverse of `regions`.
+
+    A province belongs to the first region that claims it, the way a tag belongs
+    to its first line in `common/countries.txt`. Divergences of Darkness keeps a
+    metaregion in `region.txt` -- MET_1, one entry naming almost every province
+    on the map -- and reversing the mapping without that rule handed all 2,704
+    of them to it, which turned every state in the war tab into "Earth".
+    """
+    out = {}
+    for name, ids in regions(path).items():
+        for pid in ids:
+            out.setdefault(pid, name)
+    return out
 
 
 def country_order(path):
@@ -490,11 +524,7 @@ def country_order(path):
     A save's `great_nations` list holds 1-based indices into it, so this is what
     turns "2 10 9 16 6 4 8 12" into a great power ranking.
     """
-    listing = os.path.join(path, "common", "countries.txt")
-    if not os.path.isfile(listing):
-        return []
-    entry = re.compile(r'^\s*([A-Z0-9]{3})\s*=\s*"?[^"\r\n]+"?\s*$', re.M)
-    return entry.findall(_plain(listing))
+    return [tag for tag, _file in _country_entries(path)]
 
 
 def country_colours(path):
@@ -622,8 +652,9 @@ def province_raster(path, scale=4):
             return 0, 0, []
         stride = ((width * bpp + 31) // 32) * 4
         out_w, out_h = width // scale, height // scale
-        runs = []
-        prev, count = -1, 0
+        grid = array.array("i", bytes(4 * out_w * out_h))
+        holes = []
+        at = 0
         for oy in range(out_h):
             # Rows are stored top-down here despite the positive height a
             # bottom-up BMP declares: file row 168 holds Sitka, whose own
@@ -634,15 +665,63 @@ def province_raster(path, scale=4):
             for ox in range(out_w):
                 i = ox * scale * 3
                 pid = colour.get((row[i + 2], row[i + 1], row[i]), 0)
-                if pid == prev:
-                    count += 1
-                else:
-                    if count:
-                        runs.append((prev, count))
-                    prev, count = pid, 1
-        if count:
-            runs.append((prev, count))
+                grid[at] = pid
+                if not pid:
+                    holes.append(at)
+                at += 1
+
+    _close_holes(grid, out_w, out_h, holes)
+
+    runs = []
+    prev, count = -1, 0
+    for pid in grid:
+        if pid == prev:
+            count += 1
+        else:
+            if count:
+                runs.append((prev, count))
+            prev, count = pid, 1
+    if count:
+        runs.append((prev, count))
     return out_w, out_h, runs
+
+
+def _close_holes(grid, width, height, holes):
+    """
+    Hand pixels no province claims to whichever province surrounds them.
+
+    Victoria 2 paints one blob into `provinces.bmp` that `definition.csv` never
+    names -- RGB 208,17,223, about 8,000 pixels over the Tibesti in northern
+    Chad -- and every mod built on the vanilla map inherits it. Drawn as it
+    stands it becomes unclaimed land in the middle of a colonised Sahara, which
+    is a gap in the game's own data posing as a fact about the map, so it is
+    grown over from its edges: each unnamed pixel takes the province most of its
+    neighbours belong to, a ring at a time, until the blob is gone.
+    """
+    while holes:
+        filled = {}
+        for at in holes:
+            x = at % width
+            y = at // width
+            around = {}
+            if x:
+                around[grid[at - 1]] = around.get(grid[at - 1], 0) + 1
+            if x + 1 < width:
+                around[grid[at + 1]] = around.get(grid[at + 1], 0) + 1
+            if y:
+                around[grid[at - width]] = around.get(grid[at - width], 0) + 1
+            if y + 1 < height:
+                around[grid[at + width]] = around.get(grid[at + width], 0) + 1
+            around.pop(0, None)
+            if around:
+                # ties go to the lower province id, so the result does not
+                # depend on which order a dict happened to hand them back
+                filled[at] = max(around, key=lambda pid: (around[pid], -pid))
+        if not filled:
+            return                    # nothing borders them; leave them be
+        for at, pid in filled.items():
+            grid[at] = pid
+        holes = [at for at in holes if at not in filled]
 
 
 def government_flag_types(path):

@@ -150,6 +150,15 @@ Roughly 300 KB for two saves. Narrow the nation list to strip the markers back
 to the nations you care about; the land stays shaded so the geography does not
 move under you.
 
+**The hole in the Tibesti.** Victoria 2 paints about 8,000 pixels of northern
+Chad into `provinces.bmp` in a magenta -- RGB 208,17,223 -- that `definition.csv`
+never names, and it is the only unnamed colour on the map. Vanilla has it, and
+so does every mod built on the vanilla bitmap. Drawn literally it becomes
+unclaimed land in the middle of a colonised Sahara, which is a gap in the game's
+own data posing as a fact, so the raster grows the surrounding provinces over it
+a ring at a time -- in practice Murzuk, Madama and Matan as Sarah, which are
+exactly its neighbours.
+
 **Zoom and pan.** Scroll to zoom on the cursor, drag to pan, double-click to zoom
 in, **Reset** for the whole world. Markers grow more slowly than the map, so a
 crowded theatre thins out as you go in rather than turning into one blob: at
@@ -193,6 +202,18 @@ and it is the game's own ranking: across this campaign Turkey drops out between
 (Italy outscores Britain on prestige in 1908 and still ranks second). `prestige`
 is a top-level country field, read directly.
 
+That array is `common/countries.txt` with its repeats dropped. A mod can name
+the same tag twice -- Divergences of Darkness lists eight, ARC and AZL among
+them -- and the engine keeps only the first, so counting the file as written
+puts every index past the first repeat out by however many came before it. In
+DoD that turned eight real great powers into five tags the campaign has never
+heard of, each with an empty row beside it, because the wrong tags are not in
+the save to have statistics. De-duplicated, the list matches the order a save
+writes its own country blocks in, tag for tag, at 658 of 658 -- which is the
+engine's array by definition. `common/countries.txt` also drives the party list
+`ruling_party` indexes into, so the same repeats were shifting war policy and
+mobilisation impact for every country past the first one.
+
 Flags come out of the mod's own `gfx/flags/*.tga`, converted to PNG and inlined
 as data URIs -- about 2.4 KB a flag, 26 KB for a campaign, and 10 ms to decode.
 Which variant a nation flies mostly follows `flagType` in `governments.txt`, so a
@@ -217,6 +238,16 @@ both at runtime. Rather than print a guess beside two exact numbers, the cards
 carry the real quantities instead -- factory levels, brigades and ships -- all
 of which are counted from the save. If you want the game's own two numbers they
 have to be read off the in-game ledger.
+
+### States come from the first region that claims a province
+
+`map/region.txt` is meant to be one entry per state, but a mod can keep other
+things in it: DoD ends the file with `MET_1`, a metaregion naming almost every
+province on the map. Reversing the file into a province-to-state mapping without
+a rule for repeats handed all 2,704 provinces to that one entry, and every state
+in the war tab came out as "Earth". A province now belongs to the **first**
+region that claims it, the same rule the country array follows, which leaves
+mods without metaregions untouched -- IGoR reads 528 regions either way.
 
 ## Wars
 
@@ -272,10 +303,14 @@ the size, so it is cached in the system temp folder and reused:
 | first run | ~52 s |
 | every run after | **~3 s** |
 
-The cache key is the save's path, size and timestamp **plus a hash of the
-parsing code**, so editing `vic2_analyzer.py` or `v2parse.py` expires every
-entry automatically -- the one version counter nobody forgets to bump. Output is
-byte-identical either way. `--no-cache` re-reads everything.
+The cache key is the save's path, size and timestamp, **a hash of the parsing
+code**, and **which mod it was read under**. The first expires every entry the
+moment `vic2_analyzer.py` or `v2parse.py` changes -- the one version counter
+nobody forgets to bump. The second matters because a save is not read the same
+way under every mod: the mod's own pop types are registered before parsing and
+decide which pop blocks the province reader keeps, so the same file under two
+mods is two different parses and must not share a slot. Output is byte-identical
+either way. `--no-cache` re-reads everything.
 
 Skipping a block also no longer tokenizes it: most of a save is blocks nothing
 here reads, and the skip now leaps brace to brace through the raw text.

@@ -820,20 +820,38 @@ def _parser_fingerprint():
     return digest.hexdigest()[:10]
 
 
-def _cache_slot(path, fingerprint):
-    """Where this save's parsed form lives, keyed by the file and the parser."""
+def mod_fingerprint(mod_path, pop_types):
+    """
+    What the mod changes about parsing, as a short string.
+
+    A save is not read the same way under every mod. `register_pop_types` adds
+    the mod's own pop types to the set the province reader keeps, so the same
+    file parsed under two mods yields two different results -- and the cache,
+    keyed only by the file, would hand the second run the first one's answer.
+    Naming the mod and the pop types it registered keeps those apart.
+    """
+    if not mod_path:
+        return "no-mod"
+    return hashlib.md5(
+        (os.path.abspath(mod_path) + "|" + ",".join(sorted(pop_types)))
+        .encode("utf-8")).hexdigest()[:10]
+
+
+def _cache_slot(path, fingerprint, world="no-mod"):
+    """Where this save's parsed form lives, keyed by the file, the parser and
+    the mod it is being read under."""
     try:
         stat = os.stat(path)
     except OSError:
         return None
     key = hashlib.md5(
-        f"{os.path.abspath(path)}|{stat.st_size}|{int(stat.st_mtime)}|{fingerprint}"
-        .encode("utf-8")).hexdigest()
+        f"{os.path.abspath(path)}|{stat.st_size}|{int(stat.st_mtime)}"
+        f"|{fingerprint}|{world}".encode("utf-8")).hexdigest()
     folder = os.path.join(tempfile.gettempdir(), "vic2_analyzer_cache")
     return os.path.join(folder, key + ".pkl")
 
 
-def analyze_cached(path, verbose=True, use_cache=True):
+def analyze_cached(path, verbose=True, use_cache=True, world="no-mod"):
     """`analyze_save`, but remembering what it read last time.
 
     Parsing a 44 MB save takes about two seconds and a campaign folder holds
@@ -841,7 +859,7 @@ def analyze_cached(path, verbose=True, use_cache=True):
     thousandth of the size, so it is cheap to keep and near-free to reload.
     """
     fingerprint = _parser_fingerprint() if use_cache else ""
-    slot = _cache_slot(path, fingerprint) if fingerprint else None
+    slot = _cache_slot(path, fingerprint, world) if fingerprint else None
     if slot and os.path.isfile(slot):
         try:
             with open(slot, "rb") as fh:
@@ -1427,11 +1445,16 @@ def main():
 
     set_mob_candidates(args.mob_types)
 
+    # Which mod a save is read under changes what comes out of it, so it is part
+    # of the cache key. Two campaigns on two mods no longer share entries.
+    world = mod_fingerprint(args.mod_path, (mod or {}).get("pop_types") or ())
+
     parsed = []
     for path in files:
         try:
             meta, nations = analyze_cached(path, verbose=verbose,
-                                           use_cache=not args.no_cache)
+                                           use_cache=not args.no_cache,
+                                           world=world)
         except (ValueError, OSError) as exc:
             print(f"  skipped {os.path.basename(path)}: {exc}", file=sys.stderr)
             continue
