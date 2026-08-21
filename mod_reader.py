@@ -23,11 +23,16 @@ driven to zero by a dependency on an unobtainable invention are excluded.
 """
 
 import array
+import base64
+import hashlib
 import os
+import pickle
 import re
 import struct
+import tempfile
 import zlib
-import base64
+
+from itertools import groupby
 
 from v2parse import Tokens, as_list, parse_block, to_float, to_int, unquote
 
@@ -622,13 +627,26 @@ def province_raster(path, scale=4):
     encodes to about 130 KB and still shows every province in the game.
 
     Only the sampled rows are read, so this costs a tenth of a second rather
-    than the minute a full decode would take.
+    than the minute a full decode would take. The result is kept next to the
+    parsed saves in the temp folder, because a mod's map does not change between
+    runs and half a second is most of what is left once the saves are cached.
     """
     bmp = os.path.join(path, "map", "provinces.bmp")
     csv_path = os.path.join(path, "map", "definition.csv")
     if not (os.path.isfile(bmp) and os.path.isfile(csv_path)):
         return 0, 0, []
 
+    slot = _raster_slot(bmp, csv_path, scale)
+    if slot and os.path.isfile(slot):
+        try:
+            with open(slot, "rb") as fh:
+                return pickle.loads(zlib.decompress(fh.read()))
+        except Exception:
+            pass                      # a bad entry just means decoding it again
+
+    # Keyed by the three bytes as the bitmap stores them -- blue, green, red --
+    # so a pixel is looked up by slicing the row rather than by unpacking it
+    # into a tuple of three integers three million times.
     colour = {}
     with open(csv_path, "rb") as fh:
         next(fh, None)
@@ -637,7 +655,8 @@ def province_raster(path, scale=4):
             if len(bits) < 4:
                 continue
             try:
-                colour[(int(bits[1]), int(bits[2]), int(bits[3]))] = int(bits[0])
+                colour[bytes((int(bits[3]), int(bits[2]), int(bits[1])))] = \
+                    int(bits[0])
             except ValueError:
                 continue
 
@@ -655,6 +674,9 @@ def province_raster(path, scale=4):
         grid = array.array("i", bytes(4 * out_w * out_h))
         holes = []
         at = 0
+        step = scale * 3
+        span = out_w * step
+        look = colour.get
         for oy in range(out_h):
             # Rows are stored top-down here despite the positive height a
             # bottom-up BMP declares: file row 168 holds Sitka, whose own
@@ -662,28 +684,48 @@ def province_raster(path, scale=4):
             # the southern ocean.
             fh.seek(offset + (oy * scale) * stride)
             row = fh.read(stride)
-            for ox in range(out_w):
-                i = ox * scale * 3
-                pid = colour.get((row[i + 2], row[i + 1], row[i]), 0)
-                grid[at] = pid
-                if not pid:
+            # Provinces are contiguous, so a pixel almost always repeats the one
+            # to its left. Comparing three bytes is cheaper than a dict lookup,
+            # and skips nine in ten of them.
+            seen, pid = None, 0
+            for i in range(0, span, step):
+                key = row[i:i + 3]
+                if key != seen:
+                    seen = key
+                    pid = look(key, 0)
+                    if not pid:
+                        holes.append(at)
+                elif not pid:
                     holes.append(at)
+                grid[at] = pid
                 at += 1
 
     _close_holes(grid, out_w, out_h, holes)
 
-    runs = []
-    prev, count = -1, 0
-    for pid in grid:
-        if pid == prev:
-            count += 1
-        else:
-            if count:
-                runs.append((prev, count))
-            prev, count = pid, 1
-    if count:
-        runs.append((prev, count))
-    return out_w, out_h, runs
+    made = (out_w, out_h, [(pid, sum(1 for _ in run))
+                           for pid, run in groupby(grid)])
+    if slot:
+        try:
+            os.makedirs(os.path.dirname(slot), exist_ok=True)
+            with open(slot, "wb") as fh:
+                fh.write(zlib.compress(pickle.dumps(made, protocol=5), 1))
+        except Exception:
+            pass                      # caching is an optimisation, not a duty
+    return made
+
+
+def _raster_slot(bmp, csv_path, scale):
+    """Where this map's decoded form lives, keyed by the two files it comes
+    from and the scale it was decoded at."""
+    try:
+        a, b = os.stat(bmp), os.stat(csv_path)
+    except OSError:
+        return None
+    key = hashlib.md5(
+        f"{os.path.abspath(bmp)}|{a.st_size}|{int(a.st_mtime)}"
+        f"|{b.st_size}|{int(b.st_mtime)}|{scale}".encode("utf-8")).hexdigest()
+    return os.path.join(tempfile.gettempdir(), "vic2_analyzer_cache",
+                        "map_" + key + ".pkl")
 
 
 def _close_holes(grid, width, height, holes):
@@ -1144,8 +1186,6 @@ def load_mod(path):
         "mob_impacts": mobilization_impacts(path),
         "modifier_impacts": modifier_mob_impacts(path),
         "revanchism_impact_ladder": impact_ladder,
-        "party_sequence": party_sequence(path),
-        "mob_impacts": mobilization_impacts(path),
         # Set by index_base_for once a save is in hand; None means the indices
         # could not be decoded and inventions fall back to requirement matching.
         "index_base": None,

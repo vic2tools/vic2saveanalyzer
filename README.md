@@ -56,6 +56,9 @@ python3 vic2_analyzer.py saves/ --min-pop 500000
 # CSVs only
 python3 vic2_analyzer.py saves/ --no-html
 
+# read the saves one at a time instead of on every core
+python3 vic2_analyzer.py saves/ -j 1
+
 # print the structure of a save without analyzing it
 python3 vic2_analyzer.py saves/ --peek
 
@@ -294,14 +297,44 @@ occupied; only that third one took anything.
 
 ## Speed
 
-A 44 MB save takes about two seconds to parse and a campaign folder holds
-dozens, nearly all unchanged between runs. The parsed form is a thousandth of
-the size, so it is cached in the system temp folder and reused:
+A campaign folder is 38 saves of 44 MB each, and reading them used to be the
+whole runtime. Measured on the same folder and the same machine, 32 logical
+cores:
 
-| 38 saves | |
-|---|---|
-| first run | ~52 s |
-| every run after | **~3 s** |
+| 38 saves | | |
+|---|---|---|
+| first run, one core | 63 s | where this started |
+| first run, one core | 41 s | after the parser changes below |
+| **first run** | **6 s** | on as many cores as the machine has |
+| **every run after** | **2.3 s** | the saves come back from the cache |
+
+Three things got it there.
+
+**Saves are read in parallel.** They do not depend on each other, so the only
+thing in the way was that a worker needs the same two pieces of state the mod
+sets up -- which pop types exist and which of them can be mobilized -- and
+Windows starts workers with a fresh interpreter. Both are handed over before a
+worker touches a save. How many workers is the machine's business: one per core
+bar one, no more than there are saves left to read, and bounded by free memory,
+because a worker peaks at about two and a half times its save (114 MB for a
+46 MB file). `-j N` overrides it; `-j 1` reads them one at a time. Anything
+already cached is loaded in the parent, since a process started to do that would
+cost more than it saves. On this machine: 63s on one core, 13s on eight, 8.5s on
+sixteen, 7.3s on twenty-four -- it keeps paying past the physical core count,
+just less.
+
+**Pops skip what nothing reads.** Every pop carries an `ideology` and an
+`issues` sub-block -- six ideology numbers and sixteen party-support numbers --
+against the fourteen fields that are actually used. They were being parsed into
+dictionaries and thrown away. Skipping them at the brace takes a save from 2.0 s
+to 1.4 s and drops the tokens read from 5.2 M to 3.0 M.
+
+**The map is decoded once.** `provinces.bmp` is 5616x2160 and decoding it cost
+half a second on every single run, so the result is cached beside the saves,
+keyed by the two files it comes from and the scale. The decode itself also got
+twice as fast: a pixel is looked up by slicing three bytes out of the row rather
+than unpacking them into a tuple, and since provinces are contiguous a pixel
+almost always repeats the one to its left, which skips nine lookups in ten.
 
 The cache key is the save's path, size and timestamp, **a hash of the parsing
 code**, and **which mod it was read under**. The first expires every entry the
@@ -312,8 +345,14 @@ decide which pop blocks the province reader keeps, so the same file under two
 mods is two different parses and must not share a slot. Output is byte-identical
 either way. `--no-cache` re-reads everything.
 
-Skipping a block also no longer tokenizes it: most of a save is blocks nothing
-here reads, and the skip now leaps brace to brace through the raw text.
+Skipping a block also does not tokenize it: most of a save is blocks nothing
+here reads, and the skip leaps brace to brace through the raw text. The token
+cursor keeps the last match rather than asking it for its position, because
+where the cursor is only matters when a block gets skipped -- once in thirty
+tokens, not three million times on the way there.
+
+Every number above was checked by comparing output: the report and all eight
+CSVs are byte-identical across one core and many, cached and not.
 
 ## What was removed
 

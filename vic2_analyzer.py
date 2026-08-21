@@ -36,6 +36,7 @@ from v2parse import (
     looks_like_country_tag,
     parse_block,
     pop_culture,
+    read_pop,
     read_save_text,
     skip_block,
     to_float,
@@ -281,7 +282,7 @@ def read_province(tok, nations, province_owner_sink, pop_registry=None,
         if val == "{":
             key = unquote(t)
             if key in POP_TYPES:
-                pops.append((key, parse_block(tok)))
+                pops.append((key, read_pop(tok)))
             elif key in ("naval_base", "fort", "railroad"):
                 buildings[key] = parse_block(tok)
             else:
@@ -851,35 +852,176 @@ def _cache_slot(path, fingerprint, world="no-mod"):
     return os.path.join(folder, key + ".pkl")
 
 
-def analyze_cached(path, verbose=True, use_cache=True, world="no-mod"):
-    """`analyze_save`, but remembering what it read last time.
+def _cache_read(slot):
+    """What is in that cache slot, or None if there is nothing usable."""
+    if not (slot and os.path.isfile(slot)):
+        return None
+    try:
+        with open(slot, "rb") as fh:
+            return pickle.loads(zlib.decompress(fh.read()))
+    except Exception:
+        return None                   # a bad entry is just a slow read
 
-    Parsing a 44 MB save takes about two seconds and a campaign folder holds
-    dozens, nearly all of them unchanged between runs. The parsed form is a
-    thousandth of the size, so it is cheap to keep and near-free to reload.
+
+def _cache_write(slot, meta, nations):
+    if not slot:
+        return
+    try:
+        os.makedirs(os.path.dirname(slot), exist_ok=True)
+        with open(slot, "wb") as fh:
+            fh.write(zlib.compress(
+                pickle.dumps((meta, dict(nations)), protocol=5), 1))
+    except Exception:
+        pass                          # caching is an optimisation, not a duty
+
+
+# --- reading a folder of saves across however many cores the machine has -----
+#
+# Saves do not depend on each other, so the only thing stopping a folder from
+# being read all at once is that every worker needs the same two pieces of
+# global state the mod sets up: which pop types exist, and which of them can be
+# mobilized. Windows starts workers with a fresh interpreter, so both are passed
+# in and applied before the worker touches a save.
+
+def _worker_setup(pop_types, mob_types):
+    v2parse.register_pop_types(pop_types)
+    set_mob_candidates(mob_types)
+
+
+def _worker_parse(job):
+    """One save, in a worker. Returns the slot so the parent can do the writing
+    only once, and plain dicts because a defaultdict of lambdas will not pickle."""
+    index, path, slot = job
+    meta, nations = analyze_save(path, verbose=False)
+    return index, slot, meta, dict(nations)
+
+
+def _spare_memory():
+    """Bytes the machine can spare right now, or None if it will not say."""
+    if os.name != "nt":
+        try:
+            return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+        except (ValueError, AttributeError, OSError):
+            return None
+    try:
+        import ctypes
+
+        class _Status(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong),
+                        ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+        status = _Status()
+        status.dwLength = ctypes.sizeof(_Status)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return int(status.ullAvailPhys)
+    except Exception:
+        pass
+    return None
+
+
+def worker_count(jobs, biggest_save, asked=None):
+    """
+    How many saves to read at once.
+
+    Three things bound it. The machine's cores, minus one so the rest of the
+    computer stays usable. The number of saves actually left to read, since a
+    worker with nothing to do is pure startup cost. And memory: a worker holds
+    its whole save as text plus what it builds out of it, which measures at
+    roughly three times the file, so on a small machine that is the real
+    ceiling -- six workers on eight free gigabytes, whatever the core count
+    says. Only 60% of what is free is spent, because the report still has to be
+    built afterwards.
+
+    Measured on 38 saves and 32 logical cores: 63s on one, 13s on eight, 8.5s
+    on sixteen, 7.3s on twenty-four. It keeps paying past the physical core
+    count, just less, and flattens out rather than turning back, so there is no
+    ceiling here beyond what the machine itself imposes.
+    """
+    if asked:
+        return max(1, min(asked, jobs))
+    cores = max(1, (os.cpu_count() or 1) - 1)
+    room = jobs
+    spare = _spare_memory()
+    if spare:
+        room = max(1, int(spare * 0.6) // max(biggest_save * 3, 1))
+    return max(1, min(cores, jobs, room))
+
+
+def parse_saves(files, verbose=True, use_cache=True, world="no-mod",
+                pop_types=(), mob_types=(), jobs=None):
+    """
+    Every save in the folder, read in parallel when that is worth doing.
+
+    Cached saves are loaded here rather than in a worker: it costs a few
+    milliseconds each and a process started to do it would cost more than it
+    saves. Only what is left over is worth spreading out.
     """
     fingerprint = _parser_fingerprint() if use_cache else ""
-    slot = _cache_slot(path, fingerprint, world) if fingerprint else None
-    if slot and os.path.isfile(slot):
-        try:
-            with open(slot, "rb") as fh:
-                meta, nations = pickle.loads(zlib.decompress(fh.read()))
+    slots = [_cache_slot(p, fingerprint, world) if fingerprint else None
+             for p in files]
+
+    out = [None] * len(files)
+    todo = []
+    for i, path in enumerate(files):
+        held = _cache_read(slots[i])
+        if held is not None:
+            out[i] = held
             if verbose:
                 print(f"  {os.path.basename(path)} ... cached, "
-                      f"{meta.get('date', '?')}")
-            return meta, nations
-        except Exception:
-            pass                      # a bad entry is just a slow read
-    meta, nations = analyze_save(path, verbose=verbose)
-    if slot:
+                      f"{held[0].get('date', '?')}")
+        else:
+            todo.append(i)
+
+    if not todo:
+        return [item for item in out if item is not None]
+
+    biggest = max((os.path.getsize(files[i]) for i in todo), default=0)
+    workers = worker_count(len(todo), biggest, jobs)
+    if workers > 1:
         try:
-            os.makedirs(os.path.dirname(slot), exist_ok=True)
-            with open(slot, "wb") as fh:
-                fh.write(zlib.compress(
-                    pickle.dumps((meta, dict(nations)), protocol=5), 1))
-        except Exception:
-            pass                      # caching is an optimisation, not a duty
-    return meta, nations
+            return _parse_parallel(files, out, todo, slots, workers, verbose,
+                                   pop_types, mob_types)
+        except Exception as exc:
+            # A machine that will not start workers still has to read its saves.
+            print(f"  reading one at a time ({exc})", file=sys.stderr)
+
+    for i in todo:
+        try:
+            meta, nations = analyze_save(files[i], verbose=verbose)
+        except (ValueError, OSError) as exc:
+            print(f"  skipped {os.path.basename(files[i])}: {exc}",
+                  file=sys.stderr)
+            continue
+        _cache_write(slots[i], meta, nations)
+        out[i] = (meta, nations)
+    return [item for item in out if item is not None]
+
+
+def _parse_parallel(files, out, todo, slots, workers, verbose, pop_types,
+                    mob_types):
+    from concurrent.futures import ProcessPoolExecutor
+    if verbose:
+        print(f"Reading {len(todo)} save(s) on {workers} cores.")
+    done = 0
+    with ProcessPoolExecutor(max_workers=workers, initializer=_worker_setup,
+                             initargs=(tuple(pop_types),
+                                       tuple(mob_types))) as pool:
+        jobs = [(i, files[i], slots[i]) for i in todo]
+        for index, slot, meta, nations in pool.map(_worker_parse, jobs):
+            out[index] = (meta, nations)
+            _cache_write(slot, meta, nations)
+            done += 1
+            if verbose:
+                print(f"  [{done}/{len(todo)}] "
+                      f"{os.path.basename(files[index])} ... {meta['date']}")
+    return [item for item in out if item is not None]
 
 
 def explain_mob_pool(tag, nat, meta, rate, args):
@@ -1349,6 +1491,12 @@ def main():
                          "moves nations under siege a lot -- Russia in 1908 "
                          "reads 558 without them and 612 with -- so it is worth "
                          "checking against the game when a nation is at war.")
+    ap.add_argument("-j", "--jobs", type=int, default=None, metavar="N",
+                    help="how many saves to read at once. The default sizes "
+                         "itself to the machine: one worker per core bar one, "
+                         "capped by how many saves are left to read and by how "
+                         "much memory is free. Pass 1 to read them one at a "
+                         "time.")
     ap.add_argument("--no-cache", action="store_true",
                     help="re-read every save instead of reusing what was parsed "
                          "last time. The cache lives in the system temp folder, "
@@ -1449,16 +1597,9 @@ def main():
     # of the cache key. Two campaigns on two mods no longer share entries.
     world = mod_fingerprint(args.mod_path, (mod or {}).get("pop_types") or ())
 
-    parsed = []
-    for path in files:
-        try:
-            meta, nations = analyze_cached(path, verbose=verbose,
-                                           use_cache=not args.no_cache,
-                                           world=world)
-        except (ValueError, OSError) as exc:
-            print(f"  skipped {os.path.basename(path)}: {exc}", file=sys.stderr)
-            continue
-        parsed.append((meta, nations))
+    parsed = parse_saves(files, verbose=verbose, use_cache=not args.no_cache,
+                         world=world, pop_types=sorted(v2parse.POP_TYPES),
+                         mob_types=args.mob_types, jobs=args.jobs)
 
     if not parsed:
         sys.exit("No saves could be read.")
@@ -1751,4 +1892,8 @@ def main():
 
 
 if __name__ == "__main__":
+    # A worker on Windows starts by re-running this file, and without this it
+    # would run the whole analysis again instead of waiting for a job.
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()

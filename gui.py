@@ -257,6 +257,12 @@ def _attach_console():
 
 
 def main():
+    # Saves are read on several cores, and a worker on Windows starts by
+    # re-running this program. Without this it would open a second window
+    # instead of waiting for a save to read -- once per core, forever.
+    import multiprocessing
+    multiprocessing.freeze_support()
+
     if len(sys.argv) > 1:
         # Handed arguments, the executable is the command line it was built
         # from -- every flag, --explain-mob and all.

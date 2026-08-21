@@ -84,7 +84,11 @@ def build():
     # These are imported inside functions rather than at the top of the file, so
     # they are named here in case the bundler's scan ever stops following them.
     carried = ["vic2_analyzer", "v2parse", "mod_reader", "report", "template",
-               "tech_groups"]
+               "tech_groups",
+               # saves are read on several cores, and the machinery for that is
+               # reached through function-level imports
+               "multiprocessing", "multiprocessing.spawn",
+               "concurrent.futures.process"]
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
            "--onefile", "--windowed", "--name", NAME, "--icon", ICON,
            "--distpath", os.path.join(HERE, "dist"),

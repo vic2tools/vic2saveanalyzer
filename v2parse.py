@@ -57,13 +57,14 @@ _BRACE_RE = re.compile(r'["{}]')
 class Tokens:
     """Token cursor with one-token pushback and a fast whole-block skip."""
 
-    __slots__ = ("_text", "_it", "_pos", "_pushed")
+    __slots__ = ("_text", "_it", "_pos", "_pushed", "_last")
 
     def __init__(self, text):
         self._text = text
         self._it = TOKEN_RE.finditer(text)
         self._pos = 0
         self._pushed = None
+        self._last = None
 
     def next(self):
         if self._pushed is not None:
@@ -73,7 +74,10 @@ class Tokens:
         m = next(self._it, None)
         if m is None:
             return None
-        self._pos = m.end()
+        # Where the cursor is only matters when a block gets skipped, which is
+        # once in thirty tokens, so the match is kept and asked for its end
+        # then rather than three million times on the way there.
+        self._last = m
         return m.group()
 
     def push(self, tok):
@@ -90,7 +94,7 @@ class Tokens:
                 self.skip_to_close()
         text = self._text
         depth = 1
-        i = self._pos
+        i = self._last.end() if self._last is not None else self._pos
         while depth:
             m = _BRACE_RE.search(text, i)
             if m is None:
@@ -104,6 +108,7 @@ class Tokens:
             depth += 1 if c == "{" else -1
             i = m.end()
         self._pos = i
+        self._last = None             # the kept match is behind the skip now
         self._it = TOKEN_RE.finditer(text, i)
 
 
@@ -191,6 +196,39 @@ def to_int(value, default=0):
         return int(float(value))
     except (TypeError, ValueError):
         return default
+
+
+def read_pop(tok):
+    """
+    One pop block, scalars only.
+
+    Every pop carries an `ideology` and an `issues` sub-block, and between them
+    they hold about two thirds of the tokens in the pop section of a save --
+    sixteen party-support numbers and six ideology numbers against fourteen
+    fields that are actually read. Nothing here looks at either, so they are
+    skipped at the brace instead of being built into dictionaries and thrown
+    away. `pop_culture` still works, because it only ever considered the string
+    fields and a skipped block was never one.
+    """
+    out = {}
+    while True:
+        t = tok.next()
+        if t is None or t == "}":
+            break
+        nxt = tok.next()
+        if nxt is None:
+            break
+        if nxt != "=":
+            tok.push(nxt)
+            continue
+        val = tok.next()
+        if val is None:
+            break
+        if val == "{":
+            tok.skip_to_close()
+        else:
+            out[unquote(t)] = unquote(val)
+    return out
 
 
 def pop_culture(pop):
