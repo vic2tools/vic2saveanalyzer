@@ -119,6 +119,18 @@ svg{display:block;width:100%;height:auto}
 /* The map is a fixed-aspect box with the canvas stretched over it. Without the
    explicit CSS size the canvas falls back to its width/height attributes, which
    are the raster's -- 2808px -- and it bursts straight out of the page. */
+.gpgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:8px}
+.gpcard{display:flex;align-items:center;gap:10px;padding:8px 10px;
+  border:1px solid var(--rule);background:rgba(8,25,44,.72)}
+.gprank{font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:600;
+  color:var(--ink-dim);min-width:26px;text-align:right}
+.gpflag{width:34px;height:23px;border:1px solid rgba(0,0,0,.6);flex:none}
+.gpbody{min-width:0;flex:1}
+.gpname{font-family:'Barlow Condensed',sans-serif;font-size:18px;color:var(--ink);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gpstats{display:flex;flex-wrap:wrap;gap:10px;font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:11px;color:var(--ink)}
+.gpstats .rk{color:var(--ink-dim)}
 .mapwrap{position:relative;width:100%;overflow:hidden;background:var(--ground);
   border:1px solid var(--grid)}
 .mapwrap canvas{position:absolute;inset:0;width:100%!important;height:100%!important;
@@ -197,7 +209,6 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
   <div class="tabs" role="tablist" aria-label="Views">
     <button class="tab" role="tab" id="tab-nations" aria-controls="panel-nations" aria-selected="true">Nations</button>
     <button class="tab" role="tab" id="tab-military" aria-controls="panel-military" aria-selected="false">Military</button>
-    <button class="tab" role="tab" id="tab-map" aria-controls="panel-map" aria-selected="false">Map</button>
     <button class="tab" role="tab" id="tab-fleets" aria-controls="panel-fleets" aria-selected="false">Fleets</button>
     <button class="tab" role="tab" id="tab-pops" aria-controls="panel-pops" aria-selected="false">Pops</button>
     <button class="tab" role="tab" id="tab-market" aria-controls="panel-market" aria-selected="false">Market</button>
@@ -205,6 +216,42 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
 
   <!-- ============ NATIONS ============ -->
   <div role="tabpanel" id="panel-nations" aria-labelledby="tab-nations">
+    <section>
+      <h2>Deployment at <span id="mapdate"></span></h2>
+      <div class="controls">
+        <label for="mapsave">Save</label>
+        <select id="mapsave"></select>
+        <button id="mapocc" aria-pressed="true" title="Shade land by who currently controls it rather than who owns it">Control</button>
+        <button id="mapreset" title="Back to the whole world">Reset</button>
+        <span class="rk" id="mapzoom">1.0&times;</span>
+        <span id="pick-map"></span>
+      </div>
+      <figure>
+        <div class="mapwrap"><canvas id="mapcanvas" role="img"
+             aria-label="Political map with army positions"></canvas></div>
+        <div class="readout" id="mapreadout"></div>
+      </figure>
+      <p class="note">Every army in the save is drawn at the province the game
+        stacks it on, sized by brigade count and coloured by its nation. Hover a
+        marker for the province, the nations stacked there and what they are made
+        of. Narrow the nation list to strip the map back to the ones you care
+        about &mdash; the land stays shaded, only the markers are filtered.
+        Land is shaded by whoever controls it; press <strong>Control</strong> to
+        switch to who owns it, which separates occupied ground from annexed.
+        Scroll to zoom, drag to pan, double-click to zoom in, and click a marker
+        to pin its readout while you look elsewhere.</p>
+    </section>
+
+    <section>
+      <h2>Great powers at <span id="gpdate"></span></h2>
+      <div class="gpgrid" id="gpgrid"></div>
+      <p class="note">The ranking is the game's own: saves carry a
+        <code>great_nations</code> list in rank order. <strong>Prestige</strong> is
+        read straight from the save. Industrial and military score are
+        <em>not</em> stored anywhere in a save, so the columns beside prestige are
+        the real quantities behind them rather than the game's own two numbers.</p>
+    </section>
+
     <section>
       <h2>Series</h2>
       <div class="controls">
@@ -277,35 +324,6 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
     </section>
   </div>
 
-
-  <!-- ============ MAP ============ -->
-  <div role="tabpanel" id="panel-map" aria-labelledby="tab-map" hidden>
-    <section>
-      <h2>Deployment at <span id="mapdate"></span></h2>
-      <div class="controls">
-        <label for="mapsave">Save</label>
-        <select id="mapsave"></select>
-        <button id="mapocc" aria-pressed="true" title="Shade land by who currently controls it rather than who owns it">Control</button>
-        <button id="mapreset" title="Back to the whole world">Reset</button>
-        <span class="rk" id="mapzoom">1.0&times;</span>
-        <span id="pick-map"></span>
-      </div>
-      <figure>
-        <div class="mapwrap"><canvas id="mapcanvas" role="img"
-             aria-label="Political map with army positions"></canvas></div>
-        <div class="readout" id="mapreadout"></div>
-      </figure>
-      <p class="note">Every army in the save is drawn at the province the game
-        stacks it on, sized by brigade count and coloured by its nation. Hover a
-        marker for the province, the nations stacked there and what they are made
-        of. Narrow the nation list to strip the map back to the ones you care
-        about &mdash; the land stays shaded, only the markers are filtered.
-        Land is shaded by whoever controls it; press <strong>Control</strong> to
-        switch to who owns it, which separates occupied ground from annexed.
-        Scroll to zoom, drag to pan, double-click to zoom in, and click a marker
-        to pin its readout while you look elsewhere.</p>
-    </section>
-  </div>
 
   <!-- ============ FLEETS ============ -->
   <div role="tabpanel" id="panel-fleets" aria-labelledby="tab-fleets" hidden>
@@ -1654,6 +1672,12 @@ const MARKET_COLS = [
   {key: 'good', label: 'Good', colour: r => goodColour(r.good)},
   {key: 'category', label: 'Category'},
   {key: 'price', label: 'Price', fmt: v => v.toFixed(2)},
+  {key: 'base', label: 'Base', fmt: v => v == null ? '—' : v.toFixed(2),
+   title: "The good's base cost from the mod's common/goods.txt"},
+  {key: 'vsBase', label: 'vs base',
+   fmt: v => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(0) + '%',
+   title: 'How far the world price sits above or below that base cost',
+   cls: r => r.vsBase == null ? '' : r.vsBase > 1 ? 'up' : r.vsBase < -1 ? 'down' : ''},
   {key: 'change', label: 'Change',
    fmt: v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%',
    cls: r => r.change > 0.05 ? 'up' : r.change < -0.05 ? 'down' : ''},
@@ -1672,9 +1696,12 @@ function drawMarketTable() {
     const seen = PD.filter(d => by[d] !== undefined);
     const first = seen.length ? by[seen[0]] : 0;
     const last = seen.length ? by[seen[seen.length - 1]] : 0;
+    const base = (DATA.basePrices || {})[good];
     return {
       good, category: DATA.goodCategory[good] || 'other',
       price: snap[good].price,
+      base: base == null ? null : base,
+      vsBase: base ? (snap[good].price - base) / base * 100 : null,
       change: first ? (last - first) / first * 100 : 0,
       supply: snap[good].supply,
       demand: snap[good].demand,
@@ -1934,7 +1961,7 @@ if (MAP) {
     mapSave.appendChild(o);
   });
   mapSave.value = DATA.lastDate;
-  mapSave.onchange = () => { mapPinned = null; mapRender(); };
+  mapSave.onchange = () => { mapPinned = null; mapRender(); drawGreatPowers(); };
 
   const occBtn = document.getElementById('mapocc');
   occBtn.onclick = () => {
@@ -1999,8 +2026,48 @@ if (MAP) {
   canvas.addEventListener('pointerleave', () => { if (!mapPinned) mapIdle(); });
   window.addEventListener('resize', () => { if (mapBase) mapRender(); });
 } else {
-  const tab = document.getElementById('tab-map');
-  if (tab) tab.hidden = true;
+  // No --mod-path, so there is no province bitmap and no country order: hide the
+  // map and the great power ranking rather than showing empty frames.
+  for (const id of ['mapcanvas', 'gpgrid']) {
+    const el = document.getElementById(id);
+    const section = el && el.closest('section');
+    if (section) section.hidden = true;
+  }
+}
+
+
+/* =============== GREAT POWERS =============== */
+function drawGreatPowers() {
+  const grid = document.getElementById('gpgrid');
+  if (!grid) return;
+  const date = (document.getElementById('mapsave') || {}).value || DATA.lastDate;
+  const list = (DATA.greatPowers || {})[date] || [];
+  document.getElementById('gpdate').textContent = date;
+  const section = grid.closest('section');
+  if (section) section.hidden = !list.length;
+  grid.innerHTML = '';
+  const facts = DATA.facts[date] || {};
+  list.forEach((tag, i) => {
+    const f = facts[tag] || {};
+    const colour = (DATA.map && DATA.map.colours[tag]) || colourFor(tag);
+    const card = document.createElement('div');
+    card.className = 'gpcard';
+    const stat = (label, v, fmt) =>
+      `<span><span class="rk">${label}</span> <b>${v == null ? '—' : (fmt ? fmt(v) : v.toLocaleString())}</b></span>`;
+    card.innerHTML =
+      `<div class="gprank">${i + 1}</div>`
+      + `<div class="gpflag" style="background:${colour}"></div>`
+      + `<div class="gpbody">`
+      +   `<div class="gpname">${nameOf(tag)} <span class="rk">${tag}</span></div>`
+      +   `<div class="gpstats">`
+      +     stat('prestige', f.prestige, v => Math.round(v).toLocaleString())
+      +     stat('factories', f.factory_levels)
+      +     stat('brigades', f.brigades)
+      +     stat('ships', f.ships)
+      +   `</div>`
+      + `</div>`;
+    grid.appendChild(card);
+  });
 }
 
 /* =============== TABS =============== */
@@ -2031,6 +2098,7 @@ drawFleetChart(); drawFleetTable(); drawNavy();
 drawPopTable(); drawCultureTable(); drawPopChart();
 drawMarketTable();
 if (MAP) mapRender();
+drawGreatPowers();
 </script>
 </body>
 </html>

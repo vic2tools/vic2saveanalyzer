@@ -418,6 +418,37 @@ def name_for(tag, government, localisation):
     return localisation.get(tag) or tag
 
 
+def base_prices(path):
+    """{good: base cost} from `common/goods.txt`, which nests goods in categories."""
+    target = os.path.join(path, "common", "goods.txt")
+    if not os.path.isfile(target):
+        return {}
+    out = {}
+    for _category, block in _read_clausewitz(target):
+        if not isinstance(block, dict):
+            continue
+        for good, spec in block.items():
+            if good.startswith("_") or not isinstance(spec, dict):
+                continue
+            if "cost" in spec:
+                out[good] = to_float(spec["cost"], 0.0)
+    return out
+
+
+def country_order(path):
+    """
+    Tags in `common/countries.txt` order, which is the engine's country array.
+
+    A save's `great_nations` list holds 1-based indices into it, so this is what
+    turns "2 10 9 16 6 4 8 12" into a great power ranking.
+    """
+    listing = os.path.join(path, "common", "countries.txt")
+    if not os.path.isfile(listing):
+        return []
+    entry = re.compile(r'^\s*([A-Z0-9]{3})\s*=\s*"?[^"\r\n]+"?\s*$', re.M)
+    return entry.findall(_plain(listing))
+
+
 def country_colours(path):
     """{tag: '#rrggbb'} from each country file's `color = { r g b }`."""
     listing = os.path.join(path, "common", "countries.txt")
@@ -644,6 +675,8 @@ def load_mod(path):
         "invention_sequence": invention_sequence(path),
         "party_sequence": party_sequence(path),
         "localisation": read_localisation(path),
+        "base_prices": base_prices(path),
+        "country_order": country_order(path),
         "mob_impacts": mobilization_impacts(path),
         "modifier_impacts": modifier_mob_impacts(path),
         "revanchism_impact_ladder": impact_ladder,

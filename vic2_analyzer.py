@@ -558,6 +558,7 @@ def analyze_save(path, verbose=True):
     pop_registry = {}
     meta = {"file": os.path.basename(path), "date": "", "player": "", "market": None}
     province_owner = {}
+    great_nations = []
     market_block = None
 
     while True:
@@ -583,6 +584,14 @@ def analyze_save(path, verbose=True):
                               province_id=int(key), owner_map=province_owner)
             elif looks_like_country_tag(key):
                 read_country(tok, key, nations)
+            elif key == "great_nations":
+                # The engine's own great power list, in rank order, as 1-based
+                # indices into the country array that common/countries.txt
+                # defines. Nothing else in the save ranks nations.
+                block = parse_block(tok)
+                ids = (block if isinstance(block, list)
+                       else block.get("_items", []) if isinstance(block, dict) else [])
+                great_nations = [to_int(i, -1) for i in ids]
             elif key == "worldmarket" and market_block is None:
                 market_block = parse_block(tok)
             else:
@@ -605,6 +614,7 @@ def analyze_save(path, verbose=True):
                 nat["mobilized_brigades"] += 1
 
     meta["province_owner"] = province_owner
+    meta["great_nations"] = great_nations
 
     if isinstance(market_block, dict):
         meta["market"] = read_worldmarket(market_block, meta["date"])
@@ -1781,12 +1791,24 @@ def main():
         # The map needs the mod's province bitmap; without --mod-path the tab
         # is dropped rather than shown empty.
         map_data = build_map(mod, parsed, args.map_scale) if mod else None
+        # The save ranks the great powers itself, as 1-based indices into the
+        # country array common/countries.txt defines, so the mod is needed to
+        # turn them back into tags.
+        order = (mod or {}).get("country_order") or []
+        great_powers = {}
+        for meta_i, _nations_i in parsed:
+            picks = [order[i - 1] for i in meta_i.get("great_nations", ())
+                     if 0 < i <= len(order)]
+            if picks:
+                great_powers[meta_i.get("date") or ""] = picks
         html_path = build_report(
             rows, ship_rows, pop_rows, culture_rows, price_rows, snapshot_rows,
             brigade_rows, tech_rows, args.out,
             tag_names=report_names,
             player_tags=args.players if args.players else DEFAULT_PLAYER_TAGS,
             map_data=map_data,
+            base_prices=(mod or {}).get("base_prices"),
+            great_powers=great_powers,
         )
         paths.insert(0, html_path)
 

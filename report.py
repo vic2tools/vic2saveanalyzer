@@ -189,7 +189,7 @@ def build_map(mod, parsed, scale=5):
 def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
                  snapshot_rows, brigade_rows, tech_rows, outdir,
                  tag_names=None, player_tags=None, map_data=None,
-                 filename="report.html"):
+                 base_prices=None, great_powers=None, filename="report.html"):
     os.makedirs(outdir, exist_ok=True)
     tag_names = tag_names or {}
     player_tags = player_tags or []
@@ -356,6 +356,8 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
         "cultures": cultures,
         "colours": SERIES_COLOURS,
         "map": map_data,
+        "basePrices": base_prices or {},
+        "greatPowers": great_powers or {},
         "priceDates": price_dates,
         "priceYears": [year_fraction(d) for d in price_dates],
         "prices": prices,

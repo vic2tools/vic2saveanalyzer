@@ -81,6 +81,7 @@ rather than building the whole tree, so a 150 MB save won't exhaust RAM.
   the pool is fragmented, the more often a large pop flushes what the small ones
   had gathered — see below
 - **mobilization_brigades** — the ceiling itself
+- **prestige** — the country's prestige score, read straight from the save
 - **ships** — count of ship blocks across all navies
 - **factory_levels** — summed levels of all state buildings
 - **ports / naval_base_levels / max_naval_base** — naval base coverage, depth,
@@ -90,7 +91,7 @@ rather than building the whole tree, so a 150 MB save won't exhaust RAM.
 
 ## The deployment map
 
-With `--mod-path` the report gains a **Map** tab: a political map of the campaign
+With `--mod-path` the **Nations** tab opens on a map: a political map of the campaign
 with every army drawn where the game stacks it, sized by brigade count and
 coloured by its nation, using the nation colours out of the mod's own
 `common/countries/*.txt`. Hovering a marker names the province and breaks the
@@ -144,6 +145,25 @@ top -- so trusting the header puts Alaska in the southern ocean. And the canvas
 needs an explicit CSS size: without one it falls back to its `width`/`height`
 attributes, which are the raster's, and a 2808px canvas bursts straight out of
 the page.
+
+## Great powers
+
+Below the map, the eight great powers of the selected save, in rank order, with
+prestige.
+
+Both come straight out of the save. A save carries a `great_nations` list --
+eight 1-based indices into the country array `common/countries.txt` defines --
+and it is the game's own ranking: across this campaign Turkey drops out between
+1888 and 1908 and the United States enters, and the order is not prestige order
+(Italy outscores Britain on prestige in 1908 and still ranks second). `prestige`
+is a top-level country field, read directly.
+
+**Industrial and military score are not in a save.** Nothing resembling them
+appears in any country block or anywhere else in the file; the engine derives
+both at runtime. Rather than print a guess beside two exact numbers, the cards
+carry the real quantities instead -- factory levels, brigades and ships -- all
+of which are counted from the save. If you want the game's own two numbers they
+have to be read off the in-game ledger.
 
 ## Picking nations
 
