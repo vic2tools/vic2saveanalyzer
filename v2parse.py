@@ -48,13 +48,21 @@ POP_KNOWN_FIELDS = frozenset([
 ])
 
 
-class Tokens:
-    """Token cursor with one-token pushback."""
+# Braces and the quote that can hide them. Skipping a block only needs to find
+# the brace that closes it, so it can leap between these instead of tokenizing
+# every word in between -- and most of a save is blocks nothing here reads.
+_BRACE_RE = re.compile(r'["{}]')
 
-    __slots__ = ("_it", "_pushed")
+
+class Tokens:
+    """Token cursor with one-token pushback and a fast whole-block skip."""
+
+    __slots__ = ("_text", "_it", "_pos", "_pushed")
 
     def __init__(self, text):
+        self._text = text
         self._it = TOKEN_RE.finditer(text)
+        self._pos = 0
         self._pushed = None
 
     def next(self):
@@ -63,10 +71,40 @@ class Tokens:
             self._pushed = None
             return tok
         m = next(self._it, None)
-        return m.group() if m is not None else None
+        if m is None:
+            return None
+        self._pos = m.end()
+        return m.group()
 
     def push(self, tok):
         self._pushed = tok
+
+    def skip_to_close(self):
+        """Consume everything up to the `}` closing the block already opened."""
+        if self._pushed is not None:
+            tok = self._pushed
+            self._pushed = None
+            if tok == "}":
+                return
+            if tok == "{":
+                self.skip_to_close()
+        text = self._text
+        depth = 1
+        i = self._pos
+        while depth:
+            m = _BRACE_RE.search(text, i)
+            if m is None:
+                i = len(text)
+                break
+            c = m.group()
+            if c == '"':
+                j = text.find('"', m.end())
+                i = len(text) if j < 0 else j + 1
+                continue
+            depth += 1 if c == "{" else -1
+            i = m.end()
+        self._pos = i
+        self._it = TOKEN_RE.finditer(text, i)
 
 
 def unquote(tok):
@@ -77,15 +115,7 @@ def unquote(tok):
 
 def skip_block(tok):
     """Consume tokens until the block opened by the caller's `{` closes."""
-    depth = 1
-    while depth:
-        t = tok.next()
-        if t is None:
-            return
-        if t == "{":
-            depth += 1
-        elif t == "}":
-            depth -= 1
+    tok.skip_to_close()
 
 
 def parse_block(tok):

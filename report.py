@@ -204,6 +204,17 @@ def _battle_key(battle, seen):
     return base + (seen[base],)
 
 
+def _at_sea(battle, kinds):
+    """A battle is naval when the units present are ships."""
+    for side in ("attacker", "defender"):
+        for unit in ((battle.get(side) or {}).get("units") or {}):
+            if kinds.get(unit) == "naval":
+                return True
+            if kinds.get(unit) == "land":
+                return False
+    return False
+
+
 def _ledger_at(books, date, before):
     """Province ownership at the save just before, or just after, a date."""
     when = year_fraction(date)
@@ -214,7 +225,8 @@ def _ledger_at(books, date, before):
     return fit[0] if fit else (books[-1][1] if books else {})
 
 
-def build_wars(parsed, province_names=None, province_regions=None):
+def build_wars(parsed, province_names=None, province_regions=None,
+               state_names=None, unit_kinds=None):
     """
     Every war in the campaign, with battle dates recovered across saves.
 
@@ -226,6 +238,8 @@ def build_wars(parsed, province_names=None, province_regions=None):
     the obvious approach does, is wrong for 97% of battles.
     """
     province_names = province_names or {}
+    state_names = state_names or {}
+    unit_kinds = unit_kinds or {}
     # Saves arrive in filename order, which is not date order: "mp_Italy1884"
     # sorts before "mp_The_United States1840". Diffing province ownership down
     # that list compares 1884 against 1840 and invents transfers.
@@ -330,8 +344,12 @@ def build_wars(parsed, province_names=None, province_regions=None):
                 "sieged": g.get("fulfilled") if "fulfilled" in g else None,
                 "checkable": bool(had),
             })
-            for p in sorted(took):
-                transfers.append([p, province_names.get(p, ""), receiver, actor, 1])
+            if took:
+                # A war takes a state, not a scattered handful of provinces:
+                # five names under Tabriz is one line, not five.
+                transfers.append([state or "", state_names.get(state, "")
+                                  or province_names.get(took[0], ""),
+                                  receiver, actor, len(took), len(had)])
         checkable = [g for g in goals if g["checkable"]]
         won = sum(1 for g in checkable if g["met"] or g["part"])
         outcome = (f"{won} of {len(checkable)} taken" if checkable else "")
@@ -348,6 +366,7 @@ def build_wars(parsed, province_names=None, province_regions=None):
             "goals": goals,
             "dated": sum(1 for b in battles if b["date"]),
             "battles": [{
+                "sea": _at_sea(b, unit_kinds),
                 "name": b["name"],
                 "province": b["location"],
                 "date": b["date"] or "",

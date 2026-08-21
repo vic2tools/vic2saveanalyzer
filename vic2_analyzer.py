@@ -18,11 +18,16 @@ import argparse
 import csv
 import math
 import json
+import hashlib
 import os
+import pickle
 import re
+import tempfile
+import zlib
 import sys
 from collections import Counter, defaultdict
 
+import v2parse
 from v2parse import (
     POP_TYPES,
     TOKEN_RE,
@@ -74,60 +79,15 @@ POP_SIZE_PER_REGIMENT = 3000
 # The engine applies no minimum pop size to *mobilization*. POP_MIN_SIZE_FOR_REGIMENT
 # governs how small a *soldier* pop may be and still support a standing brigade,
 # which is a different rule on a different pop type -- IGoR sets it to 1000.
-# Mobilization truncates: int(pop_manpower / POP_SIZE_PER_REGIMENT). Project
-# Alice stops there, but that reads 11% low across eight in-game readings and
-# up to 24% low on Turkey, so pops too small to fill a regiment evidently still
-# contribute something. Two ways to model that, both calibrated against those
-# readings rather than read out of the game:
 #
-#   cascade        manpower a bucket cannot use climbs province-type ->
-#                  province -> state -> nation, pooling and truncating again at
-#                  every rung. 6.2% mean error over 46 readings spanning
-#                  1836-1908 and mobilisation sizes from 3% to 12.5%.
-#   province-levy  the same idea stopped at the province. 2.3% on the 1908
-#                  save alone, but 60% low in 1836.
-#   short-share    a fixed share of the sub-regiment pops yields a brigade
-#                  anyway. 1.2% on 1908 alone, 13.8% over all four saves.
-#   threshold      a pop yields its first brigade once it clears this much
-#                  manpower. 19.2% over all four saves.
-#
-# Only the cascade holds up across eras; every model that stops short of the
-# nation collapses at low mobilisation sizes, where hardly any pop reaches a
-# whole regiment on its own and the game still raises dozens of brigades. Its
-# one parameter is what a mobilized regiment actually costs, which comes out
-# above POP_SIZE_PER_REGIMENT and is fitted, not read out of the game.
-# Measured on a 33-reading controlled test bed built inside the mod (see
-# MOBILIZATION_TEST.md). A pop whose manpower reaches POP_SIZE_PER_REGIMENT
-# raises whole regiments alone and its remainder is discarded. One that falls
-# short still counts, as 1/k of a regiment, where k is how many such pops it
-# would take to reach one: k = ceil(POP_SIZE_PER_REGIMENT / manpower). The
-# fractions are summed across the whole nation and floored once at the end.
-#
-# Nothing in that is fitted. It reproduces all 33 controlled readings exactly,
-# across mobilisation sizes from 3% to 17% and pop manpower from 180 to 26,000.
-#
-# On real campaign saves it reads about 6% high, uniformly across all four eras.
-# A systematic bias with arithmetic this well pinned points at the eligible pool
-# being slightly too permissive, not at the counting -- see the README.
-#
-# The older models below are kept selectable so this stays checkable.
+# How the count works is in brigades_from_clusters and in the README. It was
+# measured on a purpose-built test bed inside the mod rather than fitted, and
+# POP_SIZE_PER_REGIMENT is the only number in it. Six earlier models -- per-pop
+# truncation, a cascade up province/state/nation, a province levy, a fixed
+# share of short pops, a manpower threshold, and a pooled scale factor -- were
+# each fitted to in-game readings and each failed somewhere; they are gone, and
+# the README records what they were and how they broke.
 
-# Superseded, retained for --mob-model. Measured on a 25-nation bed (see
-# MOBILIZATION_TEST.md). A pop whose manpower reaches POP_SIZE_PER_REGIMENT
-# raises whole regiments on its own and its remainder is discarded; a pop that
-# falls short still counts, as a half. Both of those are measured, not fitted:
-# 25 of 25 test nations are reproduced exactly with no free constants.
-#
-# The two thresholds below are the part the test bed could not pin, because no
-# test pop sat under 1,860 manpower. They are fitted to 46 in-game campaign
-# readings and are the only fitted numbers left in the model.
-MOB_HALF_THRESHOLD = 1850
-MOB_QUARTER_THRESHOLD = 300
-CASCADE_REGIMENT_COST = 3220
-# No longer a correction, and no longer needed: once the pool flush was
-# measured the model reproduced 100 of 100 controlled readings, 39 of 39 older
-# ones and 45 of 46 in-game campaign readings exactly. Kept only so the effect
-# of scaling the pool can still be explored from the command line.
 # The nations the report pre-selects under its "Players" button. Purely a
 # convenience default for this campaign; override per run with --players.
 DEFAULT_PLAYER_TAGS = [
@@ -137,10 +97,6 @@ DEFAULT_PLAYER_TAGS = [
     "BEL",
 ]
 
-MOB_POOL_FACTOR = 1.0
-PROVINCE_LEVY_THRESHOLD = 2400
-SHORT_BUCKET_SHARE = 0.1245
-POP_MIN_SIZE_FOR_REGIMENT = 1925
 
 
 def shift_months(date, back):
@@ -764,7 +720,6 @@ def accepted_cultures_of(nat):
 
 
 def mobilization_clusters(nat, mob_types=MOBILIZABLE_TYPES,
-                          mob_grouping="pop",
                           include_occupied=False):
     """
     The manpower buckets a mobilization ceiling is counted over.
@@ -794,166 +749,185 @@ def mobilization_clusters(nat, mob_types=MOBILIZABLE_TYPES,
             continue
         pool += size
         entries += 1
-        if mob_grouping == "province-type":
-            # Pool same-type pops of every accepted culture within a province
-            # before truncating, so the leftovers of small pops still add up.
-            key = (province_id, poptype)
-        else:
-            # One bucket per pop entry, which is what Project Alice does.
-            key = index
-        grouped[key] += size
-        where[key] = (province_id, states.get(province_id, -1), poptype)
+        # One bucket per pop, in save order. The engine walks pops, not
+        # provinces, and the order is what decides when the pool is flushed.
+        grouped[index] += size
+        where[index] = (province_id, states.get(province_id, -1), poptype)
     buckets = [where[k] + (v,) for k, v in grouped.items()]
     return buckets, pool, entries
 
 
 # Where a bucket's unused manpower goes, in order. Each rung pools what the one
 # below it could not use and truncates again.
-CASCADE_LEVELS = ("province-type", "province", "state", "nation")
-
-
-def _rung(level, province, state, poptype):
-    if level == "province-type":
-        return (province, poptype)
-    if level == "province":
-        return province
-    if level == "state":
-        return state
-    return 0
-
-
-def brigades_from_clusters(buckets, rate,
-                           pop_per_regiment=POP_SIZE_PER_REGIMENT,
-                           min_pop_per_regiment=0,
-                           short_share=0.0,
-                           levy_threshold=0,
-                           cascade_cost=0,
-                           half_threshold=0,
-                           quarter_threshold=0,
-                           reciprocal=False,
-                           pool_factor=1.0):
+def brigades_from_clusters(buckets, rate, pop_per_regiment=POP_SIZE_PER_REGIMENT):
     """
-    Brigades a set of (province, state, poptype, size) buckets yields at `rate`.
+    Brigades a nation's mobilizable pops yield, in the order the save lists them.
 
-    Every bucket truncates: it gives int(size * rate / cost) brigades. What
-    becomes of the manpower that does not reach a whole regiment is the part
-    that has to be calibrated, and the models are mutually exclusive.
+    The engine carries one pool of manpower too small to have raised a regiment
+    yet. A pop big enough to raise regiments on its own raises them and EMPTIES
+    that pool; a pop too small adds to it, and the pool yields a regiment and
+    empties whenever it reaches the cost. That flush is why nations whose big
+    and small pops interleave -- which is what cultural variety produces --
+    mobilize worse than their population suggests, and it is why `buckets` must
+    stay in save order.
 
-    `cascade_cost` hands it up the chain in CASCADE_LEVELS, pooling and
-    truncating again at every rung, so a pop too small to raise a regiment on
-    its own still counts towards its province, its state and finally the
-    nation. `levy_threshold` stops that chain at the province. `short_share`
-    gives a fixed share of the sub-regiment buckets one brigade each.
-    `min_pop_per_regiment` gives one to every such bucket above that manpower.
-    All of them off is the plain truncation Project Alice documents.
+    Measured against 139 controlled readings from a purpose-built test bed and
+    57 in-game campaign readings; the only constant is POP_SIZE_PER_REGIMENT.
     """
-    if reciprocal:
-        # The measured rule. The engine walks the pops of a nation in save
-        # order carrying one pool of manpower that is too small to have raised
-        # a regiment yet. A pop big enough to raise regiments by itself raises
-        # them and EMPTIES that pool -- whatever had been gathered behind it is
-        # thrown away. A pop too small to raise one adds to the pool, and the
-        # pool yields a regiment and empties whenever it reaches the cost.
-        #
-        # The flush is the whole story of the old 6% error. A nation of small
-        # pops never flushes, so its pool works perfectly; a nation whose big
-        # and small pops interleave keeps losing what it had gathered, which is
-        # why culturally mixed nations came out high. Order therefore matters,
-        # and `buckets` must stay in the order the save lists the pops.
-        total = 0
-        pool = 0.0
-        for _province, _state, _poptype, size in buckets:
-            manpower = size * rate * pool_factor
-            if manpower <= 0:
-                continue
-            if manpower >= pop_per_regiment:
-                total += int(manpower // pop_per_regiment)
-                pool = 0.0
-            else:
-                pool += manpower
-                if pool >= pop_per_regiment:
-                    total += 1
-                    pool = 0.0
-        return total
-
-    if half_threshold:
-        total = 0.0
-        for _province, _state, _poptype, size in buckets:
-            manpower = size * rate
-            if manpower >= pop_per_regiment:
-                total += int(manpower // pop_per_regiment)
-            elif manpower >= half_threshold:
-                total += 0.5
-            elif quarter_threshold and manpower >= quarter_threshold:
-                total += 0.25
-        return int(total)
-
-    cost = cascade_cost or pop_per_regiment
     total = 0
-    short = 0
-    unused = defaultdict(float)
-    for province, state, poptype, size in buckets:
+    pool = 0.0
+    for _province, _state, _poptype, size in buckets:
         manpower = size * rate
-        count = int(manpower // cost)
-        if count == 0:
-            if min_pop_per_regiment and manpower >= min_pop_per_regiment:
-                count = 1
-            else:
-                short += 1
-                unused[(province, state, poptype)] += manpower
-        total += count
-    total += int(short_share * short)
-
-    if levy_threshold:
-        levy = defaultdict(float)
-        for (province, _state, _type), manpower in unused.items():
-            levy[province] += manpower
-        for pooled in levy.values():
-            whole = int(pooled // cost)
-            total += max(whole, 1) if pooled >= levy_threshold else whole
-    elif cascade_cost:
-        for level in CASCADE_LEVELS:
-            pooled = defaultdict(float)
-            home = {}
-            for ident, manpower in unused.items():
-                key = _rung(level, *ident)
-                pooled[key] += manpower
-                home[key] = ident
-            unused = defaultdict(float)
-            for key, manpower in pooled.items():
-                whole = int(manpower // cost)
-                if whole:
-                    total += whole
-                else:
-                    # Still not enough here; try the next rung up.
-                    unused[home[key]] += manpower
+        if manpower <= 0:
+            continue
+        if manpower >= pop_per_regiment:
+            total += int(manpower // pop_per_regiment)
+            pool = 0.0
+        else:
+            pool += manpower
+            if pool >= pop_per_regiment:
+                total += 1
+                pool = 0.0
     return total
 
 
-def model_knobs(args):
-    """The counting knobs implied by --mob-model."""
-    if args.mob_model == "measured":
-        return 0, 0.0, 0, 0, 0, 0, True
-    if args.mob_model == "half-tier":
-        return 0, 0.0, 0, 0, args.mob_half_threshold, args.mob_quarter_threshold, False
-    if args.mob_model == "cascade":
-        return 0, 0.0, 0, args.mob_cascade_cost, 0, 0, False
-    if args.mob_model == "province-levy":
-        return 0, 0.0, args.mob_levy_threshold, 0, 0, 0, False
-    if args.mob_model == "short-share":
-        return 0, args.mob_short_share, 0, 0, 0, 0, False
-    if args.mob_model == "threshold":
-        return args.min_pop_per_regiment, 0.0, 0, 0, 0, 0, False
-    return 0, 0.0, 0, 0, 0, 0, False
+def _parser_fingerprint():
+    """
+    A hash of the code that does the parsing.
+
+    The cache stores what a save was turned into, not the save, so it has to
+    expire the moment that translation changes. Hashing the two modules that do
+    it means editing either one invalidates every entry automatically, which is
+    the only version counter nobody forgets to bump.
+    """
+    digest = hashlib.md5()
+    for module in (__file__, v2parse.__file__):
+        try:
+            with open(module, "rb") as fh:
+                digest.update(fh.read())
+        except OSError:
+            return ""
+    return digest.hexdigest()[:10]
+
+
+def _cache_slot(path, fingerprint):
+    """Where this save's parsed form lives, keyed by the file and the parser."""
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    key = hashlib.md5(
+        f"{os.path.abspath(path)}|{stat.st_size}|{int(stat.st_mtime)}|{fingerprint}"
+        .encode("utf-8")).hexdigest()
+    folder = os.path.join(tempfile.gettempdir(), "vic2_analyzer_cache")
+    return os.path.join(folder, key + ".pkl")
+
+
+def analyze_cached(path, verbose=True, use_cache=True):
+    """`analyze_save`, but remembering what it read last time.
+
+    Parsing a 44 MB save takes about two seconds and a campaign folder holds
+    dozens, nearly all of them unchanged between runs. The parsed form is a
+    thousandth of the size, so it is cheap to keep and near-free to reload.
+    """
+    fingerprint = _parser_fingerprint() if use_cache else ""
+    slot = _cache_slot(path, fingerprint) if fingerprint else None
+    if slot and os.path.isfile(slot):
+        try:
+            with open(slot, "rb") as fh:
+                meta, nations = pickle.loads(zlib.decompress(fh.read()))
+            if verbose:
+                print(f"  {os.path.basename(path)} ... cached, "
+                      f"{meta.get('date', '?')}")
+            return meta, nations
+        except Exception:
+            pass                      # a bad entry is just a slow read
+    meta, nations = analyze_save(path, verbose=verbose)
+    if slot:
+        try:
+            os.makedirs(os.path.dirname(slot), exist_ok=True)
+            with open(slot, "wb") as fh:
+                fh.write(zlib.compress(
+                    pickle.dumps((meta, dict(nations)), protocol=5), 1))
+        except Exception:
+            pass                      # caching is an optimisation, not a duty
+    return meta, nations
+
+
+def explain_mob_pool(tag, nat, meta, rate, args):
+    """
+    Show where a nation's mobilization pool comes from and what it is worth.
+
+    The interesting number is not the ceiling but the gap between the two
+    grouping models: they agree exactly when every province holds one pop per
+    poor type, and diverge in proportion to how many cultures those pops are
+    split across. That gap is the cost of truncating each pop separately.
+    """
+    mob_types = frozenset(args.mob_types)
+    accepted = accepted_cultures_of(nat)
+    occ = args.mob_include_occupied
+    per_pop, pool, entries = mobilization_clusters(nat, mob_types, "pop", occ)
+    per_pt, _pool, _entries = mobilization_clusters(
+        nat, mob_types, "province-type", occ)
+
+    dropped = defaultdict(int)
+    for poptype, culture, size, province_id in nat["mobilizable_pops"]:
+        if poptype not in mob_types:
+            continue
+        if culture not in accepted:
+            dropped["non-accepted culture"] += size
+        elif not occ and province_id in nat["occupied_provinces"]:
+            dropped["occupied province"] += size
+        elif province_id in nat["colonial_provinces"]:
+            dropped["colonial province"] += size
+
+    print(f"\nMobilization pool for {tag} at {meta['date']} "
+          f"({os.path.basename(meta['file'])})")
+    print(f"  primary culture   {nat['primary_culture']}")
+    print(f"  accepted cultures {' '.join(sorted(nat['accepted_cultures'])) or '(none)'}")
+    print(f"  pop types counted {' '.join(sorted(mob_types))}")
+    print(f"  mobilisation size {rate * 100:.2f}%   "
+          f"POP_SIZE_PER_REGIMENT {args.pop_per_regiment}")
+    print(f"\n  eligible population   {pool:>12,} in {entries} pop entries, "
+          f"{len(per_pt)} province/type slots")
+    if entries:
+        print(f"  cultural split        {entries / max(1, len(per_pt)):.2f} pop "
+              f"entries per province/type slot")
+    for reason, size in sorted(dropped.items(), key=lambda kv: -kv[1]):
+        print(f"  excluded: {reason:<20} {size:>12,}")
+
+    per_pop_n = brigades_from_clusters(per_pop, rate, args.pop_per_regiment)
+    per_pt_n = brigades_from_clusters(per_pt, rate, args.pop_per_regiment)
+    untruncated = pool * rate / args.pop_per_regiment
+    print(f"\n  ceiling, --mob-grouping pop            {per_pop_n:>6}")
+    print(f"  ceiling, --mob-grouping province-type  {per_pt_n:>6}"
+          f"   ({'+' if per_pt_n >= per_pop_n else ''}{per_pt_n - per_pop_n})")
+    print(f"  no truncation at all                   {untruncated:>6.0f}")
+    print(f"  standing brigades                      {nat['brigades']:>6}"
+          f"  ({nat['mobilized_brigades']} of them mobilized, "
+          f"{nat['mobilizing']} queued)")
+    print("\n  Compare the two ceilings against the in-game military panel.")
+
+    biggest = sorted(per_pt, key=lambda b: -b[3])[:10]
+    if biggest:
+        print("\n  largest province/type slots")
+        print(f"    {'prov':>6} {'manpower':>10} {'brigades':>8}")
+        for province_id, _state, _type, size in biggest:
+            print(f"    {province_id:>6} {size * rate:>10,.0f} "
+                  f"{int(size * rate // args.pop_per_regiment):>8}")
+
+
+def save_sort_key(path, meta_date):
+    """Sort by in-game date when we have it, filename otherwise."""
+    parts = meta_date.split(".")
+    try:
+        return (0, int(parts[0]), int(parts[1]), int(parts[2]))
+    except (IndexError, ValueError):
+        return (1, 0, 0, 0)
 
 
 def finalize(nat, rate=1.0, pop_per_regiment=POP_SIZE_PER_REGIMENT,
-             min_pop_per_regiment=0,
-             mob_types=MOBILIZABLE_TYPES, mob_grouping="pop",
-             include_occupied=False, short_share=0.0, levy_threshold=0,
-             cascade_cost=0, half_threshold=0,
-             quarter_threshold=0, reciprocal=True,
-             pool_factor=MOB_POOL_FACTOR, mod=None):
+             mob_types=MOBILIZABLE_TYPES, include_occupied=False, mod=None):
     """Derive the ratios that need the totals first."""
     total = nat["total_pop"]
     accepted_set = accepted_cultures_of(nat)
@@ -965,11 +939,8 @@ def finalize(nat, rate=1.0, pop_per_regiment=POP_SIZE_PER_REGIMENT,
     primary_pop = nat["pop_by_culture"].get(primary, 0)
 
     buckets, pool_stated, entries = mobilization_clusters(
-        nat, mob_types, mob_grouping, include_occupied)
-    brigades = brigades_from_clusters(
-        buckets, rate, pop_per_regiment, min_pop_per_regiment, short_share,
-        levy_threshold, cascade_cost, half_threshold, quarter_threshold,
-        reciprocal, pool_factor)
+        nat, mob_types, include_occupied)
+    brigades = brigades_from_clusters(buckets, rate, pop_per_regiment)
 
     out = dict(nat)
     out["mobilization_pool"] = pool_stated
@@ -1312,210 +1283,6 @@ def peek_save(path):
     print()
 
 
-def calibrate_mob(readings, parsed, mod, live, args):
-    """
-    Search the counting model that reproduces a set of in-game figures.
-
-    The engine's own arithmetic cannot be read from outside the game, so the
-    free parts -- where the truncation is applied, and what becomes of pops too
-    small to raise a regiment -- are fitted to whatever readings the player
-    supplies. Everything else (mobilisation size, eligible pops, colonial and
-    occupied provinces) is derived, not fitted.
-
-    Readings are `TAG=N` for the last save, or `DATE:TAG=N` to name one, so a
-    fit can span several saves at once. That matters more than the number of
-    readings: nations at different mobilisation sizes, and saves from different
-    eras, are what separate models that agree on any one snapshot.
-
-    Each candidate is also scored leave-one-out -- the parameter is refitted
-    without a reading and then asked to predict it. Held-out error much worse
-    than in-sample means the fit is chasing noise.
-    """
-    by_date = {}
-    for index, (meta, nations) in enumerate(parsed):
-        by_date.setdefault(meta["date"], index)
-    targets = {}
-    for item in readings:
-        stamp, _, rest = item.rpartition(":")
-        if "=" not in rest:
-            sys.exit(f"--mob-calibrate wants TAG=N or DATE:TAG=N, got {item!r}")
-        tag, _, value = rest.partition("=")
-        tag = tag.strip().upper()
-        if stamp:
-            if stamp not in by_date:
-                sys.exit(f"No save dated {stamp}. Have: "
-                         f"{', '.join(sorted(by_date))}")
-            index = by_date[stamp]
-        else:
-            index = len(parsed) - 1
-        if tag not in parsed[index][1]:
-            sys.exit(f"{tag} is not in {parsed[index][0]['file']}.")
-        targets[(index, tag)] = int(value)
-
-    mob_types = frozenset(args.mob_types)
-    rates = {}
-    buckets = {}
-    for index, tag in targets:
-        nat = parsed[index][1][tag]
-        if mod is not None:
-            from mod_reader import rate_for
-            rates[(index, tag)] = rate_for(nat, mod, live=live) or args.mob_rate
-        else:
-            rates[(index, tag)] = args.mob_rate
-        for grouping in ("pop", "province-type"):
-            clusters, _pool, _n = mobilization_clusters(
-                nat, mob_types, grouping, args.mob_include_occupied)
-            buckets[(grouping, index, tag)] = clusters
-
-    def count(grouping, key, knobs):
-        return brigades_from_clusters(buckets[(grouping,) + key], rates[key],
-                                      args.pop_per_regiment, *knobs)
-
-    grid = range(0, args.pop_per_regiment + 1, 25)
-    costs = range(args.pop_per_regiment, args.pop_per_regiment * 2, 20)
-    candidates = []
-    for grouping in ("pop", "province-type"):
-        candidates.append((grouping, "plain", "--mob-model plain",
-                           [(0, 0.0, 0, 0)]))
-        candidates.append((grouping, "cascade",
-                           "--mob-model cascade --mob-cascade-cost {3}",
-                           [(0, 0.0, 0, c) for c in costs]))
-        candidates.append((grouping, "province-levy",
-                           "--mob-model province-levy --mob-levy-threshold {2}",
-                           [(0, 0.0, t, 0) for t in grid if t]))
-        candidates.append((grouping, "threshold",
-                           "--mob-model threshold --min-pop-per-regiment {0}",
-                           [(t, 0.0, 0, 0) for t in grid]))
-        candidates.append((grouping, "short-share",
-                           "--mob-model short-share --mob-short-share {1:g}",
-                           [(0, k / 2000, 0, 0) for k in range(0, 801)]))
-
-    def score(grouping, knobs, keys):
-        square = 0.0
-        for key in keys:
-            err = (count(grouping, key, knobs) - targets[key]) / targets[key]
-            square += err * err
-        return (square / len(keys)) ** 0.5
-
-    keys = sorted(targets)
-    results = []
-    for grouping, name, template, space in candidates:
-        knobs = min(space, key=lambda k: score(grouping, k, keys))
-        rms = score(grouping, knobs, keys)
-        worst = max(abs(count(grouping, k, knobs) - targets[k]) / targets[k]
-                    for k in keys)
-        held = 0.0
-        for out in keys:
-            rest = [k for k in keys if k != out]
-            alt = min(space, key=lambda k: score(grouping, k, rest))
-            err = (count(grouping, out, alt) - targets[out]) / targets[out]
-            held += err * err
-        held = (held / len(keys)) ** 0.5
-        results.append((rms, worst, held, grouping, name,
-                        template.format(*knobs), knobs))
-    results.sort()
-
-    dates = sorted({parsed[i][0]["date"] for i, _t in keys})
-    print(f"\nCalibrating against {len(targets)} readings "
-          f"across {len(dates)} saves ({', '.join(dates)})")
-    print(f"\n  {'grouping':<14}{'model':<15}{'mean':>7}{'worst':>7}"
-          f"{'held-out':>10}   flags")
-    for rms, worst, held, grouping, name, flags, _knobs in results:
-        print(f"  {grouping:<14}{name:<15}{rms * 100:>6.1f}%{worst * 100:>6.1f}%"
-              f"{held * 100:>9.1f}%   --mob-grouping {grouping} {flags}")
-
-    rms, worst, held, grouping, name, flags, knobs = results[0]
-    print(f"\nBest: --mob-grouping {grouping} {flags}")
-    last = None
-    for key in keys:
-        index, tag = key
-        date = parsed[index][0]["date"]
-        if date != last:
-            print(f"\n  {date}")
-            print(f"    {'tag':<5} {'rate':>6} {'in game':>8} {'fitted':>8}"
-                  f" {'err':>7} {'plain trunc':>12} {'err':>7}")
-            last = date
-        got = count(grouping, key, knobs)
-        plain = count(grouping, key, (0, 0.0, 0, 0))
-        print(f"    {tag:<5} {rates[key] * 100:>5.1f}% {targets[key]:>8} "
-              f"{got:>8} {(got - targets[key]) / targets[key] * 100:>+6.1f}% "
-              f"{plain:>12} {(plain - targets[key]) / targets[key] * 100:>+6.1f}%")
-    print("\n  Check the rate column against the game too -- it is derived, not "
-          "fitted,\n  and a wrong rate moves the ceiling roughly in proportion.")
-
-
-def explain_mob_pool(tag, nat, meta, rate, args):
-    """
-    Show where a nation's mobilization pool comes from and what it is worth.
-
-    The interesting number is not the ceiling but the gap between the two
-    grouping models: they agree exactly when every province holds one pop per
-    poor type, and diverge in proportion to how many cultures those pops are
-    split across. That gap is the cost of truncating each pop separately.
-    """
-    mob_types = frozenset(args.mob_types)
-    accepted = accepted_cultures_of(nat)
-    occ = args.mob_include_occupied
-    per_pop, pool, entries = mobilization_clusters(nat, mob_types, "pop", occ)
-    per_pt, _pool, _entries = mobilization_clusters(
-        nat, mob_types, "province-type", occ)
-
-    dropped = defaultdict(int)
-    for poptype, culture, size, province_id in nat["mobilizable_pops"]:
-        if poptype not in mob_types:
-            continue
-        if culture not in accepted:
-            dropped["non-accepted culture"] += size
-        elif not occ and province_id in nat["occupied_provinces"]:
-            dropped["occupied province"] += size
-        elif province_id in nat["colonial_provinces"]:
-            dropped["colonial province"] += size
-
-    print(f"\nMobilization pool for {tag} at {meta['date']} "
-          f"({os.path.basename(meta['file'])})")
-    print(f"  primary culture   {nat['primary_culture']}")
-    print(f"  accepted cultures {' '.join(sorted(nat['accepted_cultures'])) or '(none)'}")
-    print(f"  pop types counted {' '.join(sorted(mob_types))}")
-    print(f"  mobilisation size {rate * 100:.2f}%   "
-          f"POP_SIZE_PER_REGIMENT {args.pop_per_regiment}")
-    print(f"\n  eligible population   {pool:>12,} in {entries} pop entries, "
-          f"{len(per_pt)} province/type slots")
-    if entries:
-        print(f"  cultural split        {entries / max(1, len(per_pt)):.2f} pop "
-              f"entries per province/type slot")
-    for reason, size in sorted(dropped.items(), key=lambda kv: -kv[1]):
-        print(f"  excluded: {reason:<20} {size:>12,}")
-
-    knobs = model_knobs(args)
-    per_pop_n = brigades_from_clusters(per_pop, rate, args.pop_per_regiment, *knobs)
-    per_pt_n = brigades_from_clusters(per_pt, rate, args.pop_per_regiment, *knobs)
-    untruncated = pool * rate / args.pop_per_regiment
-    print(f"\n  ceiling, --mob-grouping pop            {per_pop_n:>6}")
-    print(f"  ceiling, --mob-grouping province-type  {per_pt_n:>6}"
-          f"   ({'+' if per_pt_n >= per_pop_n else ''}{per_pt_n - per_pop_n})")
-    print(f"  no truncation at all                   {untruncated:>6.0f}")
-    print(f"  standing brigades                      {nat['brigades']:>6}"
-          f"  ({nat['mobilized_brigades']} of them mobilized, "
-          f"{nat['mobilizing']} queued)")
-    print("\n  Compare the two ceilings against the in-game military panel.")
-
-    biggest = sorted(per_pt, key=lambda b: -b[3])[:10]
-    if biggest:
-        print("\n  largest province/type slots")
-        print(f"    {'prov':>6} {'manpower':>10} {'brigades':>8}")
-        for province_id, _state, _type, size in biggest:
-            print(f"    {province_id:>6} {size * rate:>10,.0f} "
-                  f"{int(size * rate // args.pop_per_regiment):>8}")
-
-
-def save_sort_key(path, meta_date):
-    """Sort by in-game date when we have it, filename otherwise."""
-    parts = meta_date.split(".")
-    try:
-        return (0, int(parts[0]), int(parts[1]), int(parts[2]))
-    except (IndexError, ValueError):
-        return (1, 0, 0, 0)
-
 
 def main():
     ap = argparse.ArgumentParser(
@@ -1548,77 +1315,17 @@ def main():
                     help="pop types that can mobilize. With --mod-path this "
                          "comes from the mod's poptypes/ strata; the default "
                          "here is what vanilla works out to.")
-    ap.add_argument("--mob-grouping", choices=("pop", "province-type"),
-                    default="pop",
-                    help="where the engine's truncation is applied. "
-                         "province-type (default) pools accepted pops of the "
-                         "same type within a province before truncating; pop "
-                         "truncates each pop entry on its own, which is what "
-                         "Project Alice documents. The two agree exactly for "
-                         "single-culture nations and diverge with cultural "
-                         "fragmentation.")
-    ap.add_argument("--mob-model",
-                    choices=("measured", "half-tier", "cascade",
-                             "province-levy", "short-share", "threshold",
-                             "plain"),
-                    default="measured",
-                    help="what becomes of manpower too small to fill a "
-                         "regiment. cascade (default) sends it up "
-                         "province-type -> province -> state -> nation; "
-                         "province-levy stops at the province; short-share "
-                         "gives a fixed share of the sub-regiment pops a "
-                         "brigade each; threshold gives one to every such pop "
-                         "above --min-pop-per-regiment; plain discards it, "
-                         "which is what Project Alice documents and reads up "
-                         "to 100%% low early in a game.")
-    ap.add_argument("--mob-pool-factor", type=float, default=MOB_POOL_FACTOR,
-                    help="scales every pop's manpower before counting. The "
-                         "arithmetic reproduces 41 of 41 controlled readings at "
-                         "1.0, but real campaign saves come out about 6%% high, "
-                         "so this closes a gap whose cause is not identified. "
-                         "Pass 1.0 for the uncorrected rule.")
-    ap.add_argument("--mob-half-threshold", type=int,
-                    default=MOB_HALF_THRESHOLD,
-                    help="manpower at which a pop too small for a whole "
-                         "regiment still counts as half a one, for --mob-model "
-                         "measured. The half itself is measured; where the cut "
-                         "sits is fitted.")
-    ap.add_argument("--mob-quarter-threshold", type=int,
-                    default=MOB_QUARTER_THRESHOLD,
-                    help="manpower at which such a pop counts as a quarter "
-                         "instead. Fitted; 0 disables the tier.")
-    ap.add_argument("--mob-cascade-cost", type=int,
-                    default=CASCADE_REGIMENT_COST,
-                    help="manpower one mobilized regiment costs, for "
-                         "--mob-model cascade. Fitted to in-game readings and "
-                         "higher than POP_SIZE_PER_REGIMENT; recalibrate with "
-                         "--mob-calibrate.")
-    ap.add_argument("--mob-levy-threshold", type=int,
-                    default=PROVINCE_LEVY_THRESHOLD,
-                    help="manpower at which a province levy too small for a "
-                         "whole regiment still raises one, for --mob-model "
-                         "province-levy. Fitted to in-game readings; "
-                         "recalibrate with --mob-calibrate.")
-    ap.add_argument("--mob-short-share", type=float, default=SHORT_BUCKET_SHARE,
-                    help="share of sub-regiment pops that raise a brigade "
-                         "anyway, for --mob-model short-share. Fitted to "
-                         "in-game readings; recalibrate with --mob-calibrate.")
-    ap.add_argument("--min-pop-per-regiment", type=int,
-                    default=POP_MIN_SIZE_FOR_REGIMENT,
-                    help="manpower at which a sub-regiment pop still raises "
-                         "one, for --mob-model threshold.")
-    ap.add_argument("--mob-calibrate", metavar="TAG=N", nargs="+",
-                    help="in-game mobilization figures, as TAG=N for the last "
-                         "save or DATE:TAG=N to name one, e.g. --mob-calibrate "
-                         "USA=560 1862.6.6:FRA=121. Fits every counting model "
-                         "against them, ranks the fits, and exits without "
-                         "writing anything.")
     ap.add_argument("--mob-include-occupied", action="store_true",
                     help="count provinces the owner has lost control of. The "
                          "engine excludes them, which is the default, but it "
                          "moves nations under siege a lot -- Russia in 1908 "
                          "reads 558 without them and 612 with -- so it is worth "
                          "checking against the game when a nation is at war.")
+    ap.add_argument("--no-cache", action="store_true",
+                    help="re-read every save instead of reusing what was parsed "
+                         "last time. The cache lives in the system temp folder, "
+                         "keyed by the save's size and timestamp and by a hash "
+                         "of the parsing code, so editing the parser expires it.")
     ap.add_argument("--map-scale", type=int, default=2, metavar="N",
                     help="how far to shrink the province bitmap for the map tab. "
                          "Default 2, so 2808x1080 from a 5616x2160 map, which "
@@ -1702,9 +1409,8 @@ def main():
         if mod["mob_types"] and args.mob_types == sorted(MOBILIZABLE_TYPES):
             args.mob_types = sorted(mod["mob_types"])
         if verbose:
-            print(f"defines.lua: POP_SIZE_PER_REGIMENT={args.pop_per_regiment} "
-                  f"(mobilization threshold {args.min_pop_per_regiment}, "
-                  f"calibrated -- see --mob-calibrate)")
+            print("defines.lua: POP_SIZE_PER_REGIMENT="
+                  f"{args.pop_per_regiment}")
             print(f"poptypes/: mobilizable = {' '.join(args.mob_types)}"
                   + (f"; mod-only pop types read: {' '.join(sorted(extra))}"
                      if extra else ""))
@@ -1714,7 +1420,8 @@ def main():
     parsed = []
     for path in files:
         try:
-            meta, nations = analyze_save(path, verbose=verbose)
+            meta, nations = analyze_cached(path, verbose=verbose,
+                                           use_cache=not args.no_cache)
         except (ValueError, OSError) as exc:
             print(f"  skipped {os.path.basename(path)}: {exc}", file=sys.stderr)
             continue
@@ -1799,15 +1506,9 @@ def main():
                 nation_rate = max(0.0, sum(v for _k, _n, v in parts))
             else:
                 nation_rate = args.mob_rate
-            knobs = model_knobs(args)
-            done = finalize(nat, nation_rate, args.pop_per_regiment, knobs[0],
+            done = finalize(nat, nation_rate, args.pop_per_regiment,
                             mob_types=frozenset(args.mob_types),
-                            mob_grouping=args.mob_grouping,
                             include_occupied=args.mob_include_occupied,
-                            short_share=knobs[1], levy_threshold=knobs[2],
-                            cascade_cost=knobs[3], half_threshold=knobs[4],
-                            quarter_threshold=knobs[5], reciprocal=knobs[6],
-                            pool_factor=(args.mob_pool_factor if knobs[6] else 1.0),
                             mod=mod)
             done["mobilisation_size"] = round(nation_rate, 5)
             accepted_set = set(done["accepted_cultures"]) | {done["primary_culture"]}
@@ -1845,10 +1546,6 @@ def main():
                 culture_rows.append({"date": date, "year": year, "tag": tag,
                                      "culture": culture, "size": size,
                                      "accepted": int(culture in accepted_set)})
-
-    if args.mob_calibrate:
-        calibrate_mob(args.mob_calibrate, parsed, mod, live, args)
-        return
 
     if args.explain_mob_pool:
         tag = args.explain_mob_pool.upper()
@@ -1943,6 +1640,23 @@ def main():
                             flags[key] = got[tag]
                     row.append([tag, key])
                 great_powers[meta_i.get("date") or ""] = row
+            # Battle tables name a lot of nations that never made great power,
+            # and a flag beside the tag reads faster than a tag alone. These
+            # take the plain national flag rather than a government variant.
+            fighters = set()
+            for meta_i, _n in parsed:
+                for war in meta_i.get("wars", ()):
+                    fighters.update(war["attackers"])
+                    fighters.update(war["defenders"])
+                    for b in war["battles"]:
+                        for who in (b.get("attacker"), b.get("defender")):
+                            if who and who.get("country"):
+                                fighters.add(who["country"])
+            for tag in sorted(t for t in fighters if t and t != "---"):
+                if tag + "|" not in flags:
+                    got = flag_images(mod["path"], [tag], {})
+                    if tag in got:
+                        flags[tag + "|"] = got[tag]
         html_path = build_report(
             rows, ship_rows, pop_rows, culture_rows, price_rows, snapshot_rows,
             brigade_rows, tech_rows, args.out,
@@ -1954,7 +1668,9 @@ def main():
             flags=flags,
             technology=(mod or {}).get("technology"),
             wars=build_wars(parsed, (mod or {}).get("province_names"),
-                            (mod or {}).get("province_regions")),
+                            (mod or {}).get("province_regions"),
+                            (mod or {}).get("state_names"),
+                            (mod or {}).get("unit_kinds")),
         )
         paths.insert(0, html_path)
 
@@ -1982,9 +1698,7 @@ def main():
             else:
                 nation_rate = args.mob_rate
             done = finalize(nat, nation_rate, args.pop_per_regiment,
-                            args.min_pop_per_regiment,
-                            frozenset(args.mob_types), args.mob_grouping,
-                            mod=mod)
+                            frozenset(args.mob_types), mod=mod)
             done["mobilisation_size"] = round(nation_rate, 5)
             print(f"  {tag:<5}{done['total_pop']:>12,}{done['accepted_pct']:>9.1f}"
                   f"{done['avg_literacy'] * 100:>6.1f}%{done['brigades']:>7}"

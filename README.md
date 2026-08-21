@@ -188,6 +188,12 @@ have to be read off the in-game ledger.
 
 Every war in the campaign, its battles, and what it actually took.
 
+Battles are split into land and naval by the unit types present, read from the
+mod's own `units/*.txt`, and every column of both tables sorts -- including each
+side's losses, so the costliest engagement of a war is one click away. Land that
+changed hands is reported by state rather than province: five names under Tabriz
+is one line, not five.
+
 **Battle dates take the whole folder.** A save dates only its most recent
 battles and drops the dates from older ones -- the 1908 save can date 33 of its
 1,310. Reading all 38 saves lifts that to **1,217 of 1,359, about 90%**, because
@@ -220,6 +226,35 @@ an 1857 save it turns out to carry three demands, the third an American claim on
 Mexico for Georgia -- which is why Atlanta, Savannah and four more provinces
 change hands in a war named after a Dutch province. All three demands read as
 occupied; only that third one took anything.
+
+## Speed
+
+A 44 MB save takes about two seconds to parse and a campaign folder holds
+dozens, nearly all unchanged between runs. The parsed form is a thousandth of
+the size, so it is cached in the system temp folder and reused:
+
+| 38 saves | |
+|---|---|
+| first run | ~52 s |
+| every run after | **~3 s** |
+
+The cache key is the save's path, size and timestamp **plus a hash of the
+parsing code**, so editing `vic2_analyzer.py` or `v2parse.py` expires every
+entry automatically -- the one version counter nobody forgets to bump. Output is
+byte-identical either way. `--no-cache` re-reads everything.
+
+Skipping a block also no longer tokenizes it: most of a save is blocks nothing
+here reads, and the skip now leaps brace to brace through the raw text.
+
+## What was removed
+
+Six models of the mobilization count were built and discarded before the rule
+was measured: per-pop truncation, a cascade up province/state/nation, a province
+levy, a fixed share of short pops, a manpower threshold, and a pooled scale
+factor. Each was fitted to in-game readings, each failed somewhere, and all six
+plus their ten command-line knobs and the calibration harness are gone -- about
+370 lines. What they were and how they broke is recorded above, which is the
+part worth keeping.
 
 ## Picking nations
 

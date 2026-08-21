@@ -457,6 +457,27 @@ def regions(path):
     return out
 
 
+def unit_kinds(path):
+    """{unit type: 'land' or 'naval'} from `units/*.txt`."""
+    folder = os.path.join(path, "units")
+    out = {}
+    if not os.path.isdir(folder):
+        return out
+    for fname in _files(folder):
+        body = _plain(os.path.join(folder, fname))
+        for m in re.finditer(r"^(\w+)\s*=\s*\{", body, re.M):
+            kind = re.search(r"(?<![\w_])type\s*=\s*(\w+)", body[m.end():m.end() + 900])
+            if kind:
+                out[m.group(1)] = kind.group(1)
+    return out
+
+
+def state_names(path):
+    """{state key: the name the game shows}, e.g. PER_1112 -> Tabriz."""
+    keys = set(regions(path))
+    return {k: v for k, v in text_localisation(path, keys).items() if v}
+
+
 def province_regions(path):
     """{province id: state name}, the reverse of `regions`."""
     return {pid: name for name, ids in regions(path).items() for pid in ids}
@@ -749,7 +770,25 @@ def _flag_roots(path):
     return [r for r in roots if os.path.isdir(r)]
 
 
-def flag_images(path, wanted, governments=None):
+def _shrink(width, height, rgb, target):
+    """Nearest-neighbour downscale. Flags render about 34px wide, so the source
+    93x64 is four times more pixel than any of them needs."""
+    if width <= target:
+        return width, height, rgb
+    out_w = target
+    out_h = max(1, round(height * target / width))
+    out = bytearray(out_w * out_h * 3)
+    for y in range(out_h):
+        sy = min(height - 1, y * height // out_h)
+        row = sy * width * 3
+        for x in range(out_w):
+            sx = min(width - 1, x * width // out_w)
+            i, j = (y * out_w + x) * 3, row + sx * 3
+            out[i:i + 3] = rgb[j:j + 3]
+    return out_w, out_h, bytes(out)
+
+
+def flag_images(path, wanted, governments=None, width=46):
     """
     {tag: PNG data URI} for the tags asked for, converted from the mod's TGAs.
 
@@ -779,7 +818,8 @@ def flag_images(path, wanted, governments=None):
                 image = None
             if image:
                 out[tag] = ("data:image/png;base64,"
-                            + base64.b64encode(_write_png(*image)).decode())
+                            + base64.b64encode(
+                                _write_png(*_shrink(*image, width))).decode())
                 break
     return out
 
@@ -1019,6 +1059,8 @@ def load_mod(path):
         "country_order": country_order(path),
         "province_names": province_names(path),
         "province_regions": province_regions(path),
+        "state_names": state_names(path),
+        "unit_kinds": unit_kinds(path),
         "technology": technology_tree(path),
         "mob_impacts": mobilization_impacts(path),
         "modifier_impacts": modifier_mob_impacts(path),

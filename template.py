@@ -175,6 +175,8 @@ svg{display:block;width:100%;height:auto}
 .warrow{cursor:pointer}
 .warrow.on{background:rgba(231,196,100,.14)}
 .warname{white-space:normal;min-width:230px}
+.tagflag{width:18px;height:12px;object-fit:fill;vertical-align:-1px;
+  margin-right:5px;border:1px solid rgba(0,0,0,.55)}
 .warhead{font-family:'Playfair Display',Georgia,serif;font-size:19px;
   color:var(--brass);margin-bottom:6px}
 table.mini{width:auto;min-width:100%}
@@ -2343,7 +2345,7 @@ function drawWarTable() {
 
   const head = [['name', 'War'], ['start', 'From'], ['start', 'To'],
                 ['losses', 'Casualties'], ['battles', 'Battles'],
-                ['land', 'Provinces'], ['outcome', 'Goals taken']];
+                ['land', 'States'], ['outcome', 'Goals taken']];
   const body = rows.map((w, i) => {
     const idx = WARS.indexOf(w);
     return `<tr class="warrow${warPick === idx ? ' on' : ''}" data-war="${idx}">`
@@ -2383,6 +2385,55 @@ function drawWarTable() {
   drawWarDetail();
 }
 
+let warBattleSort = {key: 'date', dir: 1};
+
+function warFlag(tag) {
+  const src = (DATA.flags || {})[tag + '|'];
+  return src ? `<img class="tagflag" src="${src}" alt="">` : '';
+}
+function warTag(tag) {
+  if (!tag) return '<span class="rk">&mdash;</span>';
+  return `${warFlag(tag)}<b style="color:${colourFor(tag)}">${tag}</b>`;
+}
+
+function warBattleTable(list, title) {
+  if (!list.length) return '';
+  const get = {
+    date: b => b.date || '9999',
+    name: b => b.name.toLowerCase(),
+    alost: b => b.a[2],
+    dlost: b => b.d[2],
+    total: b => b.a[2] + b.d[2],
+  }[warBattleSort.key] || (b => b.date || '9999');
+  const rows = list.slice().sort((x, y) => {
+    const a = get(x), b = get(y);
+    return (a < b ? -1 : a > b ? 1 : 0) * warBattleSort.dir;
+  });
+  const head = [['date', 'Date'], ['name', 'Battle'], ['', 'Winner'],
+                ['', 'Attacker'], ['alost', 'Lost'],
+                ['', 'Defender'], ['dlost', 'Lost'], ['total', 'Total']];
+  const force = s => s[3] ? s[3].split(';').map(p => p.replace(':', ' ')).join(', ') : '';
+  return `<div class="techsub" style="margin-top:12px">${title} `
+    + `<span class="rk">${list.length}</span></div>`
+    + `<div class="tablewrap"><table class="mini"><thead><tr>`
+    + head.map(([k, label]) => k
+        ? `<th data-bk="${k}"${warBattleSort.key === k ? ' aria-sort="' +
+            (warBattleSort.dir < 0 ? 'descending' : 'ascending') + '"' : ''}>${label}</th>`
+        : `<th>${label}</th>`).join('')
+    + `</tr></thead><tbody>`
+    + rows.map(b => {
+        const win = b.won ? b.a[0] : b.d[0];
+        return `<tr><td>${b.date || '<span class="rk">unknown</span>'}</td>`
+          + `<td>${b.name}</td><td>${warTag(win)}</td>`
+          + `<td>${warTag(b.a[0])}<div class="rk">${b.a[1] || '—'} · ${force(b.a)}</div></td>`
+          + `<td>${b.a[2].toLocaleString()}</td>`
+          + `<td>${warTag(b.d[0])}<div class="rk">${b.d[1] || '—'} · ${force(b.d)}</div></td>`
+          + `<td>${b.d[2].toLocaleString()}</td>`
+          + `<td>${(b.a[2] + b.d[2]).toLocaleString()}</td></tr>`;
+      }).join('')
+    + `</tbody></table></div>`;
+}
+
 function drawWarDetail() {
   const box = document.getElementById('wardetail');
   if (warPick === null || !WARS[warPick]) {
@@ -2390,19 +2441,13 @@ function drawWarDetail() {
     return;
   }
   const w = WARS[warPick];
-  const goal = w.goal.casus_belli
-    ? `<span class="rk">goal</span> <b>${w.goal.casus_belli.replace(/_/g, ' ')}</b>`
-      + (w.goal.actor ? ` <span class="rk">for</span> <b>${w.goal.actor}</b>` : '')
-      + (w.goal.receiver ? ` <span class="rk">against</span> <b>${w.goal.receiver}</b>` : '')
-    : '<span class="rk">no recorded war goal</span>';
-
-  const verdict = w.goals.length
+  const goals = w.goals.length
     ? `<table class="mini"><thead><tr><th>Demand</th><th>By</th><th>On</th>`
-      + `<th>State</th><th>Taken at the peace</th><th>Occupied mid-war</th></tr></thead><tbody>`
+      + `<th>State</th><th>Taken at the peace</th><th>Occupied mid-war</th>`
+      + `</tr></thead><tbody>`
       + w.goals.map(g =>
           `<tr><td>${g.cb.replace(/_/g, ' ')}</td>`
-          + `<td><b style="color:${colourFor(g.actor)}">${g.actor}</b></td>`
-          + `<td><b style="color:${colourFor(g.receiver)}">${g.receiver}</b></td>`
+          + `<td>${warTag(g.actor)}</td><td>${warTag(g.receiver)}</td>`
           + `<td>${g.state || '—'}</td>`
           + `<td class="${g.met ? 'up' : g.part ? '' : g.checkable ? 'down' : ''}">`
           +   (!g.checkable ? '<span class="rk">not checkable</span>'
@@ -2412,60 +2457,53 @@ function drawWarDetail() {
         .join('')
       + `</tbody></table>`
       + `<p class="note">A war carries more than one demand: the one it opened `
-      + `with, plus any added while it ran. Added demands are dropped from the `
-      + `save when the war ends, so they survive only where a save caught the `
-      + `war still being fought. <strong>Taken at the peace</strong> compares who `
-      + `held the state either side of the war. <strong>Occupied mid-war</strong> is `
-      + `the save's own <code>is_fulfilled</code> flag: the claimant held the state `
-      + `by siege at that moment, a live condition rather than an outcome. A demand `+ `can be occupied and still yield nothing, which is what the French claim `+ `on Prussia does here.</p>`
+      + `with, plus any added while it ran. Added demands are dropped when the `
+      + `war ends, so they survive only where a save caught the war still being `
+      + `fought. <strong>Taken at the peace</strong> compares who held the state `
+      + `either side of the war. <strong>Occupied mid-war</strong> is the save's `
+      + `own <code>is_fulfilled</code> flag: the claimant held the state by siege `
+      + `at that moment, a live condition rather than an outcome.</p>`
     : `<p class="note">No war goal was recorded for this war.</p>`;
+
   const land = w.transfers.length
-    ? `<table class="mini"><thead><tr><th>Province</th><th>From</th><th>To</th></tr></thead><tbody>`
+    ? `<div class="techsub" style="margin-top:12px">States that changed hands</div>`
+      + `<table class="mini"><thead><tr><th>State</th><th>Provinces</th>`
+      + `<th>From</th><th>To</th></tr></thead><tbody>`
       + w.transfers.map(t =>
-          `<tr><td>${t[1] || ('#' + t[0])}${t[4] ? ' <span class="rk">war goal</span>' : ''}</td>`
-          + `<td><b style="color:${colourFor(t[2])}">${t[2]}</b></td>`
-          + `<td><b style="color:${colourFor(t[3])}">${t[3]}</b></td></tr>`).join('')
+          `<tr><td>${t[1] || t[0] || '—'}</td>`
+          + `<td>${t[4]}${t[5] && t[5] !== t[4] ? ` <span class="rk">of ${t[5]}</span>` : ''}</td>`
+          + `<td>${warTag(t[2])}</td><td>${warTag(t[3])}</td></tr>`).join('')
       + `</tbody></table>`
     : '';
 
+  const sea = w.battles.filter(b => b.sea), dry = w.battles.filter(b => !b.sea);
   const undated = w.battles.length - w.dated;
-  const battles = w.battles.length
-    ? `<table class="mini"><thead><tr><th>Date</th><th>Battle</th><th>Winner</th>`
-      + `<th>Attacker</th><th>lost</th><th>Defender</th><th>lost</th></tr></thead><tbody>`
-      + w.battles.map(b => {
-          const win = b.won ? b.a[0] : b.d[0];
-          const force = s => s[3] ? s[3].split(';').map(p => p.replace(':', ' ')).join(', ') : '';
-          return `<tr><td>${b.date || '<span class="rk">unknown</span>'}</td>`
-            + `<td>${b.name}</td>`
-            + `<td><b style="color:${colourFor(win)}">${win}</b></td>`
-            + `<td><b style="color:${colourFor(b.a[0])}">${b.a[0]}</b>`
-            + `<div class="rk">${b.a[1] || '—'} · ${force(b.a)}</div></td>`
-            + `<td>${b.a[2].toLocaleString()}</td>`
-            + `<td><b style="color:${colourFor(b.d[0])}">${b.d[0]}</b>`
-            + `<div class="rk">${b.d[1] || '—'} · ${force(b.d)}</div></td>`
-            + `<td>${b.d[2].toLocaleString()}</td></tr>`;
-        }).join('')
-      + `</tbody></table>`
-      + (undated ? `<p class="note">${undated} of these have no date. A save keeps `
-          + `dates only on its most recent battles, so a battle is dated here when `
-          + `some save in the folder still remembered it.</p>` : '')
-    : '<p class="note">No battle was recorded in this war.</p>';
-
   box.innerHTML =
     `<div class="warhead">${w.name}</div>`
     + `<div class="readout" style="border:0;padding:0 0 8px">`
     +   `<span><span class="rk">from</span> <b>${w.start || '—'}</b></span>`
     +   `<span><span class="rk">to</span> <b>${w.active ? 'ongoing' : (w.end || '—')}</b></span>`
     +   `<span><span class="rk">casualties</span> <b>${warLosses(w).toLocaleString()}</b></span>`
-    +   `<span>${goal}</span>`
     + `</div>`
     + `<div class="readout" style="border:0;padding:0 0 10px">`
-    +   `<span><span class="rk">attackers</span> ${warSide(w.attackers)}</span>`
-    +   `<span><span class="rk">defenders</span> ${warSide(w.defenders)}</span>`
+    +   `<span><span class="rk">attackers</span> ${w.attackers.map(warTag).join(' ')}</span>`
+    +   `<span><span class="rk">defenders</span> ${w.defenders.map(warTag).join(' ')}</span>`
     + `</div>`
-    + `<div class="techsub">War goals</div>${verdict}`
-    + (land ? `<div class="techsub" style="margin-top:12px">Provinces that changed hands</div>${land}` : '')
-    + `<div class="techsub" style="margin-top:12px">Battles</div>${battles}`;
+    + `<div class="techsub">War goals</div>${goals}${land}`
+    + warBattleTable(dry, 'Land battles')
+    + warBattleTable(sea, 'Naval battles')
+    + (undated ? `<p class="note">${undated} battle${undated === 1 ? ' has' : 's have'} `
+        + `no date. A save keeps dates only on its most recent battles, so a battle `
+        + `is dated here when some save in the folder still remembered it.</p>` : '');
+
+  box.querySelectorAll('th[data-bk]').forEach(th => {
+    th.onclick = () => {
+      const k = th.dataset.bk;
+      if (warBattleSort.key === k) warBattleSort.dir *= -1;
+      else warBattleSort = {key: k, dir: k === 'date' || k === 'name' ? 1 : -1};
+      drawWarDetail();
+    };
+  });
 }
 
 if (WARS.length) {
