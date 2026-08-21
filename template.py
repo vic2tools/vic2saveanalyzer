@@ -148,6 +148,10 @@ svg{display:block;width:100%;height:auto}
 .gpstats{display:flex;flex-wrap:wrap;gap:10px;font-family:'IBM Plex Mono',ui-monospace,monospace;
   font-size:11px;color:var(--ink)}
 .gpstats .rk{color:var(--ink-dim)}
+.selsearch{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;
+  background:linear-gradient(180deg,var(--panel),#431B26);color:var(--ink);
+  border:1px solid var(--rule);border-radius:0;padding:7px 11px;width:150px}
+.selsearch::placeholder{color:var(--ink-dim);opacity:.8}
 .mapwrap{position:relative;width:100%;overflow:hidden;background:var(--ground-deep);
   border:1px solid var(--rule);box-shadow:0 0 0 1px rgba(124,94,34,.35) inset}
 .mapwrap canvas{position:absolute;inset:0;width:100%!important;height:100%!important;
@@ -2092,6 +2096,34 @@ function drawGreatPowers() {
   });
 }
 
+
+/* A long <select> of nations is unusable without one. Filters the options in
+   place and jumps to the first match, so the select stays the source of truth
+   and every existing onchange keeps working. */
+function searchSelect(select, placeholder) {
+  if (!select) return;
+  const box = document.createElement('input');
+  box.type = 'search';
+  box.className = 'selsearch';
+  box.placeholder = placeholder || 'search';
+  box.setAttribute('aria-label', placeholder || 'search');
+  select.parentNode.insertBefore(box, select);
+  const all = [...select.options];
+  box.oninput = () => {
+    const q = box.value.trim().toLowerCase();
+    let first = null;
+    for (const o of all) {
+      const hit = !q || o.textContent.toLowerCase().includes(q);
+      o.hidden = !hit;
+      if (hit && !first) first = o;
+    }
+    if (q && first && select.value !== first.value) {
+      select.value = first.value;
+      if (select.onchange) select.onchange();
+    }
+  };
+}
+
 /* =============== TABS =============== */
 const tabs = [...document.querySelectorAll('.tab')];
 function selectTab(id) {
@@ -2118,6 +2150,8 @@ drawChart(); drawLedger();
 drawMilPies(); drawMilTable(); drawTechTable();
 drawFleetChart(); drawFleetTable(); drawNavy();
 drawPopTable(); drawCultureTable(); drawPopChart();
+searchSelect(document.getElementById('cultagsel'), 'search nations');
+searchSelect(document.getElementById('poptag'), 'search nations');
 drawMarketTable();
 if (MAP) mapRender();
 drawGreatPowers();

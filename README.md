@@ -163,23 +163,19 @@ Flags come out of the mod's own `gfx/flags/*.tga`, converted to PNG and inlined
 as data URIs -- about 2.4 KB a flag, 26 KB for a campaign, and 10 ms to decode.
 Which variant a nation flies mostly follows `flagType` in `governments.txt`, so a
 communist Russia flies the communist flag, and one image is kept per tag and
-variant rather than per save. One case `flagType` cannot express on its
-own: absolute monarchy, Prussian constitutionalism and HM's Government all
-declare `flagType = monarchy`, in the mod and in vanilla alike, yet the game
-does not fly the same flag for all three. What separates them in the file is
-whether the government holds elections, and that is the line taken here -- a
-crowned republic takes `_republic`, an autocracy takes `_monarchy`. Germany is
-the case that settles it: black-red-gold under a constitutional monarchy against
-the black-white-red empire flag under an absolute one.
+variant rather than per save. Which file a nation flies is fitted to what the game displays rather than to
+`flagType`, which cannot be the whole story. In one 1908 save Germany and Japan
+share a government (HM's Government) *and* a ruling party ideology
+(reactionary) and still fly different files, and a democratic United States
+under a communist party flies the plain national flag rather than the communist
+one. Seven of that save's eight great powers fly the plain `TAG.tga`; only an
+autocracy -- `flagType = monarchy` with no elections -- reliably takes a
+variant, and a communist or fascist government takes its own.
 
-That rule is inferred from two observed flags rather than from anything the
-files state outright, and there is one case it may get wrong. Japan under a
-constitutional monarchy comes out as `JAP_republic.tga`, a blue civil ensign,
-where the Hinomaru might be expected. If the game shows the Hinomaru there, the
-rule needs a third branch rather than a straight election test. The mod's folder wins over the base game's, which
-is how a mod replaces a flag without shipping all 1,300. Vic2 flags are TGA in
-four shapes -- run-length encoded or not, 24 or 32 bit -- and all four are read;
-the five 8-bit greyscale files fall back to a plain colour chip.
+Germany is a standing exception: the game shows it black-red-gold, which is
+`GER_republic.tga`, and nothing in the files separates it from a Japan flying
+the Hinomaru under the same government and the same party. It is left wrong
+rather than special-cased on a guess.
 
 **Industrial and military score are not in a save.** Nothing resembling them
 appears in any country block or anywhere else in the file; the engine derives

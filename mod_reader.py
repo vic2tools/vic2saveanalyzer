@@ -626,14 +626,26 @@ def government_flag_types(path):
 
 
 def flag_suffixes(government, styles):
-    """Flag file suffixes to try, best first, for a government."""
+    """
+    Flag file suffixes to try, best first, for a government.
+
+    Fitted to what the game actually displays rather than to `flagType`, which
+    cannot be the whole story: in one 1908 save Germany and Japan share both a
+    government (HM's Government) and a ruling party ideology (reactionary) and
+    still fly different files, and a democratic United States under a communist
+    party flies the plain national flag rather than the communist one.
+
+    Of the eight great powers in that save, seven fly the plain `TAG.tga`. Only
+    an autocracy -- `flagType = monarchy` with no elections -- reliably takes a
+    variant. Germany is a standing exception: it shows black-red-gold, which is
+    `GER_republic.tga`, and nothing in the files distinguishes it from Japan.
+    """
     variant, elects = styles.get(government, ("", True))
-    if variant == "monarchy":
-        # A crowned republic flies the national flag, a real autocracy does not.
-        return ["_republic", ""] if elects else ["_monarchy", ""]
-    if variant:
+    if variant == "monarchy" and not elects:
+        return ["_monarchy", ""]
+    if variant in ("communist", "fascist"):
         return ["_" + variant, ""]
-    return ["_republic", ""]      # democracy declares no flagType at all
+    return ["", "_republic"]
 
 
 def _read_tga(target):
