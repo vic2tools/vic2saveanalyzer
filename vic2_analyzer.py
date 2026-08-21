@@ -1487,11 +1487,12 @@ def main():
                          "moves nations under siege a lot -- Russia in 1908 "
                          "reads 558 without them and 612 with -- so it is worth "
                          "checking against the game when a nation is at war.")
-    ap.add_argument("--map-scale", type=int, default=5, metavar="N",
-                    help="how far to shrink the province bitmap for the map tab "
-                         "(default 5, so 1123x432 from a 5616x2160 map). Lower "
-                         "is sharper and bigger: 4 adds about 70KB to the "
-                         "report, 8 saves about 90KB.")
+    ap.add_argument("--map-scale", type=int, default=2, metavar="N",
+                    help="how far to shrink the province bitmap for the map tab. "
+                         "Default 2, so 2808x1080 from a 5616x2160 map, which "
+                         "costs about 660KB once however many saves are in the "
+                         "report. 3 is 410KB, 5 is 230KB and visibly blocky "
+                         "once you zoom, 1 is the full map at 1.4MB.")
     ap.add_argument("--player-nations", nargs="*", metavar="TAG", default=None,
                     help="tags that were run by a human. Only matters for "
                          "UNCIVILIZED nations, which in IGoR pick up "

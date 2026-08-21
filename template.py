@@ -116,14 +116,17 @@ select:focus-visible,button:focus-visible,input:focus-visible{
 
 figure{margin:0;border:1px solid var(--rule);background:rgba(8,25,44,.72)}
 svg{display:block;width:100%;height:auto}
+/* The map is a fixed-aspect box with the canvas stretched over it. Without the
+   explicit CSS size the canvas falls back to its width/height attributes, which
+   are the raster's -- 2808px -- and it bursts straight out of the page. */
+.mapwrap{position:relative;width:100%;overflow:hidden;background:var(--ground);
+  border:1px solid var(--grid)}
+.mapwrap canvas{position:absolute;inset:0;width:100%!important;height:100%!important;
+  image-rendering:pixelated;cursor:grab;touch-action:none}
 @media(max-width:640px){
   figure{overflow-x:auto}
   figure svg{min-width:640px}
-  .mapwrap{position:relative;width:100%;overflow:hidden;background:var(--ground);
-  border:1px solid var(--grid)}
-.mapwrap canvas{position:absolute;inset:0;width:100%;height:100%;
-  image-rendering:pixelated;cursor:grab;touch-action:none}
-.readout{position:sticky;left:0}
+  .readout{position:sticky;left:0}
 }
 .axis text{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;fill:var(--ink-dim)}
 .gridline{stroke:var(--grid);stroke-width:1}
@@ -1843,7 +1846,10 @@ function mapRender() {
 
   mapClamp();
   const s = mapFit() * mapZoom;
-  ctx.imageSmoothingEnabled = false;
+  // crisp province edges when magnifying, but let the browser average when the
+  // raster is finer than the screen, or shrinking it turns into noise
+  ctx.imageSmoothingEnabled = s < 1;
+  ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(mapBase, -mapOX * s, -mapOY * s, MAP.w * s, MAP.h * s);
 
   mapDots = mapStacks(date);

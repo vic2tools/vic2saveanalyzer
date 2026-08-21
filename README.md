@@ -100,10 +100,9 @@ hussar 14, FRA 28 artillery 28".
 It is built to stay light enough to carry every save in a campaign:
 
 - The province bitmap is 5616x2160 and 36 MB. It ships as a run-length encoded
-  grid of province ids at 1/5 scale, which is about 220 KB of base36 text and
-  still shows every province in the game. Only sampled rows are read, so
-  building it costs a tenth of a second rather than the minute a full decode
-  would take.
+  grid of province ids at half scale -- 2808x1080, about 660 KB of base36 text.
+  Only sampled rows are read, so building it costs a fraction of a second rather
+  than the minute a full decode would take.
 - One raster serves every save. Only ownership changes, and that ships as a
   delta against the previous save: an 1836 base of 2,297 provinces is followed
   by a few hundred changes per snapshot.
@@ -130,9 +129,21 @@ file row 168 holds Sitka, whose own position is 168 rows from the top. Trusting
 the header puts Alaska in the southern ocean. Check orientation against a
 province you can place rather than against the spec.
 
-`--map-scale` trades size against sharpness: the default 5 gives 1123x432, 4 is
-sharper and adds about 70 KB, 8 saves about 90 KB. Without `--mod-path` there is
-no bitmap to read and the tab is dropped rather than shown empty.
+`--map-scale` trades size against sharpness, and it is a one-off cost however
+many saves are in the report: the default 2 gives 2808x1080 for about 660 KB, 3
+gives 1872x720 for 410 KB, 5 gives 1123x432 for 230 KB and is visibly blocky
+once you zoom, and 1 is the map at native resolution for 1.4 MB. Decoding half
+scale takes 24 ms and the first paint 38 ms; native quadruples both. Without
+`--mod-path` there is no bitmap to read and the tab is dropped rather than shown
+empty.
+
+Two traps, both recorded because each cost an afternoon. The bitmap declares a
+positive height, which in a BMP means bottom-up rows, but this one is stored
+top-down -- file row 168 holds Sitka, whose own position is 168 rows from the
+top -- so trusting the header puts Alaska in the southern ocean. And the canvas
+needs an explicit CSS size: without one it falls back to its `width`/`height`
+attributes, which are the raster's, and a 2808px canvas bursts straight out of
+the page.
 
 ## Picking nations
 
