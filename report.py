@@ -394,11 +394,96 @@ def _units(side):
 
 
 
+def build_succession(parsed, formations=None):
+    """
+    Which nation a vanished one turned into.
+
+    A save records nothing about it. A nation that formed another leaves a block
+    holding only its diplomatic relations -- no successor field, no event log --
+    and the decision that formed Italy sets no country flag: it changes the tag,
+    swaps the cores and inherits the other Italian states. The one flag that
+    does survive such a change, IGoR's `dual_monarchy_done`, sits on
+    Austria-Hungary because a country carries its own flags through a tag
+    change, so it says the nation is the product of a decision without saying
+    what it used to be.
+
+    Two things do know. The mod's decisions declare who is *allowed* to form
+    what -- `form_italy` is open to Sardinia-Piedmont and the Two Sicilies --
+    and the province ledger says what actually happened in this campaign: NGF
+    appears holding land that was Prussian one save earlier, and Prussia holds
+    none any more. So a predecessor is a nation that disappears as the newcomer
+    appears, having handed it most of what it owned, and that the mod either
+    names as a former of it or whose people the newcomer accepts.
+
+    Every part of that earns its place. Without "disappears", Austria-Hungary
+    would be recorded as becoming Hungary in 1906 when it merely released it,
+    and the Confederacy as replacing the United States. Without "most of what it
+    owned", any neighbour that lost a province in the same window would qualify.
+    And without the last test -- saves being years apart -- a conquest inside
+    the same window reads exactly like a formation: it is what keeps Tibet from
+    becoming a Dzungar khanate and Swaziland from becoming Batavia, while
+    Denmark and Finland still become Scandinavia, whose cultures they are.
+
+    On one campaign this finds Wallachia becoming Romania, Sardinia and the Two
+    Sicilies becoming Italy, Austria becoming Austria-Hungary, Prussia and five
+    small German states becoming the North German Federation, and that becoming
+    Germany.
+    """
+    formations = formations or {}
+    ledgers = []
+    for meta, nations in parsed:
+        book = {}
+        for pid, (owner, _ctrl) in meta.get("province_owner", {}).items():
+            if owner:
+                book.setdefault(owner, set()).add(pid)
+        home = {}
+        for tag, nat in nations.items():
+            primary = str(nat.get("primary_culture") or "")
+            home[tag] = (primary,
+                         set(nat.get("accepted_cultures") or ()) | {primary})
+        ledgers.append((meta.get("date") or "", book, home))
+
+    out = {}
+    for (_before, was, was_home), (date, now, home) in zip(ledgers, ledgers[1:]):
+        appeared = set(now) - set(was)
+        vanished = set(was) - set(now)
+        for tag in sorted(appeared):
+            land = now[tag]
+            if not land:
+                continue
+            _primary, accepts = home.get(tag, ("", set()))
+            declared = formations.get(tag) or set()
+            came = []
+            for old in vanished:
+                shared = was[old] & land
+                if not shared:
+                    continue
+                # most of what the old nation held has to have become this one
+                if len(shared) / len(was[old]) < 0.5:
+                    continue
+                # and the mod has to name it as a former of this nation, or
+                # failing that -- releases and event tag changes are in no
+                # decision file -- the newcomer has to claim its people. A
+                # nation that becomes another keeps them; one merely conquered
+                # in the same window does not.
+                by_decision = old in declared
+                mine = was_home.get(old, ("", set()))[0]
+                if not by_decision and (not mine or mine not in accepts):
+                    continue
+                came.append([old, round(len(shared) / len(land), 4),
+                             1 if by_decision else 0])
+            if came:
+                came.sort(key=lambda part: -part[1])
+                out[tag] = {"date": date, "from": came}
+    return out
+
+
 def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
                  snapshot_rows, brigade_rows, tech_rows, outdir,
                  tag_names=None, player_tags=None, map_data=None,
                  base_prices=None, great_powers=None, flags=None,
-                 technology=None, wars=None, filename="report.html"):
+                 technology=None, wars=None, succession=None,
+                 filename="report.html"):
     os.makedirs(outdir, exist_ok=True)
     tag_names = tag_names or {}
     player_tags = player_tags or []
@@ -570,6 +655,7 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
         "flags": flags or {},
         "technology": technology or {},
         "wars": wars or [],
+        "succession": succession or {},
         "priceDates": price_dates,
         "priceYears": [year_fraction(d) for d in price_dates],
         "prices": prices,

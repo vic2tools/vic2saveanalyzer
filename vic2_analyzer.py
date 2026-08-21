@@ -1766,7 +1766,8 @@ def main():
                           args.out)
 
     if not args.no_html:
-        from report import build_map, build_report, build_wars
+        from report import (build_map, build_report, build_succession,
+                            build_wars)
         # Country names come from the mod's own localisation, which is where the
         # game gets them: a bare TAG, overridden by TAG_<government> when one
         # exists -- IGoR's PBC is "Peru-Bolivia" but "Andine Federation" while
@@ -1845,6 +1846,8 @@ def main():
                             (mod or {}).get("province_regions"),
                             (mod or {}).get("state_names"),
                             (mod or {}).get("unit_kinds")),
+            succession=build_succession(parsed,
+                                        (mod or {}).get("formations")),
         )
         paths.insert(0, html_path)
 

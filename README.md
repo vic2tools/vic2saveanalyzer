@@ -155,12 +155,20 @@ move under you.
 
 **The hole in the Tibesti.** Victoria 2 paints about 8,000 pixels of northern
 Chad into `provinces.bmp` in a magenta -- RGB 208,17,223 -- that `definition.csv`
-never names, and it is the only unnamed colour on the map. Vanilla has it, and
-so does every mod built on the vanilla bitmap. Drawn literally it becomes
-unclaimed land in the middle of a colonised Sahara, which is a gap in the game's
-own data posing as a fact, so the raster grows the surrounding provinces over it
-a ring at a time -- in practice Murzuk, Madama and Matan as Sarah, which are
-exactly its neighbours.
+never names, and it is the only unnamed colour on the map. Vanilla has it, and so
+does every mod built on the vanilla bitmap. It is drawn as unclaimed land and
+left that way. Filling it from its neighbours was tried and reverted: the map
+would have shown someone owning ground nobody owns, which is worse than a blank
+patch that matches what the game itself shows.
+
+**Nations in a picker are the ones in the save.** Anything read at one date --
+the tech tree, the culture table, the force comparison, the map -- offers only
+the nations that hold land in the save selected beside it, which on a late save
+is twenty-one rather than the campaign's hundred and twenty-six. The options are
+hidden rather than removed, so stepping back to an earlier save brings them
+straight back with the selection intact. Anything plotted across every date
+keeps the full list, because a nation that ended in 1860 still has a line worth
+drawing.
 
 **Zoom and pan.** Scroll to zoom on the cursor, drag to pan, double-click to zoom
 in, **Reset** for the whole world. Markers grow more slowly than the map, so a
@@ -191,6 +199,43 @@ top -- so trusting the header puts Alaska in the southern ocean. And the canvas
 needs an explicit CSS size: without one it falls back to its `width`/`height`
 attributes, which are the raster's, and a 2808px canvas bursts straight out of
 the page.
+
+## One nation becoming another
+
+The **Series** chart joins a nation to the one it became with a dashed line, so
+Prussia's population does not simply stop in 1860 while Germany's begins out of
+nowhere in 1870.
+
+A save records none of this. A nation that formed another leaves a block holding
+only its diplomatic relations -- no successor field, no event log -- and the
+decision that does the forming leaves no mark either: `form_italy` changes the
+tag, swaps the cores and inherits the other Italian states, and the file that
+forms Germany, Italy, Scandinavia and Romania sets exactly one country flag
+between them, about Finland. The one formation flag that does survive, IGoR's
+`dual_monarchy_done`, sits on Austria-Hungary, because a country carries its own
+flags through a tag change -- which tells you the nation is the product of a
+decision without telling you what it used to be.
+
+Two sources do know, and they are used together:
+
+- **The mod's own decisions** declare who may form what. A decision whose effect
+  is `change_tag = ITA` and whose `potential` is `tag = SAR OR tag = SIC` says
+  Italy is formed by Sardinia-Piedmont or the Two Sicilies. IGoR declares 15
+  such tags, DoD 42.
+- **The province ledger** says which of them happened here: the newcomer appears
+  holding land the old nation held one save earlier, and the old nation holds
+  none any more.
+
+A predecessor has to disappear as the newcomer appears, having handed over most
+of what it owned, and be either named by a decision or of a culture the newcomer
+accepts. Without the first test Austria-Hungary would read as *becoming* Hungary
+in 1906 when it merely released it, and the Confederacy as replacing the United
+States. Without the last, a conquest that happened inside the same window --
+saves are years apart -- reads exactly like a formation, which is what would
+otherwise have Tibet becoming a Dzungar khanate.
+
+Nations matched by culture rather than by a decision are starred in the note
+under the chart: releases and event formations are in no decision file.
 
 ## Great powers
 

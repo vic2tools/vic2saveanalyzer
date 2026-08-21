@@ -322,6 +322,7 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         <svg id="chart" viewBox="0 0 1000 460" role="img" aria-label="Metric plotted over time by nation"></svg>
         <div class="readout" id="readout"></div>
       </figure>
+      <p class="note" id="succnote"></p>
     </section>
 
     <section>
@@ -623,6 +624,12 @@ function makePicker(mount, cfg) {
   wrap.append(toggle, panel);
   mount.replaceWith(wrap);
 
+  // A picker tied to a save only offers what that save has. `available`
+  // returns the current list; everything else is built once and hidden, so
+  // switching saves costs nothing and a nation that comes back is still there.
+  let allowed = null;
+  const permitted = item => allowed === null || allowed.has(item);
+
   const optFor = {};
   cfg.items.forEach(item => {
     const b = document.createElement('button');
@@ -649,32 +656,37 @@ function makePicker(mount, cfg) {
     const b = document.createElement('button');
     b.type = 'button'; b.textContent = label;
     b.onclick = () => {
-      selected.clear(); fn().forEach(i => selected.add(i));
+      selected.clear(); fn().filter(permitted).forEach(i => selected.add(i));
       sync(); cfg.onChange(ordered());
     };
     presets.appendChild(b);
   });
 
   // Always report in the item list's own order so table columns stay put.
-  const ordered = () => cfg.items.filter(i => selected.has(i));
+  const ordered = () => cfg.items.filter(i => selected.has(i) && permitted(i));
 
-  function sync() {
-    cfg.items.forEach(i => optFor[i].setAttribute('aria-pressed', selected.has(i)));
-    const n = selected.size;
-    const word = n === 1 ? cfg.noun.replace(/s$/, '') : cfg.noun;
-    toggle.innerHTML = `<span>${n} ${word} selected</span><span class="caret">▾</span>`;
-  }
-  search.oninput = () => {
+  // One place decides whether an option shows: the search box and the save
+  // filter both feed it, so neither can undo the other.
+  function applyFilter() {
     const q = search.value.trim().toLowerCase();
     let visible = 0;
     cfg.items.forEach(i => {
       const hay = (cfg.labelFor(i) + ' ' + (cfg.subLabelFor ? cfg.subLabelFor(i) : '')).toLowerCase();
-      const on = !q || hay.includes(q);
+      const on = permitted(i) && (!q || hay.includes(q));
       optFor[i].style.display = on ? '' : 'none';
       if (on) visible++;
     });
     empty.hidden = visible > 0;
-  };
+  }
+
+  function sync() {
+    cfg.items.forEach(i => optFor[i].setAttribute('aria-pressed', selected.has(i)));
+    applyFilter();
+    const n = ordered().length;
+    const word = n === 1 ? cfg.noun.replace(/s$/, '') : cfg.noun;
+    toggle.innerHTML = `<span>${n} ${word} selected</span><span class="caret">▾</span>`;
+  }
+  search.oninput = applyFilter;
   toggle.onclick = () => {
     const open = panel.hidden;
     panel.hidden = !open;
@@ -688,10 +700,23 @@ function makePicker(mount, cfg) {
     if (ev.key === 'Escape') { panel.hidden = true; toggle.setAttribute('aria-expanded','false'); toggle.focus(); }
   });
 
+  if (cfg.available) allowed = new Set(cfg.available());
   sync();
   return {
-    get: () => cfg.items.filter(i => selected.has(i)),
+    get: ordered,
     set: list => { selected.clear(); list.forEach(i => selected.add(i)); sync(); cfg.onChange(ordered()); },
+    // Called when the save changes. Anything selected that the new save does
+    // not have drops out of the report without being forgotten, so stepping
+    // back to an earlier save brings it straight back.
+    refresh: () => {
+      if (!cfg.available) return;
+      allowed = new Set(cfg.available());
+      if (!ordered().length) {
+        (cfg.fallback ? cfg.fallback() : []).forEach(i => selected.add(i));
+      }
+      sync();
+      cfg.onChange(ordered());
+    },
   };
 }
 
@@ -758,7 +783,12 @@ function plot(svg, cfg) {
   axis.appendChild(el('line', {x1: M.l, x2: W - M.r, y1: H - M.b, y2: H - M.b, class: 'axisline'}));
   svg.appendChild(axis);
 
+  // Sits before the series so a join is drawn under the lines it connects.
+  const joins = el('g', {});
+  svg.appendChild(joins);
+
   const endLabels = [];
+  const span = {};
   cfg.series.forEach(s => {
     const pts = s.pts.filter(([, v]) => !log || v > 0);
     if (!pts.length) return;
@@ -779,7 +809,20 @@ function plot(svg, cfg) {
         x: p[0] - 2.5, y: p[1] - 2.5, width: 5, height: 5,
         fill: 'var(--ground)', stroke: s.colour, 'stroke-width': 1.5})));
     const last = xy[xy.length - 1];
+    span[s.name] = {first: xy[0], last, colour: s.colour};
     endLabels.push({name: s.name, colour: s.colour, x: last[0], y: last[1]});
+  });
+
+  // One nation became another: join where the old line stops to where the new
+  // one starts. Only drawn when both are on the chart, since a join to nothing
+  // would be a line to nowhere.
+  (cfg.links || []).forEach(([from, to]) => {
+    const a = span[from], b = span[to];
+    if (!a || !b) return;
+    joins.appendChild(el('line', {
+      x1: a.last[0], y1: a.last[1], x2: b.first[0], y2: b.first[1],
+      stroke: b.colour, 'stroke-width': 1.3, 'stroke-dasharray': '3 4',
+      opacity: 0.8}));
   });
   const gap = cfg.thin ? 11.5 : 12;
   spread(endLabels, gap, M.t + 4, H - M.b).forEach(({name, colour, x, y}) => {
@@ -873,7 +916,24 @@ function largestBy(key) {
     ((at[b] || {})[key] || 0) - ((at[a] || {})[key] || 0))[0] || DATA.tags[0];
 }
 
-function tagPickerCfg(selected, onChange) {
+/* Nations that exist in a given save: holding land, and therefore a country
+   rather than a tag the mod defines and the campaign never used. Anything read
+   at one date -- a tech tree, a force comparison, the map -- offers only these.
+   Anything plotted across every date keeps the full list, because a nation that
+   ends in 1860 still has a line worth drawing. */
+function tagsAt(date) {
+  const at = DATA.facts[date] || {};
+  return DATA.tags.filter(t => at[t] && at[t].provinces > 0);
+}
+
+function biggestAt(date, key, n) {
+  const at = DATA.facts[date] || {};
+  return tagsAt(date)
+    .sort((a, b) => ((at[b] || {})[key] || 0) - ((at[a] || {})[key] || 0))
+    .slice(0, n);
+}
+
+function tagPickerCfg(selected, onChange, dateOf) {
   return {
     items: DATA.tags,
     labelFor: t => t,
@@ -881,16 +941,39 @@ function tagPickerCfg(selected, onChange) {
     colourFor,
     selected,
     noun: 'nations',
+    available: dateOf ? () => tagsAt(dateOf()) : null,
+    fallback: dateOf ? () => biggestAt(dateOf(), 'total_pop', 1) : null,
     presets: [
-      ['Players', () => DATA.playerTags.length ? DATA.playerTags : DATA.tags.slice(0, 8)],
-      ['Top 8 by pop', () => [...DATA.tags].sort((a, b) =>
-        (DATA.series[b].total_pop[DATA.lastDate] || 0) - (DATA.series[a].total_pop[DATA.lastDate] || 0)
-      ).slice(0, 8)],
-      ['All', () => DATA.tags],
+      ['Players', () => {
+        const live = dateOf ? tagsAt(dateOf()) : DATA.tags;
+        const players = DATA.playerTags.filter(t => live.includes(t));
+        return players.length ? players : live.slice(0, 8);
+      }],
+      ['Top 8 by pop', () => dateOf ? biggestAt(dateOf(), 'total_pop', 8)
+        : [...DATA.tags].sort((a, b) =>
+            (DATA.series[b].total_pop[DATA.lastDate] || 0) -
+            (DATA.series[a].total_pop[DATA.lastDate] || 0)).slice(0, 8)],
+      ['All', () => dateOf ? tagsAt(dateOf()) : DATA.tags],
       ['None', () => []],
     ],
     onChange,
   };
+}
+
+/* The same idea for a plain <select>: options the save does not have are hidden
+   rather than removed, so the search box beside them keeps working and the list
+   does not have to be rebuilt every time the date moves. */
+function limitSelect(select, allowed, fallback) {
+  if (!select) return;
+  const ok = new Set(allowed);
+  let first = null;
+  for (const o of select.options) {
+    const on = ok.has(o.value);
+    o.dataset.off = on ? '' : '1';
+    o.hidden = !on;
+    if (on && first === null) first = o.value;
+  }
+  if (ok.size && !ok.has(select.value)) select.value = fallback || first;
 }
 DATA.lastDate = DATA.dates[DATA.dates.length - 1];
 
@@ -920,6 +1003,36 @@ scaleBtn.onclick = () => {
   drawChart();
 };
 
+/* [predecessor, successor] for every nation that turned into another one. */
+const SUCCESSIONS = Object.entries(DATA.succession || {}).flatMap(
+  ([to, info]) => (info.from || []).map(([from]) => [from, to]));
+
+(() => {
+  const note = document.getElementById('succnote');
+  if (!note) return;
+  const lines = Object.entries(DATA.succession || {}).map(([to, info]) =>
+    `${(info.from || []).map(([f, , decided]) =>
+        nameOf(f) + (decided ? '' : '*')).join(' and ')} became `
+    + `<b>${nameOf(to)}</b> by ${info.date}`);
+  const guessed = Object.values(DATA.succession || {})
+    .some(i => (i.from || []).some(([, , d]) => !d));
+  note.innerHTML = lines.length
+    ? 'A dashed line joins a nation to the one it became. A save records none '
+      + 'of this: a nation that formed another leaves a block holding only its '
+      + 'diplomatic relations, and the decision that does the forming changes '
+      + 'the tag without leaving a flag behind. So these come from the '
+      + 'decisions the mod itself ships, which declare who may form what, '
+      + 'matched against the '
+      + 'province ledger, which says who did: the newcomer appears holding land '
+      + 'the old nation held one save earlier, and the old nation holds none. A '
+      + 'nation that merely releases a puppet keeps its own line. In this '
+      + 'campaign: ' + lines.join('; ') + '.'
+      + (guessed ? ' Starred nations are not named by any decision -- they are '
+                 + 'released or event-formed, and are matched by their people '
+                 + 'being people the new nation accepts.' : '')
+    : 'No nation in this campaign turned into another one.';
+})();
+
 function drawChart() {
   const key = metricSel.value;
   const shown = DATA.tags.filter(t => natTags.includes(t));
@@ -931,6 +1044,7 @@ function drawChart() {
     })),
     xOf: xOfSave, xTicks: saveTicks, hoverXs: saveHovers,
     fmt: fmtFor(key), log: logScale, markers: true,
+    links: SUCCESSIONS,
     readout: document.getElementById('readout'),
     idle: 'Hover the plot to read values at a date.',
     emptyMsg: shown.length ? 'No data for this measure.' : 'Select a nation.',
@@ -979,9 +1093,9 @@ let sideA = [byBrigades[0]].filter(Boolean);
 let sideB = [byBrigades[1]].filter(Boolean);
 
 const pickerA = makePicker(document.getElementById('pick-milA'),
-  tagPickerCfg(sideA, sel => { sideA = sel; drawMilPies(); }));
+  tagPickerCfg(sideA, sel => { sideA = sel; drawMilPies(); }, () => milSave.value));
 const pickerB = makePicker(document.getElementById('pick-milB'),
-  tagPickerCfg(sideB, sel => { sideB = sel; drawMilPies(); }));
+  tagPickerCfg(sideB, sel => { sideB = sel; drawMilPies(); }, () => milSave.value));
 
 const milModeBtn = document.getElementById('milmode');
 milModeBtn.onclick = () => {
@@ -1009,10 +1123,14 @@ document.getElementById('milswap').onclick = () => {
   pickerA.set(sideB.slice());
   pickerB.set(a);
 };
-milSave.onchange = () => { drawMilPies(); drawMilTable(); drawTechTable(); };
+milSave.onchange = () => {
+  pickerA.refresh(); pickerB.refresh(); milPicker.refresh();
+  drawMilPies(); drawMilTable(); drawTechTable();
+};
 
-makePicker(document.getElementById('pick-military'),
-  tagPickerCfg(milTags, sel => { milTags = sel; drawMilTable(); drawTechTable(); }));
+const milPicker = makePicker(document.getElementById('pick-military'),
+  tagPickerCfg(milTags, sel => { milTags = sel; drawMilTable(); drawTechTable(); },
+               () => milSave.value));
 
 const milTypes = () => milMode === 'army' ? DATA.regimentTypes : DATA.shipTypes;
 const milColour = t => C[milTypes().indexOf(t) % C.length];
@@ -1574,7 +1692,7 @@ DATA.dates.forEach(d => {
   popSave.appendChild(o);
 });
 popSave.value = DATA.lastDate;
-popSave.onchange = () => { drawPopTable(); drawCultureTable(); };
+popSave.onchange = () => { culLimit(); drawPopTable(); drawCultureTable(); };
 
 let popShare = false;
 const popShareBtn = document.getElementById('popshare');
@@ -1631,6 +1749,9 @@ DATA.tags.forEach(t => {
   culSel.appendChild(o);
 });
 culSel.value = largestBy('total_pop');
+const culLimit = () => limitSelect(culSel, tagsAt(popSave.value),
+                                   biggestAt(popSave.value, 'total_pop', 1)[0]);
+culLimit();
 culSel.onchange = drawCultureTable;
 
 const culState = {key: 'size', dir: -1};
@@ -2058,7 +2179,9 @@ if (MAP) {
     mapSave.appendChild(o);
   });
   mapSave.value = DATA.lastDate;
-  mapSave.onchange = () => { mapPinned = null; mapRender(); drawGreatPowers(); };
+  mapSave.onchange = () => {
+    mapPinned = null; mapPicker.refresh(); mapRender(); drawGreatPowers();
+  };
 
   const occBtn = document.getElementById('mapocc');
   occBtn.onclick = () => {
@@ -2071,8 +2194,9 @@ if (MAP) {
     mapZoom = 1; mapOX = 0; mapOY = 0; mapPinned = null; mapRender();
   };
 
-  makePicker(document.getElementById('pick-map'),
-    tagPickerCfg(DATA.tags.slice(), sel => { mapTags = sel; mapRender(); }));
+  const mapPicker = makePicker(document.getElementById('pick-map'),
+    tagPickerCfg(DATA.tags.slice(), sel => { mapTags = sel; mapRender(); },
+                 () => mapSave.value));
 
   const canvas = document.getElementById('mapcanvas');
 
@@ -2183,12 +2307,14 @@ function searchSelect(select, placeholder) {
   box.placeholder = placeholder || 'search';
   box.setAttribute('aria-label', placeholder || 'search');
   select.parentNode.insertBefore(box, select);
-  const all = [...select.options];
   box.oninput = () => {
     const q = box.value.trim().toLowerCase();
     let first = null;
-    for (const o of all) {
-      const hit = !q || o.textContent.toLowerCase().includes(q);
+    for (const o of select.options) {
+      // `off` is set by limitSelect for nations this save does not have; the
+      // search must not bring them back.
+      const hit = o.dataset.off !== '1'
+        && (!q || o.textContent.toLowerCase().includes(q));
       o.hidden = !hit;
       if (hit && !first) first = o;
     }
@@ -2299,7 +2425,6 @@ if (TECH) {
     o.textContent = nameOf(t) === t ? t : `${t} · ${nameOf(t)}`;
     tagSel.appendChild(o);
   });
-  tagSel.value = largestBy('total_pop');
   tagSel.onchange = () => { techPick = null; drawTechTree(); };
   const saveSel = document.getElementById('techsave');
   DATA.dates.forEach(d => {
@@ -2307,7 +2432,11 @@ if (TECH) {
     saveSel.appendChild(o);
   });
   saveSel.value = DATA.lastDate;
-  saveSel.onchange = () => { techPick = null; drawTechTree(); };
+  const techLimit = () => limitSelect(tagSel, tagsAt(saveSel.value),
+                                      biggestAt(saveSel.value, 'total_pop', 1)[0]);
+  tagSel.value = largestBy('total_pop');
+  techLimit();
+  saveSel.onchange = () => { techPick = null; techLimit(); drawTechTree(); };
 } else {
   const tab = document.getElementById('tab-tech');
   if (tab) tab.hidden = true;

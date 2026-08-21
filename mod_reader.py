@@ -672,7 +672,6 @@ def province_raster(path, scale=4):
         stride = ((width * bpp + 31) // 32) * 4
         out_w, out_h = width // scale, height // scale
         grid = array.array("i", bytes(4 * out_w * out_h))
-        holes = []
         at = 0
         step = scale * 3
         span = out_w * step
@@ -693,14 +692,8 @@ def province_raster(path, scale=4):
                 if key != seen:
                     seen = key
                     pid = look(key, 0)
-                    if not pid:
-                        holes.append(at)
-                elif not pid:
-                    holes.append(at)
                 grid[at] = pid
                 at += 1
-
-    _close_holes(grid, out_w, out_h, holes)
 
     made = (out_w, out_h, [(pid, sum(1 for _ in run))
                            for pid, run in groupby(grid)])
@@ -721,49 +714,13 @@ def _raster_slot(bmp, csv_path, scale):
         a, b = os.stat(bmp), os.stat(csv_path)
     except OSError:
         return None
+    # The trailing number is this decoder's version. Bump it when what comes
+    # out of the same two files changes, or a stale entry outlives the change.
     key = hashlib.md5(
         f"{os.path.abspath(bmp)}|{a.st_size}|{int(a.st_mtime)}"
-        f"|{b.st_size}|{int(b.st_mtime)}|{scale}".encode("utf-8")).hexdigest()
+        f"|{b.st_size}|{int(b.st_mtime)}|{scale}|2".encode("utf-8")).hexdigest()
     return os.path.join(tempfile.gettempdir(), "vic2_analyzer_cache",
                         "map_" + key + ".pkl")
-
-
-def _close_holes(grid, width, height, holes):
-    """
-    Hand pixels no province claims to whichever province surrounds them.
-
-    Victoria 2 paints one blob into `provinces.bmp` that `definition.csv` never
-    names -- RGB 208,17,223, about 8,000 pixels over the Tibesti in northern
-    Chad -- and every mod built on the vanilla map inherits it. Drawn as it
-    stands it becomes unclaimed land in the middle of a colonised Sahara, which
-    is a gap in the game's own data posing as a fact about the map, so it is
-    grown over from its edges: each unnamed pixel takes the province most of its
-    neighbours belong to, a ring at a time, until the blob is gone.
-    """
-    while holes:
-        filled = {}
-        for at in holes:
-            x = at % width
-            y = at // width
-            around = {}
-            if x:
-                around[grid[at - 1]] = around.get(grid[at - 1], 0) + 1
-            if x + 1 < width:
-                around[grid[at + 1]] = around.get(grid[at + 1], 0) + 1
-            if y:
-                around[grid[at - width]] = around.get(grid[at - width], 0) + 1
-            if y + 1 < height:
-                around[grid[at + width]] = around.get(grid[at + width], 0) + 1
-            around.pop(0, None)
-            if around:
-                # ties go to the lower province id, so the result does not
-                # depend on which order a dict happened to hand them back
-                filled[at] = max(around, key=lambda pid: (around[pid], -pid))
-        if not filled:
-            return                    # nothing borders them; leave them be
-        for at, pid in filled.items():
-            grid[at] = pid
-        holes = [at for at in holes if at not in filled]
 
 
 def government_flag_types(path):
@@ -1098,6 +1055,55 @@ def _pretty(key):
     return key.replace("_", " ").strip().capitalize()
 
 
+def formation_decisions(path):
+    """
+    {formed tag: {tags allowed to form it}}, from the mod's own decisions.
+
+    A formation is a decision whose effect is `change_tag`, and whose
+    `potential` names the tags that may take it -- `form_italy` is open to SAR
+    and SIC, `form_germany` to NGF. Nothing records that the decision was
+    *taken*: the country keeps its own flags through the tag change, and the
+    file that forms Germany, Italy, Scandinavia and Romania sets no country
+    flag at all. So this says who could have formed what, not who did. Which
+    campaign it happened in still has to come off the province ledger.
+    """
+    out = {}
+    folder = os.path.join(path, "decisions")
+    if not os.path.isdir(folder):
+        return out
+    for fname in _files(folder):
+        text = _plain(os.path.join(folder, fname))
+        for block in _brace_blocks(text):
+            made = re.search(r"change_tag(?:_no_core_switch)?\s*=\s*([A-Z0-9]{3})\b",
+                             block)
+            if not made:
+                continue
+            potential = _block_text(block, "potential")
+            from_tags = set(re.findall(r"(?<![\w_])tag\s*=\s*([A-Z0-9]{3})\b",
+                                       potential))
+            if from_tags:
+                out.setdefault(made.group(1), set()).update(from_tags)
+    return out
+
+
+def _brace_blocks(text):
+    """Every second-level `name = { ... }` body, which is where a decision is."""
+    out = []
+    depth = 0
+    start = None
+    for i, ch in enumerate(text):
+        if ch == "{":
+            depth += 1
+            if depth == 2:
+                start = i
+        elif ch == "}":
+            if depth == 2 and start is not None:
+                out.append(text[start:i])
+                start = None
+            depth -= 1
+    return out
+
+
 def load_mod(path):
     """
     Returns {
@@ -1178,6 +1184,7 @@ def load_mod(path):
         "localisation": read_localisation(path),
         "base_prices": base_prices(path),
         "country_order": country_order(path),
+        "formations": formation_decisions(path),
         "province_names": province_names(path),
         "province_regions": province_regions(path),
         "state_names": state_names(path),
