@@ -391,18 +391,46 @@ def count_units(node, nat, where=None):
                 count_units(block, nat, here if here > 0 else where)
 
 
+_I32_WRAP = 2 ** 32 // 1000
+
+
+def unwrap_overflow(n):
+    """
+    Undo a single signed-32-bit overflow on a Vic2 battle stat.
+
+    Vic2 tracks casualties and per-type unit counts internally as a signed
+    32-bit fixed-point integer with 3 implied decimal places (the true count
+    times 1000). A troop count has no fractional part, so that raw internal
+    value is always an exact multiple of 1000 -- but a save with big enough
+    numbers (as heavily-scaled mods produce) can still push it past
+    INT32_MAX and wrap around into negative territory, which is what turns
+    up in the save file as a nonsensical negative loss or unit count.
+
+    Since the true raw value was an exact multiple of 1000 and the wrap
+    subtracts exactly 2**32, undoing it is just adding back 2**32 // 1000 =
+    4,294,967 -- the arithmetic leaves no fractional remainder to round.
+
+    This can't tell a once-wrapped value from one that wrapped twice (a true
+    count north of roughly 4.29 million), which comes back out positive and
+    silently wrong with no way to catch it from the number alone -- but
+    that's already a game/mod bug either way, not something a sign check on
+    its own can fully undo.
+    """
+    return n + _I32_WRAP if n < 0 else n
+
+
 def _side(block):
     """One side of a battle: country, leader, losses and the units engaged."""
     if not isinstance(block, dict):
         return None
     out = {"country": unquote(str(block.get("country", ""))),
            "leader": unquote(str(block.get("leader", ""))),
-           "losses": to_int(block.get("losses"), 0),
+           "losses": unwrap_overflow(to_int(block.get("losses"), 0)),
            "units": {}}
     for key, val in block.items():
         if key in ("country", "leader", "losses") or key.startswith("_"):
             continue
-        n = to_int(val, 0)
+        n = unwrap_overflow(to_int(val, 0))
         if n:
             out["units"][key] = n
     return out
@@ -495,6 +523,10 @@ def read_war(block, active):
         "original_defender": unquote(str(block.get("original_defender", ""))),
         "attackers": sorted({w for _d, w, a in joined if a}),
         "defenders": sorted({w for _d, w, a in joined if not a}),
+        # Raw (date, tag, is_attacker) join events, kept alongside the flat tag
+        # sets above so a consumer can tell an original belligerent from a
+        # later intervention -- the sets alone collapse that distinction.
+        "joins": [[d, w, a] for d, w, a in joined],
         "goals": goals,
         "goal": {
             "casus_belli": unquote(str(goal.get("casus_belli", ""))),

@@ -172,6 +172,17 @@ svg{display:block;width:100%;height:auto}
   color:var(--ink);border-color:var(--rule)}
 .techbox.open{outline:2px solid var(--brass);outline-offset:-2px}
 .techbox:hover{border-color:var(--brass)}
+/* A search only means anything relative to its misses: a highlighted match
+   reads as "found" mainly because everything else has visibly stepped back. */
+.techbox.techmatch{outline:2px solid var(--brass);outline-offset:-1px;
+  background:linear-gradient(180deg,#6B4A24,#4A3018);color:var(--ink)}
+.techbox.techmatch.done{background:linear-gradient(180deg,#5C7A3E,#3E5828)}
+.techbox.techdim{opacity:.32}
+.techcatbadge{display:inline-block;margin-left:5px;padding:0 5px;
+  border-radius:8px;background:var(--brass);color:#2A0F17;font-size:10px;
+  font-weight:700;line-height:15px;vertical-align:1px}
+.techinv{margin:1px 0}
+.techinv .rk{font-size:10.5px}
 .techtitle{font-family:'Playfair Display',Georgia,serif;font-size:16px;
   color:var(--brass);width:100%;margin-bottom:4px}
 .techcols2{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
@@ -256,11 +267,58 @@ tbody tr:hover{background:rgba(231,196,100,.10)}
 .tablewrap.fit td.num,.tablewrap.fit th.num{white-space:nowrap;text-align:right}
 /* Each side of a battle is a column of its own: nation, then who led it, then
    what it was made of, one line each. Laid out across, the unit list alone was
-   wider than the screen. */
+   wider than the screen. Used in the expanded battle detail, not the row. */
 .side{display:flex;flex-direction:column;gap:2px;align-items:flex-start;
   text-align:left}
 .side .unit{color:var(--ink-dim);font-size:11px;line-height:1.35}
 .side .who{color:var(--ink-dim);font-size:11px;font-style:italic}
+/* Battle rows stay one line so many fit on screen; clicking one opens a detail
+   row beneath it with the composition either side brought and lost. */
+.battlerow{cursor:pointer}
+.battlerow.on{background:rgba(231,196,100,.14)}
+.battledetail td{padding:12px 14px 16px;background:rgba(42,15,23,.4);
+  border-bottom:1px solid var(--rule)}
+.battlesides{display:flex;flex-wrap:wrap;gap:10px 36px}
+.battleside{min-width:190px}
+.battleside .side{gap:4px}
+.battleside .sidehead{display:flex;align-items:baseline;gap:6px;
+  font-size:11px;text-transform:uppercase;letter-spacing:.1em;
+  color:var(--ink-dim);margin-bottom:3px}
+.sidetotal{margin-top:6px;font-size:11px;color:var(--ink-dim)}
+.sidetotal b{color:var(--ink);font-weight:500}
+/* table-layout:fixed pins every column to its declared share of the width
+   from the colgroup, regardless of content -- a long battle name or a wide
+   number wraps inside its own cell instead of stretching the table (and the
+   page) wider than the screen. auto layout can't guarantee that; it only
+   wraps once a cell has nowhere left to grow, which can still be past the
+   viewport edge. */
+.battletable{table-layout:fixed}
+.battletable td,.battletable th{overflow-wrap:anywhere}
+/* Defenders on the left, attackers on the right, each split into who was in
+   it from the start and who joined later. Two columns side by side rather
+   than one long flag list, so a reader can tell at a glance how a war grew
+   past its original two sides. A rule down the middle gives the gutter
+   between them a reason to be there instead of reading as leftover space. */
+.belligerents{display:grid;grid-template-columns:1fr auto 1fr;gap:0 28px;
+  padding:4px 0 14px;border-bottom:1px solid var(--rule)}
+.beldivider{width:1px;background:var(--rule)}
+@media(max-width:640px){
+  .belligerents{grid-template-columns:1fr}
+  .beldivider{display:none}
+}
+.belcolhead{font-family:'Playfair Display',Georgia,serif;font-size:12.5px;
+  text-transform:uppercase;letter-spacing:.12em;color:var(--brass);
+  margin-bottom:6px}
+.belgroup{margin-bottom:10px}
+.belgrouphead{font-size:11px;text-transform:uppercase;letter-spacing:.1em;
+  color:var(--ink-dim);margin-bottom:3px}
+/* Name flush left, join date flush right, joined by a dotted rule that takes
+   up whatever's between them -- a ledger line, not a gap. */
+.belrow{display:flex;align-items:baseline;gap:6px;font-size:12.5px;
+  padding:3px 0}
+.belleader{flex:1;min-width:10px;border-bottom:1px dotted rgba(231,196,100,.22);
+  margin-bottom:3px}
+.belrow .rk{font-size:11px;white-space:nowrap}
 /* The belligerent list keeps its "A v B" reading order and wraps within the
    column rather than stretching it. */
 .sides{white-space:normal;line-height:1.7}
@@ -296,6 +354,7 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
 
   <div class="tabs" role="tablist" aria-label="Views">
     <button class="tab" role="tab" id="tab-nations" aria-controls="panel-nations" aria-selected="true">Nations</button>
+    <button class="tab" role="tab" id="tab-compare" aria-controls="panel-compare" aria-selected="false">Compare</button>
     <button class="tab" role="tab" id="tab-pops" aria-controls="panel-pops" aria-selected="false">Pops</button>
     <button class="tab" role="tab" id="tab-military" aria-controls="panel-military" aria-selected="false">Military</button>
     <button class="tab" role="tab" id="tab-fleets" aria-controls="panel-fleets" aria-selected="false">Fleets</button>
@@ -341,7 +400,10 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         <em>not</em> stored anywhere in a save, so the columns beside prestige are
         the real quantities behind them rather than the game's own two numbers.</p>
     </section>
+  </div>
 
+  <!-- ============ COMPARE ============ -->
+  <div role="tabpanel" id="panel-compare" aria-labelledby="tab-compare" hidden>
     <section>
       <h2>Series</h2>
       <div class="controls">
@@ -372,7 +434,7 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         <label class="tb-label" for="milsave" style="margin:0">Save</label>
         <select id="milsave"></select>
         <button id="milmode" aria-pressed="false" title="Switch the pies between land regiments and naval hulls">Army</button>
-        <button id="milmob" aria-pressed="true" title="Add each nation's mobilization ceiling to its brigade count. Army only.">With mobilization</button>
+        <button id="milmob" aria-pressed="true" title="Show each side's full potential -- standing brigades plus everything its mobilization ceiling could still add -- instead of just its brigades right now. Army only.">Potential</button>
       </div>
       <div class="controls">
         <label class="tb-label" style="margin:0">Left</label>
@@ -426,6 +488,8 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         <select id="techtag"></select>
         <label class="tb-label" for="techsave" style="margin:0">Save</label>
         <select id="techsave"></select>
+        <input type="search" id="techfind" class="selsearch" style="width:230px"
+               placeholder="search modifiers or inventions" aria-label="search modifiers or inventions">
       </div>
       <div class="controls" id="techcats"></div>
       <div class="techgrid" id="techgrid"></div>
@@ -433,7 +497,11 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
       <p class="note">Every technology in the mod, laid out as the game lays it
         out: one column per research area, in order. Filled boxes are researched
         at the chosen save. Click one for its effects and the inventions it
-        makes available.</p>
+        makes available. Search matches a technology's own effects and the
+        name and effects of anything it unlocks -- a match in another
+        category shows as a count on that category's button rather than
+        switching you to it, since the same search term can turn up in more
+        than one.</p>
     </section>
   </div>
 
@@ -698,6 +766,19 @@ function spread(labels, gap, top, bottom) {
   if (over > 0) labels.forEach(l => l.y -= over);
   if (labels.length && labels[0].y < top)
     labels.forEach(l => l.y += top - labels[0].y);
+  // The block above only translates the stack, which can't help once there
+  // are simply more labels than the available height has room for at a
+  // legible gap -- translating a too-tall stack just moves the overlap
+  // around rather than removing it. When that happens, give up on the
+  // preferred gap and space the whole stack evenly across what's there;
+  // tighter spacing beats labels sitting on top of each other.
+  if (labels.length > 1) {
+    const need = labels[labels.length - 1].y - labels[0].y;
+    if (need > bottom - top) {
+      const g = (bottom - top) / (labels.length - 1);
+      labels.forEach((l, i) => l.y = top + i * g);
+    }
+  }
   return labels;
 }
 
@@ -872,13 +953,34 @@ function plot(svg, cfg) {
     label.textContent = cfg.fmt(log ? Math.pow(10, tick) : tick);
     axis.appendChild(label);
   });
-  cfg.xTicks.forEach(({v, label: txt}) => {
-    const x = xOf(v);
-    axis.appendChild(el('line', {x1: x, x2: x, y1: M.t, y2: H - M.b, class: 'gridline'}));
-    const label = el('text', {x: x, y: H - M.b + 17, 'text-anchor': 'middle'});
-    label.textContent = txt;
-    axis.appendChild(label);
-  });
+  // One save can sit weeks from the next while the whole plot spans decades,
+  // so a tick label per save (the old behaviour) ran them together into an
+  // unreadable smear. Gridlines still mark every save -- useful reference
+  // points on hover -- but a label only draws once it clears the minimum
+  // pixel gap from the last one shown. The final tick always shows -- a
+  // reader needs the plot's actual end date -- but forcing it on unmodified
+  // could still land it right next to whatever the greedy pass had already
+  // placed just before it, so any of those that are now too close to it get
+  // dropped in a second pass instead of just the first tick being exempted.
+  const xTickGap = cfg.xLabelGap || 44;
+  const ticked = cfg.xTicks.map(t => ({...t, x: xOf(t.v)}));
+  ticked.forEach(({x}) => axis.appendChild(
+    el('line', {x1: x, x2: x, y1: M.t, y2: H - M.b, class: 'gridline'})));
+  if (ticked.length) {
+    const shown = [];
+    for (let i = 0; i < ticked.length - 1; i++) {
+      const t = ticked[i];
+      if (!shown.length || t.x - shown[shown.length - 1].x >= xTickGap) shown.push(t);
+    }
+    const last = ticked[ticked.length - 1];
+    while (shown.length && last.x - shown[shown.length - 1].x < xTickGap) shown.pop();
+    shown.push(last);
+    shown.forEach(({x, label: txt}) => {
+      const label = el('text', {x, y: H - M.b + 17, 'text-anchor': 'middle'});
+      label.textContent = txt;
+      axis.appendChild(label);
+    });
+  }
   if (cfg.baseline != null) {
     const y = yOf(cfg.baseline);
     if (y > M.t && y < H - M.b)
@@ -1198,7 +1300,7 @@ function drawLedger() {
 let milTags = defaultTags.slice(0, 6);
 let milMode = 'army';       // army | navy
 let milView = 'totals';     // totals | composition
-let milWithMob = true;      // add the mobilization ceiling to army totals
+let milPotential = true;    // true = standing + mobilization ceiling, false = brigades right now
 // Horizon blue against field grey: the two uniforms the period ended in, and
 // far enough apart on a burgundy ground to read at a glance. Mobilization is
 // the same blue and grey held back to a khaki, so an added ceiling reads as
@@ -1240,9 +1342,9 @@ milViewBtn.onclick = () => {
 };
 const milMobBtn = document.getElementById('milmob');
 milMobBtn.onclick = () => {
-  milWithMob = !milWithMob;
-  milMobBtn.setAttribute('aria-pressed', milWithMob);
-  milMobBtn.textContent = milWithMob ? 'With mobilization' : 'Standing only';
+  milPotential = !milPotential;
+  milMobBtn.setAttribute('aria-pressed', milPotential);
+  milMobBtn.textContent = milPotential ? 'Potential' : 'Current';
   drawMilPies();
 };
 document.getElementById('milswap').onclick = () => {
@@ -1278,11 +1380,44 @@ const groupTotal = (tags, date) => {
   for (const key in at) n += at[key];
   return n;
 };
+/**
+ * Standing (non-mobilized) brigades for a side. Kept separate from
+ * `groupTotal` -- which is every brigade a side currently has, mobilized or
+ * not -- specifically so it can be added to the mobilization ceiling below
+ * without double-counting: `mobilization_brigades` is the *total* a side
+ * could ever raise through mobilizing, already inclusive of whatever it's
+ * mobilized so far, so adding it to `groupTotal` (which also already
+ * includes those same mobilized brigades) counted them twice.
+ */
+function groupStanding(tags, date) {
+  if (milMode !== 'army') return groupTotal(tags, date);
+  const at = DATA.facts[date] || {};
+  return tags.reduce((sum, t) => sum + ((at[t] || {}).regular_brigades || 0), 0);
+}
 /** Mobilization ceiling for a side. Naval hulls cannot be mobilized. */
 function groupMob(tags, date) {
-  if (milMode !== 'army' || !milWithMob) return 0;
+  if (milMode !== 'army') return 0;
   const at = DATA.facts[date] || {};
   return tags.reduce((sum, t) => sum + ((at[t] || {}).mobilization_brigades || 0), 0);
+}
+/** How many of a side's current brigades came from mobilizing already,
+    rather than standing recruitment -- regular_brigades + this always sums
+    to groupTotal, since a brigade is one or the other, never both. */
+function groupMobilized(tags, date) {
+  if (milMode !== 'army') return 0;
+  const at = DATA.facts[date] || {};
+  return tags.reduce((sum, t) => sum + ((at[t] || {}).mobilized_brigades || 0), 0);
+}
+/**
+ * A side's headline total: its brigades right now, or -- with "Potential"
+ * selected -- its standing brigades plus everything its mobilization
+ * ceiling could still add. See `groupStanding` for why that's the ceiling
+ * added to *standing*, not to the current brigade count.
+ */
+function sideTotal(tags, date) {
+  return milPotential
+    ? groupStanding(tags, date) + groupMob(tags, date)
+    : groupTotal(tags, date);
 }
 const sideLabel = tags => !tags.length ? 'nobody'
   : tags.length <= 3 ? tags.join(' + ')
@@ -1364,8 +1499,10 @@ function drawMilPies() {
   const noun = milMode === 'army' ? 'brigades' : 'ships';
 
   const raised = [groupTotal(sideA, date), groupTotal(sideB, date)];
+  const standing = [groupStanding(sideA, date), groupStanding(sideB, date)];
   const mobs = [groupMob(sideA, date), groupMob(sideB, date)];
-  const totals = [raised[0] + mobs[0], raised[1] + mobs[1]];
+  const mobilized = [groupMobilized(sideA, date), groupMobilized(sideB, date)];
+  const totals = [sideTotal(sideA, date), sideTotal(sideB, date)];
   if (!sideA.length && !sideB.length) {
     const t = el('text', {x: 500, y: 200, 'text-anchor': 'middle', fill: '#C9AC80',
       'font-family': 'IBM Plex Mono, monospace', 'font-size': 14});
@@ -1385,11 +1522,12 @@ function drawMilPies() {
     if (!n) return '';
     return `<span><span class="rk">${sideLabel(tags)} mobilized</span> <b>${n.toLocaleString()}</b></span>`;
   }
-  const split = milMode === 'army' && (mobs[0] || mobs[1])
-    ? `<span><span class="rk">raised</span> <b>${raised[0].toLocaleString()}</b>`
-      + ` <span class="rk">v</span> <b>${raised[1].toLocaleString()}</b></span>`
-      + `<span><span class="rk">mobilization</span> <b>${mobs[0].toLocaleString()}</b>`
-      + ` <span class="rk">v</span> <b>${mobs[1].toLocaleString()}</b></span>`
+  const split = milMode === 'army' && (milPotential ? (mobs[0] || mobs[1]) : (mobilized[0] || mobilized[1]))
+    ? `<span><span class="rk">standing</span> <b>${standing[0].toLocaleString()}</b>`
+      + ` <span class="rk">v</span> <b>${standing[1].toLocaleString()}</b></span>`
+      + `<span><span class="rk">${milPotential ? 'mob ceiling' : 'mobilized'}</span> `
+      + `<b>${(milPotential ? mobs[0] : mobilized[0]).toLocaleString()}</b>`
+      + ` <span class="rk">v</span> <b>${(milPotential ? mobs[1] : mobilized[1]).toLocaleString()}</b></span>`
     : '';
   const idle = `<span class="rk">left</span> <b style="color:${SIDE_COLOUR[0]}">`
     + `${totals[0].toLocaleString()}</b>`
@@ -1410,7 +1548,7 @@ function drawMilPies() {
       const share = (totals[0] + totals[1])
         ? (slice.value / (totals[0] + totals[1]) * 100).toFixed(1) : '0.0';
       const parts = slice.tags.map(tag => {
-        const n = groupTotal([tag], date);
+        const n = sideTotal([tag], date);
         return `<span><span class="rk">${tag}</span> <b style="color:${colourFor(tag)}">`
              + `${n.toLocaleString()}</b></span>`;
       });
@@ -1419,8 +1557,13 @@ function drawMilPies() {
         + `<span class="rk">${noun} (${share}% of both)</span></span>`
         + (slice.tags.length > 1 ? parts.join('') : '');
     }, {split: true});
-    centreText(svg, 500, 196, (totals[0] + totals[1]).toLocaleString(),
-               'both sides · ' + noun + (mobs[0] || mobs[1] ? ' + mobilization' : ''));
+    // The donut hole is only ~2x its inner radius wide, so the centre label
+    // has to stay short -- "both sides" fits; tacking the noun and a
+    // mobilization note on (as this used to) ran past the ring itself. That
+    // detail moves to sit under each side's own number instead, where there
+    // is room for it and it reads as "how this side's total breaks down"
+    // rather than a caption on the aggregate.
+    centreText(svg, 500, 196, (totals[0] + totals[1]).toLocaleString(), 'both sides');
 
     [[sideA, 0, 232], [sideB, 1, 768]].forEach(([tags, side, x]) => {
       const head = el('text', {x, y: 34, 'text-anchor': 'middle', fill: SIDE_COLOUR[side],
@@ -1435,11 +1578,28 @@ function drawMilPies() {
         'font-family': 'IBM Plex Mono, monospace', 'font-size': 11});
       sub.textContent = noun;
       svg.appendChild(sub);
+      // A second line under each side's number only when there is something
+      // to split it into -- a side with no mobilization ceiling (navy, or a
+      // nation that can't mobilize) has nothing worth breaking out.
+      if (milMode === 'army' && (milPotential ? mobs[side] : mobilized[side])) {
+        const breakdown = el('text', {x, y: 122, 'text-anchor': 'middle',
+          fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
+        breakdown.textContent = milPotential
+          ? `${standing[side].toLocaleString()} standing `
+            + `+ ${mobs[side].toLocaleString()} mob ceiling`
+          : `${standing[side].toLocaleString()} standing `
+            + `+ ${mobilized[side].toLocaleString()} mobilized`;
+        svg.appendChild(breakdown);
+      }
     });
-    const ratio = el('text', {x: 500, y: 372, 'text-anchor': 'middle', fill: 'var(--brass)',
-      'font-family': 'IBM Plex Mono, monospace', 'font-size': 14});
-    ratio.textContent = 'left / right  ' + ratioText;
+    const ratio = el('text', {x: 500, y: 362, 'text-anchor': 'middle', fill: 'var(--brass)',
+      'font-family': 'IBM Plex Mono, monospace', 'font-size': 16, 'font-weight': 600});
+    ratio.textContent = ratioText;
     svg.appendChild(ratio);
+    const ratioLabel = el('text', {x: 500, y: 380, 'text-anchor': 'middle',
+      fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
+    ratioLabel.textContent = 'ratio';
+    svg.appendChild(ratioLabel);
 
     slices.forEach(slice => {
       const item = document.createElement('span');
@@ -1449,21 +1609,29 @@ function drawMilPies() {
       legend.appendChild(item);
     });
   } else {
-    // Two pies broken down by unit type, shared colour scale.
+    // Two pies broken down by unit type, shared colour scale. The unit-type
+    // counts already include every brigade a side has raised so far,
+    // mobilized ones among them -- so the ceiling can only be added on top
+    // as *remaining* headroom (ceiling minus what's mobilized already), and
+    // only in Potential mode. Adding the full ceiling regardless of mode, as
+    // this used to, double-counted a nation's already-mobilized brigades:
+    // once inside its unit-type slices, again as part of "the ceiling".
     const counts = [groupCounts(sideA, date), groupCounts(sideB, date)];
+    const remainingMob = milPotential
+      ? [0, 1].map(i => Math.max(0, mobs[i] - mobilized[i])) : [0, 0];
     const present = milTypes().filter(t => counts.some(c => c[t]));
     const setType = type => {
       const parts = [0, 1].map(i => {
-        const n = type === '__mob' ? mobs[i] : (counts[i][type] || 0);
+        const n = type === '__mob' ? remainingMob[i] : (counts[i][type] || 0);
         const pct = totals[i] ? (n / totals[i] * 100).toFixed(1) : '0.0';
         return `<span><span class="rk">${i ? 'right' : 'left'}</span> `
              + `<b style="color:${SIDE_COLOUR[i]}">${n.toLocaleString()}</b> `
              + `<span class="rk">(${pct}%)</span></span>`;
       });
-      const [x, y] = type === '__mob' ? mobs
+      const [x, y] = type === '__mob' ? remainingMob
                    : [counts[0][type] || 0, counts[1][type] || 0];
       const r = y ? (x / y).toFixed(2) + '×' : (x ? '—' : '');
-      const label = type === '__mob' ? 'mobilization ceiling' : type.replace(/_/g, ' ');
+      const label = type === '__mob' ? 'still mobilizable' : type.replace(/_/g, ' ');
       readout.innerHTML = `<span class="rk">${label}</span>` + parts.join('')
         + (r ? `<span><span class="rk">ratio</span> <b>${r}</b></span>` : '');
     };
@@ -1477,8 +1645,8 @@ function drawMilPies() {
         label: `${sideLabel(tags)} · ${type}`, value: counts[side][type] || 0,
         colour: milColour(type), type,
       }));
-      if (mobs[side]) slices.push({
-        label: `${sideLabel(tags)} · mobilization`, value: mobs[side],
+      if (remainingMob[side]) slices.push({
+        label: `${sideLabel(tags)} · still mobilizable`, value: remainingMob[side],
         colour: MOB_COLOUR, type: '__mob',
       });
       donut(svg, cx, 196, 74, 122, slices, slice => setType(slice.type));
@@ -1491,7 +1659,7 @@ function drawMilPies() {
     svg.appendChild(ratio);
     const ratioLabel = el('text', {x: 500, y: 208, 'text-anchor': 'middle',
       fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
-    ratioLabel.textContent = 'left / right';
+    ratioLabel.textContent = 'ratio';
     svg.appendChild(ratioLabel);
 
     present.forEach(type => {
@@ -1502,10 +1670,10 @@ function drawMilPies() {
       item.onmouseenter = () => setType(type);
       legend.appendChild(item);
     });
-    if (mobs[0] || mobs[1]) {
+    if (remainingMob[0] || remainingMob[1]) {
       const item = document.createElement('span');
       item.className = 'slegend';
-      item.innerHTML = `<i style="background:${MOB_COLOUR}"></i>mobilization ceiling`;
+      item.innerHTML = `<i style="background:${MOB_COLOUR}"></i>still mobilizable`;
       item.style.cursor = 'pointer';
       item.onmouseenter = () => setType('__mob');
       legend.appendChild(item);
@@ -2464,6 +2632,26 @@ function techResearched(tag, date) {
   return have;
 }
 
+// A tech matches a search if the term turns up in its own name or effects,
+// or in the name or effects of anything it unlocks -- a mobilization search
+// should surface both a tech that directly grants it and one that only does
+// so through an invention gated behind it.
+function techMatches(t, q) {
+  const hit = (label, value) => label.toLowerCase().includes(q)
+    || String(value).toLowerCase().includes(q);
+  if (t.name.toLowerCase().includes(q)) return true;
+  if (t.effects.some(([l, v]) => hit(l, v))) return true;
+  return t.inventions.some(([, name, effs]) =>
+    name.toLowerCase().includes(q) || effs.some(([l, v]) => hit(l, v)));
+}
+function techCatMatchCount(cat, q) {
+  let n = 0;
+  for (const col of TECH.tree[cat])
+    for (const t of col.techs)
+      if (techMatches(t, q)) n++;
+  return n;
+}
+
 function drawTechTree() {
   if (!TECH) return;
   const tag = document.getElementById('techtag').value;
@@ -2471,8 +2659,11 @@ function drawTechTree() {
   document.getElementById('techwho').textContent =
     (nameOf(tag) === tag ? tag : nameOf(tag) + ' · ' + tag) + ' at ' + date;
   const have = techResearched(tag, date);
+  const query = (document.getElementById('techfind').value || '').trim().toLowerCase();
 
-  // category buttons, with a researched count each
+  // category buttons, with a researched count each, plus a match count badge
+  // when a search is active -- so a hit sitting in a category the reader
+  // isn't currently looking at is visible without jumping them there.
   const bar = document.getElementById('techcats');
   bar.innerHTML = '';
   const cats = Object.keys(TECH.tree);
@@ -2483,6 +2674,16 @@ function drawTechTree() {
       for (const t of col.techs) { total++; if (have.has(t.key)) done++; }
     const b = document.createElement('button');
     b.textContent = (TECH.categories[cat] || cat) + '  ' + done + '/' + total;
+    if (query) {
+      const n = techCatMatchCount(cat, query);
+      if (n) {
+        const badge = document.createElement('span');
+        badge.className = 'techcatbadge';
+        badge.textContent = n;
+        badge.title = n + ' match' + (n === 1 ? '' : 'es') + ' in ' + (TECH.categories[cat] || cat);
+        b.appendChild(badge);
+      }
+    }
     b.setAttribute('aria-pressed', cat === techCat);
     b.onclick = () => { techCat = cat; techPick = null; drawTechTree(); };
     bar.appendChild(b);
@@ -2506,6 +2707,7 @@ function drawTechTree() {
       const open = techPick && techPick.category === techCat
                 && techPick.area === ci && techPick.index === ti;
       if (open) box.classList.add('open');
+      if (query) box.classList.add(techMatches(t, query) ? 'techmatch' : 'techdim');
       box.textContent = t.name;
       box.title = t.name + ' · ' + t.year + ' · ' + t.cost.toLocaleString() + ' research points';
       box.onclick = () => {
@@ -2530,7 +2732,12 @@ function drawTechTree() {
         `<li><span class="rk">${label}</span> <b>${value}</b></li>`).join('')
     : '<li class="rk">No direct modifiers.</li>';
   const invs = t.inventions.length
-    ? t.inventions.map(([, name]) => `<li>${name}</li>`).join('')
+    ? t.inventions.map(([, name, effs]) => `<li>${name}`
+        + (effs.length
+            ? `<div class="techinv"><span class="rk">${effs.map(([l, v]) =>
+                `${l} <b>${v}</b>`).join(' &middot; ')}</span></div>`
+            : '')
+        + `</li>`).join('')
     : '<li class="rk">Nothing gated behind it.</li>';
   panel.innerHTML =
     `<div class="techtitle">${t.name}`
@@ -2564,6 +2771,7 @@ if (TECH) {
   tagSel.value = largestBy('total_pop');
   techLimit();
   saveSel.onchange = () => { techPick = null; techLimit(); drawTechTree(); };
+  document.getElementById('techfind').oninput = () => drawTechTree();
 } else {
   const tab = document.getElementById('tab-tech');
   if (tab) tab.hidden = true;
@@ -2643,6 +2851,10 @@ function drawWarTable() {
 }
 
 let warBattleSort = {key: 'date', dir: 1};
+// Which battles currently have their detail row open. Battle objects are
+// parsed once and only ever reordered, never recreated, so the object itself
+// is a stable key across re-sorts -- no need to invent a string id for it.
+let expandedBattles = new Set();
 
 function warFlag(tag) {
   const src = (DATA.flags || {})[tag + '|'];
@@ -2653,7 +2865,66 @@ function warTag(tag) {
   return `${warFlag(tag)}<b style="color:${colourFor(tag)}">${tag}</b>`;
 }
 
-function warBattleTable(list, title) {
+// A war's own attackers/defenders lists are flat tags with no join info; the
+// *_parties lists (when present) carry a join date and an original/later
+// split per tag. Older data that predates that field falls back to treating
+// everyone as original, so the layout still works either way.
+function belParties(w, side) {
+  const parties = w[side + '_parties'];
+  if (parties) return parties;
+  return (w[side + 's'] || []).map(tag => ({tag, joined: '', original: true}));
+}
+function belRow(p) {
+  const known = nameOf(p.tag) !== p.tag;
+  return `<div class="belrow">${warFlag(p.tag)}`
+    + `<b style="color:${colourFor(p.tag)}">${known ? nameOf(p.tag) : p.tag}</b>`
+    + `<span class="belleader"></span>`
+    + `<span class="rk">${p.joined || 'from the start'}</span></div>`;
+}
+function belColumn(title, parties) {
+  const original = parties.filter(p => p.original);
+  const later = parties.filter(p => !p.original);
+  return `<div class="belcol"><div class="belcolhead">${title}</div>`
+    + (original.length
+        ? `<div class="belgroup"><div class="belgrouphead">Original ${title.toLowerCase()}</div>`
+          + original.map(belRow).join('') + `</div>`
+        : '')
+    + (later.length
+        ? `<div class="belgroup"><div class="belgrouphead">Later interventions</div>`
+          + later.map(belRow).join('') + `</div>`
+        : '')
+    + `</div>`;
+}
+
+// A side's unit string is "kind:n;kind:n", largest first. Parsed once here for
+// both the (unused in the row) army total and the expanded composition list.
+function sideUnits(s) {
+  const units = s[3] ? s[3].split(';').map(p => {
+    const [kind, n] = p.split(':');
+    return [kind.replace(/_/g, ' '), +n];
+  }) : [];
+  return {units, army: units.reduce((sum, [, n]) => sum + n, 0)};
+}
+
+function battleDetail(b) {
+  const side = (label, s) => {
+    const {units, army} = sideUnits(s);
+    return `<div class="battleside"><div class="sidehead">${label}</div>`
+      + `<div class="side">${warTag(s[0])}`
+      + `<span class="who">${s[1] || '—'}</span>`
+      + units.map(([kind, n]) =>
+          `<span class="unit">${kind} ${n.toLocaleString()}</span>`).join('')
+      + `</div>`
+      + `<div class="sidetotal">army <b>${army.toLocaleString()}</b>`
+      +   ` &nbsp; lost <b>${s[2].toLocaleString()}</b></div>`
+      + `</div>`;
+  };
+  return `<tr class="battledetail"><td colspan="8"><div class="battlesides">`
+    + side('Defender', b.d) + side('Attacker', b.a)
+    + `</div></td></tr>`;
+}
+
+function warBattleTable(list, title, kind) {
   if (!list.length) return '';
   const get = {
     date: b => b.date || '9999',
@@ -2666,40 +2937,42 @@ function warBattleTable(list, title) {
     const a = get(x), b = get(y);
     return (a < b ? -1 : a > b ? 1 : 0) * warBattleSort.dir;
   });
+  // Defender before Attacker, matching how a reader asks "who held, who came
+  // for it" -- the Winner column already carries whichever side actually won.
   const head = [['date', 'Date'], ['name', 'Battle'], ['', 'Winner'],
-                ['', 'Attacker'], ['alost', 'Lost'],
-                ['', 'Defender'], ['dlost', 'Lost'], ['total', 'Total']];
-  // A side reads down, not across: nation, then its general, then one line per
-  // unit type. Strung along a row instead, a single battle was wider than the
-  // window and everything after it had to be scrolled to.
-  const side = s => `<div class="side">${warTag(s[0])}`
-    + `<span class="who">${s[1] || '—'}</span>`
-    + (s[3] ? s[3].split(';').map(p => {
-        const [kind, n] = p.split(':');
-        return `<span class="unit">${kind.replace(/_/g, ' ')} `
-          + `${(+n).toLocaleString()}</span>`;
-      }).join('') : '')
-    + `</div>`;
+                ['', 'Defender'], ['dlost', 'Lost'],
+                ['', 'Attacker'], ['alost', 'Lost'], ['total', 'Total losses']];
+  // Column widths sum to 100%. Fixed rather than content-driven -- see
+  // .battletable -- so this table can never push the page wider than the
+  // screen no matter how long a battle or nation name gets.
+  const widths = [9, 23, 9, 11, 11, 11, 11, 15];
+  const numCol = [true, false, false, false, true, false, true, true];
   return `<div class="techsub" style="margin-top:12px">${title} `
     + `<span class="rk">${list.length}</span></div>`
-    + `<div class="tablewrap fit"><table class="mini"><thead><tr>`
+    + `<div class="tablewrap fit"><table class="mini battletable">`
+    + `<colgroup>${widths.map(w => `<col style="width:${w}%">`).join('')}</colgroup>`
+    + `<thead><tr>`
     + head.map(([k, label], i) => {
-        const cls = i >= 4 || i === 0 ? ' class="num"' : '';
+        const cls = numCol[i] ? ' class="num"' : '';
         return k
           ? `<th data-bk="${k}"${cls}${warBattleSort.key === k ? ' aria-sort="' +
               (warBattleSort.dir < 0 ? 'descending' : 'ascending') + '"' : ''}>${label}</th>`
           : `<th${cls}>${label}</th>`;
       }).join('')
     + `</tr></thead><tbody>`
-    + rows.map(b => {
+    + rows.map((b, i) => {
         const win = b.won ? b.a[0] : b.d[0];
-        return `<tr><td class="num">${b.date || '<span class="rk">unknown</span>'}</td>`
+        const open = expandedBattles.has(b);
+        return `<tr class="battlerow${open ? ' on' : ''}" `
+            + `data-bkind="${kind}" data-bi="${list.indexOf(b)}">`
+          + `<td class="num">${b.date || '<span class="rk">unknown</span>'}</td>`
           + `<td>${b.name}</td><td>${warTag(win)}</td>`
-          + `<td>${side(b.a)}</td>`
-          + `<td class="num">${b.a[2].toLocaleString()}</td>`
-          + `<td>${side(b.d)}</td>`
+          + `<td>${warTag(b.d[0])}</td>`
           + `<td class="num">${b.d[2].toLocaleString()}</td>`
-          + `<td class="num">${(b.a[2] + b.d[2]).toLocaleString()}</td></tr>`;
+          + `<td>${warTag(b.a[0])}</td>`
+          + `<td class="num">${b.a[2].toLocaleString()}</td>`
+          + `<td class="num">${(b.a[2] + b.d[2]).toLocaleString()}</td></tr>`
+          + (open ? battleDetail(b) : '');
       }).join('')
     + `</tbody></table></div>`;
 }
@@ -2755,13 +3028,14 @@ function drawWarDetail() {
     +   `<span><span class="rk">to</span> <b>${w.active ? 'ongoing' : (w.end || '—')}</b></span>`
     +   `<span><span class="rk">casualties</span> <b>${warLosses(w).toLocaleString()}</b></span>`
     + `</div>`
-    + `<div class="readout" style="border:0;padding:0 0 10px">`
-    +   `<span><span class="rk">attackers</span> ${w.attackers.map(warTag).join(' ')}</span>`
-    +   `<span><span class="rk">defenders</span> ${w.defenders.map(warTag).join(' ')}</span>`
+    + `<div class="belligerents">`
+    +   belColumn('Defenders', belParties(w, 'defender'))
+    +   `<div class="beldivider"></div>`
+    +   belColumn('Attackers', belParties(w, 'attacker'))
     + `</div>`
     + `<div class="techsub">War goals</div>${goals}${land}`
-    + warBattleTable(dry, 'Land battles')
-    + warBattleTable(sea, 'Naval battles')
+    + warBattleTable(dry, 'Land battles', 'land')
+    + warBattleTable(sea, 'Naval battles', 'sea')
     + (undated ? `<p class="note">${undated} battle${undated === 1 ? ' has' : 's have'} `
         + `no date. A save keeps dates only on its most recent battles, so a battle `
         + `is dated here when some save in the folder still remembered it.</p>` : '');
@@ -2771,6 +3045,17 @@ function drawWarDetail() {
       const k = th.dataset.bk;
       if (warBattleSort.key === k) warBattleSort.dir *= -1;
       else warBattleSort = {key: k, dir: k === 'date' || k === 'name' ? 1 : -1};
+      drawWarDetail();
+    };
+  });
+  // Click a battle row to open/close its composition detail underneath it.
+  // The row's own list ('land' or 'sea') is looked up fresh here rather than
+  // trusting a captured closure, since dry/sea are rebuilt every draw.
+  box.querySelectorAll('tr.battlerow').forEach(tr => {
+    tr.onclick = () => {
+      const b = (tr.dataset.bkind === 'sea' ? sea : dry)[+tr.dataset.bi];
+      if (expandedBattles.has(b)) expandedBattles.delete(b);
+      else expandedBattles.add(b);
       drawWarDetail();
     };
   });

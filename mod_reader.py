@@ -948,14 +948,14 @@ _TECH_SKIP = {"area", "year", "cost", "ai_chance", "unciv_military",
               "unciv_naval", "unciv_economic", "unciv_culture"}
 
 
-def _effects(block, prefix=""):
-    """[(label key, value)] for everything on a tech that is an actual effect."""
+def _flatten_effects(block, skip, prefix=""):
+    """[(label key, value)] for every field on `block` that isn't bookkeeping."""
     out = []
     for key, val in block.items():
-        if key.startswith("_") or key in _TECH_SKIP:
+        if key.startswith("_") or key in skip:
             continue
         if isinstance(val, dict):
-            out.extend(_effects(val, prefix + key + ": "))
+            out.extend(_flatten_effects(val, skip, prefix + key + ": "))
         elif isinstance(val, list):
             for item in val:
                 if not isinstance(item, (dict, list)):
@@ -965,13 +965,45 @@ def _effects(block, prefix=""):
     return out
 
 
+def _effects(block, prefix=""):
+    """[(label key, value)] for everything on a tech that is an actual effect."""
+    return _flatten_effects(block, _TECH_SKIP, prefix)
+
+
+_INVENTION_SKIP = {"icon", "limit", "chance"}
+
+
+def _invention_effects(block):
+    """
+    [(label key, value)] for what an invention itself grants.
+
+    Unlike a tech, an invention's modifiers can sit at its own top level or be
+    tucked inside an `effect = {}` sub-block -- `_find_mob_size` above already
+    has to check both places for the same reason. `effect` is unwrapped into
+    the same flat list here rather than nested under an "effect:" prefix,
+    which would just be noise every invention repeats.
+    """
+    if not isinstance(block, dict):
+        return []
+    out = _flatten_effects({k: v for k, v in block.items() if k != "effect"},
+                            _INVENTION_SKIP)
+    nested = block.get("effect")
+    if isinstance(nested, dict):
+        out.extend(_flatten_effects(nested, _INVENTION_SKIP))
+    return out
+
+
 def invention_index(path):
     """
-    {invention: set of techs its `limit` requires}, for every invention.
+    {invention: {"requires": set of techs its `limit` needs,
+                 "effects": [(label, value), ...] it grants}}, for every
+    invention whose `limit` names at least one tech.
 
-    `invention_rules` deliberately holds only the inventions that grant
-    mobilisation size. The technology tree wants all of them, so it can show
-    what each tech unlocks.
+    An invention with no tech requirement never shows up under any tech's
+    "makes available" list, so `technology_tree` has nothing to attach it
+    to -- it's excluded here for the same reason `invention_rules` (built
+    separately, for mobilisation) only cares about the inventions it can
+    actually gate.
     """
     folder = os.path.join(path, "inventions")
     out = {}
@@ -980,10 +1012,10 @@ def invention_index(path):
     for fname in _files(folder):
         target = os.path.join(folder, fname)
         raw = _COMMENT.sub("", open(target, "rb").read().decode("latin-1"))
-        for name, _block in _read_clausewitz(target):
+        for name, block in _read_clausewitz(target):
             reqs, _tags, _invs = _limit_of(_block_text(raw, name))
             if reqs:
-                out[name] = reqs
+                out[name] = {"requires": reqs, "effects": _invention_effects(block)}
     return out
 
 
@@ -997,16 +1029,21 @@ def technology_tree(path, rules=None):
     techs appear down that column, so it is kept.
 
     Each tech carries its year, cost, its effects, and the inventions gated
-    behind it, which come from the invention `limit` blocks already parsed for
-    mobilisation.
+    behind it -- each with its own effects too -- which come from the
+    invention `limit` and body already parsed by `invention_index`.
     """
     folder = os.path.join(path, "technologies")
     if not os.path.isdir(folder):
         return {}
 
+    rule_map = rules if rules is not None else invention_index(path)
     gated = {}
-    for name, techs in (rules if rules is not None
-                        else invention_index(path)).items():
+    inv_effects = {}
+    for name, info in rule_map.items():
+        # `rules` is a public parameter; accept the older {name: set(techs)}
+        # shape too, in case anything still passes it that way.
+        techs = info["requires"] if isinstance(info, dict) else info
+        inv_effects[name] = info["effects"] if isinstance(info, dict) else []
         for tech in techs:
             gated.setdefault(tech, []).append(name)
 
@@ -1039,6 +1076,8 @@ def technology_tree(path, rules=None):
                 keys.add(label.split(":")[0].strip())
             for inv in gated.get(key, ()):
                 keys.add(inv)
+                for label, _v in inv_effects.get(inv, ()):
+                    keys.add(label.split(":")[0].strip())
         if areas:
             tree[category] = areas
             keys.add(category)
@@ -1054,7 +1093,10 @@ def technology_tree(path, rules=None):
                     for label, value in tech["effects"]
                 ]
                 tech["inventions"] = [
-                    [inv, names.get(inv) or _pretty(inv)] for inv in tech["inventions"]
+                    [inv, names.get(inv) or _pretty(inv),
+                     [[names.get(lbl) or _pretty(lbl), val]
+                      for lbl, val in inv_effects.get(inv, ())]]
+                    for inv in tech["inventions"]
                 ]
     return {"tree": tree,
             "categories": {c: names.get(c) or _pretty(c) for c in tree}}

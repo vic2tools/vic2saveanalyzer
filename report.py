@@ -203,6 +203,33 @@ def _war_key(war):
             war["start"])
 
 
+def _participants(tags, join_dates, is_attacker, original_tag, start):
+    """
+    Split one side's belligerents into original combatants and later
+    interventions.
+
+    A tag counts as original if it's the war's named original attacker or
+    defender, if it has no recorded join date (founders usually aren't
+    logged joining their own war -- only reinforcements get an explicit
+    `add_attacker`/`add_defender` event), or if its first join date falls
+    within a month of the war's start. Everything else is a later
+    intervention. Originals sort first, each group oldest-joined first.
+    """
+    cutoff = year_fraction(start) + 1 / 12.0 if start else None
+    out = []
+    for tag in tags:
+        joined = join_dates.get((tag, is_attacker), "")
+        original = (
+            tag == original_tag or not joined
+            or cutoff is None or year_fraction(joined) <= cutoff
+        )
+        out.append({"tag": tag, "joined": joined, "original": original})
+    out.sort(key=lambda p: (not p["original"],
+                             year_fraction(p["joined"]) if p["joined"] else 0.0,
+                             p["tag"]))
+    return out
+
+
 def _battle_key(battle, seen):
     """Identify a battle across saves. Province, name and both casualty counts
     pin it down; a repeat of all four in the same war gets an occurrence
@@ -293,6 +320,17 @@ def build_wars(parsed, province_names=None, province_regions=None,
                 held["active"] = False
             for field in ("attackers", "defenders"):
                 held[field] = sorted(set(held[field]) | set(war[field]))
+            # Earliest date each tag is seen joining each side, across every
+            # save that caught the war. A later save can only add events an
+            # earlier one hadn't happened yet -- never move one earlier -- so
+            # keeping the minimum date per (tag, side) is always safe.
+            jd = held.setdefault("join_dates", {})
+            for d, w, a in war.get("joins", ()):
+                if not d:
+                    continue
+                k = (w, a)
+                if k not in jd or year_fraction(d) < year_fraction(jd[k]):
+                    jd[k] = d
             # Goals added mid-war vanish when it ends, so take them from
             # whichever save caught the war still running.
             book = held.setdefault("goalbook", {})
@@ -394,6 +432,14 @@ def build_wars(parsed, province_names=None, province_regions=None,
             "active": bool(war["active"]),
             "attackers": war["attackers"] or [war["original_attacker"]],
             "defenders": war["defenders"] or [war["original_defender"]],
+            "attacker_parties": _participants(
+                war["attackers"] or [war["original_attacker"]],
+                war.get("join_dates", {}), True,
+                war["original_attacker"], war["start"]),
+            "defender_parties": _participants(
+                war["defenders"] or [war["original_defender"]],
+                war.get("join_dates", {}), False,
+                war["original_defender"], war["start"]),
             "goal": war["goal"],
             "losses": [atk, dfd],
             "outcome": outcome,
