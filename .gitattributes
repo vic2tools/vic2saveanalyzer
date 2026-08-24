@@ -5,3 +5,7 @@
 
 # The licence is a verbatim document; never let it be rewritten.
 LICENSE -text
+
+# The built executable is bytes. `text=auto` above would normally leave it
+# alone on its own, but a 13 MB artifact is not worth leaving to a heuristic.
+*.exe -text

@@ -481,7 +481,7 @@ def regions(path):
     A war goal names one province, but it wants the whole state, so testing
     whether a goal was met means knowing which provinces travel together.
     """
-    target = os.path.join(path, "map", "region.txt")
+    target = _map_file(path, "region.txt")
     if not os.path.isfile(target):
         return {}
     out = {}
@@ -542,21 +542,95 @@ def country_order(path):
     return [tag for tag, _file in _country_entries(path)]
 
 
+_COUNTRY_ENTRY = re.compile(r'^\s*([A-Z0-9]{3})\s*=\s*"?([^"\r\n]+?)"?\s*$', re.M)
+
+
+def country_files(path):
+    """
+    {tag: the file defining it}, the mod's copy winning over the game's.
+
+    Same partial-mod story as the map: Ferrum Mare's `common/countries.txt`
+    names 179 tags and its `countries/` folder holds 130 files, so a campaign
+    played on the standard nations found a colour for two of them and drew
+    the rest of the world as unclaimed ground. The base game is read first
+    and the mod laid over the top, which is the order the game resolves them
+    in.
+    """
+    out = {}
+    for root in (base_game_path(path), path):
+        if not root:
+            continue
+        listing = os.path.join(root, "common", "countries.txt")
+        if not os.path.isfile(listing):
+            continue
+        for tag, rel in _COUNTRY_ENTRY.findall(_plain(listing)):
+            rel = rel.strip().replace("/", os.sep)
+            # A tag may be listed by one and shipped by the other, so the file
+            # is looked for in both regardless of which list named it.
+            for home in (path, root):
+                target = os.path.join(home, "common", rel)
+                if os.path.isfile(target):
+                    out[tag] = target
+                    break
+    return out
+
+
 def country_colours(path):
     """{tag: '#rrggbb'} from each country file's `color = { r g b }`."""
-    listing = os.path.join(path, "common", "countries.txt")
-    if not os.path.isfile(listing):
-        return {}
     out = {}
-    entry = re.compile(r'^\s*([A-Z0-9]{3})\s*=\s*"?([^"\r\n]+?)"?\s*$', re.M)
-    for tag, rel in entry.findall(_plain(listing)):
-        target = os.path.join(path, "common", rel.strip().replace("/", os.sep))
-        if not os.path.isfile(target):
-            continue
-        hit = re.search(r"color\s*=\s*\{\s*(\d+)\s+(\d+)\s+(\d+)\s*\}", _plain(target))
+    for tag, target in country_files(path).items():
+        hit = re.search(r"color\s*=\s*\{\s*(\d+)\s+(\d+)\s+(\d+)\s*\}",
+                        _plain(target))
         if hit:
             out[tag] = "#%02x%02x%02x" % tuple(int(g) for g in hit.groups())
     return out
+
+
+def base_game_path(path):
+    """
+    The Victoria II install a mod sits inside, or None when there isn't one.
+
+    Mods live at `<install>/mod/<name>`, so the install is two levels up.
+    Confirmed by looking for files no mod folder holds on its own, rather
+    than trusting the shape of the path.
+    """
+    if not path:
+        return None
+    root = os.path.dirname(os.path.dirname(os.path.abspath(path)))
+    if os.path.basename(os.path.dirname(os.path.abspath(path))).lower() != "mod":
+        return None
+    if not os.path.isfile(os.path.join(root, "map", "default.map")):
+        return None
+    return root
+
+
+def map_source(path):
+    """
+    Where to read the province layout from: the mod, or the game beneath it.
+
+    Victoria II resolves a mod file by file. A mod that ships no
+    `provinces.bmp` runs on the base game's map -- Modus Omnino Demens ships
+    one file in `map/` and inherits the rest -- and reading only the mod
+    folder gave it no map at all. So the bitmap and `definition.csv` are
+    resolved as a pair, because a bitmap read against another map's ids is
+    worse than no map.
+
+    `positions.txt` and `default.map` follow whichever map won, for the same
+    reason: army counters placed by coordinates from a *different* map would
+    land in the wrong provinces, so a mod with its own bitmap never borrows
+    the game's positions. Anything it then leaves unanchored is covered by
+    `province_anchors`.
+    """
+    own = os.path.join(path, "map")
+    if (os.path.isfile(os.path.join(own, "provinces.bmp"))
+            and os.path.isfile(os.path.join(own, "definition.csv"))):
+        return path
+    return base_game_path(path) or path
+
+
+def _map_file(path, name):
+    """One file from `map/`, taken from wherever the province layout is."""
+    return os.path.join(map_source(path), "map", name)
 
 
 def unit_positions(path):
@@ -568,7 +642,7 @@ def unit_positions(path):
     from the bottom of the map, matching the province bitmap, and is flipped to
     screen orientation by the caller that knows the height.
     """
-    target = os.path.join(path, "map", "positions.txt")
+    target = _map_file(path, "positions.txt")
     if not os.path.isfile(target):
         return {}
     out = {}
@@ -594,9 +668,64 @@ def unit_positions(path):
     return out
 
 
+def province_anchors(width, runs, wanted):
+    """
+    A point inside each of `wanted`, taken from the run-length raster.
+
+    `map/positions.txt` is the game's own anchor for army counters and stays
+    the first choice, but a mod is free to ship a stripped one: Ferrum Mare
+    gives 3,450 provinces a positions block and a usable anchor to 178 of
+    them. Every province without one used to drop off the deployment map
+    silently, which on that mod meant almost all of them.
+
+    The bitmap is already in hand, so the fallback is the province's own
+    pixels -- the one nearest their centroid, which for a crescent or an
+    archipelago keeps the marker on the province instead of in the bay it
+    wraps around. Where `positions.txt` does give an anchor the two agree to
+    within a pixel or so, which is what makes it safe to mix them on one map.
+
+    Coordinates come back in downsampled grid units, the space
+    `positions.txt` is scaled into, and point at the centre of a cell.
+    """
+    if not width or not wanted:
+        return {}
+
+    def walk():
+        """(province, x, y) for every raster cell belonging to `wanted`."""
+        at = 0
+        for pid, count in runs:
+            if pid in wanted:
+                for i in range(at, at + count):
+                    yield pid, i % width, i // width
+            at += count
+
+    # Two passes rather than one, so nothing holds a province's pixels: at
+    # full scale the grid is twelve million cells and the land alone would be
+    # a few hundred megabytes of coordinate tuples.
+    totals = {}
+    for pid, x, y in walk():
+        got = totals.get(pid)
+        if got is None:
+            totals[pid] = [x, y, 1]
+        else:
+            got[0] += x
+            got[1] += y
+            got[2] += 1
+    middle = {pid: (sx / n, sy / n) for pid, (sx, sy, n) in totals.items()}
+
+    best = {}
+    for pid, x, y in walk():
+        cx, cy = middle[pid]
+        far = (x - cx) ** 2 + (y - cy) ** 2
+        if pid not in best or far < best[pid][0]:
+            best[pid] = (far, x, y)
+    return {pid: [round(x + 0.5, 1), round(y + 0.5, 1)]
+            for pid, (_far, x, y) in best.items()}
+
+
 def sea_provinces(path):
     """Province ids the map treats as water, from `map/default.map`."""
-    target = os.path.join(path, "map", "default.map")
+    target = _map_file(path, "default.map")
     if not os.path.isfile(target):
         return frozenset()
     hit = re.search(r"sea_starts\s*=\s*\{([^}]*)\}", _plain(target))
@@ -607,7 +736,7 @@ def sea_provinces(path):
 
 def province_names(path):
     """{province id: name} from `map/definition.csv`."""
-    target = os.path.join(path, "map", "definition.csv")
+    target = _map_file(path, "definition.csv")
     if not os.path.isfile(target):
         return {}
     out = {}
@@ -641,8 +770,8 @@ def province_raster(path, scale=4):
     parsed saves in the temp folder, because a mod's map does not change between
     runs and half a second is most of what is left once the saves are cached.
     """
-    bmp = os.path.join(path, "map", "provinces.bmp")
-    csv_path = os.path.join(path, "map", "definition.csv")
+    bmp = _map_file(path, "provinces.bmp")
+    csv_path = _map_file(path, "definition.csv")
     if not (os.path.isfile(bmp) and os.path.isfile(csv_path)):
         return 0, 0, []
 

@@ -23,10 +23,15 @@ __pycache__/
 Thumbs.db
 desktop.ini
 
-# The executable and everything that makes it: `python build_exe.py` rebuilds
-# all of it, and a 13 MB binary does not belong in a source repository.
+# Everything the build leaves behind. `python build_exe.py` regenerates all of
+# it, including the icon, so none of it is worth tracking -- except the finished
+# executable, which is tracked deliberately: it is what someone who does not
+# have Python installed actually downloads. Note `dist/*` rather than `dist/`:
+# git will not re-include a file underneath an excluded directory, so the
+# directory has to stay listed for the negation below to be read at all.
 build/
-dist/
+dist/*
+!dist/vic2saveanalyzer.exe
 dist_new/
 vic2.ico
 

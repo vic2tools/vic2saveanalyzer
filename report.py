@@ -109,8 +109,8 @@ def build_map(mod, parsed, scale=5):
     change, and ownership ships as a delta against the previous save because a
     campaign rarely moves more than a few hundred provinces between snapshots.
     """
-    from mod_reader import (country_colours, province_names, province_raster,
-                            sea_provinces, unit_positions)
+    from mod_reader import (country_colours, province_anchors, province_names,
+                            province_raster, sea_provinces, unit_positions)
 
     if not mod or not mod.get("path"):
         return None
@@ -135,6 +135,12 @@ def build_map(mod, parsed, scale=5):
             continue
         # positions.txt measures y from the bottom, like the bitmap
         spots[pid] = [round(x / scale, 1), round((full_height - y) / scale, 1)]
+    # A mod may ship a positions.txt that names a province without giving it
+    # any anchor at all. Those fall back to the province's own shape rather
+    # than vanishing from the map -- see `province_anchors`.
+    unanchored = garrisoned - set(spots)
+    spots.update(province_anchors(width, runs, unanchored))
+    fallback = len(unanchored & set(spots))
 
     # one tag table for every save, so ownership is a list of small integers
     tags = sorted({owner
@@ -185,6 +191,9 @@ def build_map(mod, parsed, scale=5):
         "w": width,
         "h": height,
         "scale": scale,
+        # How many garrisoned provinces the mod's positions.txt could not
+        # anchor, so the caller can say so rather than leave it silent.
+        "derived": fallback,
         "runs": " ".join(_b36(p) if c == 1 else _b36(p) + "." + _b36(c)
                          for p, c in runs),
         "tags": tags,

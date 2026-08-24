@@ -221,6 +221,14 @@ table.mini td .rk{font-size:11px;white-space:normal}
 .axisline{stroke:var(--rule);stroke-width:1}
 .plotline{fill:none;stroke-width:1.75;stroke-linejoin:round;stroke-linecap:round}
 .plotline.thin{stroke-width:1.35}
+/* A tag longer than the gutter still reaches back over the plot, so each
+   one carries its own dark outline rather than relying on the space it
+   landed in being empty. The leader joining a moved tag to its line is
+   drawn faint: it is there to be followed when asked, not to be read. */
+.endlab{font-family:'IBM Plex Mono',ui-monospace,monospace;
+  paint-order:stroke;stroke:var(--ground-deep);stroke-width:3.2px;
+  stroke-linejoin:round;stroke-linecap:round}
+.leader{fill:none;stroke-width:.9;opacity:.5}
 @media(prefers-reduced-motion:no-preference){
   .plotline{stroke-dasharray:var(--len);stroke-dashoffset:var(--len);
     animation:draw .9s cubic-bezier(.3,.7,.3,1) forwards}
@@ -641,10 +649,42 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
 <script>
 const DATA = __DATA__;
 const C = DATA.colours;
+/**
+ * A stable colour for the nth series in a set.
+ *
+ * `C` is a hand-picked palette sized for a vanilla campaign. Mods run past
+ * it -- Ferrum Mare fields a 13th regiment type and a 13th pop type, and the
+ * market runs to about 48 goods -- and plain `C[i % C.length]` then hands two
+ * different series the *identical* colour: `tank` came out the same gold as
+ * `artillery`, one indistinguishable wedge in the composition pie.
+ *
+ * The first `C.length` series keep their hand-picked colours exactly, so
+ * every chart that fitted before is unchanged. Past that, hues are placed at
+ * the golden angle -- which spreads any number of them about as evenly as a
+ * circle allows -- at the palette's own saturation, so the overflow still
+ * reads as part of the same set.
+ *
+ * Lightness steps every `C.length` on top of that, because the golden angle
+ * only guarantees a wide gap between *consecutive* series: the pair that
+ * ends up closest in hue is always about 21 or 34 apart, which is far enough
+ * to land on a different step. The goods list, the worst case here, comes
+ * out with no two colours nearer than a tone apart.
+ */
+const seriesColour = i => {
+  if (i < 0) return C[0];
+  if (i < C.length) return C[i];
+  const over = i - C.length;
+  const hue = ((over * 137.508) + 21) % 360;
+  const light = [63, 52, 74][Math.floor(over / C.length) % 3];
+  return `hsl(${hue.toFixed(1)} 38% ${light}%)`;
+};
 const SVGNS = 'http://www.w3.org/2000/svg';
 const el = (n, a) => { const e = document.createElementNS(SVGNS, n);
   for (const k in a) e.setAttribute(k, a[k]); return e; };
-const W = 1000, H = 460, M = {t: 20, r: 20, b: 40, l: 80};
+// The right margin is wide because the end-of-line tags live in it: a tag
+// laid over the plot has to fight the gridlines and the lines it names,
+// and a stack of them has nowhere to go but on top of each other.
+const W = 1000, H = 460, M = {t: 20, r: 58, b: 40, l: 80};
 
 const nameOf = t => DATA.tagNames[t] || t;
 /* A nation is drawn in its own colour out of the mod, so the report reads like
@@ -717,12 +757,12 @@ const NATION_INK = {};
   const own = (DATA.map && DATA.map.colours) || {};
   DATA.tags.forEach(t => {
     const ink = _readable(own[t]);
-    NATION_INK[t] = ink || C[DATA.tags.indexOf(t) % C.length];
+    NATION_INK[t] = ink || seriesColour(DATA.tags.indexOf(t));
   });
 })();
 
-const colourFor = t => NATION_INK[t] || C[DATA.tags.indexOf(t) % C.length];
-const goodColour = g => C[DATA.goods.indexOf(g) % C.length];
+const colourFor = t => NATION_INK[t] || seriesColour(DATA.tags.indexOf(t));
+const goodColour = g => seriesColour(DATA.goods.indexOf(g));
 
 const fmtCount = v => {
   const a = Math.abs(v);
@@ -757,28 +797,140 @@ function logTicks(lo, hi) {
     }
   return out.length >= 3 ? out : niceTicks(lo, hi, 5);
 }
-// Keep end-of-line labels from stacking on top of one another.
-function spread(labels, gap, top, bottom) {
-  labels.sort((a, b) => a.y - b.y);
-  for (let i = 1; i < labels.length; i++)
-    if (labels[i].y - labels[i-1].y < gap) labels[i].y = labels[i-1].y + gap;
-  const over = labels.length ? labels[labels.length-1].y - bottom : 0;
-  if (over > 0) labels.forEach(l => l.y -= over);
-  if (labels.length && labels[0].y < top)
-    labels.forEach(l => l.y += top - labels[0].y);
-  // The block above only translates the stack, which can't help once there
-  // are simply more labels than the available height has room for at a
-  // legible gap -- translating a too-tall stack just moves the overlap
-  // around rather than removing it. When that happens, give up on the
-  // preferred gap and space the whole stack evenly across what's there;
-  // tighter spacing beats labels sitting on top of each other.
-  if (labels.length > 1) {
-    const need = labels[labels.length - 1].y - labels[0].y;
-    if (need > bottom - top) {
-      const g = (bottom - top) / (labels.length - 1);
-      labels.forEach((l, i) => l.y = top + i * g);
+/* Stack one column of labels, moving each as little as it can be moved.
+
+   The obvious way -- walk down the list and push anything too close to its
+   neighbour further down -- drags a whole run downhill from whichever label
+   happened to come first, so labels with room to spare still end up moved and
+   the run as a whole finishes low. Here labels that already clear each other
+   are left exactly where their line ended, and only a run that genuinely
+   collides is evened out, centred on where its own members wanted to be. */
+function packColumn(items, gap, top, bottom) {
+  items.sort((a, b) => a.want - b.want);
+  // A run's `sum / n` is the first position it would like: every member
+  // contributes the start it implies, which is its own wanted position less
+  // the gaps that would sit above it inside the run.
+  const runs = [];
+  for (const item of items) {
+    let run = {n: 1, sum: item.want, items: [item]};
+    while (runs.length) {
+      const prev = runs[runs.length - 1];
+      if (prev.sum / prev.n + prev.n * gap <= run.sum / run.n) break;
+      runs.pop();
+      run = {n: prev.n + run.n,
+             sum: prev.sum + run.sum - prev.n * run.n * gap,
+             items: prev.items.concat(run.items)};
     }
+    runs.push(run);
   }
+  const out = [];
+  for (const run of runs) {
+    const start = Math.max(top, Math.min(run.sum / run.n,
+                                         bottom - (run.n - 1) * gap));
+    run.items.forEach((it, i) => { it.y = start + i * gap; out.push(it); });
+  }
+  if (!out.length) return out;
+  // Holding a run inside the band can push it into the run below, so the stack
+  // is settled downhill, slid back up by however far that overran the bottom,
+  // then settled uphill and slid back down the same way. Settling one way only
+  // walks the last labels out of the chart and onto the axis.
+  for (let i = 1; i < out.length; i++)
+    if (out[i].y - out[i-1].y < gap) out[i].y = out[i-1].y + gap;
+  const over = out[out.length - 1].y - bottom;
+  if (over > 0) out.forEach(it => { it.y -= over; });
+  for (let i = out.length - 2; i >= 0; i--)
+    if (out[i+1].y - out[i].y < gap) out[i].y = out[i+1].y - gap;
+  const under = top - out[0].y;
+  if (under > 0) out.forEach(it => { it.y += under; });
+  // Sliding only works while the stack fits. If it does not -- more labels than
+  // even the extra columns could absorb -- spread what is there evenly and take
+  // the tighter spacing: crowded inside the frame beats legible outside it.
+  if (out.length > 1 && out[out.length - 1].y - out[0].y > bottom - top) {
+    const even = (bottom - top) / (out.length - 1);
+    out.forEach((it, i) => { it.y = top + i * even; });
+  }
+  return out;
+}
+
+/* Place every end-of-line label: in, its wanted y, which is where its own line
+   ended; out, the y to draw it at, plus the anchor and column to draw it from. */
+function placeLabels(labels, gap, top, bottom) {
+  const fits = Math.max(1, Math.floor((bottom - top) / gap) + 1);
+  labels.forEach(l => { l.col = 0; l.lo = l.bx0; l.hi = l.bx1; });
+  // A label only contends with the ones it would actually collide with. Nearly
+  // all of them sit at the last save, but a nation that stopped existing partway
+  // leaves its tag out in the middle of the chart, where it is nowhere near the
+  // right-hand stack and has no business being shoved about by it. So they are
+  // grouped by whether the space they take overlaps at all, merging as it goes:
+  // two tags that each clear a third but not each other still have to end up in
+  // one group, which a fixed distance test gets wrong.
+  //
+  // Grouping and column count feed each other, though -- a group that needs a
+  // second column takes more width, which can reach the group beside it, which
+  // then belongs in the same group -- so the two are settled together, grouping
+  // and sizing in turn until nothing more moves. The space a group claims only
+  // ever grows, so groups only ever combine and this always comes to a stop.
+  let columns = [];
+  for (let pass = 0; pass < 8; pass++) {
+    const next = [];
+    let open = null;
+    labels.slice().sort((a, b) => a.lo - b.lo).forEach(l => {
+      if (open && l.lo < open.edge) {
+        open.list.push(l);
+        open.wide = Math.max(open.wide, l.wide);
+        open.edge = Math.max(open.edge, l.hi);
+      } else {
+        open = {list: [l], wide: l.wide, edge: l.hi};
+        next.push(open);
+      }
+    });
+    let settled = next.length === columns.length;
+    next.forEach(col => {
+      // More labels than the height holds at a legible gap. Squeezing them in
+      // regardless only trades one unreadable pile for another, so the stack
+      // steps sideways into a second column, a third, as many as it takes. The
+      // one limit is width -- labels may eat into the plot, but not swallow
+      // it -- and past that the packer falls back to crowding.
+      const room = Math.max(1, Math.floor((W - M.l) * 0.5 / col.wide));
+      col.k = Math.min(room, Math.max(1, Math.ceil(col.list.length / fits)));
+      // Every tag in a group hangs off one shared anchor rather than off its
+      // own line's end. Stepping each label sideways from wherever its own line
+      // stopped would put one group's second column straight through the next
+      // group's first, which is the collision the grouping just went to the
+      // trouble of ruling out.
+      col.end = col.list.some(l => l.atEnd);
+      const left = Math.min(...col.list.map(l => l.bx0));
+      col.anchor = col.end ? W - 4 : Math.max(...col.list.map(l => l.bx0));
+      const span = col.k * col.wide;
+      // The claim runs from the leftmost line end to the far side of the last
+      // column: leaders cross that ground too, and it is what the next group
+      // has to clear.
+      const lo = col.end ? Math.min(left, col.anchor - span) : left;
+      const hi = col.end ? col.anchor : col.anchor + span;
+      col.list.forEach(l => {
+        if (lo !== l.lo || hi !== l.hi) settled = false;
+        l.lo = lo;
+        l.hi = hi;
+        l.anchor = col.anchor;
+        l.end = col.end;
+      });
+    });
+    columns = next;
+    if (settled) break;
+  }
+  columns.forEach(col => {
+    col.list.forEach(l => { l.step = col.wide; });
+    col.list.sort((a, b) => a.want - b.want);
+    // Every k-th label goes to the same column, which leaves each column's
+    // labels about k times further apart than they started; handing each column
+    // a contiguous block would put the whole crowded run back into one column
+    // and fix nothing.
+    for (let c = 0; c < col.k; c++) {
+      const part = col.list.filter((_, i) => i % col.k === c);
+      part.forEach(l => { l.col = c; });
+      packColumn(part, gap, top, bottom);
+    }
+  });
   return labels;
 }
 
@@ -1032,13 +1184,48 @@ function plot(svg, cfg) {
       stroke: b.colour, 'stroke-width': 1.3, 'stroke-dasharray': '3 4',
       opacity: 0.8}));
   });
-  const gap = cfg.thin ? 11.5 : 12;
-  spread(endLabels, gap, M.t + 4, H - M.b).forEach(({name, colour, x, y}) => {
-    const atEnd = x > W - M.r - (cfg.thin ? 70 : 46);
-    const label = el('text', {x: atEnd ? x - 6 : x + 6, y: y + 3.5, fill: colour,
-      'font-family': 'IBM Plex Mono, monospace', 'font-size': cfg.thin ? 10.5 : 11,
-      'text-anchor': atEnd ? 'end' : 'start'});
-    label.textContent = name;
+  /* The tags on the ends of the lines. Eight nations whose values run close
+     together finish the chart within a few pixels of one another, and eight
+     tags crammed into those few pixels are worth less than the room they cost.
+     The gap is the type size plus real leading rather than the bare clearance
+     it used to be, the stack is packed by least displacement so a tag only
+     moves as far as it must, and a leader joins each tag back to the point it
+     names, so buying the separation never costs the reader the one thing the
+     tag was for. A flat leader says the tag sits at its line's own height; a
+     sloped one says it had to be nudged to make room. */
+  const fs = cfg.thin ? 10.5 : 11;
+  const charW = fs * 0.6;              // IBM Plex Mono runs 0.6em to the glyph
+  const gutter = W - M.r;
+  endLabels.forEach(l => {
+    l.want = l.y;
+    l.atEnd = l.x > gutter - 24;
+    // The box the tag would take if nothing were in its way, padded, which is
+    // both what decides who it collides with and how far a second column steps.
+    l.wide = l.name.length * charW + 10;
+    l.bx0 = l.atEnd ? W - 4 - l.wide : l.x + 6;
+    l.bx1 = l.bx0 + l.wide;
+  });
+  placeLabels(endLabels, fs + 3.5, M.t + 4, H - M.b - 2);
+  endLabels.forEach(l => {
+    const tx = l.end ? l.anchor - l.col * l.step : l.anchor + l.col * l.step;
+    const width = l.name.length * charW;
+    // A tag still sitting on its line's last point says so by being there and
+    // needs no leader. One that had to move, in either direction, gets a line
+    // back to the point it belongs to.
+    const near = l.end ? tx - width : tx;
+    if (Math.abs(l.y - l.want) > 1.2 || near - l.x > 9) {
+      const from = l.x + 3, to = near - 4;
+      const stub = (to - from) * 0.3;
+      svg.appendChild(el('path', {class: 'leader', stroke: l.colour,
+        d: `M${from.toFixed(1)} ${l.want.toFixed(1)}`
+         + `L${(from + stub).toFixed(1)} ${l.want.toFixed(1)}`
+         + `L${(to - stub).toFixed(1)} ${l.y.toFixed(1)}`
+         + `L${to.toFixed(1)} ${l.y.toFixed(1)}`}));
+    }
+    const label = el('text', {x: tx, y: l.y + fs * 0.34, fill: l.colour,
+      class: 'endlab', 'font-size': fs,
+      'text-anchor': l.end ? 'end' : 'start'});
+    label.textContent = l.name;
     svg.appendChild(label);
   });
 
@@ -1362,7 +1549,7 @@ const milPicker = makePicker(document.getElementById('pick-military'),
                () => milSave.value));
 
 const milTypes = () => milMode === 'army' ? DATA.regimentTypes : DATA.shipTypes;
-const milColour = t => C[milTypes().indexOf(t) % C.length];
+const milColour = t => seriesColour(milTypes().indexOf(t));
 const milSource = tag => (milMode === 'army' ? DATA.brigades : DATA.ships)[tag] || {};
 
 /** Sum a side's unit counts by type across every nation in the group. */
@@ -1951,7 +2138,7 @@ function stackedBars(svgId, legendId, byDate, keys, emptyMsg) {
       const h = count / peak * (NH - NM.t - NM.b);
       y -= h;
       const rect = el('rect', {x, y, width: barW, height: h,
-        fill: C[si % C.length], 'fill-opacity': .82,
+        fill: seriesColour(si), 'fill-opacity': .82,
         stroke: 'var(--ground)', 'stroke-width': .5});
       const title = document.createElementNS(SVGNS, 'title');
       title.textContent = `${d} · ${k}: ${count.toLocaleString()}`;
@@ -1971,7 +2158,7 @@ function stackedBars(svgId, legendId, byDate, keys, emptyMsg) {
   used.forEach((k, si) => {
     const item = document.createElement('span');
     item.className = 'slegend';
-    item.innerHTML = `<i style="background:${C[si % C.length]}"></i>${k.replace(/_/g, ' ')}`;
+    item.innerHTML = `<i style="background:${seriesColour(si)}"></i>${k.replace(/_/g, ' ')}`;
     legend.appendChild(item);
   });
 }
@@ -2277,6 +2464,24 @@ function mapOwnerTables() {
 
 const mapSea = new Set((MAP && MAP.sea) || []);
 const MAP_WATER = [38, 54, 74], MAP_WILD = [122, 106, 78], MAP_EDGE = [32, 18, 14];
+/* Land is painted in a nation's own colour and so are the army counters
+   standing on it, which left a nation's brigades all but invisible inside its
+   own borders -- an orange stack on orange ground, separated by half a pixel
+   of outline. The counter is what gives way: it keeps the nation's hue but
+   drops toward MAP_SHADE, so the political map reads at full strength and a
+   stack still reads against the country it is standing in. Going the other
+   way -- dimming the land -- worked too, but it dulled the whole map to fix
+   a few hundred circles. Dark counters also carry a pale numeral, which a
+   full-strength one could not. */
+const MAP_SHADE = [16, 14, 20], MAP_SHADE_MIX = 0.48;
+/** A #rrggbb string in the same hue, dropped toward MAP_SHADE. */
+const mapDim = hex => {
+  const rgb = parseInt((hex || '#ffffff').slice(1), 16);
+  const keep = 1 - MAP_SHADE_MIX;
+  const mix = (v, i) => Math.round(v * keep + MAP_SHADE[i] * MAP_SHADE_MIX);
+  return `rgb(${mix((rgb >> 16) & 255, 0)} ${mix((rgb >> 8) & 255, 1)} `
+       + `${mix(rgb & 255, 2)})`;
+};
 
 function mapPalette(date) {
   const book = mapOwners[date] || {own: new Map(), occ: new Map()};
@@ -2348,13 +2553,26 @@ function mapClamp() {
                          : Math.min(Math.max(mapOY, 0), MAP.h - viewH);
 }
 
+/* Provinces the last mapStacks() could not place, so the readout can own up
+   to an under-drawn map instead of quietly showing a fraction of the army.
+   With the base-game fallback in the mod loader this should stay at zero. */
+let mapUnplaced = 0, mapUnplacedBrigades = 0;
+
 function mapStacks(date) {
   const armies = (MAP.armies || {})[date] || {};
-  const wanted = mapTags && mapTags.length ? new Set(mapTags) : null;
+  // `mapTags` is null until the picker is touched, which is what makes the
+  // map open showing every nation. After that an empty list is a real
+  // choice -- "None" -- and has to draw nothing rather than fall back to all.
+  const wanted = mapTags === null ? null : new Set(mapTags);
   const dots = [];
+  mapUnplaced = 0; mapUnplacedBrigades = 0;
   for (const pid in armies) {
     const spot = MAP.spots[pid];
-    if (!spot) continue;
+    if (!spot) {
+      mapUnplaced++;
+      for (const a of armies[pid]) mapUnplacedBrigades += a[1];
+      continue;
+    }
     const stacks = armies[pid]
       .map(a => ({tag: MAP.tags[a[0]], n: a[1], mix: a[2]}))
       .filter(a => !wanted || wanted.has(a.tag));
@@ -2396,25 +2614,103 @@ function mapRender() {
   // markers grow with zoom, but slower than the map, so a dense theatre thins
   // out as you go in instead of turning into one blob
   const grow = Math.pow(mapZoom, 0.45);
+  const labelled = [];
   for (const dot of mapDots) {
     dot.sx = (dot.x - mapOX) * s;
     dot.sy = (dot.y - mapOY) * s;
     dot.sr = Math.max(2.2, Math.min(26, Math.sqrt(dot.total) * 1.3 * grow));
     if (dot.sx < -20 || dot.sy < -20 || dot.sx > cw + 20 || dot.sy > ch + 20) continue;
+    const ink = t => mapDim(MAP.colours[t] || '#ffffff');
+    // The nation's hue, dropped toward black, so the counter reads against
+    // its own country without the map having to give up any colour.
     ctx.beginPath();
     ctx.arc(dot.sx, dot.sy, dot.sr, 0, Math.PI * 2);
-    ctx.fillStyle = MAP.colours[dot.stacks[0].tag] || '#ffffff';
-    ctx.globalAlpha = .88;
+    ctx.fillStyle = ink(dot.stacks[0].tag);
     ctx.fill();
-    ctx.globalAlpha = 1;
-    ctx.lineWidth = Math.min(1.6, .6 * grow);
-    ctx.strokeStyle = 'rgba(0,0,0,.8)';
+    // A province holding more than one nation -- a battle, or allies stacked
+    // together -- carries the split as a band round the rim rather than as a
+    // whole pie. The middle has to stay one flat colour for the numeral to be
+    // legible on it, and the rim is where a share is easiest to judge anyway,
+    // since that is where the counter has the most room. Below a few pixels
+    // the band would be noise, so a small counter stays the dominant colour
+    // and the breakdown is a hover away.
+    if (dot.stacks.length > 1 && dot.sr >= 5.5) {
+      const band = Math.max(2, dot.sr * 0.4);
+      const inner = dot.sr - band;
+      // Neutral middle, not the biggest nation's colour: an even split
+      // between two nations otherwise reads as mostly whoever holds the
+      // core. It leaves the ring to carry the proportion on its own, and
+      // makes a shared province tell itself apart from a plain one at a
+      // glance -- solid disc for one nation, ringed for several.
+      ctx.beginPath();
+      ctx.arc(dot.sx, dot.sy, inner, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgb(26 24 30)';
+      ctx.fill();
+      let angle = -Math.PI / 2;
+      for (const part of dot.stacks) {
+        const sweep = part.n / dot.total * Math.PI * 2;
+        ctx.beginPath();
+        ctx.arc(dot.sx, dot.sy, dot.sr, angle, angle + sweep);
+        ctx.arc(dot.sx, dot.sy, inner, angle + sweep, angle, true);
+        ctx.closePath();
+        ctx.fillStyle = ink(part.tag);
+        ctx.fill();
+        angle += sweep;
+      }
+      // Neighbouring nations can be close in colour, so the segments are
+      // parted rather than left to run together -- but only once the band is
+      // thick enough that a line across it is not most of the segment.
+      if (dot.sr >= 9) {
+        ctx.lineWidth = Math.min(1.1, .45 * grow);
+        ctx.strokeStyle = 'rgba(0,0,0,.6)';
+        angle = -Math.PI / 2;
+        for (const part of dot.stacks) {
+          ctx.beginPath();
+          ctx.moveTo(dot.sx + inner * Math.cos(angle), dot.sy + inner * Math.sin(angle));
+          ctx.lineTo(dot.sx + dot.sr * Math.cos(angle), dot.sy + dot.sr * Math.sin(angle));
+          ctx.stroke();
+          angle += part.n / dot.total * Math.PI * 2;
+        }
+        ctx.beginPath();
+        ctx.arc(dot.sx, dot.sy, inner, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    // A pale ring rather than a dark one, now that the counter is the dark
+    // thing: it is the edge that survives on a dark nation's land.
+    ctx.beginPath();
+    ctx.arc(dot.sx, dot.sy, dot.sr, 0, Math.PI * 2);
+    ctx.lineWidth = Math.min(1.6, .7 * grow);
+    ctx.strokeStyle = 'rgba(255,240,214,.7)';
     ctx.stroke();
     if (mapPinned && mapPinned.pid === dot.pid) {
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2.4;
       ctx.strokeStyle = '#ffffff';
       ctx.stroke();
     }
+    labelled.push(dot);
+  }
+  // Numerals last, so a small stack drawn over a big one cannot have its
+  // count half-covered. Only where the circle can hold the digits: below
+  // that the number would be a smudge, and the count is a hover away.
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const dot of labelled) {
+    const text = dot.total.toLocaleString();
+    // Fitted to whatever the numeral actually sits on: the whole circle, or
+    // just the core when a band has been taken out of the rim for the split.
+    const room = dot.stacks.length > 1 && dot.sr >= 5.5
+      ? dot.sr - Math.max(2, dot.sr * 0.4) : dot.sr;
+    // Circles are sized by area, so a 4-digit stack is not much wider than a
+    // 2-digit one; the fit has to be checked against the digits themselves.
+    const size = Math.min(room * 1.5, room * 3.2 / text.length);
+    if (size < 7) continue;
+    ctx.font = `600 ${size.toFixed(1)}px "IBM Plex Mono", monospace`;
+    ctx.lineWidth = Math.max(1.6, size / 5);
+    ctx.strokeStyle = 'rgba(0,0,0,.55)';
+    ctx.strokeText(text, dot.sx, dot.sy);
+    ctx.fillStyle = '#F6ECD8';
+    ctx.fillText(text, dot.sx, dot.sy);
   }
   document.getElementById('mapzoom').textContent = mapZoom.toFixed(1) + '×';
   mapShow(mapPinned);
@@ -2426,6 +2722,11 @@ function mapIdle() {
     `<span class="rk">stacks</span> <b>${mapDots.length.toLocaleString()}</b>`
     + `<span><span class="rk">brigades shown</span> <b>${shown.toLocaleString()}</b></span>`
     + `<span><span class="rk">shading</span> <b>${mapByControl ? 'controller' : 'owner'}</b></span>`
+    + (mapUnplaced
+        ? `<span><span class="rk">no map position</span> `
+          + `<b>${mapUnplaced.toLocaleString()}</b>`
+          + `<span class="rk"> provinces, ${mapUnplacedBrigades.toLocaleString()} brigades</span></span>`
+        : '')
     + `<span class="rk">hover a marker, click to pin it</span>`;
 }
 

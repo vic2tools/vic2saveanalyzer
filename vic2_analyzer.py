@@ -1539,12 +1539,13 @@ def main():
                          "last time. The cache lives in the system temp folder, "
                          "keyed by the save's size and timestamp and by a hash "
                          "of the parsing code, so editing the parser expires it.")
-    ap.add_argument("--map-scale", type=int, default=2, metavar="N",
+    ap.add_argument("--map-scale", type=int, default=1, metavar="N",
                     help="how far to shrink the province bitmap for the map tab. "
-                         "Default 2, so 2808x1080 from a 5616x2160 map, which "
-                         "costs about 660KB once however many saves are in the "
-                         "report. 3 is 410KB, 5 is 230KB and visibly blocky "
-                         "once you zoom, 1 is the full map at 1.4MB.")
+                         "Default 1, the full 5616x2160 map at about 1.4MB, "
+                         "which is the sharpest the tab gets and holds up when "
+                         "you zoom into a single theatre. 2 halves it to "
+                         "2808x1080 for about 660KB, 3 is 410KB, and 5 is 230KB "
+                         "and visibly blocky once you zoom.")
     ap.add_argument("--player-nations", nargs="*", metavar="TAG", default=None,
                     help="tags that were run by a human. Only matters for "
                          "UNCIVILIZED nations, which in IGoR pick up "
@@ -1822,6 +1823,10 @@ def main():
         # The map needs the mod's province bitmap; without --mod-path the tab
         # is dropped rather than shown empty.
         map_data = build_map(mod, parsed, args.map_scale) if mod else None
+        if map_data and map_data.get("derived") and not args.quiet:
+            print(f"map/positions.txt anchors no army counter for "
+                  f"{map_data['derived']} of the provinces holding troops; "
+                  f"those markers sit at the middle of the province instead.")
         # The save ranks the great powers itself, as 1-based indices into the
         # country array common/countries.txt defines, so the mod is needed to
         # turn them back into tags.
