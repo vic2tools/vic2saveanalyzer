@@ -30,6 +30,7 @@ from tkinter import filedialog, messagebox, ttk
 import vic2_analyzer
 
 APP = "Victoria 2 Save Analyzer"
+AUTO = "(work it out from the saves)"
 
 
 def human_size(count):
@@ -237,6 +238,7 @@ class App:
         # a flag because the worker thread and the window both touch it.
         self.stop = threading.Event()
         self.report = None
+        self.mod_paths = {}
         saved = load_settings()
 
         root.title(APP)
@@ -275,16 +277,44 @@ class App:
 
         # Only meaningful when the saves folder holds more than one campaign,
         # so it stays out of the way until it does.
+        # One row per campaign, each with the mod it was played on. Two mods
+        # built on the same base can agree on everything a save records except
+        # a handful of provinces, so working it out is a good guess and no
+        # more; this is where it can be settled instead.
         self.primary = tk.StringVar(value="")
+        self.rows = []
+        self.campaign_names = []
         self.primary_row = ttk.Frame(frame)
-        ttk.Label(self.primary_row, text="Main campaign").pack(side="left")
-        self.primary_box = ttk.Combobox(self.primary_row, state="readonly",
-                                        textvariable=self.primary, width=34)
-        self.primary_box.pack(side="left", padx=8)
-        ttk.Label(self.primary_row,
-                  text="the one the map, wars and tech tree are about",
-                  foreground="#666").pack(side="left")
-        self.primary_row.grid(row=6, column=1, columnspan=2, sticky="w",
+        head = ttk.Frame(self.primary_row)
+        head.pack(fill="x")
+        ttk.Label(head, text="Campaigns").pack(side="left")
+        ttk.Label(head, text="the marked one is what the map, wars and tech "
+                             "tree are about", foreground="#666").pack(
+            side="left", padx=8)
+        # A canvas, because thirty campaigns will not fit and must scroll.
+        holder = ttk.Frame(self.primary_row)
+        holder.pack(fill="both", expand=True)
+        # Height is set from the row count in `refresh_campaigns`; a fixed one
+        # left two campaigns sitting above four rows of nothing.
+        self.camp_canvas = tk.Canvas(holder, height=26, highlightthickness=0,
+                                     borderwidth=0)
+        self.camp_canvas.pack(side="left", fill="both", expand=True)
+        camp_bar = ttk.Scrollbar(holder, orient="vertical",
+                                 command=self.camp_canvas.yview)
+        camp_bar.pack(side="right", fill="y")
+        self.camp_canvas.configure(yscrollcommand=camp_bar.set)
+        self.camp_inner = ttk.Frame(self.camp_canvas)
+        self.camp_window = self.camp_canvas.create_window(
+            (0, 0), window=self.camp_inner, anchor="nw")
+        self.camp_inner.bind(
+            "<Configure>",
+            lambda _e: self.camp_canvas.configure(
+                scrollregion=self.camp_canvas.bbox("all")))
+        self.camp_canvas.bind(
+            "<Configure>",
+            lambda e: self.camp_canvas.itemconfigure(self.camp_window,
+                                                     width=e.width))
+        self.primary_row.grid(row=6, column=0, columnspan=3, sticky="ew",
                               padx=8, pady=(0, 6))
         self.primary_row.grid_remove()
 
@@ -323,6 +353,7 @@ class App:
         self.refresh_cache()
 
         self.saves.trace_add("write", lambda *_a: self.refresh_campaigns())
+        self.mod.trace_add("write", lambda *_a: self.refresh_campaigns())
         self.refresh_campaigns()
 
         root.after(80, self.drain)
@@ -339,29 +370,78 @@ class App:
         if chosen:
             var.set(os.path.normpath(chosen))
 
+    def mod_choices(self):
+        """`(work it out)` plus every mod beside the one in the mod box."""
+        mod = self.mod.get().strip()
+        kind, where = mod_kind(mod)
+        if kind == "home":
+            home = os.path.join(where, "mod")
+        elif kind == "mod":
+            home = os.path.dirname(os.path.normpath(mod))
+        else:
+            return [AUTO]
+        out = {}
+        try:
+            for name in sorted(os.listdir(home)):
+                path = os.path.join(home, name)
+                if os.path.isdir(os.path.join(path, "common")):
+                    out[name] = path
+        except OSError:
+            pass
+        self.mod_paths = out
+        return [AUTO] + list(out)
+
     def refresh_campaigns(self):
-        """Offer the campaigns under the saves folder, if there are several."""
+        """
+        A row per campaign under the saves folder, when there is more than one.
+
+        Only the folders are read here, never the saves: this runs on every
+        keystroke in the saves box, and identifying a mod means reading a whole
+        30 MB file. Rows default to working it out, which happens during the
+        run, and a row set to a named mod skips that entirely.
+        """
         path = self.saves.get().strip()
-        names = []
+        found = []
         if path and os.path.isdir(path):
             try:
                 import cross
-                found = cross.campaigns_in(path)
-                if len(found) > 1:
-                    names = ["%s  (%d saves)" % (n, len(f))
-                             for n, _p, f in sorted(
-                                 found, key=lambda e: -len(e[2]))]
+                found = sorted(cross.campaigns_in(path),
+                               key=lambda e: -len(e[2]))
             except Exception:
-                names = []
-        self.campaign_names = [n.split("  (")[0] for n in names]
-        self.primary_box.configure(values=names)
-        if not names:
+                found = []
+        if len(found) < 2:
             self.primary_row.grid_remove()
+            self.rows, self.campaign_names = [], []
             self.primary.set("")
             return
+
+        keep_main = self.primary.get()
+        keep_mods = {r["name"]: r["mod"].get() for r in self.rows}
+        for child in self.camp_inner.winfo_children():
+            child.destroy()
+        self.rows = []
+        choices = self.mod_choices()
+        for name, _path, files in found:
+            line = ttk.Frame(self.camp_inner)
+            line.pack(fill="x", pady=1)
+            ttk.Radiobutton(line, value=name, variable=self.primary).pack(
+                side="left")
+            ttk.Label(line, text=name, width=22).pack(side="left")
+            ttk.Label(line, text="%d saves" % len(files), width=9,
+                      foreground="#666").pack(side="left")
+            picked = tk.StringVar(
+                value=keep_mods.get(name) if keep_mods.get(name) in choices
+                else AUTO)
+            box = ttk.Combobox(line, state="readonly", width=32,
+                               textvariable=picked, values=choices)
+            box.pack(side="left", padx=6)
+            self.rows.append({"name": name, "mod": picked})
+        self.campaign_names = [r["name"] for r in self.rows]
+        # Room for the rows there are, up to five; past that it scrolls.
+        self.camp_canvas.configure(height=min(len(self.rows), 5) * 26 + 2)
         self.primary_row.grid()
-        if self.primary.get() not in names:
-            self.primary.set(names[0])      # the most saves, as before
+        if keep_main not in self.campaign_names:
+            self.primary.set(self.campaign_names[0])   # the most saves
 
     def refresh_cache(self):
         """Put what the cache currently weighs on the footer."""
@@ -496,19 +576,27 @@ class App:
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
-        chosen = ""
-        if cross and self.primary.get():
-            chosen = self.primary.get().split("  (")[0]
+        chosen = self.primary.get() if cross else ""
+        told = []
+        if cross:
+            for row in self.rows:
+                pick = row["mod"].get()
+                if pick and pick != AUTO:
+                    told.append("%s=%s" % (row["name"],
+                                           self.mod_paths.get(pick, pick)))
         threading.Thread(target=self.work,
-                         args=(saves, mod, out, cross, game_root, chosen),
+                         args=(saves, mod, out, cross, game_root, chosen, told),
                          daemon=True).start()
 
-    def work(self, saves, mod, out, cross=False, game_root=None, primary=""):
+    def work(self, saves, mod, out, cross=False, game_root=None, primary="",
+             told=()):
         argv = [sys.argv[0], saves, "-o", out]
         if cross:
             argv += ["--cross"]
             if primary:
                 argv += ["--primary", primary]
+            for pair in told:
+                argv += ["--campaign-mod", pair]
         # Naming one mod and naming the folder mods live in are different
         # instructions and must not be run together. `--mod-path` says "this
         # one, for every campaign"; `--game-root` says "work it out from each

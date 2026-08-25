@@ -61,10 +61,21 @@ Campaigns grouped into folders of their own are found too — the search goes
 down through subfolders rather than looking only at the children — so a tidy
 saves directory reads the same as a flat one.
 
-Because the report's map, wars and technology tree can only be about one game,
-a **Main campaign** picker appears when there is a choice to make, listing each
-campaign with its save count. It opens on whichever has the most saves. The
-comparison itself covers all of them whichever you pick.
+A **Campaigns** panel then lists what it found, one row each, with the save
+count and a mod. Every row starts on *work it out from the saves*; set one to a
+named mod and that campaign is read under it with no guessing at all. Settle the
+ones you care about and leave the rest — the two are not exclusive.
+
+Doing that is worth knowing about, because two mods built on the same base can
+agree on every country, every technology and every invention a save records,
+leaving little to tell them apart. Getting it wrong is not cosmetic: mods that
+close agree that closely still disagree about unit stats, so the ships in the
+report would be rated against the wrong rulebook.
+
+The marked row is the **main campaign** — the one the map, wars and technology
+tree are about, since those can only be about one game. It starts on whichever
+has the most saves. The comparison itself covers all of them whichever you
+mark.
 
 Two campaigns' saves in one folder is the one mistake worth catching, and it is:
 the global event flags a save carries accumulate as a game runs, so an earlier
@@ -473,11 +484,12 @@ almost only by nations that have that technology, so its holders fingerprint the
 gate it came through and a campaign can mark its own reading. `--help` lists
 everything.
 
-Three more read a folder of campaigns rather than one. `--cross` treats the
+Four more read a folder of campaigns rather than one. `--cross` treats the
 saves path as a folder of campaign folders; `--game-root` says where the mods
-live, so each campaign can be matched to one; `--primary NAME` picks which
-campaign the rest of the report is about, instead of whichever has the most
-saves.
+live, so each campaign can be matched to one; `--campaign-mod "NAME=PATH"`
+names the mod for one campaign outright and can be repeated, with anything
+unnamed still worked out; `--primary NAME` picks which campaign the rest of the
+report is about, instead of whichever has the most saves.
 
 ```bash
 vic2saveanalyzer.exe "C:\path\to\campaigns" --cross --game-root "C:\path\to\Victoria 2"

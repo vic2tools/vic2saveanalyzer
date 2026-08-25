@@ -1899,6 +1899,23 @@ def run_cross(parent, game_root, args, verbose=True):
     from mod_reader import load_mod, name_for
     from v2parse import register_pop_types
 
+    # Told, rather than worked out: `--campaign-mod NAME=PATH` settles one
+    # campaign each. Two mods built on the same base can agree on their
+    # countries, their technologies and their whole invention array, so the
+    # search is a good guess and nothing more -- being told beats it every time.
+    chosen = {}
+    for pair in getattr(args, "campaign_mod", None) or []:
+        name, _sep, path = pair.partition("=")
+        if not _sep or not name.strip():
+            sys.exit("--campaign-mod wants NAME=PATH, as in "
+                     '--campaign-mod "NeoMgame=C:\\...\\mod\\IGoR_puir 13.0.5". '
+                     "Got: %r" % pair)
+        path = os.path.expanduser(os.path.expandvars(path.strip()))
+        if not os.path.isdir(os.path.join(path, "common")):
+            sys.exit("--campaign-mod %s: %s has no common/ inside it, so it is "
+                     "not a mod folder." % (name.strip(), path))
+        chosen[name.strip().lower()] = path
+
     # Naming a mod is an answer, not a hint. Campaigns played on the same mod
     # are the ordinary case, and being told which one is better evidence than
     # anything that can be inferred, so the search is skipped entirely.
@@ -1913,19 +1930,37 @@ def run_cross(parent, game_root, args, verbose=True):
                   % (parent, label))
             for entry in survey:
                 print("  %-22s %3d saves" % (entry["name"], len(entry["files"])))
-    elif not game_root:
+    elif not game_root and not chosen:
         sys.exit("--cross needs --game-root (the Victoria 2 install folder, the "
-                 "one with mod/ inside) to work each campaign's mod out, or "
-                 "--mod-path to read them all under one mod.")
+                 "one with mod/ inside) to work each campaign's mod out, "
+                 "--mod-path to read them all under one mod, or "
+                 "--campaign-mod to name them one at a time.")
     else:
-        survey = crossmod.survey(parent, game_root)
+        # Every campaign named outright is settled before anything is searched
+        # for; only the rest go through `survey`, and if none are left the
+        # search does not run at all.
+        found = crossmod.campaigns_in(parent)
+        unsettled = [e for e in found if e[0].lower() not in chosen]
+        survey = crossmod.survey(parent, game_root) if (unsettled and game_root) \
+            else [{"name": n, "path": p, "files": f, "mod_label": None,
+                   "mod_path": None, "candidates": []} for n, p, f in found]
+        for entry in survey:
+            override = chosen.get(entry["name"].lower())
+            if override:
+                entry["mod_path"] = override
+                entry["mod_label"] = os.path.basename(os.path.normpath(override))
+                entry["candidates"] = []
+                entry["told"] = True
         if verbose:
             print("Campaigns found under %s:" % parent)
             for entry in survey:
                 fits = sum(1 for _l, v, _d in entry["candidates"] if v == "fits")
-                print("  %-22s %3d saves  ->  %s"
+                print("  %-22s %3d saves  ->  %s%s"
                       % (entry["name"], len(entry["files"]),
-                         entry["mod_label"] or "no mod in that folder fits"))
+                         entry["mod_label"] or "no mod in that folder fits",
+                         "   (as told)" if entry.get("told") else ""))
+                if entry.get("told"):
+                    continue
                 nearest = [r for r in entry["candidates"] if r[1] == "nearest"]
                 if nearest:
                     print("      WARNING: nothing in %s explains these saves. "
@@ -2107,6 +2142,13 @@ def main():
                          "--mod-path is not needed; --game-root says where the "
                          "mods live. The rest of the report is built from "
                          "whichever campaign has the most saves.")
+    ap.add_argument("--campaign-mod", metavar="NAME=PATH", action="append",
+                    default=[],
+                    help="with --cross, the mod one campaign was played on, "
+                         "given as its folder name then the mod path. Repeat "
+                         "for as many as you like. Campaigns not named this "
+                         "way are still worked out from their own saves, so "
+                         "you only have to settle the ones you care about.")
     ap.add_argument("--primary", metavar="NAME",
                     help="with --cross, which campaign the rest of the report "
                          "is built from. The folder's own name. Without it the "
