@@ -455,7 +455,10 @@ class App:
             return
 
         mod = self.mod.get().strip()
-        kind, game_root = mod_kind(mod)
+        # `mod_kind` hands back the mod when one was picked and the game root
+        # when the folder of mods was, so only the second is a search root.
+        kind, where = mod_kind(mod)
+        game_root = where if kind == "home" else None
         if kind == "bad":
             messagebox.showerror(
                 APP, "That folder is neither a mod nor the folder mods live "
@@ -504,15 +507,18 @@ class App:
         argv = [sys.argv[0], saves, "-o", out]
         if cross:
             argv += ["--cross"]
-            if game_root:
-                argv += ["--game-root", game_root]
             if primary:
                 argv += ["--primary", primary]
-        # A folder of mods is not a mod; it is where the search starts, and
-        # --game-root already carries it.
-        if mod and not cross:
-            argv += ["--mod-path", mod]
-        elif mod and cross and not game_root:
+        # Naming one mod and naming the folder mods live in are different
+        # instructions and must not be run together. `--mod-path` says "this
+        # one, for every campaign"; `--game-root` says "work it out from each
+        # campaign's own saves, searching here". Passing a chosen mod as the
+        # root made the search look for candidates *inside* that mod, where
+        # the only thing it could find was the mod itself under the wrong
+        # name -- so every campaign was matched to it whether it fitted or not.
+        if game_root:
+            argv += ["--game-root", game_root]
+        elif mod:
             argv += ["--mod-path", mod]
         old_argv, old_out, old_err = sys.argv, sys.stdout, sys.stderr
         sys.argv = argv

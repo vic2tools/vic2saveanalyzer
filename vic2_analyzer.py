@@ -1899,25 +1899,44 @@ def run_cross(parent, game_root, args, verbose=True):
     from mod_reader import load_mod, name_for
     from v2parse import register_pop_types
 
-    if not game_root:
-        # The mod folder the user already pointed at sits inside the install,
-        # so the install is its parent's parent.
-        if args.mod_path:
-            game_root = os.path.dirname(os.path.dirname(
-                os.path.abspath(args.mod_path)))
-        else:
-            sys.exit("--cross needs --game-root (the Victoria 2 install folder) "
-                     "or a --mod-path to infer it from.")
-
-    survey = crossmod.survey(parent, game_root)
+    # Naming a mod is an answer, not a hint. Campaigns played on the same mod
+    # are the ordinary case, and being told which one is better evidence than
+    # anything that can be inferred, so the search is skipped entirely.
+    if args.mod_path:
+        label = os.path.basename(os.path.normpath(args.mod_path))
+        survey = [{"name": name, "path": path, "files": files,
+                   "mod_label": label, "mod_path": args.mod_path,
+                   "candidates": []}
+                  for name, path, files in crossmod.campaigns_in(parent)]
+        if verbose:
+            print("Campaigns found under %s, all read under %s:"
+                  % (parent, label))
+            for entry in survey:
+                print("  %-22s %3d saves" % (entry["name"], len(entry["files"])))
+    elif not game_root:
+        sys.exit("--cross needs --game-root (the Victoria 2 install folder, the "
+                 "one with mod/ inside) to work each campaign's mod out, or "
+                 "--mod-path to read them all under one mod.")
+    else:
+        survey = crossmod.survey(parent, game_root)
+        if verbose:
+            print("Campaigns found under %s:" % parent)
+            for entry in survey:
+                fits = sum(1 for _l, v, _d in entry["candidates"] if v == "fits")
+                print("  %-22s %3d saves  ->  %s"
+                      % (entry["name"], len(entry["files"]),
+                         entry["mod_label"] or "no mod in that folder fits"))
+                if fits > 1:
+                    print("      note: %d mods fit these saves; picked the one "
+                            "the campaign leaves least of unused. Name it with "
+                            "--mod-path, or in the window pick the mod itself "
+                            "instead of the folder, to settle it." % fits)
+                elif not entry["mod_label"]:
+                    print("      note: nothing in %s explains these saves. If "
+                          "the mod is installed elsewhere, point the mod box "
+                          "at it directly." % game_root)
     if verbose:
-        print("Campaigns found under %s:" % parent)
         for entry in survey:
-            fits = sum(1 for _l, v, _d in entry["candidates"] if v == "fits")
-            print("  %-22s %3d saves  ->  %-32s %s"
-                  % (entry["name"], len(entry["files"]),
-                     entry["mod_label"] or "no mod fits",
-                     "" if fits == 1 else "(%d candidates fit -- ambiguous)" % fits))
             for stray, worst, of in crossmod.history_breaks(entry["files"]):
                 print("      note: %s disagrees with all %d later saves by at "
                       "least %d event flags; it may be from another game"

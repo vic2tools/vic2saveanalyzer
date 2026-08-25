@@ -24,10 +24,15 @@ they accumulate as a game runs, so an earlier save's flags are a later save's
 past, and a save holding flags its successors never had did not come from the
 same history.
 
-The mod is worked out by elimination, cheapest test first. A country tag the
-mod has never heard of, a pop type it does not define, or an invention index
-past the end of the array it builds each rules a candidate out outright. What
-survives is ranked by how tightly it fits.
+The mod is worked out by elimination. A country tag the folder has never heard
+of, a pop type it does not define, a technology name it lacks, a province past
+the end of its map, or an invention index past the end of the array it builds --
+each rules a candidate out outright, because a save cannot hold a name the
+folder that made it never defined.
+
+Where several still fit, the one whose own country list the campaign comes
+closest to exhausting wins, and the caller is told the answer was not forced.
+Being told outright still beats all of it: `--mod-path` skips this entirely.
 """
 
 import io
@@ -35,7 +40,8 @@ import os
 import re
 from collections import Counter
 
-from mod_reader import _country_entries, invention_sequence, read_poptypes
+from mod_reader import (_country_entries, _read_clausewitz, _resolved_file,
+                        _resolved_files, invention_sequence, read_poptypes)
 
 # The country blocks sit after the province data, near the end of the file, so
 # identifying a save means reading all of it. Only the last save or two of a
@@ -44,6 +50,11 @@ from mod_reader import _country_entries, invention_sequence, read_poptypes
 _TAG = re.compile(r'\n([A-Z][A-Z0-9]{2})=\r?\n\{')
 _POP = re.compile(r'\n\t\t([a-z_]+)=\r?\n\t\t\{')
 _IDS = re.compile(r'active_inventions=\s*\{([^}]*)\}')
+# A country's researched technologies, by name, and the highest province the
+# save actually holds. Both are things a folder either defines or does not.
+_TECH_BLOCK = re.compile(r'\n\ttechnology=\r?\n\t\{(.*?)\n\t\}', re.S)
+_TECH_NAME = re.compile(r'\n\t\t(\w+)=\s*\{')
+_PROVINCE = re.compile(r'\n(\d+)=\r?\n\{\r?\n\tname=')
 _DATE = re.compile(r'^date="([\d.]+)"', re.M)
 _FLAGS = re.compile(r'^flags=\s*\{(.*?)^\}', re.M | re.S)
 _FLAG_NAME = re.compile(r'^\s*([A-Za-z_][\w]*)\s*=', re.M)
@@ -101,7 +112,7 @@ def installed_mods(game_root):
 
 
 def _sniff(path):
-    """The identifying facts in one save: tags, pop types, top invention id."""
+    """Everything in one save that a folder either accounts for or cannot."""
     with io.open(path, encoding='latin-1') as fh:
         text = fh.read()
     tags = {m.group(1) for m in _TAG.finditer(text)}
@@ -109,11 +120,50 @@ def _sniff(path):
     ids = []
     for m in _IDS.finditer(text):
         ids.extend(int(n) for n in m.group(1).split() if n.isdigit())
+    techs = set()
+    for block in _TECH_BLOCK.findall(text):
+        techs |= set(_TECH_NAME.findall(block))
+    provinces = [int(n) for n in _PROVINCE.findall(text)]
     return {
         "tags": tags,
         "pops": {k for k, c in pops.items() if c > _POP_FLOOR},
+        "techs": techs,
         "top_invention": max(ids) if ids else 0,
+        "top_province": max(provinces) if provinces else 0,
     }
+
+
+_MOD_FACTS = {}
+
+
+def _mod_facts(root):
+    """The names and sizes a folder defines, cached: every campaign asks."""
+    if root not in _MOD_FACTS:
+        techs = set()
+        try:
+            for target in _resolved_files(root, "technologies").values():
+                for name, _block in _read_clausewitz(target):
+                    techs.add(name)
+        except Exception:
+            techs = set()
+        top = 0
+        try:
+            target = _resolved_file(root, "map", "definition.csv")
+            with io.open(target, encoding='latin-1') as fh:
+                for line in fh:
+                    head = line.split(";")[0].strip()
+                    if head.isdigit():
+                        top = max(top, int(head))
+        except Exception:
+            top = 0
+        _MOD_FACTS[root] = {
+            "tags": {t for t, _f in _country_entries(root)},
+            "pops": set(read_poptypes(root)),
+            "techs": techs,
+            "inventions": _capacity(root),
+            "provinces": top,
+        }
+    return _MOD_FACTS[root]
 
 
 _CAPACITY = {}
@@ -147,46 +197,72 @@ def match_mod(files, candidates, sample=2):
     the last ones, which carry the most tags and the highest invention indices,
     so they rule the most out.
     """
-    facts = [_sniff(p) for p in files[-sample:]] or [
-        {"tags": set(), "pops": set(), "top_invention": 0}]
+    blank = {"tags": set(), "pops": set(), "techs": set(),
+             "top_invention": 0, "top_province": 0}
+    facts = [_sniff(p) for p in files[-sample:]] or [blank]
     tags = set().union(*(f["tags"] for f in facts))
     pops = set().union(*(f["pops"] for f in facts))
+    techs = set().union(*(f["techs"] for f in facts))
     top = max(f["top_invention"] for f in facts)
+    top_province = max(f["top_province"] for f in facts)
+
+    known = {label: _mod_facts(root) for label, root in candidates}
 
     # A province block nests more than pops at that indent -- `employment`,
     # `ideology`, `input_goods` all match the same shape. The only thing that
     # makes a name a pop type is that somebody defines it as one, so anything
     # no candidate has ever heard of is not evidence about any of them.
-    strata_by_mod = {label: set(read_poptypes(root)) for label, root in candidates}
-    pops &= set().union(*strata_by_mod.values()) if strata_by_mod else set()
+    if known:
+        pops &= set().union(*(f["pops"] for f in known.values()))
 
     rows, fits = [], []
     for label, root in candidates:
-        known = {t for t, _f in _country_entries(root)}
-        strata = strata_by_mod[label]
-        capacity = _capacity(root)
-        unknown = tags - known
-        missing = pops - strata
+        f = known[label]
         why = []
+        unknown = tags - f["tags"]
         if unknown:
             why.append("%d unknown tag%s (%s)"
                        % (len(unknown), "" if len(unknown) == 1 else "s",
                           " ".join(sorted(unknown)[:4])))
+        missing = pops - f["pops"]
         if missing:
             why.append("no pop type %s" % ", ".join(sorted(missing)))
-        if top > capacity:
+        # Two campaigns can share every tag and still be on different mods.
+        # Technology names separate them where tags cannot: Divergences and
+        # Heartbreaker each hold eight the other has never defined.
+        stray = techs - f["techs"]
+        if stray:
+            why.append("%d unknown technolog%s (%s)"
+                       % (len(stray), "y" if len(stray) == 1 else "ies",
+                          " ".join(sorted(stray)[:3])))
+        # A province the map does not have cannot have been owned on it.
+        if top_province > f["provinces"] > 0:
+            why.append("save holds province %d, map ends at %d"
+                       % (top_province, f["provinces"]))
+        if top > f["inventions"]:
             why.append("save names invention %d, folder builds %d"
-                       % (top, capacity))
+                       % (top, f["inventions"]))
         if why:
             rows.append((label, "no", "; ".join(why)))
             continue
-        # Among folders that could have produced this save, the honest pick is
-        # the one that explains it most tightly: fewest inventions left over,
-        # then fewest countries the campaign never mentions.
-        slack = (capacity - top, len(known - tags))
-        fits.append((slack, label, root))
-        rows.append((label, "fits", "%d spare invention slots, %d unused tags"
-                     % (capacity - top, len(known - tags))))
+        # Among folders that could have produced this save, prefer the one whose
+        # own country list the campaign comes closest to exhausting. A save that
+        # mentions every nation a mod defines is a tight explanation of it; one
+        # that leaves a sixth of them unheard of is a loose one.
+        #
+        # Invention slack was tried first and is the wrong way round: a campaign
+        # that ended early has slack against every candidate, and the mod with
+        # the *smallest* array then looks closest simply for being smallest. On
+        # the campaigns here that lost IGoR to Heartbreaker at every invention
+        # count below the very last one, while unused tags picked correctly at
+        # all of them. Slack stays as the second key, for folders that tie.
+        unused = len(f["tags"] - tags)
+        rank = (unused / max(1, len(f["tags"])), f["inventions"] - top)
+        fits.append((rank, label, root))
+        rows.append((label, "fits",
+                     "%d of its %d countries never mentioned, %d spare "
+                     "invention slots"
+                     % (unused, len(f["tags"]), f["inventions"] - top)))
     if not fits:
         return None, None, rows
     fits.sort()

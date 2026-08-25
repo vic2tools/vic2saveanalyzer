@@ -81,13 +81,23 @@ the mobilization numbers, so a report built without it is a much thinner thing.
 
 For an unmodded game, point it at the Victoria 2 install folder itself.
 
+Reading several campaigns does not change this: name one mod and every campaign
+under the folder is read under it, which is what you want when they were all
+played on the same one.
+
 You can also decline to choose. Point the box at `Victoria 2/mod` — the folder
 mods live in rather than a mod — and each campaign is matched to one by
-elimination: a country tag a mod has never heard of, a pop type it does not
-define, or an invention index past the end of the array it builds each rule it
-out. On the campaigns this was built against exactly one candidate survived
-each time, including for two mods from the same family that differ only in
-places. Where more than one fits, the log says so rather than pretending.
+elimination. A country tag the folder has never heard of, a pop type it does not
+define, a technology name it lacks, a province past the end of its map, or an
+invention index past the end of the array it builds each rule it out, because a
+save cannot hold a name the folder that made it never defined. On the campaigns
+this was built against exactly one candidate survived each time, from a single
+save as readily as from thirty-eight, including for two mods of the same family
+that differ only in places.
+
+Where several still fit, the one whose own country list the campaign comes
+closest to exhausting is taken, and the log says the answer was not forced. That
+is a judgement, not a measurement — naming the mod yourself settles it.
 
 A mod is read the way the game reads one: file by file, with the mod's copy
 winning and anything it does not ship taken from the Victoria 2 install
