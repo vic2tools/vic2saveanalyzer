@@ -3252,7 +3252,9 @@ function mapPaintBase(date) {
    width however far the map is zoomed; baked into a 5,616-pixel raster, one
    stripe would be a hair at zoom 1 and half a province at zoom 24. */
 let mapHatchTile = null;
+let mapHatchFill = null;     // the CanvasPattern, which outlives the frame
 function mapHatchPattern(ctx) {
+  if (mapHatchFill) return mapHatchFill;
   if (!mapHatchTile) {
     const p = 9, ink = 3;
     mapHatchTile = document.createElement('canvas');
@@ -3272,7 +3274,10 @@ function mapHatchPattern(ctx) {
     }
     t.putImageData(img, 0, 0);
   }
-  return ctx.createPattern(mapHatchTile, 'repeat');
+  // Held rather than remade each frame. A pattern is bound to the canvas that
+  // created it, and the scratch canvas is kept, so one lasts as long as it.
+  mapHatchFill = ctx.createPattern(mapHatchTile, 'repeat');
+  return mapHatchFill;
 }
 
 /* A screen-sized canvas to build the hatched layer in, since masking with
@@ -3283,8 +3288,31 @@ function mapScratch(w, h) {
   if (mapScratchCanvas.width !== w || mapScratchCanvas.height !== h) {
     mapScratchCanvas.width = w;
     mapScratchCanvas.height = h;
+    // Resizing a canvas resets its context, so the pattern made from the old
+    // one is no longer usable and has to be made again.
+    mapHatchFill = null;
   }
   return mapScratchCanvas;
+}
+
+/* Draw only the part of a layer that can actually be seen.
+
+   Handing `drawImage` the whole raster and letting the canvas clip means the
+   browser scales all 12 megapixels every frame, however far in you are: at
+   zoom 8 that is eight times the work the screen has any use for. Passing the
+   source rectangle instead makes the cost follow what is on screen rather than
+   what the world contains.
+
+   `mapOX` goes negative when the view is wider than the map, so the source
+   corner is clamped to zero and the destination takes the difference. */
+function mapBlit(target, layer, s, cw, ch) {
+  const sx = Math.max(0, Math.floor(mapOX));
+  const sy = Math.max(0, Math.floor(mapOY));
+  const sw = Math.min(MAP.w - sx, Math.ceil(cw / s) + 2);
+  const sh = Math.min(MAP.h - sy, Math.ceil(ch / s) + 2);
+  if (sw <= 0 || sh <= 0) return;
+  target.drawImage(layer, sx, sy, sw, sh,
+                   (sx - mapOX) * s, (sy - mapOY) * s, sw * s, sh * s);
 }
 
 function mapFit() {          // screen pixels per map pixel at zoom 1
@@ -3335,6 +3363,21 @@ function mapStacks(date) {
   return dots;
 }
 
+/* A pointer or a wheel reports far more often than the screen redraws -- a
+   120Hz trackpad or a high-rate mouse will fire several times between frames,
+   and each one used to repaint. Every repaint past the first was thrown away
+   unseen, and with occupation on each costs a second scaled blit of the raster
+   plus a full-canvas mask, so the queue fell behind and the map dragged.
+
+   Coalescing to one repaint per animation frame draws exactly what gets shown.
+   The one-off callers -- picking a save, toggling a layer, clicking a marker --
+   still call `mapRender` directly, since there is no storm to smooth there. */
+let mapFrame = 0;
+function mapRenderSoon() {
+  if (mapFrame) return;
+  mapFrame = requestAnimationFrame(() => { mapFrame = 0; mapRender(); });
+}
+
 function mapRender() {
   if (!MAP) return;
   const canvas = document.getElementById('mapcanvas');
@@ -3358,7 +3401,7 @@ function mapRender() {
   // raster is finer than the screen, or shrinking it turns into noise
   ctx.imageSmoothingEnabled = s < 1;
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(mapBase, -mapOX * s, -mapOY * s, MAP.w * s, MAP.h * s);
+  mapBlit(ctx, mapBase, s, cw, ch);
 
   if (mapHatchOccupied && mapOccAny) {
     const scratch = mapScratch(canvas.width, canvas.height);
@@ -3367,7 +3410,7 @@ function mapRender() {
     sc.clearRect(0, 0, cw, ch);
     sc.imageSmoothingEnabled = s < 1;
     sc.imageSmoothingQuality = 'high';
-    sc.drawImage(mapOccLayer, -mapOX * s, -mapOY * s, MAP.w * s, MAP.h * s);
+    mapBlit(sc, mapOccLayer, s, cw, ch);
     sc.globalCompositeOperation = 'destination-in';
     sc.fillStyle = mapHatchPattern(sc);
     sc.fillRect(0, 0, cw, ch);
@@ -3673,7 +3716,7 @@ if (MAP) {
     const after = mapFit() * mapZoom;
     mapOX = mx - at.x / after;
     mapOY = my - at.y / after;
-    mapRender();
+    mapRenderSoon();
   }
 
   canvas.addEventListener('wheel', e => {
@@ -3696,7 +3739,7 @@ if (MAP) {
       if (Math.abs(p.x - drag.x) + Math.abs(p.y - drag.y) > 3) drag.moved = true;
       mapOX = drag.ox - (p.x - drag.x) / s;
       mapOY = drag.oy - (p.y - drag.y) / s;
-      mapRender();
+      mapRenderSoon();
       return;
     }
     if (mapPinned) return;
@@ -3713,7 +3756,7 @@ if (MAP) {
     mapRender();
   });
   canvas.addEventListener('pointerleave', () => { if (!mapPinned) mapIdle(); });
-  window.addEventListener('resize', () => { if (mapBase) mapRender(); });
+  window.addEventListener('resize', () => { if (mapBase) mapRenderSoon(); });
 } else {
   // No --mod-path, so there is no province bitmap and no country order: hide the
   // map and the great power ranking rather than showing empty frames.
