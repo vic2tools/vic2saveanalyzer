@@ -486,9 +486,15 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
       <p class="note" id="succnote"></p>
     </section>
 
+
+    <section>
+      <h2>Standing at <span id="lastdate"></span></h2>
+      <div class="tablewrap"><table id="ledger"><thead><tr></tr></thead><tbody></tbody></table></div>
+      <p class="note">Click a column heading to sort. Only the nations selected above are listed.</p>
+    </section>
+
     <section id="crosssec" hidden>
       <h2>Cross-campaign comparison</h2>
-      <p class="note" id="crossintro"></p>
       <div class="controls">
         <label class="tb-label" for="crossnation" style="margin:0">Nation</label>
         <select id="crossnation"></select>
@@ -503,12 +509,6 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
       <p class="note" id="crosssummary"></p>
       <p class="note" id="crossrule" hidden></p>
       <p class="note">Hovering reads every campaign at one moment. They save on different days, so a value marked <b>&middot;</b> is that campaign's last reading at or before the line rather than one taken on it. Campaigns rarely start on the same day or run for the same length. On <b>calendar years</b> each line sits where it actually happened, so two games only overlap where they really did. On <b>campaign years</b> every line starts at zero, which is the fair way to ask how two runs of the same nation developed. Every measure the data visualizer offers is here. Most are counted straight off the save and compare directly; the few marked &dagger; are worked out from each mod's own files, and say so when you pick one.</p>
-    </section>
-
-    <section>
-      <h2>Standing at <span id="lastdate"></span></h2>
-      <div class="tablewrap"><table id="ledger"><thead><tr></tr></thead><tbody></tbody></table></div>
-      <p class="note">Click a column heading to sort. Only the nations selected above are listed.</p>
     </section>
   </div>
 
@@ -4303,10 +4303,14 @@ if (CROSS && CROSS.campaigns.length > 1) {
   const axisBtn = document.getElementById('crossaxis');
   let relative = false;
 
-  document.getElementById('crossintro').textContent =
-    CROSS.campaigns.length + ' campaigns read together, '
-    + CROSS.campaigns.map(c => c.name + ' on ' + c.mod).join('; ')
-    + '. ' + CROSS.tags.length + ' nations appear in more than one of them.';
+  /* Which campaign was read under which mod is worth being able to find and
+     not worth a paragraph above the chart -- the lines name the campaigns
+     themselves. It hangs off the heading instead. */
+  const crossHead = document.querySelector('#crosssec h2');
+  if (crossHead) {
+    crossHead.title = CROSS.campaigns.map(c => c.name + ' on ' + c.mod)
+                                     .join('; ');
+  }
 
   const has = (tag, key) => CROSS.series.filter(
     b => b[tag] && b[tag][key] && b[tag][key].length).length;

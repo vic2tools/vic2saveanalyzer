@@ -256,7 +256,7 @@ have selected.
 
 #### Cross-campaign comparison
 
-Present only when several campaigns were read together. One nation, one measure,
+Last in the tab, and present only when several campaigns were read together. One nation, one measure,
 one line per game: how did Italy fare in this campaign against the last one?
 Every measure the data visualizer offers is here, drawn from the same numbers,
 so they mean what they mean above.
