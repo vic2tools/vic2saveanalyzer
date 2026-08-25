@@ -35,6 +35,93 @@ SETTINGS = os.path.join(
     "vic2saveanalyzer", "settings.json")
 
 
+def _documents():
+    """The user's Documents folder, OneDrive's copy included.
+
+    Windows moves Documents under OneDrive when that is switched on, and
+    Victoria II follows it there, so both are worth looking at. Neither is
+    guaranteed to exist; the caller checks.
+    """
+    home = os.path.expanduser("~")
+    out = []
+    for base in (os.environ.get("OneDrive"), os.environ.get("OneDriveConsumer"),
+                 home):
+        if base:
+            out.append(os.path.join(base, "Documents"))
+    return out
+
+
+def _first_folder(candidates):
+    """The first of these that is actually there, or ""."""
+    for path in candidates:
+        if path and os.path.isdir(path):
+            return os.path.normpath(path)
+    return ""
+
+
+def default_saves():
+    """Where Victoria II keeps saves, if this machine has them.
+
+    The game writes to `Documents/Paradox Interactive/Victoria II/save games`.
+    That folder is offered directly when it exists, because it is the one
+    holding .v2 files -- a campaign kept in a subfolder of it is one Browse
+    away, and the dialog opens there.
+    """
+    roots = [os.path.join(d, "Paradox Interactive", "Victoria II")
+             for d in _documents()]
+    return _first_folder([os.path.join(r, "save games") for r in roots] + roots)
+
+
+def _steam_libraries():
+    """Every Steam library folder this machine has, common ones first.
+
+    Steam records extra libraries in `libraryfolders.vdf` beside the default
+    one, which is how a game ends up on a second drive. The file is read with
+    a regex rather than a vdf parser: one key is wanted out of it.
+    """
+    seen = []
+    for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles"),
+                 r"C:\Program Files (x86)", r"C:\Program Files"):
+        if base:
+            seen.append(os.path.join(base, "Steam"))
+    out = list(seen)
+    for root in seen:
+        vdf = os.path.join(root, "steamapps", "libraryfolders.vdf")
+        if not os.path.isfile(vdf):
+            continue
+        try:
+            with open(vdf, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        import re
+        out += [p.replace("\\\\", "\\")
+                for p in re.findall(r'"path"\s+"([^"]+)"', text)]
+    return out
+
+
+def default_mod_home():
+    """The folder Victoria II keeps its mods in, if this machine has one.
+
+    This is where to *start browsing*, not an answer: `mod/` holds mods, it is
+    not one. The entry box stays empty until a mod is picked.
+    """
+    return _first_folder([
+        os.path.join(lib, "steamapps", "common", "Victoria 2", "mod")
+        for lib in _steam_libraries()])
+
+
+def default_out():
+    """Where reports go by default.
+
+    Not next to the saves. A folder of saves is the game's, gets synced and
+    backed up as the game's, and a campaign folder that has quietly grown an
+    `analysis` directory inside it is a folder someone has to tidy later.
+    """
+    return os.path.join(_first_folder(_documents()) or os.path.expanduser("~"),
+                        "Victoria 2 Save Analyzer")
+
+
 def load_settings():
     try:
         with open(SETTINGS, encoding="utf-8") as fh:
@@ -81,6 +168,9 @@ class App:
         self.root = root
         self.log_queue = queue.Queue()
         self.running = False
+        # Set by Stop, read by the analyzer between saves. An Event rather than
+        # a flag because the worker thread and the window both touch it.
+        self.stop = threading.Event()
         self.report = None
         saved = load_settings()
 
@@ -90,9 +180,12 @@ class App:
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(1, weight=1)
 
-        self.saves = tk.StringVar(value=saved.get("saves", ""))
+        # A remembered path wins; otherwise the usual place, so a first run
+        # can be one click. `mod_home` is only where Browse opens.
+        self.mod_home = default_mod_home()
+        self.saves = tk.StringVar(value=saved.get("saves") or default_saves())
         self.mod = tk.StringVar(value=saved.get("mod", ""))
-        self.out = tk.StringVar(value=saved.get("out", ""))
+        self.out = tk.StringVar(value=saved.get("out") or default_out())
         self.open_after = tk.BooleanVar(value=saved.get("open_after", True))
 
         rows = [
@@ -117,8 +210,13 @@ class App:
                         variable=self.open_after).grid(
             row=6, column=1, sticky="w", padx=8)
 
-        self.button = ttk.Button(frame, text="Analyze", command=self.start)
-        self.button.grid(row=7, column=1, sticky="w", padx=8, pady=(10, 6))
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=7, column=1, sticky="w", padx=8, pady=(10, 6))
+        self.button = ttk.Button(buttons, text="Analyze", command=self.start)
+        self.button.pack(side="left")
+        self.stop_button = ttk.Button(buttons, text="Stop", command=self.cancel,
+                                      state="disabled")
+        self.stop_button.pack(side="left", padx=(8, 0))
         self.status = ttk.Label(frame, text="Pick a saves folder to begin.")
         self.status.grid(row=7, column=2, sticky="e", pady=(10, 6))
 
@@ -136,12 +234,14 @@ class App:
 
     # ---------------------------------------------------------------- helpers
     def pick(self, var, label):
-        start = var.get() or os.path.expanduser("~")
-        chosen = filedialog.askdirectory(title=label, initialdir=start)
+        start = var.get()
+        if not start:
+            start = (self.mod_home if var is self.mod
+                     else default_saves() if var is self.saves else "")
+        chosen = filedialog.askdirectory(
+            title=label, initialdir=start or os.path.expanduser("~"))
         if chosen:
             var.set(os.path.normpath(chosen))
-            if var is self.saves and not self.out.get():
-                self.out.set(os.path.join(os.path.normpath(chosen), "analysis"))
 
     def say(self, chunk):
         """Append output, treating a carriage return the way a console does."""
@@ -161,10 +261,21 @@ class App:
                 break
         self.root.after(80, self.drain)
 
+    def cancel(self):
+        """Ask the run to stop at the next save it has not started."""
+        if not self.running:
+            return
+        self.stop.set()
+        self.stop_button.configure(state="disabled")
+        self.status.configure(text="Stopping…")
+        self.log_queue.put("\nStopping. Saves already being read will finish "
+                           "first; nothing new will be started.\n")
+
     def close(self):
         if self.running and not messagebox.askokcancel(
                 APP, "The analysis is still running. Close anyway?"):
             return
+        self.stop.set()
         self.root.destroy()
 
     # ------------------------------------------------------------------- run
@@ -188,13 +299,15 @@ class App:
                      "mobilisation size falls back to a fixed guess.\n\n"
                      "Carry on anyway?"):
             return
-        out = self.out.get().strip() or os.path.join(saves, "analysis")
+        out = self.out.get().strip() or default_out()
         self.out.set(out)
         save_settings({"saves": saves, "mod": mod, "out": out,
                        "open_after": self.open_after.get()})
 
         self.running = True
+        self.stop.clear()
         self.button.configure(state="disabled")
+        self.stop_button.configure(state="normal")
         self.status.configure(text="Working…")
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
@@ -209,9 +322,16 @@ class App:
         old_argv, old_out, old_err = sys.argv, sys.stdout, sys.stderr
         sys.argv = argv
         sys.stdout = sys.stderr = Pipe(self.log_queue)
+        vic2_analyzer.set_cancel_check(self.stop.is_set)
         ok = True
+        stopped = False
         try:
             vic2_analyzer.main()
+        except vic2_analyzer.Cancelled:
+            ok = False
+            stopped = True
+            self.log_queue.put("\nStopped. Every save read so far is cached, so "
+                               "starting again picks up where this left off.\n")
         except SystemExit as stop:          # sys.exit on a path it cannot read
             ok = not stop.code
             if stop.code:
@@ -221,24 +341,28 @@ class App:
             import traceback
             self.log_queue.put("\n" + traceback.format_exc())
         finally:
+            vic2_analyzer.set_cancel_check(None)
             sys.argv, sys.stdout, sys.stderr = old_argv, old_out, old_err
         self.report = os.path.join(out, "report.html")
         if ok and os.path.isfile(self.report):
             self.log_queue.put(f"\nReport written to {self.report}\n")
-        self.root.after(0, self.finished, ok)
+        self.root.after(0, self.finished, ok, stopped)
 
-    def finished(self, ok):
+    def finished(self, ok, stopped=False):
         self.running = False
         self.button.configure(state="normal")
+        self.stop_button.configure(state="disabled")
         done = ok and os.path.isfile(self.report or "")
-        self.status.configure(text="Done." if done else "Failed — see the log.")
+        self.status.configure(
+            text="Done." if done else "Stopped." if stopped
+            else "Failed — see the log.")
         if done and self.open_after.get():
             try:
                 os.startfile(self.report)       # noqa: S606  (Windows only)
             except Exception:
                 subprocess.Popen(["cmd", "/c", "start", "", self.report],
                                  shell=False)
-        elif not done:
+        elif not done and not stopped:
             messagebox.showerror(APP, "The analysis did not finish. The log "
                                       "has the details.")
 

@@ -94,9 +94,93 @@ needs an explicit CSS size: without one it falls back to its `width`/`height`
 attributes, which are the raster's, and a 2808px canvas bursts straight out of
 the page.
 
+### One column, as wide as the window
+
+The sheet was 1180 pixels wide, chosen when the widest thing on it was a
+paragraph. What is on it now is mostly a twenty-column table, a chart or a world
+map, and on an ordinary 1080p screen that left a third of the window empty on
+either side. It is `min(1800px, 96vw)` instead.
+
+A `max-width` only ever gives room back, so this costs a small screen nothing:
+at 1366 the sheet is 1311 and at 3840 it stops at 1800 rather than becoming a
+two-thousand-pixel wall of text. `vw` rather than `%` because the sheet is the
+page's only column, and the 4% left over covers the scrollbar `100vw` counts and
+`clientWidth` does not.
+
+The map briefly had a `.bleed` rule stepping it out of the column and across the
+whole window, on the grounds that the world raster is 2.6 times as wide as it is
+tall. It looked wrong for a simpler reason than any of that: a map wider than
+the sheet it sits in reads as a mistake, whatever its aspect ratio. Widening the
+column and leaving the map inside it gets the same map at the same size with
+nothing sticking out.
+
+The notes under each figure were given a reading measure of their own for a
+while, on the grounds that prose runs to two hundred characters a line at 1,700
+pixels. It looked worse than the long line did: a paragraph that stops half a
+screen short of the chart it is explaining reads as text that has been cut off.
+Everything in the column is now the width of the column.
+
+### Occupation is drawn over the map, not into it
+
+Shading a province in the colour of whoever is holding it made a siege and an
+annexation look identical, so land keeps its owner's colour and occupied ground
+is hatched diagonally in the occupier's on top.
+
+The hatching is a mask applied on the screen rather than stripes painted into
+the raster. The raster is 5,616 pixels wide and the panel is about 1,100, so a
+stripe baked into it at a width that reads at zoom 1 would be half a province at
+zoom 24 -- the hatching would grow with the map instead of staying a texture on
+it. So `mapPaintBase` builds a second canvas holding only the occupied
+provinces, in the occupier's colours, everything else transparent; each frame
+that layer is drawn into a screen-sized scratch canvas, masked with
+`destination-in` against a repeating 9-pixel diagonal tile, and blitted over the
+map. The tile is built once from an `ImageData` where alpha follows
+`(x + y) % 9`, which wraps cleanly at the tile edge so the stripes join up.
+
+Two canvases rather than one because `destination-in` eats everything already on
+the canvas it runs on, and the map underneath has to survive.
+
+Two things keep the owner readable under all that. The occupation layer skips
+every pixel the edge mask marks, so province borders are never hatched over --
+without that, a stripe of occupier colour ran straight across the line between
+two provinces and it became a guess which one the ground belonged to. And the
+stripes cover three pixels of the nine-pixel tile rather than five: the occupier
+has to be legible, but it is the owner's province and the owner's colour should
+still be the one the eye lands on.
+
+Neither is a substitute for saying it outright, so hovering any land names the
+province, its owner and whoever is holding it. `mapProvinceAt` is the painting's
+own lookup run backwards -- screen point to map pixel to `mapProv[y * w + x]` --
+which round-trips exactly at every zoom from 1 to 24, and costs one array read
+per pointer move. An army marker still wins the readout when the cursor is on
+one, and it now carries the same two lines above its brigade count.
+
+### Playing the campaign back
+
+A run of saves is a campaign in the order it happened, and the only way to watch
+it move used to be picking each date in turn. The slider beside the save
+dropdown is the same choice by another route -- both set the save and go through
+`mapSave.onchange`, so the picker, the great power panel and the readout stay in
+step -- and **Play** walks it, at 250 ms a frame, or half or a fifth of that
+under the 1x/2x/5x button beside it. A repaint costs about 120 ms and the picker
+refresh doubles it to roughly 300 ms, so even first gear is asking for frames
+faster than they can be drawn. What is waited is the rest of the frame's slot
+rather than the whole slot on top of the drawing, so 1x is a quarter of a second
+a frame and not a quarter of a second plus however long the frame took -- which
+is the difference between a third of the old pace and half of it.
+
+That is why each frame books the next one after it has finished drawing rather
+than every frame being booked in advance on an interval. An interval would keep
+firing while the previous frame was still painting and the queue would run away
+from the machine; a chain of timeouts simply plays back as fast as the machine
+manages, which is the failure worth having -- and it is what makes asking for
+50 ms a frame at 5x a reasonable thing to do rather than a way to hang the tab. Pressing Play while sitting
+on the last save rewinds to the first, and leaving the tab stops the timer,
+since a slideshow nobody is looking at is just work.
+
 ## One nation becoming another
 
-The **Series** chart joins a nation to the one it became with a dashed line, so
+The **Data visualizer** joins a nation to the one it became with a dashed line, so
 Prussia's population does not simply stop in 1860 while Germany's begins out of
 nowhere in 1870.
 
@@ -191,6 +275,128 @@ in the war tab came out as "Earth". A province now belongs to the **first**
 region that claims it, the same rule the country array follows, which leaves
 mods without metaregions untouched -- IGoR reads 528 regions either way.
 
+### Charts that survive a monthly autosave
+
+Every chart here used to be drawn against the saves themselves: a vertical rule
+and a date label per save behind the lines, and a small square on every reading.
+At thirty hand-made saves that reads as a calendar. At an autosave a month it is
+nine hundred rules a pixel apart behind the very lines they are there to help
+read, and four thousand squares threaded onto eight of them.
+
+So the two were separated. The background is ruled at round years -- the step is
+the first of 1, 2, 5, 10, 20, 25, 50 that leaves each label about 74 pixels,
+which is why no thinning pass is needed afterwards -- and the markers are drawn
+only at the two ends of each line. The ends are the one thing a line cannot say
+for itself: where this nation's run of data begins and where it stops, which on
+a chart full of nations that come and go is worth more than a box on every
+reading in between. A series with a single reading has no line at all, so its
+one marker is the whole of it and is drawn once rather than twice.
+
+Hovering is unaffected. The rules are years but `hoverXs` is still the saves, so
+the readout snaps to real dates and reports what was actually recorded.
+
+The stacked charts -- fleet composition, population composition -- cannot thin a
+bar the way a line chart thins a gridline, since the bar is the data. They keep
+the last save in each year and drop the rest. A year is the unit a population is
+read in, and the totals printed over the bars and the years printed under them
+are then handed out by the same greedy pass, so a label is drawn only where it
+clears its neighbour, with the final bar always keeping its own.
+
+### A hull the campaign has not invented yet
+
+**Compare navies** plots one hull type across nations. Plotted against the whole
+campaign, a battleship chart in a run starting in 1836 is two thirds empty floor
+and one third data, because nobody launched one until 1882.
+
+The axis is therefore built from the plotted points rather than from the
+campaign: it runs from the first save anyone held that hull to the last, with
+two percent of the span as padding. Taking it off the data rather than off the
+tech tree covers the other end too -- a hull every navy has since scrapped stops
+the axis where the last one was scrapped, instead of trailing off flat -- and it
+needs nothing from the mod, which is what makes it work on a report built
+without one. `hoverXs` is filtered to the same window so a hover cannot land
+outside the plot.
+
+### Names come from the mod, not from the key
+
+A save writes a good, a unit type, a pop type, a technology and a casus belli as
+a bare key: `cattle`, `clipper_transport`, `aristocrats`,
+`post_napoleonic_thought`. Tidying the underscores out is not translation --
+IGoR calls `cattle` Livestock and `aristocrats` Landowners, and Divergences of
+Darkness renames Post-Napoleonic Thought to Post-Wenceslian Thought.
+
+All five are ordinary localisation keys sharing one namespace, so
+`display_names` gathers the keys from `common/goods.txt`, `poptypes/`, `units/`,
+`technologies/` and `common/cb_types.txt` across base game and mod, and looks
+all of them up in one pass. `text_localisation` reads the mod first and the base
+game after it with the first definition winning, so a mod's rename wins and a
+partial mod still gets the game's names for what it left alone.
+
+Country names took longer to get there. `read_localisation` read the mod folder
+and stopped, which is fine for a total conversion and wrong for everything else:
+Divergences of Darkness names 599 of its 658 tags and leaves Denmark, Norway,
+Sweden, Belgium and 55 more to the game underneath, and CE 1v1 ships two
+localisation files and inherits the rest. Those tags came out as bare three-letter
+codes. It now reads both roots on the same first-wins rule as everything else,
+and the count of nations with no name at all went 59 to 1 on Divergences and 77
+to 0 on CE -- the one that remains, CHR, is not named anywhere.
+
+The lists a reader scans alphabetically -- the goods dropdown, the goods picker,
+the hull dropdown -- are sorted by the name they show rather than by the key
+behind it, or Livestock would sit under C. The same goes for sorting the market
+table by good, which is what `renderTable`'s `sortBy` is for.
+
+### A mod is a layer over the game, not a replacement for it
+
+Victoria II resolves a mod file by file. `units/frigate.txt` in a mod replaces
+the game's; a file the mod does not ship is inherited whole. Half of this
+program's readers followed that rule and half looked only in the mod folder,
+which is a bug that hides well -- most mods override most things, so it only
+shows on the file a particular mod happens not to ship.
+
+What it was actually costing, across the seven mods installed here:
+
+| | |
+|---|---|
+| `localisation/` | 59 nameless tags on Divergences of Darkness, 77 on CE 1v1 |
+| `poptypes/` | CE 1v1 read **none** of the twelve; three mods missed `slaves` |
+| `decisions/` | CE 1v1 saw 1 file of 30, Ferrum Mare 44 of 73 -- no formations |
+| `common/issues.txt` and its neighbours | nothing yet, but one file away from it |
+
+`_resolved_files` does folders and `_resolved_file` does the single files, and
+between them every reader now goes through one of the two. Two of them are
+order-sensitive and were checked rather than assumed: no mod here borrows a
+single `technologies/` or `inventions/` file, so the invention array the save's
+indices point into is byte-for-byte what it was.
+
+### One run must not leave its pop types for the next
+
+`register_pop_types` folded the mod's own pop types into a module-level set so
+`read_province` would keep them. It only ever added. The window runs one
+campaign after another inside the same process, so analyzing IGoR and then
+Divergences of Darkness read IGoR's `bankers` out of Divergences saves -- Jan
+Mayen came back 16,482 bankers under a mod that has no such pop type -- and then
+wrote that answer into the parse cache under a key computed from the mod's
+declared types, which said it had not.
+
+It is set from scratch now, from the twelve the game ships plus the mod's own,
+and the cache key is taken from the set the parse will actually use rather than
+from the set the mod declares. The regression test runs Divergences alone, then
+after IGoR, then after a no-mod run, and requires all three tables to be
+byte-identical.
+
+### Who was playing
+
+Each country a person is playing carries `human = yes` as the first line of its
+own block. That is every player in a multiplayer game, not just the one who
+pressed save, which is all `meta["player"]` ever gave -- and the difference is
+thirty-one nations against one in the campaigns this was built on.
+
+It matters twice: the **Players** preset and the **Player** column are read off
+it, and so is `player_unciv_mobilization`, the bonus an uncivilized nation gets
+for being run by a person. `--player-nations` still overrides the lot, and the
+save's own player is still the fallback for a save with no markers at all.
+
 ### Nothing scrolls sideways
 
 The war tables are read, not scrubbed, so they are laid out to fit the page
@@ -257,14 +463,15 @@ A campaign folder is 38 saves of 44 MB each, and reading them used to be the
 whole runtime. Measured on the same folder and the same machine, 32 logical
 cores:
 
-| 38 saves | | |
+| 38 saves, 1.28 GB | | |
 |---|---|---|
 | first run, one core | 63 s | where this started |
-| first run, one core | 41 s | after the parser changes described here |
-| **first run** | **6 s** | on as many cores as the machine has |
-| **every run after** | **2.3 s** | the saves come back from the cache |
+| first run, one core | 40 s | once pops stopped being built and thrown away |
+| first run, one core | **21 s** | once the parse stopped being a token walk |
+| **first run** | 6.1 s &rarr; **4.1 s** | on as many cores as the machine has |
+| **every run after** | 3.0 s &rarr; **2.7 s** | the saves come back from the cache |
 
-Three things got it there.
+Four things got it there.
 
 **Saves are read in parallel.** They do not depend on each other, so the only
 thing in the way was that a worker needs the same two pieces of state the mod
@@ -281,9 +488,13 @@ just less.
 
 **Pops skip what nothing reads.** Every pop carries an `ideology` and an
 `issues` sub-block -- six ideology numbers and sixteen party-support numbers --
-against the fourteen fields that are actually used. They were being parsed into
-dictionaries and thrown away. Skipping them at the brace takes a save from 2.0 s
-to 1.4 s and drops the tokens read from 5.2 M to 3.0 M.
+against the seven fields that are actually used. They were being parsed into
+dictionaries and thrown away. Skipping them at the brace took a save from 2.0 s
+to 1.4 s and dropped the tokens read from 5.2 M to 3.0 M. The scan that replaced
+the walk does not so much skip them as never look: see below.
+
+**The parse reads the layout rather than every token**, which is the largest
+single change and has a section of its own below.
 
 **The map is decoded once.** `provinces.bmp` is 5616x2160 and decoding it cost
 half a second on every single run, so the result is cached beside the saves,
@@ -301,14 +512,166 @@ decide which pop blocks the province reader keeps, so the same file under two
 mods is two different parses and must not share a slot. Output is byte-identical
 either way. `--no-cache` re-reads everything.
 
-Skipping a block also does not tokenize it: most of a save is blocks nothing
-here reads, and the skip leaps brace to brace through the raw text. The token
-cursor keeps the last match rather than asking it for its position, because
-where the cursor is only matters when a block gets skipped -- once in thirty
-tokens, not three million times on the way there.
+Both of those still describe the token walk, which is now the fallback rather
+than the usual path: skipping a block does not tokenize it, since most of a save
+is blocks nothing here reads and the skip leaps brace to brace through the raw
+text, and the cursor keeps its last match rather than asking it for a position,
+because where the cursor is only matters when a block gets skipped.
 
 Every number above was checked by comparing output: the report and all eight
 CSVs are byte-identical across one core and many, cached and not.
+
+### A campaign saved every month
+
+Thirty-eight hand-made saves is one shape of problem. A century autosaved
+monthly is twelve hundred, and things that were rounding errors at thirty-eight
+are the whole runtime at twelve hundred. Measured by running the real pipeline
+over twelve hundred saves:
+
+| | before | after |
+|---|---|---|
+| the parse, on every core | about 100 s | about 51 s |
+| everything after the parse | 32.3 s | 23.5 s |
+| peak memory | 4.14 GB | 2.94 GB |
+| report.html | 119 MB | about 30 MB |
+
+Four things were costing more than they were worth.
+
+**The same war history, twelve hundred times.** A save does not record the war
+it is in; it records every war there has ever been. By 1908 that is 2.7 MB per
+save of which 263 wars are distinct, so thirty-eight saves carry fifty megabytes
+of overlapping copies and twelve hundred would carry nearly two gigabytes. The
+merge that `build_wars` always did at the end now happens once up front, in
+`merge_wars`, and each save drops its own list the moment it has been folded in.
+
+**Mobilizable pops that were never eligible.** The biggest thing a parsed save
+carries is one entry per pop per province -- eleven thousand for a large nation,
+two megabytes a save -- and about half of them are of a culture the nation does
+not accept, which `finalize` was discarding every time it ran. The test needs
+the country block, which is why it could not live in `read_province`, but it can
+live at the end of `analyze_save`, and now does. What survives keeps its order,
+because the counting rule depends on it, and the total the dropped pops came to
+is kept as a number so `--explain-mob-pool` still reports it exactly. The rest
+of the list goes as soon as `finalize` has read it. `regiment_pops` goes the
+same way, one line after the only loop that reads it.
+
+**A date split three million times.** `merge_prices` was asking `date_key` for
+the save's own date once per price reading rather than once per save, and both
+`date_key` and `year_fraction` were re-splitting the same few hundred strings
+hundreds of thousands of times. Hoisting the first and remembering the other two
+takes `merge_prices` from 2.6 s to 0.6 s and `build_wars` from 2.7 s to 0.5 s.
+
+**A dict per CSV row.** The four big tables -- technologies above all, which is
+one row per nation per save per tech -- are tuples now, in the column order the
+writer declares, and `csv.writer.writerows` pulls them itself instead of
+`DictWriter` naming the same six columns three million times.
+
+### The parse stopped being a walk
+
+The token walk reads a save without knowing anything about how it is laid out,
+which is what made it safe and what made it slow: eight million tokens, every
+one a Python step, most of them inside blocks nothing here reads. It ran at
+35 MB/s.
+
+Five attempts to make the walk itself cheaper are worth recording, because they
+all failed the same way. Each was measured on four saves from four mods and
+each was checked for identical output:
+
+| | |
+|---|---|
+| read each pop block by slicing it out and regexing it | 1.03x |
+| count braces in C instead of walking them one at a time | 3.4x on the skip, 0.99x overall |
+| a fast path for flat blocks, which are 75% of the skips | 1.01x |
+| let `read_pop` drive the match iterator itself | 1.04x |
+| leave a pop block early, once it has given up its seven fields | 1.00x-1.12x |
+
+Tokenising the whole file takes 0.98 s and a bare regex scan for braces alone
+takes 0.30 s, against 1.33 s for the parse. The cost was never which tokens got
+built; it was walking 46 MB one match at a time. The last two rows make the
+point exactly -- skipping work inside a pop saves nothing, because the skip has
+to cross the same bytes the tokeniser would have.
+
+So the walk was replaced by a scan, and the same save now parses in **0.58 s**,
+80 MB/s, **2.14x** over all 76 saves of the four campaigns.
+
+**The layout is the thing.** The engine writes a save to a fixed shape and no
+mod can change it: a top-level key at column zero with its `{` alone on the next
+line, a province's own fields one tab in, a pop's two. Four things follow.
+
+*Finding the blocks.* `top_level_blocks` looks for `\n{` -- a memchr over four
+thousand hits -- and reads the key backwards off the line above. Looking for the
+key instead, with `(?m)^([^\s={}"]+)=`, means offering three million line starts
+to a regex and cost 0.24 s, a quarter of the parse on its own. A block then runs
+to the *next* block's key line, which is more than the block; that is
+deliberate, since every reader stops at its own closing brace anyway and finding
+that brace exactly would mean counting braces through the file again.
+
+*Never touching what is not wanted.* The walk had to brace-count its way through
+26 MB of blocks nothing reads. The scan does not look at them at all.
+
+*Matching only the seven fields a pop has to answer for.* A pop carries about
+two dozen and seven are read: six numbers and the culture line, which has no key
+of its own -- it is literally `french=catholic` -- and so is picked out by having
+a value that does not start with a digit. Matching all of them was half a
+million matches a save; matching those is two hundred thousand. And the pop is
+filled into a list of eight slots rather than a dictionary, which is
+twenty-five thousand dictionaries a save that are no longer built, filled, and
+read back a key at a time.
+
+*A literal to search for.* `\n\t` rather than `(?m)^\t` lets the engine jump
+from newline to newline instead of trying every line start: same matches, a
+third off the scan.
+
+Two things that are still `parse_block` got told what to skip instead. A state
+lists every employed pop of every factory under `employment`, which is most of
+the block and has never been read here; an `id` sub-block is the engine's handle
+on a thing and says nothing about it, and a `leader` is a handle too. `pop` is
+in neither list and must not be, because a regiment's pop is how a standing
+brigade is told from a mobilized one.
+
+**The walk is still there.** `top_level_blocks` returns None the moment a `{` at
+column zero does not have a bare `key=` above it, and everything falls back to
+the token walk, which needs no layout at all -- a save reflowed by a text editor
+still reads, just slowly. The readers are written once and take their entries
+from either source, so there is one copy of what a province or a country
+*means* and two of how its parts are found.
+
+**How it was checked.** The scan and the walk were run against each other over
+all 76 saves of the four campaigns -- 2.7 GB, four different mods -- and
+compared by pickling the whole result, so a stray key or a float differing in
+the last place would show. They agree on every save. Before any of it was
+written, the two were compared structurally on 69,106 top-level blocks: same
+keys, same order, same block-or-scalar, every time. `--verify`, which counts
+regiments and ships by an independent brace-tracking scan of the raw text,
+agrees on all four mods. And the whole pipeline's output -- eight CSVs and the
+report payload -- is byte-identical to what the walk produced.
+
+### The report travels compressed
+
+A payload of thirty-eight saves is 7.3 MB of JSON. The same campaign autosaved
+monthly is 119 MB, which is not a file anybody sends anyone.
+
+It is mostly repeated key names and columns of similar numbers, so it goes into
+the page gzipped and base64'd and the browser inflates it on the way in. A real
+report goes from 7.5 MB to 2.3 MB, and opens quicker than it did: inflating a
+megabyte costs less than reading nine off a disk and parsing them. On the
+twelve-hundred-save payload, 253 ms to inflate and 479 ms to parse against
+4.3 s to load it uncompressed.
+
+Base64 costs a third back on top of the gzip. That is the price of keeping one
+file that opens off a disk with no server behind it, and it is worth paying.
+
+Two things follow from it. `DecompressionStream` is asynchronous and a browser
+has no synchronous gzip, so the whole page script runs inside one async function
+-- which is also why it is not a module: a module script will not load from a
+`file://` URL, and opening the report off a disk is the normal way to read one.
+And a failure has to say so on the page, since a report is a file somebody was
+sent and the console is not somewhere they will look.
+
+Rearranging the payload was tried and dropped. Turning every date key into an
+index into `DATA.dates`, and printing whole floats as integers, takes 7% off the
+raw JSON and **2%** off the compressed size, because gzip was already doing that
+work. The compression is the whole of the win.
 
 ## What was removed
 
@@ -336,16 +699,119 @@ daily movement at about 0.01, while consecutive history entries differ by up to
 `prices.csv` is `date, year, good, category, price`. Categories come from a
 vanilla goods list; anything a mod adds lands in `other` and still charts fine.
 
-**Demand needs care.** Victoria II holds a good at its price floor by adding a
-sentinel of roughly two billion to the stored `demand`. `market_snapshot.csv`
-keeps both the raw `demand` and the honest `real_demand`; the report shows
-`real_demand` and flags pinned goods in an "At floor" column. If you analyse the
-CSV yourself, use `real_demand` or you will get nonsense.
+**Demand needs care.** Some goods carry a stored `demand` of roughly a billion
+or two, which is nobody's economy: it is a standing order to buy without limit,
+which mods hand a nation so raw materials always find a buyer. Every reading
+carrying one, across the campaigns this was checked against, sits at exactly
+five times the good's base cost -- the engine's price ceiling -- so for those
+goods neither price nor demand reports on scarcity. The report flags them in a
+**Pegged** column and falls back to `unsold` (supply that found no buyer at all)
+as the glut signal. `market_snapshot.csv` keeps both the raw `demand` and the
+honest `real_demand`; if you analyse the CSV yourself, use `real_demand` or you
+will get nonsense.
 
 Market tab controls worth knowing: **Top movers** picks the six goods that moved
 most across the span, **Indexed (=100)** rebases every good to 100 at its first
 reading so a 70-unit good and a 1-unit good can share an axis, and clicking a
 row in the market table plots that good.
+
+## Who supplied what
+
+Each country block carries `saved_country_supply`: a good-by-good record of what
+that nation put on the world market. It is production as the market sees it
+rather than a stockpile or an income, and the check is that it adds up. Summed
+over the nations that hold land in the 1908 IGoR save it comes to 41,072.85 of
+grain against a world `supply_pool` of 41,072.85. Summed over *every* country
+block it comes to 43,191, because a nation that no longer exists keeps the last
+figure it ever had; the report only ever counts nations with population, which
+is what makes the two agree.
+
+The payload names the fourteen largest suppliers of each good at each save and
+keeps the world total beside them, so the share the named ones do not account for
+is still recoverable as one bar. Naming all of them for every good at every save
+was most of a megabyte; fourteen is 370 KB, and the ninetieth supplier of grain
+is not what makes a glut.
+
+**A good that records no sale in any save is not traded at all.** Precious metal
+is the standing case: the engine turns it into money at the mint rather than
+putting it up for sale, so its supply is real and its `actual_sold` is always
+nil. Read naively that is "100% unsold, for ever", which puts it at the top of
+every glut list and says nothing, so those goods are left blank instead.
+
+## Fleet power
+
+A hull is worth
+
+    gun power x hull / (1 - evasion)
+
+Two ships trading fire deal damage in proportion to their own gun power and in
+inverse proportion to the other's hull, and evasion throws away a share of the
+ticks aimed at it. Ask which of them out-damages the other and move each ship's
+terms to its own side of the comparison, and this is what is left -- a number
+that can be added over a fleet and divided between two of them. The derivation is
+Boltun's, in his guide to navies, after Poppis on the combat code.
+
+It reproduces his worked figures exactly, which is what makes it trustworthy.
+Vanilla frigate: gun power 4, hull 3, evasion 0.25, one naval point, so
+`4 x 3 / 0.75 = 16` per point. Man-o'-war: 8, 4, no evasion, two points, so also
+16 -- "just as efficient", as the guide has it. Add the +2 gun power an early
+invention gives every ship and the frigate goes to 24 and the man-o'-war to 20,
+his numbers. Add the later +2 gun power and +1 hull and the frigate reads
+`8 x 4 / 0.75 = 42.67`, and the guide says 42.7.
+
+Torpedoes are a second power level rather than part of the first: they only work
+against a `big_ship`, so `unit_type` is carried through and the report gives a
+separate "against heavy ships" figure wherever any hull on either side carries
+one.
+
+**The upgrades are almost all inventions rather than technologies.** A
+technology opens an area and the inventions under it add the gun power and the
+hull: in vanilla, IGoR, Ferrum Mare and Divergences of Darkness, `technologies/`
+does not touch a ship at all. Almost -- GFM's `naval_directionism` hands the two
+transports speed and evasion directly, so technologies are read as well. They are
+the easier half, since a save names a nation's technologies outright; `ai_chance`
+is cut out of a tech block first, because it is full of `modifier = { ... }`
+blocks that look like effects and are weightings.
+
+Inventions follow `breakdown`: the save names them by index where the load order
+decodes, and otherwise falls back to every invention whose requirements the
+nation meets, which flatters unlucky nations. Only `effect = { ... }` is read
+there -- a `limit` or a `chance` block names ships as requirements, not as
+changes. `navy_base` is the engine's name for "every naval unit" and is applied
+to all of them.
+
+Nations that researched the same things have the same ships, so the profiles are
+stored once each and referred to by number: 83 distinct profiles across 126
+nations and 38 saves in the IGoR campaign.
+
+Two things a mod can do that the measure has to survive. IGoR sets
+`supply_consumption_score = 0` on every hull, so there are no naval points to
+divide by and only the per-hull figure is shown. And a mod is free to rewrite the
+stats entirely -- IGoR's cruiser is 20/30/0.25 against vanilla's 30/50/0.30 --
+which is exactly why the numbers are read from the files rather than written down
+here.
+
+## Stopping a run
+
+The window has a **Stop** button, so the analyzer takes a callable and asks it,
+between saves, whether to carry on; a terminal run never sets one and never asks.
+Between saves rather than inside one, because a save is a few seconds at worst
+and unwinding a half-read one buys nothing.
+
+The parallel path had to change shape for it. `pool.map` gives no handle on the
+queue, so a cancellation would leave the executor's context manager waiting
+politely for every save still to come -- on a folder of hundreds, a Stop button
+that takes ten minutes to stop. Work is now submitted one future per save and
+collected with a short `wait` timeout, so the button is answered while the
+workers are busy, and cancelling calls `shutdown(cancel_futures=True)`: everything
+not yet started is dropped and only the saves actually in flight finish. Measured
+on the 38-save folder, Stop pressed at 1.5 s returned at 1.7 s and the process was
+gone at 4.5 s. `parse_saves` re-raises `Cancelled` rather than treating it as a
+machine that cannot start workers, which would otherwise quietly restart the
+whole folder one save at a time.
+
+Everything read before the stop is already in the cache, so starting again picks
+up where it left off.
 
 ## Mobilized brigades
 
@@ -385,6 +851,11 @@ python3 vic2_analyzer.py saves/ --mod-path "path/to/IGoR"
 ```
 
 - **Technologies and national values** are stored in the save by name.
+- **Reforms** are stored in the save by name too -- a country block carries a
+  plain `conscription = mandatory_service` line. GFM hangs a four-rung
+  conscription ladder off that reform, +1% to +6%, and takes 1% back at two
+  levels of its `centralization` reform. Six percent is more than GFM's entire
+  technology tree grants.
 - **Inventions** are stored as bare numeric indices into the engine's global
   invention array. That array is built by walking `inventions/` in plain ASCII
   file order — uppercase file names sort before lowercase — taking inventions in
@@ -394,7 +865,12 @@ python3 vic2_analyzer.py saves/ --mod-path "path/to/IGoR"
   5694 nation-invention pairs (0.1%), which is the residue of inventions granted
   by events. A wrong ordering fails 11% or more, and the analyzer falls back to
   requirement matching and says so when the check does not pass.
-- **Event modifiers and revanchism bands** come from `common/`.
+- **Event modifiers** are listed in the save by name.
+- **The uncivilized penalty** is a static modifier: `unciv_nation` in
+  `common/static_modifiers.txt`, -10% in the base game and -20% in Divergences
+  of Darkness, applied to everyone uncivilized and written down nowhere.
+- **Triggered modifiers** are the hard ones, and have a section to themselves
+  below.
 
 This matters because inventions fire on a chance roll: two nations with
 identical technology routinely have different mobilisation sizes. Assuming every
@@ -413,6 +889,61 @@ back to `--mobilisation-size`:
 python3 vic2_analyzer.py saves/ --mobilisation-size 0.12
 ```
 
+#### Triggered modifiers have to be judged, not looked up
+
+An **event** modifier is granted to a country and stays granted, so the save
+lists it by name and reading it is a dictionary lookup. A **triggered** modifier
+is re-evaluated by the engine every day from its own `trigger` block and never
+written down at all. The only way to know a country has one is to read the
+trigger and decide.
+
+This used to be done for exactly two shapes: a trigger that names a revanchism
+threshold, and the human-run-uncivilized bonus. Everything else was skipped in
+silence. On GFM that is most of them:
+
+| | |
+|---|---|
+| `ils_ne_passeront_pas` | +13% to an AI France that does not hold province 409 |
+| `pashtunwali` | +20% to Afghanistan at war with a great power |
+| `glory_prussia` | +10% to an AI Prussia before 1880 |
+| five more, for the Americas | +3% to +10%, by population and by whether a person is playing |
+| `collectivisation_modifier` | +2% to a communist government holding the invention |
+
+`_trigger_ok` reads a trigger one condition at a time and answers **true, false
+or "I cannot tell"**. It knows twenty-five conditions -- tag, ai, civilized,
+war, exists, government, national value, primary culture, culture group,
+capital, capital continent, year, great-power status, total population, province
+ownership, invention, technology, country flags, country modifiers, and the
+numeric ones (revanchism, infamy, prestige, treasury, war exhaustion,
+plurality) -- plus whichever reforms a trigger names, and `AND`, `OR` and
+`NOT`. A modifier whose trigger
+uses anything else is left out, and `--explain-mob` prints which ones those
+were, so a number that is short is short *visibly*. Across all seven installed
+mods that is one modifier: GFM's `pashtunwali`, which asks
+`any_greater_power = { war_with = THIS }`.
+
+One subtlety worth writing down. A Clausewitz block is a bag of key/value pairs
+and the same key may repeat, so `OR = { tag = FRA tag = BOR }` parses to a
+single block whose `tag` holds two values. It is two conditions, not one
+condition with two values, and only the enclosing operator says whether they are
+ANDed or ORed. Reading the first value alone cost Bourbon France a modifier
+worth 13%.
+
+**Retiring the two special cases changed nothing where nothing should change.**
+The revanchism ladder picked the highest matching band; the general evaluator
+sums every matching modifier, and the bands are written mutually exclusive
+(`revanchism = 0.20`, `NOT = { revanchism = 0.25 }`), so the two agree by
+construction. Checked rather than argued: 1,543 nation-saves of IGoR and 156 of
+Ferrum Mare come out identical to the last decimal, and the 80 that move on
+Divergences of Darkness all move for the separate reason that its uncivilized
+nations now carry `unciv_nation` at -20% and floor at zero.
+
+GFM has no save here, so its rules are checked against nations built for the
+purpose -- an AI France, a Bourbon France, a player France, a France holding 409,
+a Prussia either side of 1880, a regionalist USA, five sizes of South American
+nation, a communist with and without the invention -- 27 assertions worked out
+by hand from the mod files.
+
 #### Uncivilized nations, and who was human
 
 Being uncivilized is **not** a filter. A test nation with `civilized = no` in its
@@ -423,6 +954,13 @@ no national value grants it either. (Project Alice documents an explicit
 `is_civilized() == false -> 0`; since a mod runs the same executable, that
 appears to be a divergence rather than a description.)
 
+The **base game and Divergences of Darkness** do apply a flat penalty --
+`unciv_nation`, -10% and -20% -- which had been missed entirely. It is what
+takes Ethiopia, Punjab, Berar and forty other Divergences nations from the 4-5%
+their national value grants to a floored zero, which is the same place the
+vanilla engine puts them. IGoR, Ferrum Mare, CE 1v1 and DoD Heartbreaker attach
+no mobilisation size to `unciv_nation` at all, so nothing there moves.
+
 That leaves one modifier the save cannot resolve on its own. IGoR's
 `player_unciv_mobilization` grants **+2%** on `ai = no` and `civilized = no`,
 excluding whoever holds the `china` country flag:
@@ -431,10 +969,13 @@ excluding whoever holds the `china` country flag:
 python3 vic2_analyzer.py saves/ --mod-path <mod> --player-nations JAP KOR
 ```
 
-A save records only the nation that took it, so in multiplayer every other human
-reads as AI. Name them with `--player-nations`; the default is the save's own
-player, and passing the flag with no tags disables it. It only ever changes an
-uncivilized nation. In a 1836 save this reproduces Japan's in-game tooltip
+Every country a person is playing carries `human = yes`, so this is read off
+the save and `--player-nations` is only needed for a save that carries no such
+marker -- it overrides what the save says when given, and passing the flag with
+no tags treats everyone as AI. It is no longer only uncivilized nations that
+care: GFM pays a South American player differently from a South American AI, and
+three of its modifiers turn on `ai = yes`. In a 1836 save this reproduces
+Japan's in-game tooltip
 exactly -- 2.00% mobilisation size, a pro-military cap of 40 x (1 + 3) = 160 --
 while China, holding the `china` flag, stays at zero however it is marked.
 
@@ -601,6 +1142,21 @@ strata table from `poptypes/`, along with any pop type the mod adds — IGoR's
 population total. Note that IGoR's `POP_MIN_SIZE_FOR_REGIMENT` of 1000 is *not*
 the mobilization threshold: it governs how small a **soldier** pop may be and
 still support a **standing** brigade, a different rule on a different pop type.
+
+#### Which layer a pop type sits in is the mod's business too
+
+Reading a mod's own pop types was only half of it. The poor/middle/rich totals
+and the per-type columns of `nations_timeseries.csv` were both counted against
+a hardcoded vanilla twelve, so a mod's own type was parsed out of the save,
+added to the national total, and then dropped on the way to the table. Every one
+of the four campaigns this is used on hit it: IGoR and Ferrum Mare add rich
+`bankers`, GFM and Divergences of Darkness add poor `serfs`.
+
+It shows worst where a nation is mostly that type. Ferrum Mare's LCT is 98%
+bankers and its wealth breakdown accounted for 2,305 of its 116,733 people;
+Hungary in Divergences is 29% serfs and lost every one of them. The layers now
+come from the mod's `strata` table and the columns from the pop types actually
+registered, and poor + middle + rich adds up to the population again.
 
 #### What is not modelled
 

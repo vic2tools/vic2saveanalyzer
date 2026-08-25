@@ -18,11 +18,26 @@ Double-click **`vic2saveanalyzer.exe`**. A window asks for two folders:
 | **Saves folder** | Where this campaign's `.v2` files are. |
 | **Mod folder** | The mod's own folder — the one with `common/`, `map/` and `history/` inside. |
 
+A third box says where the report goes. It defaults to
+`Documents/Victoria 2 Save Analyzer`, deliberately *not* inside your saves
+folder — that folder belongs to the game.
+
 Then press **Analyze**. A minute later the report opens in your browser.
 
-Both paths are remembered, so the next run is one click. The box at the bottom
-shows progress, and there is a tick to stop it opening the report if you would
-rather find it yourself.
+On a first run the saves box is already filled in with
+`Documents/Paradox Interactive/Victoria II/save games` if that folder exists,
+and **Browse** for the mod opens straight in
+`Steam/steamapps/common/Victoria 2/mod`. After that all three paths are
+remembered, so the next run is one click.
+
+The box at the bottom shows progress, and there is a tick to stop it opening the
+report if you would rather find it yourself.
+
+**Stop** cancels a run. Saves already being read finish first — they are seconds
+each — and nothing new is started, so pointing it at a folder of two hundred
+campaigns by mistake costs you a moment rather than a coffee break. Every save
+read before you stopped stays cached, so starting again picks up where it left
+off.
 
 ### About the mod folder
 
@@ -33,6 +48,14 @@ nation colours, the province map, the tech tree, pop types and the rules behind
 the mobilization numbers, so a report built without it is a much thinner thing.
 
 For an unmodded game, point it at the Victoria 2 install folder itself.
+
+A mod is read the way the game reads one: file by file, with the mod's copy
+winning and anything it does not ship taken from the Victoria 2 install
+underneath. That matters for the partial ones — Divergences of Darkness names
+599 of its 658 countries and leaves the rest to the base game, and CE 1v1 ships
+two localisation files and no pop types at all. So keep the mod inside
+`Victoria 2/mod/`, where the game keeps it, rather than copying it somewhere
+else; pointed at a stray copy it can only read what that copy contains.
 
 ### Saves must be plaintext
 
@@ -59,6 +82,9 @@ Seven tabs across the top, and they share three habits worth knowing:
 **Nation pickers.** Anything comparing nations uses a searchable dropdown rather
 than a wall of tags. Type to filter by tag or by name, or use the presets:
 
+- **Players** — every nation somebody was playing. Each save marks them itself,
+  so a multiplayer game names all of its players and not only whoever pressed
+  save. Absent from single-player campaigns, where it would be one nation.
 - **Great powers** — the eight the game itself ranks, at the save being viewed
 - **Top 8 by pop**
 - **All** / **None**
@@ -69,6 +95,18 @@ nations that exist in that save — twenty-one in 1908 rather than the hundred a
 twenty-six the campaign has seen. Step back to 1836 and they all come back.
 
 **Sorting.** Click any column heading. Click again to reverse it.
+
+**Names.** Goods, unit types, pop types, technologies and cultures are named the
+way the mod names them rather than by the key the save stores. IGoR's `cattle` is
+Livestock and its aristocrats are Landowners; Divergences of Darkness has no
+Post-Napoleonic Thought but does have Post-Wenceslian Thought. Without a mod
+folder there is nothing to read the names out of, so the keys stand in, tidied.
+
+**Charts** carry a mark at each end of a line and nothing in between, and rule
+the background at round years rather than at each save. A campaign saved by hand
+thirty times and one autosaved every month therefore draw the same chart, rather
+than the second one burying its own lines under nine hundred gridlines and four
+thousand point markers.
 
 ---
 
@@ -86,8 +124,19 @@ by its nation.
 - **Click** a marker to pin its readout while you look elsewhere.
 - **Scroll** to zoom on the cursor, **drag** to pan, **double-click** to zoom
   in, **Reset** for the whole world.
-- **Control / Ownership** switches the shading between who holds ground and who
-  owns it, which is what separates a front line from an annexation.
+- **Play**, and the slider beside it, walk the map through every save in order,
+  so a campaign plays out rather than being read one date at a time. The button
+  beside Play sets the pace — **1×**, **2×**, **5×** — which is the difference
+  between watching a thirty-save campaign and watching a nine-hundred-save one.
+  Drag the slider to move by hand; leaving the tab stops it.
+- Land is shaded by whoever **owns** it. Ground somebody else is holding is
+  hatched diagonally in the occupier's colour on top, so a siege and an
+  annexation stop looking the same. The stripes never cross a province border,
+  and they cover a third of the ground rather than half, so the owner's colour
+  stays the one the eye lands on. **Occupation** turns the hatching off.
+- **Hover any land** and the readout names the province, the nation that owns
+  it, and the nation holding it if that is somebody else. No pattern can say
+  which of two nations owns the ground under a stripe; this can.
 - Narrowing the nation picker strips the map back to the armies you care about.
   The land stays shaded, so the geography does not move under you.
 
@@ -96,17 +145,28 @@ out as the game lays them out — first to fourth down the left, fifth to eighth
 down the right — each with its flag, prestige, craftsmen, factories, brigades
 and ships.
 
-Then **Series**: any measure plotted over the whole campaign for the nations you
-pick. Population, literacy, brigades, ships, factories, prestige, treasury,
+### Compare
+
+**Data visualizer**: any measure plotted over the whole campaign for the
+nations you pick. Population, literacy, brigades, ships, factories, prestige, treasury,
 infamy and about twenty more. **Linear/Log** switches the vertical scale, which
 is what makes a small nation and a great power readable on one chart.
+
+Two of the measures are rates rather than quantities: **population growth** and
+**accepted-culture growth**, both as a percentage a year, compounded between one
+save and the one before it. A nation that grew 3% over six months plots at about
+6%. Saves less than three months apart are measured across the gap to the next one
+far enough away instead, because a fortnight of ordinary growth annualises into
+hundreds of percent and would bury everything else on the chart.
+Conquest moves population as surely as births do, so a spike is usually a border
+moving.
 
 A dashed line joins a nation to the one it became, so Prussia's line runs into
 the North German Federation's and that into Germany's rather than three lines
 starting and stopping in mid-air.
 
-Last, **Standing**: the closing table at the final save for the nations you have
-selected.
+Below it, **Standing**: the closing table at the final save for the nations you
+have selected.
 
 ### Pops
 
@@ -119,10 +179,15 @@ percentages, which is the difference between "who has the most craftsmen" and
 Click any row to load that nation into the two sections below.
 
 **Cultures** — every culture in one nation at one save, with its size, its share
-of the population, and whether the nation accepts it.
+of the population, and whether the nation accepts it. Cultures are named the way
+the mod names them, not by the key the save stores: IGoR's China is South Han and
+North Han, not `nanfaren` and `beifaren`. Without a mod folder there is nothing
+to read the names out of, so the keys stand in.
 
-**Population composition** — one nation's pop types stacked over the whole
-campaign.
+**Population composition** — one nation's pop types stacked over the campaign,
+one bar a year taken from the last save in each. A year is the unit a population
+is read in, and it is what keeps the chart the same whether the campaign was
+saved thirty times or every month.
 
 ### Military
 
@@ -138,19 +203,52 @@ nations, so USA and Austria-Hungary against Germany is a single comparison.
   count, which is the honest measure of what a nation could put in the field
   rather than what it has standing today.
 
+#### Fleet power
+
+Hulls are not interchangeable: five frigates are not a cruiser. In **Navy** mode
+each side also carries a **fleet power**, which sits beside the ship count rather
+than replacing it — the two disagreeing is the interesting part.
+
+One hull is worth
+
+    gun power × hull ÷ (1 − evasion)
+
+which is what falls out of asking who out-damages whom. Two ships trading fire
+deal damage in proportion to their own gun power and in inverse proportion to the
+other's hull, and evasion throws away a share of the ticks aimed at it; move each
+ship's terms to its own side of that comparison and this is what is left. It adds
+up over a fleet, so a side's total is a number you can divide. The reading is
+Boltun's, from his guide to navies, and it reproduces his figures exactly: a
+frigate at 16 per naval point, a man-o'-war at the same, both before any
+technology.
+
+Stats come from the mod's own `units/` files and are upgraded by the inventions
+each nation actually rolled, so the same hull type is worth more to a nation that
+researched further — in one campaign here Britain's battleship reads 4,453 and
+Germany's 4,200. Torpedoes work only against big ships, so where any are carried
+a second figure is given for a fight against heavy hulls. **Composition** adds
+what one hull of each type is worth to each side, and each side's total under its
+pie. Without a mod folder there are no unit files and the measure is unavailable.
+
 Below that, a sortable overview of the nations you select — brigades, ships,
-army and navy tech counts, soldier pops and soldier pops as a share of
-population — and a technology matrix listing every army and navy tech in
-research order with a column per nation. Those two tables scroll sideways with
-the label column pinned, because a column per nation is the point of them.
+army and navy tech counts, soldier pops, soldier pops as a share of population,
+and the same share counting only soldiers in the nation's own states. A colonial
+soldier pop raises no brigade, so that last column is the part of the soldier base
+an army can actually be built on: Britain reads 3.98% on the plain measure and
+1.82% on this one. Then a technology matrix listing every army and navy tech in
+research order with a column per nation. Those tables scroll sideways with the
+label column pinned, because a column per nation is the point of them.
 
 ### Fleets
 
 Three views. **Compare navies** plots one hull type, or all ships, across
-nations over time. **Fleets at ⟨save⟩** is a table of every navy with a column
-per hull type. **Fleet composition** stacks one nation's hull types over the
-campaign. Hull types are read from the save, so mod-added ships appear under
-their own names.
+nations over time; the axis covers the years anybody actually had that hull, so
+a battleship chart starts at the first one launched instead of spending two
+thirds of its width on the decades before the type existed. **Fleets at ⟨save⟩**
+is a table of every navy with a column per hull type. **Fleet composition**
+stacks one nation's hull types over the campaign, one bar a year. Hull types are
+read from the save and named the way the mod names them, so mod-added ships
+appear under their own names.
 
 ### Wars
 
@@ -183,9 +281,22 @@ technology for its bonuses and the inventions it unlocks.
 ### Market
 
 Price history for every good over the campaign — real monthly history, not one
-reading per save, because each save carries three years of it. Below that, the
-market snapshot: supply, demand, and how each good's price compares with its
-base price.
+reading per save, because each save carries three years of it.
+
+Below that, the market snapshot: supply, demand, how each good's price compares
+with its base price, and two columns about gluts. **Unsold** is the share of that
+day's supply that found no buyer at all. **Pegged** marks a good whose recorded
+demand runs to something on the order of a billion — a standing order to buy
+without limit, which some mods hand a nation so that raw materials always sell.
+Every pegged reading in the campaigns this was checked against sits at exactly
+five times the good's base cost, the engine's price ceiling, so for those goods
+neither price nor demand reports on scarcity and only **Unsold** still does.
+
+Last, **Who produces it**: for one good at one save, every nation's own
+contribution to the world supply, biggest first. Summed over every nation it
+comes back to the market's supply pool, so these are shares of the same quantity
+the price responds to. That is what names the nations behind an overproduced
+good. Clicking a row in the table above brings that good's producers up here.
 
 ---
 
@@ -205,6 +316,14 @@ there for when you want to do your own arithmetic.
 | `ships_by_type.csv` | Long format: date, tag, ship type, count. |
 | `brigades_by_type.csv` | Long format: date, tag, regiment type, count. |
 | `technologies.csv` | One row per nation per technology per save. |
+
+The report is one file with everything in it -- the map, the flags, every
+number -- and it is small enough to send: a thirty-eight-save campaign comes to
+about 2 MB. The data inside it is compressed, so any browser from 2023 onwards
+will open it and older ones will say so rather than showing you an empty page.
+Nothing needs to be installed and it does not need a web server; open it off the
+disk. Everything is also on `window.campaign` if you would rather read it out of
+the console.
 
 ---
 
@@ -246,10 +365,14 @@ Saves are ordered by their in-game date, so filenames do not matter.
 
 ### Multiplayer
 
-A save records only the nation that saved it. That matters in one place: an
-uncivilized nation run by a human gets a mobilization bonus an AI one does not,
-so name the human-run nations with `--player-nations TAG TAG` if you want those
-numbers exact. Everything else is unaffected.
+Every country somebody is playing carries a `human = yes` marker in its own
+block of the save, so a multiplayer campaign is read without being told anything:
+the **Players** preset in each nation picker and the **Player** column in the
+standing table both come from it, and so does the mobilization bonus an
+uncivilized nation run by a human gets and an AI one does not.
+
+`--player-nations TAG TAG` overrides that list, for a save whose markers are
+missing or a campaign where somebody handed a nation over.
 
 ---
 
@@ -265,6 +388,14 @@ Two things worth knowing:
 - **Mobilization ceilings** are computed, not stored. They match the game
   exactly in nearly every case tested; the misses are single-brigade rounding at
   the boundary.
+- **Mobilisation size** adds up every source the mod has: technologies,
+  inventions, national values, reforms, event modifiers, the flat penalty an
+  uncivilized nation carries, and triggered modifiers — which are re-evaluated
+  by the game every day and written into the save nowhere, so their conditions
+  have to be read and judged. Where a condition is one the analyzer cannot
+  answer, the modifier is left out rather than guessed at, and
+  `--explain-mob TAG` names which ones those were along with every source that
+  did count.
 - **Battle dates** are recovered by reading the whole folder, which dates about
   90% of battles. The rest are shown as undated rather than filled in with a
   guess.

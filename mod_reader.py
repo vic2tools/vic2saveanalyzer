@@ -186,7 +186,7 @@ def read_defines(path):
     the block parser: every key we want is a plain `NAME = number,` line.
     """
     out = {}
-    fname = os.path.join(path, "common", "defines.lua")
+    fname = _resolved_file(path, "common", "defines.lua")
     if not os.path.isfile(fname):
         return out
     with open(fname, "rb") as fh:
@@ -208,15 +208,13 @@ def read_poptypes(path):
     farmers/labourers/craftsmen only happens to be right for vanilla-like mods.
     """
     out = {}
-    folder = os.path.join(path, "poptypes")
-    if not os.path.isdir(folder):
-        return out
-    for fname in _files(folder):
-        with open(os.path.join(folder, fname), "rb") as fh:
+    for target in _resolved_files(path, "poptypes").values():
+        with open(target, "rb") as fh:
             text = _COMMENT.sub("", fh.read().decode("latin-1"))
         m = re.search(r"(?<![\w.])strata\s*=\s*(\w+)", text)
         if m:
-            out[os.path.splitext(fname)[0].lower()] = m.group(1).lower()
+            name = os.path.basename(target)
+            out[os.path.splitext(name)[0].lower()] = m.group(1).lower()
     return out
 
 
@@ -235,57 +233,6 @@ def _files(folder):
         (f for f in os.listdir(folder) if f.lower().endswith(".txt")),
         key=str.lower,
     )
-
-
-def _revanchism_ladder(path):
-    """
-    Triggered modifiers keyed on revanchism, as [(threshold, mobilisation_size)].
-
-    Only the revanchism trigger is handled: evaluating arbitrary triggers would
-    mean reimplementing the script engine, and revanchism is the one that
-    actually moves mobilisation size in practice.
-    """
-    steps = []
-    if not os.path.isfile(path):
-        return steps
-    for _name, block in _read_clausewitz(path):
-        size = _find_mob_size(block)
-        if not size:
-            continue
-        trigger = block.get("trigger")
-        if not isinstance(trigger, dict):
-            continue
-        rev = trigger.get("revanchism")
-        if rev is None or isinstance(rev, (dict, list)):
-            continue
-        steps.append((to_float(rev), size))
-    steps.sort()
-    return steps
-
-
-def _revanchism_impact_ladder(path):
-    """
-    The same triggered modifiers, as [(threshold, mobilization_impact)].
-
-    These are evaluated by the engine at runtime rather than written into the
-    save's per-country modifier list, so unlike the event modifiers they have to
-    be re-derived from the nation's revanchism.
-    """
-    steps = []
-    if not os.path.isfile(path):
-        return steps
-    for _name, block in _read_clausewitz(path):
-        if not isinstance(block, dict) or "mobilization_impact" not in block:
-            continue
-        trigger = block.get("trigger")
-        if not isinstance(trigger, dict):
-            continue
-        rev = trigger.get("revanchism")
-        if rev is None or isinstance(rev, (dict, list)):
-            continue
-        steps.append((to_float(rev), to_float(block["mobilization_impact"], 0.0)))
-    steps.sort()
-    return steps
 
 
 def _named_blocks(text, keyword):
@@ -326,7 +273,7 @@ def _country_entries(path):
     Dropped, this list matches the order a save writes its country blocks in,
     tag for tag, which is the engine's array by definition.
     """
-    listing = os.path.join(path, "common", "countries.txt")
+    listing = _resolved_file(path, "common", "countries.txt")
     if not os.path.isfile(listing):
         return []
     entry = re.compile(r'^\s*([A-Z0-9]{3})\s*=\s*"?([^"\r\n]+?)"?\s*$', re.M)
@@ -357,7 +304,7 @@ def party_sequence(path):
     """
     out = []
     for tag, rel in _country_entries(path):
-        target = os.path.join(path, "common", rel.replace("/", os.sep))
+        target = _resolved_file(path, "common", rel.replace("/", os.sep))
         if not os.path.isfile(target):
             continue
         for block in _named_blocks(_plain(target), "party"):
@@ -382,7 +329,7 @@ def modifier_mob_impacts(path):
     """
     out = {}
     for name in ("event_modifiers.txt", "triggered_modifiers.txt"):
-        target = os.path.join(path, "common", name)
+        target = _resolved_file(path, "common", name)
         if not os.path.isfile(target):
             continue
         for key, block in _read_clausewitz(target):
@@ -392,19 +339,368 @@ def modifier_mob_impacts(path):
 
 
 def mobilization_impacts(path):
-    """{war policy: mobilization_impact}, out of the mod's own issues.txt."""
-    target = os.path.join(path, "common", "issues.txt")
+    """
+    {war policy: mobilization_impact}, out of the mod's own issues.txt.
+
+    Every option under `party_issues > war_policy`, rather than the four
+    vanilla names: a mod is free to add a fifth stance, and one that does
+    would have read as no policy at all.
+    """
+    target = _resolved_file(path, "common", "issues.txt")
     if not os.path.isfile(target):
         return {}
-    body = _plain(target)
     out = {}
-    for name in ("jingoism", "pro_military", "anti_military", "pacifism"):
-        for block in _named_blocks(body, name):
-            hit = re.search(r"mobilization_impact\s*=\s*([-\d.]+)", block)
-            if hit:
-                out[name] = float(hit.group(1))
-                break
+    for party in _named_blocks(_plain(target), "party_issues"):
+        for policy in _named_blocks(party, "war_policy"):
+            for m in re.finditer(r"(\w+)\s*=\s*\{", policy):
+                block = _named_blocks(policy[m.start():], m.group(1))
+                if not block:
+                    continue
+                hit = re.search(r"mobilization_impact\s*=\s*([-\d.]+)", block[0])
+                if hit:
+                    out.setdefault(m.group(1), float(hit.group(1)))
     return out
+
+
+def reform_mob(path):
+    """
+    ({(reform, option): mobilisation_size}, frozenset(reform names)) from issues.txt.
+
+    A reform option is an ordinary modifier block, and a mod is free to hang
+    mobilisation size off one: GFM adds a `conscription` reform whose four
+    rungs run +1% to +6%, which is more than most nations get from their whole
+    technology tree, and its `centralization` reform takes 1% back at two of
+    its levels. Saves write the chosen option as a plain `conscription=
+    mandatory_service` line in the country block, so this resolves exactly.
+
+    `party_issues` is skipped: those are party platforms, not national reforms,
+    and a country's stance on them comes from its ruling party rather than from
+    a line of its own.
+    """
+    target = _resolved_file(path, "common", "issues.txt")
+    sizes, groups = {}, set()
+    if not os.path.isfile(target):
+        return sizes, frozenset()
+    for category, block in _read_clausewitz(target):
+        if category == "party_issues" or not isinstance(block, dict):
+            continue
+        for reform, body in block.items():
+            if reform.startswith("_") or not isinstance(body, dict):
+                continue
+            groups.add(reform)
+            for option, spec in body.items():
+                if option.startswith("_") or not isinstance(spec, dict):
+                    continue
+                size = _find_mob_size(spec)
+                if size:
+                    sizes[(reform, option)] = size
+    return sizes, frozenset(groups)
+
+
+def static_mob(path):
+    """
+    {static modifier: mobilisation_size} from `common/static_modifiers.txt`.
+
+    Only `unciv_nation` is used, and it is worth -10% in the base game and
+    -20% in Divergences of Darkness. The engine hands it to every uncivilized
+    country, unconditionally, and nothing writes it into the save.
+    """
+    target = _resolved_file(path, "common", "static_modifiers.txt")
+    out = {}
+    if not os.path.isfile(target):
+        return out
+    for name, block in _read_clausewitz(target):
+        size = _find_mob_size(block)
+        if size:
+            out[name] = size
+    return out
+
+
+def triggered_mob(path):
+    """
+    [(name, mobilisation_size, mobilization_impact, trigger)] for every
+    triggered modifier that moves either.
+
+    Triggered modifiers are re-evaluated by the engine every day and are never
+    written into a save -- unlike event modifiers, which a country lists by
+    name -- so the only way to know a country has one is to read its trigger
+    and judge it. `_trigger_ok` does that for the conditions these actually
+    use, and says so rather than guessing when it meets one it cannot judge.
+    """
+    target = _resolved_file(path, "common", "triggered_modifiers.txt")
+    out = []
+    if not os.path.isfile(target):
+        return out
+    for name, block in _read_clausewitz(target):
+        if not isinstance(block, dict):
+            continue
+        size = _find_mob_size(block)
+        impact = to_float(block.get("mobilization_impact"), 0.0)
+        if not size and not impact:
+            continue
+        trigger = block.get("trigger")
+        out.append((name, size, impact,
+                    trigger if isinstance(trigger, dict) else {}))
+    return out
+
+
+def _trigger_conditions(trigger, out):
+    """Every plain condition name a trigger uses, however deeply nested."""
+    if not isinstance(trigger, dict):
+        return out
+    for key, value in trigger.items():
+        if key in ("AND", "OR", "NOT"):
+            for part in as_list(value):
+                _trigger_conditions(part, out)
+        elif isinstance(value, dict):
+            out.add(key)
+            _trigger_conditions(value, out)
+        else:
+            out.add(key)
+    return out
+
+
+def watched_reforms(sizes, groups, triggers):
+    """
+    The reform groups a save has to carry, which is as few as possible.
+
+    Every country block names its choice for thirty-odd reforms and a campaign
+    of monthly autosaves holds hundreds of country blocks per year, so keeping
+    all of them would cost more memory than the mobilisation pool does. Only
+    two kinds are worth anything here: a reform some option of which grants
+    mobilisation size, and one a triggered modifier asks about.
+    """
+    asked = set()
+    for _name, _size, _impact, trigger in triggers:
+        _trigger_conditions(trigger, asked)
+    return frozenset({group for group, _option in sizes} | (set(groups) & asked))
+
+
+def culture_groups(path):
+    """{culture: its culture group} from `common/cultures.txt`."""
+    out = {}
+    for root in (base_game_path(path), path):
+        if not root:
+            continue
+        target = os.path.join(root, "common", "cultures.txt")
+        if not os.path.isfile(target):
+            continue
+        for group, block in _read_clausewitz(target):
+            if not isinstance(block, dict):
+                continue
+            for name, body in block.items():
+                if name.startswith("_") or name in _NOT_A_CULTURE:
+                    continue
+                if isinstance(body, dict) or (isinstance(body, list)
+                                              and body and isinstance(body[0], dict)):
+                    out[name] = group
+    return out
+
+
+def continents(path):
+    """{province id: continent} from `map/continent.txt`."""
+    target = _map_file(path, "continent.txt")
+    out = {}
+    if not os.path.isfile(target):
+        return out
+    for name, block in _read_clausewitz(target):
+        if not isinstance(block, dict):
+            continue
+        for pid in as_list(block.get("provinces")):
+            if isinstance(pid, (str, int)):
+                out[to_int(pid, -1)] = name
+    return out
+
+
+# What `_trigger_ok` can judge. A country-scope condition is a plain field of
+# the nation; a numeric one is a floor, which is how the engine reads
+# `revanchism = 0.10`. Anything not named here makes the whole modifier
+# unknown, and an unknown modifier is left out rather than guessed at.
+_TRIGGER_YESNO = ("civilized", "war", "exists", "is_greater_power", "ai")
+_TRIGGER_TEXT = {
+    "tag": "tag",
+    "government": "government",
+    "primary_culture": "primary_culture",
+    "nationalvalue": "nationalvalue",
+}
+_TRIGGER_NUMBER = {
+    "revanchism": "revanchism",
+    "badboy": "infamy",
+    "prestige": "prestige",
+    "war_exhaustion": "war_exhaustion",
+    "plurality": "plurality",
+    "money": "treasury",
+    "total_pops": "total_pop",
+}
+
+
+def _conditions(block):
+    """
+    One trigger block as a list of single-condition blocks.
+
+    A Clausewitz block is a bag of key/value pairs and the same key may appear
+    more than once, which the parser hands back as a list. `OR = { tag = FRA
+    tag = BOR }` is two conditions, not one condition with two values, and
+    only the enclosing operator says whether they are ANDed or ORed.
+    """
+    out = []
+    for key, value in block.items():
+        if key.startswith("_"):
+            continue
+        if isinstance(value, list):
+            out.extend({key: v} for v in value)
+        else:
+            out.append({key: value})
+    return out
+
+
+def _all(results):
+    """AND over answers that may be unknown: one False settles it."""
+    if any(r is False for r in results):
+        return False
+    return None if any(r is None for r in results) else True
+
+
+def _any(results):
+    """OR over answers that may be unknown: one True settles it."""
+    if any(r is True for r in results):
+        return True
+    return None if any(r is None for r in results) else False
+
+
+def _trigger_ok(trigger, nat, mod, world, inventions=()):
+    """
+    Whether a country meets a triggered modifier's trigger. None means the
+    trigger says something this cannot judge, and the caller should leave the
+    modifier out rather than assume either way.
+    """
+    if not isinstance(trigger, dict):
+        return True
+    return _all([_condition_ok(c, nat, mod, world, inventions)
+                 for c in _conditions(trigger)])
+
+
+def _condition_ok(cond, nat, mod, world, inventions):
+    """One `key = value` out of a trigger."""
+    (key, value), = cond.items()
+
+    if key in ("AND", "OR", "NOT"):
+        if not isinstance(value, dict):
+            return None
+        answers = [_condition_ok(c, nat, mod, world, inventions)
+                   for c in _conditions(value)]
+        if key == "OR":
+            return _any(answers)
+        if key == "AND":
+            return _all(answers)
+        # `NOT = { a b }` holds when none of a, b do.
+        flipped = [None if a is None else not a for a in answers]
+        return _all(flipped)
+
+    if key == "capital_scope":
+        return _province_ok(value, to_int(nat.get("capital"), -1), mod)
+
+    if isinstance(value, dict):
+        return None                   # a scope this does not know how to enter
+
+    text = unquote(str(value))
+    reforms = nat.get("reforms") or {}
+    groups = mod.get("reform_names") or frozenset()
+
+    if key in _TRIGGER_YESNO:
+        want = text.lower() == "yes"
+        if key == "ai":
+            got = not nat.get("is_player")
+        elif key == "exists":
+            if text.lower() not in ("yes", "no"):
+                return None           # `exists = TAG` asks about someone else
+            got = True
+        elif key == "war":
+            if world is None:
+                return None
+            got = nat.get("tag") in world.get("at_war", ())
+        elif key == "is_greater_power":
+            if world is None:
+                return None
+            got = nat.get("tag") in world.get("great_powers", ())
+        else:
+            got = str(nat.get("civilized", "")).lower() == "yes"
+        return got == want
+
+    if key in _TRIGGER_TEXT:
+        return text == str(nat.get(_TRIGGER_TEXT[key], ""))
+
+    if key in _TRIGGER_NUMBER:
+        return (to_float(nat.get(_TRIGGER_NUMBER[key]), 0.0)
+                >= to_float(text, 0.0))
+
+    if key == "year":
+        if world is None or not world.get("year"):
+            return None
+        return world["year"] >= to_int(text, 0)
+
+    if key == "capital":
+        return to_int(nat.get("capital"), -1) == to_int(text, -2)
+
+    if key == "owns":
+        if world is None:
+            return None
+        return world.get("owner", {}).get(to_int(text, -1)) == nat.get("tag")
+
+    if key == "is_culture_group":
+        table = mod.get("culture_groups") or {}
+        if not table:
+            return None
+        return table.get(str(nat.get("primary_culture", ""))) == text
+
+    if key == "invention":
+        if inventions is None:
+            return None
+        return text in inventions
+
+    if key == "technology":
+        return text in set(nat.get("tech_list") or ())
+
+    if key == "has_country_flag":
+        return text in (nat.get("country_flags") or ())
+
+    if key == "has_country_modifier":
+        return text in (nat.get("modifiers") or ())
+
+    if key in groups:
+        return reforms.get(key) == text
+
+    return None
+
+
+def _province_ok(trigger, pid, mod):
+    """The province-scope half, which is only ever reached through capital_scope."""
+    if not isinstance(trigger, dict):
+        return None
+    return _all([_province_condition(c, pid, mod) for c in _conditions(trigger)])
+
+
+def _province_condition(cond, pid, mod):
+    (key, value), = cond.items()
+    if key in ("AND", "OR", "NOT"):
+        if not isinstance(value, dict):
+            return None
+        answers = [_province_condition(c, pid, mod) for c in _conditions(value)]
+        if key == "OR":
+            return _any(answers)
+        if key == "AND":
+            return _all(answers)
+        return _all([None if a is None else not a for a in answers])
+    if isinstance(value, dict):
+        return None
+    if key == "continent":
+        where = (mod.get("continents") or {}).get(pid)
+        if not where:
+            return None
+        return where == unquote(str(value))
+    if key == "province_id":
+        return pid == to_int(value, -2)
+    return None
 
 
 def read_localisation(path):
@@ -421,30 +717,39 @@ def read_localisation(path):
     how the engine behaves: IGoR defines `PBC_democracy` as "Andine Federation"
     in its country pack and "The Andean Republic" in a later file, and the game
     shows the former.
+
+    The mod is read first and the game underneath it after, on that same rule
+    and for the same reason `text_localisation` does it: a mod renames what it
+    means to rename and inherits the rest. Divergences of Darkness names 599 of
+    its 658 tags and leaves Denmark, Norway, Sweden and Belgium to the base
+    game, and reading only the mod folder left those showing as bare tags.
     """
-    folder = os.path.join(path, "localisation")
-    if not os.path.isdir(folder):
-        return {}
     wanted = re.compile(r"^[A-Z][A-Z0-9]{2}(_[a-z_]+)?$")
     out = {}
-    for name in sorted(os.listdir(folder)):
-        if not name.lower().endswith(".csv"):
+    for root in (path, base_game_path(path)):
+        if not root:
             continue
-        try:
-            with open(os.path.join(folder, name), "rb") as fh:
-                text = fh.read().decode("cp1252", "replace")
-        except OSError:
+        folder = os.path.join(root, "localisation")
+        if not os.path.isdir(folder):
             continue
-        for line in text.splitlines():
-            if not line or line.startswith("#") or ";" not in line:
+        for name in sorted(os.listdir(folder)):
+            if not name.lower().endswith(".csv"):
                 continue
-            key, _, rest = line.partition(";")
-            key = key.strip()
-            if not wanted.match(key):
+            try:
+                with open(os.path.join(folder, name), "rb") as fh:
+                    text = fh.read().decode("cp1252", "replace")
+            except OSError:
                 continue
-            english = rest.split(";", 1)[0].strip()
-            if english:
-                out.setdefault(key, english)
+            for line in text.splitlines():
+                if not line or line.startswith("#") or ";" not in line:
+                    continue
+                key, _, rest = line.partition(";")
+                key = key.strip()
+                if not wanted.match(key):
+                    continue
+                english = rest.split(";", 1)[0].strip()
+                if english:
+                    out.setdefault(key, english)
     return out
 
 
@@ -459,7 +764,7 @@ def name_for(tag, government, localisation):
 
 def base_prices(path):
     """{good: base cost} from `common/goods.txt`, which nests goods in categories."""
-    target = os.path.join(path, "common", "goods.txt")
+    target = _resolved_file(path, "common", "goods.txt")
     if not os.path.isfile(target):
         return {}
     out = {}
@@ -494,18 +799,266 @@ def regions(path):
     return out
 
 
+def _resolved_file(path, *parts):
+    """
+    The copy of one named file the game would actually read.
+
+    Same rule as `_resolved_files`, for the files there is only one of:
+    `common/issues.txt` and its neighbours. A mod that ships its own wins; a
+    mod that ships none inherits the game's whole. Returns the mod's path
+    either way when neither exists, so a caller's `isfile` check still fails
+    the way it used to.
+    """
+    own = os.path.join(path, *parts)
+    if os.path.isfile(own):
+        return own
+    root = base_game_path(path)
+    if root:
+        inherited = os.path.join(root, *parts)
+        if os.path.isfile(inherited):
+            return inherited
+    return own
+
+
+def _resolved_files(path, folder):
+    """
+    {file name: the copy the game would actually read}, in load order.
+
+    Victoria II resolves a mod file by file: a mod's `units/frigate.txt`
+    replaces the game's, and a file the mod does not ship is inherited whole.
+    So the base game is listed first and the mod laid over the top, keyed by
+    name -- the same rule `country_files` and `map_source` follow.
+    """
+    out = {}
+    for root in (base_game_path(path), path):
+        if not root:
+            continue
+        target = os.path.join(root, folder)
+        for name in _files(target):
+            out[name] = os.path.join(target, name)
+    return out
+
+
 def unit_kinds(path):
     """{unit type: 'land' or 'naval'} from `units/*.txt`."""
-    folder = os.path.join(path, "units")
     out = {}
-    if not os.path.isdir(folder):
-        return out
-    for fname in _files(folder):
-        body = _plain(os.path.join(folder, fname))
+    for target in _resolved_files(path, "units").values():
+        body = _plain(target)
         for m in re.finditer(r"^(\w+)\s*=\s*\{", body, re.M):
             kind = re.search(r"(?<![\w_])type\s*=\s*(\w+)", body[m.end():m.end() + 900])
             if kind:
                 out[m.group(1)] = kind.group(1)
+    return out
+
+
+# What a ship is worth in a fight, and what it costs the naval limit. Read as
+# written: `evasion` is a fraction, the rest are plain numbers.
+_SHIP_STATS = ("hull", "gun_power", "evasion", "torpedo_attack",
+               "supply_consumption_score")
+
+
+def naval_units(path):
+    """
+    {ship: {hull, gun_power, evasion, torpedo_attack, score, heavy}} for every
+    naval unit in `units/*.txt`.
+
+    These are the numbers behind a ship's power level: two ships trading fire
+    deal damage in proportion to their own gun power and in inverse proportion
+    to the other's hull, and evasion throws a share of the incoming ticks away
+    entirely. `score` is `supply_consumption_score`, the naval points the ship
+    costs, so power per point can be read off as well. `heavy` marks a
+    `big_ship`, which is the only kind torpedoes work against.
+    """
+    out = {}
+    for target in _resolved_files(path, "units").values():
+        body = _plain(target)
+        for m in re.finditer(r"^(\w+)\s*=\s*\{", body, re.M):
+            block = _block_text(body, m.group(1))
+            kind = re.search(r"(?<![\w_])type\s*=\s*(\w+)", block)
+            if not kind or kind.group(1) != "naval":
+                continue
+            stats = {}
+            for stat in _SHIP_STATS:
+                hit = re.search(r"(?<![\w_])" + stat + r"\s*=\s*([-\d.]+)", block)
+                stats[stat] = float(hit.group(1)) if hit else 0.0
+            klass = re.search(r"(?<![\w_])unit_type\s*=\s*(\w+)", block)
+            out[m.group(1)] = {
+                "hull": stats["hull"],
+                "gun_power": stats["gun_power"],
+                "evasion": stats["evasion"],
+                "torpedo_attack": stats["torpedo_attack"],
+                "score": stats["supply_consumption_score"],
+                "heavy": int(bool(klass) and klass.group(1) == "big_ship"),
+            }
+    return out
+
+
+def _drop_block(text, keyword):
+    """The text with every `<keyword> = { ... }` cut out, braces matched."""
+    out, i = [], 0
+    pat = re.compile(r"\b" + keyword + r"\s*=\s*\{")
+    while True:
+        m = pat.search(text, i)
+        if not m:
+            out.append(text[i:])
+            return "".join(out)
+        out.append(text[i:m.start()])
+        depth, j = 0, m.end() - 1
+        while j < len(text):
+            if text[j] == "{":
+                depth += 1
+            elif text[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        i = j + 1
+
+
+def _ship_changes(text):
+    """{target: {stat: delta}} for every `<target> = { <ship stat> = n }` here.
+
+    The target is left as written -- a ship name, or `navy_base` for all of
+    them -- and checked against the mod's actual units at the point of use, so
+    anything else this picks up falls away there.
+    """
+    found = {}
+    for hit in re.finditer(r"(\w+)\s*=\s*\{([^{}]*)\}", text):
+        deltas = {stat: float(value) for stat, value in
+                  re.findall(r"(\w+)\s*=\s*([-\d.]+)", hit.group(2))
+                  if stat in _SHIP_STATS}
+        if not deltas:
+            continue
+        into = found.setdefault(hit.group(1), {})
+        for stat, value in deltas.items():
+            into[stat] = into.get(stat, 0.0) + value
+    return found
+
+
+def naval_tech_effects(path):
+    """
+    {technology: {ship or 'navy_base': {stat: delta}}} from `technologies/*.txt`.
+
+    Almost every naval upgrade in the game is an invention rather than a
+    technology, and in vanilla and four of the mods here `technologies/` touches
+    no ship at all. GFM is the exception -- `naval_directionism` hands the two
+    transports speed and evasion directly -- so techs are read too, and they are
+    the easier half: a save names a nation's technologies outright, with none of
+    the index-decoding the inventions need.
+
+    `ai_chance` is cut out first. It is full of `modifier = { ... }` blocks that
+    look like the thing being searched for and are weightings, not effects.
+    """
+    out = {}
+    for target in _resolved_files(path, "technologies").values():
+        raw = _plain(target)
+        for name, _block in _read_clausewitz(target):
+            found = _ship_changes(_drop_block(_block_text(raw, name), "ai_chance"))
+            if found:
+                out[name] = found
+    return out
+
+
+def naval_invention_effects(path):
+    """
+    {invention: {ship or 'navy_base': {stat: delta}}} for the inventions that
+    upgrade a ship.
+
+    This is where nearly every naval upgrade lives: a technology opens an area,
+    and the inventions under it are what add the gun power and the hull. The
+    few a technology grants directly are `naval_tech_effects`. `navy_base` is
+    the engine's name for "every naval unit", so it is kept as written and
+    applied to all of them at the point of use.
+
+    Only `effect = { ... }` is read. A `limit` or a `chance` block names ships
+    too -- as requirements, not as changes -- and reading those as upgrades
+    would hand a nation the stats of the ships it merely needed to unlock the
+    invention.
+    """
+    out = {}
+    for target in _resolved_files(path, "inventions").values():
+        raw = _plain(target)
+        for name, _block in _read_clausewitz(target):
+            body = _block_text(raw, name)
+            found = {}
+            for effect in _named_blocks(body, "effect"):
+                for who, deltas in _ship_changes(effect).items():
+                    into = found.setdefault(who, {})
+                    for stat, value in deltas.items():
+                        into[stat] = into.get(stat, 0.0) + value
+            if not found:
+                continue
+            # The requirements come along for the ride: when a save's invention
+            # indices cannot be decoded, the only way left to guess what a
+            # nation has rolled is what it could have rolled.
+            reqs, tags, _invs = _limit_of(body)
+            out[name] = {"effects": found, "techs": reqs, "tags": tags}
+    return out
+
+
+def naval_profile(nation, mod):
+    """
+    One nation's ships as they actually fight, as
+    {ship: {gun_power, hull, evasion, torpedo_attack, score, heavy}}.
+
+    A ship's power level is `gun_power x hull / (1 - evasion)`: in a duel each
+    side's damage runs with its own gun power and against the other's hull,
+    and evasion throws away a share of the ticks aimed at it, so rearranging
+    "who out-damages whom" leaves every term on its owner's side. Torpedoes
+    are added to gun power only against a `big_ship`, which is why `heavy` is
+    carried through to whoever does the comparing.
+
+    Upgrades come from the nation's technologies, which a save names outright,
+    and from its inventions, which it names by index. The inventions follow
+    `breakdown`: decoded when the load order can be reconstructed, and otherwise
+    guessed as every invention whose requirements the nation meets, which
+    flatters nations with bad luck.
+    """
+    units = mod.get("naval_units") or {}
+    rules = mod.get("naval_effects") or {}
+    out = {ship: dict(stats) for ship, stats in units.items()}
+    if not out:
+        return out
+
+    def apply(changes):
+        for who, deltas in changes.items():
+            # `navy_base` is the engine's name for every naval unit at once.
+            ships = list(out) if who == "navy_base" else [who] if who in out else []
+            for ship in ships:
+                for stat, delta in deltas.items():
+                    key = "score" if stat == "supply_consumption_score" else stat
+                    out[ship][key] = out[ship].get(key, 0.0) + delta
+
+    # Technologies are named outright by the save, so these need no guessing.
+    tech_rules = mod.get("naval_tech_effects") or {}
+    for tech in nation.get("tech_list", ()):
+        if tech in tech_rules:
+            apply(tech_rules[tech])
+
+    base = mod.get("index_base")
+    if base is not None:
+        seq = mod.get("invention_sequence") or []
+        held = [seq[i - base]["name"] for i in nation.get("invention_ids", ())
+                if 0 <= i - base < len(seq)]
+    else:
+        techs = set(nation.get("tech_list", ()))
+        tag = nation.get("tag", "")
+        held = [name for name, rule in rules.items()
+                if rule["techs"] <= techs
+                and (not rule["tags"] or tag in rule["tags"])]
+
+    for name in held:
+        rule = rules.get(name)
+        if rule:
+            apply(rule["effects"])
+
+    for stats in out.values():
+        stats["gun_power"] = max(0.0, stats["gun_power"])
+        stats["hull"] = max(0.0, stats["hull"])
+        stats["torpedo_attack"] = max(0.0, stats["torpedo_attack"])
+        # A ship that dodged everything would divide by zero and be worth
+        # infinity. Nothing in the game or in any mod looked at gets near this.
+        stats["evasion"] = min(0.95, max(0.0, stats["evasion"]))
     return out
 
 
@@ -876,7 +1429,7 @@ def government_flag_types(path):
     under a constitutional monarchy against the black-white-red empire flag
     under an absolute one.
     """
-    target = os.path.join(path, "common", "governments.txt")
+    target = _resolved_file(path, "common", "governments.txt")
     if not os.path.isfile(target):
         return {}
     out = {}
@@ -1048,28 +1601,120 @@ def text_localisation(path, wanted):
     `read_localisation` keeps only country-shaped keys because that is all the
     map needs; the technology tree wants tech names, area headings and modifier
     labels, which look like anything.
+
+    The mod is read first and the base game after it, and the first definition
+    of a key wins -- so a mod that renames something keeps its own name, and a
+    partial mod that only adds files still gets the game's names for everything
+    it left alone.
     """
-    folder = os.path.join(path, "localisation")
-    if not os.path.isdir(folder):
-        return {}
     wanted = set(wanted)
     out = {}
-    for name in sorted(os.listdir(folder)):
-        if not name.lower().endswith(".csv"):
+    for root in (path, base_game_path(path)):
+        if not root:
             continue
-        try:
-            with open(os.path.join(folder, name), "rb") as fh:
-                text = fh.read().decode("cp1252", "replace")
-        except OSError:
+        folder = os.path.join(root, "localisation")
+        if not os.path.isdir(folder):
             continue
-        for line in text.splitlines():
-            key, _, rest = line.partition(";")
-            key = key.strip()
-            if key in wanted and key not in out:
-                english = rest.split(";", 1)[0].strip()
-                if english:
-                    out[key] = english
+        for name in sorted(os.listdir(folder)):
+            if not name.lower().endswith(".csv"):
+                continue
+            try:
+                with open(os.path.join(folder, name), "rb") as fh:
+                    text = fh.read().decode("cp1252", "replace")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                key, _, rest = line.partition(";")
+                key = key.strip()
+                if key in wanted and key not in out:
+                    english = rest.split(";", 1)[0].strip()
+                    if english:
+                        out[key] = english
     return out
+
+
+# Everything inside a culture group that is a block but not a culture.
+_NOT_A_CULTURE = {"color", "unit", "union", "leader", "is_overseas"}
+
+
+def culture_names(path):
+    """
+    {culture: the name the game shows}, e.g. nanfaren -> Nanfaren.
+
+    `common/cultures.txt` nests cultures inside culture groups, one block each
+    alongside the group's own `union`, `leader` and `unit` entries, so a block
+    is a culture when it is none of those. The names themselves are ordinary
+    localisation keys.
+
+    Worth having because a save writes the key and nothing else: a report
+    without this lists China's people as `nanfaren` and `beifaren`.
+    """
+    keys = []
+    for root in (base_game_path(path), path):
+        if not root:
+            continue
+        target = os.path.join(root, "common", "cultures.txt")
+        if not os.path.isfile(target):
+            continue
+        for _group, block in _read_clausewitz(target):
+            if not isinstance(block, dict):
+                continue
+            for name, body in block.items():
+                if name.startswith("_") or name in _NOT_A_CULTURE:
+                    continue
+                if isinstance(body, dict) or (isinstance(body, list)
+                                              and body and isinstance(body[0], dict)):
+                    keys.append(name)
+    if not keys:
+        return {}
+    return {k: v for k, v in text_localisation(path, keys).items() if v}
+
+
+def _top_level_keys(path, folder):
+    """Every `name = {` at the start of a line, across base game and mod."""
+    out = set()
+    for target in _resolved_files(path, folder).values():
+        for m in re.finditer(r"^(\w+)\s*=\s*\{", _plain(target), re.M):
+            out.add(m.group(1))
+    return out
+
+
+def display_names(path):
+    """
+    {key: the name the game shows} for the bare keys a save writes down.
+
+    A save records a good, a unit type, a pop type and a technology by its key
+    and nothing else, so a report built from saves alone lists `small_arms`,
+    `clipper_transport` and `post_napoleonic_thought`. All four are ordinary
+    localisation keys, and a mod is free to rename any of them -- IGoR's
+    `cattle` is Livestock -- so the names have to come from the mod's own
+    files rather than from tidying the key up.
+
+    One lookup for all four because they share a namespace in the game's own
+    localisation and there is nothing to gain from four passes over it.
+    """
+    keys = set()
+    for root in (base_game_path(path), path):
+        if not root:
+            continue
+        target = os.path.join(root, "common", "goods.txt")
+        if os.path.isfile(target):
+            for _category, block in _read_clausewitz(target):
+                if isinstance(block, dict):
+                    keys |= {g for g in block if not g.startswith("_")}
+        folder = os.path.join(root, "poptypes")
+        if os.path.isdir(folder):
+            keys |= {f[:-4] for f in _files(folder)}
+        target = os.path.join(root, "common", "cb_types.txt")
+        if os.path.isfile(target):
+            for name, block in _read_clausewitz(target):
+                if isinstance(block, dict):
+                    keys.add(name)
+    keys |= _top_level_keys(path, "units")
+    keys |= _top_level_keys(path, "technologies")
+    if not keys:
+        return {}
+    return {k: v for k, v in text_localisation(path, keys).items() if v}
 
 
 # Bookkeeping rather than an effect a player would read off the tech.
@@ -1134,12 +1779,8 @@ def invention_index(path):
     separately, for mobilisation) only cares about the inventions it can
     actually gate.
     """
-    folder = os.path.join(path, "inventions")
     out = {}
-    if not os.path.isdir(folder):
-        return out
-    for fname in _files(folder):
-        target = os.path.join(folder, fname)
+    for target in _resolved_files(path, "inventions").values():
         raw = _COMMENT.sub("", open(target, "rb").read().decode("latin-1"))
         for name, block in _read_clausewitz(target):
             reqs, _tags, _invs = _limit_of(_block_text(raw, name))
@@ -1161,8 +1802,8 @@ def technology_tree(path, rules=None):
     behind it -- each with its own effects too -- which come from the
     invention `limit` and body already parsed by `invention_index`.
     """
-    folder = os.path.join(path, "technologies")
-    if not os.path.isdir(folder):
+    files = _resolved_files(path, "technologies")
+    if not files:
         return {}
 
     rule_map = rules if rules is not None else invention_index(path)
@@ -1178,13 +1819,11 @@ def technology_tree(path, rules=None):
 
     tree = {}
     keys = set()
-    for fname in sorted(os.listdir(folder)):
-        if not fname.lower().endswith(".txt"):
-            continue
+    for fname in sorted(files):
         category = fname[:-4].replace("_tech", "")
         areas = []
         index = {}
-        for key, block in _read_clausewitz(os.path.join(folder, fname)):
+        for key, block in _read_clausewitz(files[fname]):
             if not isinstance(block, dict):
                 continue
             area = unquote(str(block.get("area", "other")))
@@ -1249,11 +1888,8 @@ def formation_decisions(path):
     campaign it happened in still has to come off the province ledger.
     """
     out = {}
-    folder = os.path.join(path, "decisions")
-    if not os.path.isdir(folder):
-        return out
-    for fname in _files(folder):
-        text = _plain(os.path.join(folder, fname))
+    for target in _resolved_files(path, "decisions").values():
+        text = _plain(target)
         for block in _brace_blocks(text):
             made = re.search(r"change_tag(?:_no_core_switch)?\s*=\s*([A-Z0-9]{3})\b",
                              block)
@@ -1297,13 +1933,16 @@ def load_mod(path):
     Raises FileNotFoundError if the folder has neither techs nor inventions.
     """
     path = os.path.expanduser(os.path.expandvars(path))
-    tech_dir = os.path.join(path, "technologies")
-    inv_dir = os.path.join(path, "inventions")
-    nv_file = os.path.join(path, "common", "nationalvalues.txt")
+    # Both folders resolve file by file against the game underneath, the way
+    # the engine does: a mod that ships one invention file still runs on the
+    # game's other four, and reading only the mod folder lost them.
+    tech_files = _resolved_files(path, "technologies")
+    inv_files = _resolved_files(path, "inventions")
+    nv_file = _resolved_file(path, "common", "nationalvalues.txt")
 
     tech_mob, tech_count = {}, 0
-    for fname in _files(tech_dir):
-        for name, block in _read_clausewitz(os.path.join(tech_dir, fname)):
+    for fname in sorted(tech_files, key=str.lower):
+        for name, block in _read_clausewitz(tech_files[fname]):
             tech_count += 1
             size = _find_mob_size(block)
             if size:
@@ -1314,10 +1953,10 @@ def load_mod(path):
     # be reconstructed reliably from a mod folder -- an install may load files
     # this folder does not contain. Requirements are stable and checkable.
     invention_rules = {}
-    for fname in _files(inv_dir):
-        raw = _COMMENT.sub("", open(os.path.join(inv_dir, fname), "rb")
+    for fname in sorted(inv_files, key=str.lower):
+        raw = _COMMENT.sub("", open(inv_files[fname], "rb")
                            .read().decode("latin-1"))
-        for name, block in _read_clausewitz(os.path.join(inv_dir, fname)):
+        for name, block in _read_clausewitz(inv_files[fname]):
             size = _find_mob_size(block)
             if not size:
                 continue
@@ -1331,16 +1970,12 @@ def load_mod(path):
     inventions = [(n, r["size"]) for n, r in invention_rules.items()]
 
     event_mob = {}
-    ev_file = os.path.join(path, "common", "event_modifiers.txt")
+    ev_file = _resolved_file(path, "common", "event_modifiers.txt")
     if os.path.isfile(ev_file):
         for name, block in _read_clausewitz(ev_file):
             size = _find_mob_size(block)
             if size:
                 event_mob[name] = size
-
-    ladder = _revanchism_ladder(os.path.join(path, "common", "triggered_modifiers.txt"))
-    impact_ladder = _revanchism_impact_ladder(
-        os.path.join(path, "common", "triggered_modifiers.txt"))
 
     nv_mob = {}
     if os.path.isfile(nv_file):
@@ -1357,6 +1992,17 @@ def load_mod(path):
         )
 
     strata = read_poptypes(path)
+    reform_sizes, reform_groups = reform_mob(path)
+    triggers = triggered_mob(path)
+    reform_names = watched_reforms(reform_sizes, reform_groups, triggers)
+
+    # A modifier is either looked up by name in the country's own list or
+    # judged from its trigger. Names that are both are judged, so that the two
+    # paths cannot both count the same thing.
+    judged = {name for name, _s, _i, _t in triggers}
+    event_mob = {k: v for k, v in event_mob.items() if k not in judged}
+    modifier_impacts = {k: v for k, v in modifier_mob_impacts(path).items()
+                        if k not in judged}
 
     return {
         "path": path,
@@ -1366,14 +2012,24 @@ def load_mod(path):
         "base_prices": base_prices(path),
         "country_order": country_order(path),
         "formations": formation_decisions(path),
+        "culture_names": culture_names(path),
+        "display_names": display_names(path),
         "province_names": province_names(path),
         "province_regions": province_regions(path),
         "state_names": state_names(path),
         "unit_kinds": unit_kinds(path),
+        "naval_units": naval_units(path),
+        "naval_effects": naval_invention_effects(path),
+        "naval_tech_effects": naval_tech_effects(path),
         "technology": technology_tree(path),
         "mob_impacts": mobilization_impacts(path),
-        "modifier_impacts": modifier_mob_impacts(path),
-        "revanchism_impact_ladder": impact_ladder,
+        "modifier_impacts": modifier_impacts,
+        "reform_mob": reform_sizes,
+        "reform_names": reform_names,
+        "static_mob": static_mob(path),
+        "triggered_mob": triggers,
+        "culture_groups": culture_groups(path),
+        "continents": continents(path),
         # Set by index_base_for once a save is in hand; None means the indices
         # could not be decoded and inventions fall back to requirement matching.
         "index_base": None,
@@ -1383,48 +2039,12 @@ def load_mod(path):
         "mob_types": mobilizable_types(strata),
         "invention_rules": invention_rules,
         "event_mob": event_mob,
-        "revanchism_ladder": ladder,
-        "player_unciv_mob": player_unciv_mob(path),
         "tech_mob": tech_mob,
         "inventions": inventions,
         "nv_mob": nv_mob,
         "tech_count": tech_count,
         "invention_count": len(inventions),
     }
-
-
-def player_unciv_mob(path):
-    """
-    Triggered modifiers that hand a *player-controlled* uncivilized nation extra
-    mobilisation size, as [(name, size, excluded country flags)].
-
-    IGoR's `player_unciv_mobilization` is +0.02 on `ai = no` and
-    `civilized = no`, excluding whoever holds the `china` country flag. Saves
-    cannot say who was human -- only the nation that took the save is written to
-    the `player` field, so in multiplayer every other human reads as AI -- which
-    is why the analyzer takes the list on the command line.
-    """
-    target = os.path.join(path, "common", "triggered_modifiers.txt")
-    out = []
-    if not os.path.isfile(target):
-        return out
-    for name, block in _read_clausewitz(target):
-        if not isinstance(block, dict):
-            continue
-        size = block.get("mobilisation_size")
-        trigger = block.get("trigger")
-        if size is None or not isinstance(trigger, dict):
-            continue
-        if str(trigger.get("ai", "")).lower() != "no":
-            continue
-        if str(trigger.get("civilized", "")).lower() != "no":
-            continue
-        excluded = set()
-        for neg in as_list(trigger.get("NOT")):
-            if isinstance(neg, dict) and "has_country_flag" in neg:
-                excluded.add(unquote(str(neg["has_country_flag"])))
-        out.append((name, to_float(size, 0.0), frozenset(excluded)))
-    return out
 
 
 def invention_sequence(path):
@@ -1440,13 +2060,12 @@ def invention_sequence(path):
     the save before anything trusts it: an invention a nation holds must be one
     whose `limit` that nation actually meets.
     """
-    folder = os.path.join(path, "inventions")
-    if not os.path.isdir(folder):
+    files = _resolved_files(path, "inventions")
+    if not files:
         return []
-    names = sorted(f for f in os.listdir(folder) if f.lower().endswith(".txt"))
     seq = []
-    for fname in names:
-        full = os.path.join(folder, fname)
+    for fname in sorted(files):
+        full = files[fname]
         with open(full, "rb") as fh:
             raw = _COMMENT.sub("", fh.read().decode("latin-1"))
         for name, block in _read_clausewitz(full):
@@ -1548,10 +2167,35 @@ def attainable_inventions(mod, all_nations):
     return {n for n, ok in live.items() if ok}
 
 
-def breakdown(nation, mod, live=None):
+def held_inventions(nation, mod):
+    """
+    The inventions a nation actually holds, by name.
+
+    None when the save's numeric indices could not be decoded for this install:
+    the requirement-matching fallback answers a different question -- which
+    inventions the nation *could* have -- and a trigger asking whether it holds
+    one deserves "cannot tell" rather than that.
+    """
+    base = mod.get("index_base")
+    if base is None:
+        return None
+    seq = mod.get("invention_sequence") or ()
+    out = set()
+    for idx in nation.get("invention_ids", ()):
+        j = idx - base
+        if 0 <= j < len(seq):
+            out.add(seq[j]["name"])
+    return out
+
+
+def breakdown(nation, mod, live=None, world=None):
     """
     Every contribution to a nation's mobilisation size, as
     [(source_kind, name, value), ...]. `rate_for` is the sum of these.
+
+    `world` is what the save says about everyone else -- the year, who the
+    great powers are, who is at war, who owns which province -- which some
+    triggered modifiers ask about. Without it those modifiers are left out.
     """
     parts = []
     for tech in nation["tech_list"]:
@@ -1559,6 +2203,9 @@ def breakdown(nation, mod, live=None):
         if value:
             parts.append(("tech", tech, value))
 
+    # Which inventions the nation holds, both for the ones that grant
+    # mobilisation size and for the triggered modifiers that ask about one.
+    inventions = held_inventions(nation, mod)
     base = mod.get("index_base")
     if base is not None:
         # The save says exactly which inventions this nation rolled. Nothing
@@ -1594,26 +2241,76 @@ def breakdown(nation, mod, live=None):
         if value:
             parts.append(("event modifier", name, value))
 
-    rev = nation.get("revanchism", 0.0)
-    best = None
-    for threshold, value in mod.get("revanchism_ladder", ()):
-        if rev >= threshold:
-            best = (threshold, value)
-    if best:
-        parts.append(("revanchism", f"{rev:.3f} >= {best[0]:.2f}", best[1]))
+    # Reforms. The save writes the chosen option as a plain line in the country
+    # block -- `conscription=mandatory_service` -- so this needs no judgement at
+    # all; it was simply never read. GFM's conscription ladder is worth up to
+    # +6%, which is more than its whole technology tree grants.
+    for reform, option in (nation.get("reforms") or {}).items():
+        value = (mod.get("reform_mob") or {}).get((reform, option), 0.0)
+        if value:
+            parts.append(("reform", f"{reform} = {option}", value))
 
-    # Only a human-run uncivilized nation gets this, and the save cannot say who
-    # was human, so `is_player` is set from --player-nations.
-    if nation.get("is_player") and str(nation.get("civilized", "")).lower() != "yes":
-        flags = nation.get("country_flags") or frozenset()
-        for name, size, excluded in mod.get("player_unciv_mob", ()):
-            if excluded & set(flags):
-                continue
-            parts.append(("player unciv", name, size))
+    # The flat penalty every uncivilized country carries. It is a static
+    # modifier: the engine applies it to anyone uncivilized and writes nothing
+    # down. -10% in the base game, -20% in Divergences of Darkness, absent in
+    # IGoR and Ferrum Mare.
+    if str(nation.get("civilized", "")).lower() == "no":
+        value = (mod.get("static_mob") or {}).get("unciv_nation", 0.0)
+        if value:
+            parts.append(("uncivilized", "unciv_nation", value))
+
+    # Triggered modifiers, which cover the old revanchism ladder and the old
+    # player-unciv special case as well as everything neither of them reached:
+    # GFM alone hands AI France +13%, Prussia +10% before 1880, Afghanistan
+    # +20% and the smaller South American nations up to +8.5%.
+    for name, size, _impact, trigger in mod.get("triggered_mob", ()):
+        if not size:
+            continue
+        if _trigger_ok(trigger, nation, mod, world, inventions):
+            parts.append(("triggered modifier", name, size))
     return parts
 
 
-def rate_for(nation, mod, live=None):
+def unjudged_triggers(mod):
+    """
+    Names of the triggered modifiers whose trigger this cannot read, so a run
+    can say what it left out instead of quietly being wrong by that much.
+    """
+    out = []
+    for name, size, _impact, trigger in mod.get("triggered_mob", ()):
+        if not size:
+            continue
+        if _unreadable(trigger, mod):
+            out.append(name)
+    return out
+
+
+def _unreadable(trigger, mod):
+    """Does this trigger name a condition `_condition_ok` has no answer for?"""
+    if not isinstance(trigger, dict):
+        return False
+    known = (set(_TRIGGER_YESNO) | set(_TRIGGER_TEXT) | set(_TRIGGER_NUMBER)
+             | set(mod.get("reform_names") or ())
+             | {"year", "capital", "owns", "is_culture_group", "invention",
+                "technology", "has_country_flag", "has_country_modifier"})
+    for cond in _conditions(trigger):
+        (key, value), = cond.items()
+        if key in ("AND", "OR", "NOT"):
+            if not isinstance(value, dict) or _unreadable(value, mod):
+                return True
+        elif key == "capital_scope":
+            if not isinstance(value, dict):
+                return True
+            for inner in _conditions(value):
+                (name, _v), = inner.items()
+                if name not in ("AND", "OR", "NOT", "continent", "province_id"):
+                    return True
+        elif key not in known:
+            return True
+    return False
+
+
+def rate_for(nation, mod, live=None, world=None):
     """
     Sum of every mobilisation size contribution a nation has, floored at zero.
 
@@ -1622,4 +2319,25 @@ def rate_for(nation, mod, live=None):
     wrap into something meaningful.
     """
     return max(0.0, sum(value for _kind, _name, value in
-                        breakdown(nation, mod, live)))
+                        breakdown(nation, mod, live, world)))
+
+
+def impact_for(nation, mod, world=None, inventions=False):
+    """
+    A nation's mobilization_impact from every national modifier that moves it.
+
+    The ruling party's war policy is the base and `finalize` adds that; this is
+    what sits on top -- event modifiers, which a save lists by name, and
+    triggered modifiers, which it does not.
+    """
+    if inventions is False:
+        inventions = held_inventions(nation, mod)
+    total = 0.0
+    for name in nation.get("modifiers", ()):
+        total += (mod.get("modifier_impacts") or {}).get(name, 0.0)
+    for name, _size, impact, trigger in mod.get("triggered_mob", ()):
+        if not impact:
+            continue
+        if _trigger_ok(trigger, nation, mod, world, inventions):
+            total += impact
+    return total

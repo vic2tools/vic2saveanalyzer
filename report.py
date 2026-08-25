@@ -17,6 +17,8 @@ report is laid out like a drawing sheet -- title block, grid ground, white
 linework.
 """
 
+import base64
+import gzip
 import json
 import os
 
@@ -56,6 +58,19 @@ METRICS = [
     ("pop_rich", "Rich strata", "count"),
 ]
 
+# Measures nothing in a save holds: they are the rate of change of something
+# that is. (derived key, what it is the growth of, what to call it.)
+GROWTH_METRICS = [
+    ("pop_growth", "total_pop", "Population growth (%/yr)"),
+    ("accepted_growth", "accepted_pop", "Accepted-culture growth (%/yr)"),
+]
+
+# Saves a few days apart say nothing useful about a yearly rate: a fortnight of
+# ordinary growth annualises into hundreds of percent. So a reading is only
+# taken once this much of a year has passed since the last one, and the ones in
+# between are skipped rather than plotted as spikes.
+MIN_GROWTH_SPAN = 0.25
+
 # Muted jewel tones and gilt, so series stay apart from each other and from the
 # burgundy ground without turning the page into a pie chart.
 SERIES_COLOURS = [
@@ -77,12 +92,29 @@ CATEGORY_LABELS = {
 MAX_CULTURES = 30
 
 
+_YEAR_FRACTIONS = {}
+
+
 def year_fraction(date):
+    """
+    A date as a position on a year axis, remembered between calls.
+
+    Every chart asks for this once per point, so a campaign asks for the same
+    few hundred answers hundreds of thousands of times.
+    """
+    try:
+        got = _YEAR_FRACTIONS.get(date)
+    except TypeError:
+        return 0.0
+    if got is not None:
+        return got
     try:
         y, m, d = (int(p) for p in date.split("."))
-        return y + (m - 1) / 12.0 + (d - 1) / 365.0
+        got = y + (m - 1) / 12.0 + (d - 1) / 365.0
     except (ValueError, AttributeError):
-        return 0.0
+        got = 0.0
+    _YEAR_FRACTIONS[date] = got
+    return got
 
 
 _B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
@@ -290,8 +322,78 @@ def _state_label(region, pid, state_names, province_names):
     return region or ""
 
 
+def merge_wars(parsed):
+    """
+    Every war in the campaign, folded into one book.
+
+    A save carries the whole war history up to its date, not just what is
+    happening now: by 1908 that is two and a half megabytes of it, and only two
+    hundred and sixty of the wars are distinct. Thirty-eight saves therefore
+    hold fifty megabytes of overlapping copies, and twelve hundred monthly ones
+    would hold nearly two gigabytes.
+
+    Folding them into one book up front means the campaign keeps one copy of
+    each war, and every save can drop its own list the moment it has been read.
+    Saves are folded oldest first, because which of two readings of the same
+    war goal is kept depends on which was seen first.
+    """
+    book = {"wars": {}, "order": []}
+    for meta, _nations in sorted(
+            parsed, key=lambda pair: year_fraction(pair[0].get("date") or "")):
+        fold_wars(book, meta.get("wars", ()))
+    return book
+
+
+def fold_wars(book, war_list):
+    """Fold one save's war list into a running book. See `merge_wars`."""
+    wars, order = book["wars"], book["order"]
+    for war in war_list:
+        key = _war_key(war)
+        if key not in wars:
+            wars[key] = {k: v for k, v in war.items() if k != "battles"}
+            wars[key]["battles"] = {}
+            order.append(key)
+        held = wars[key]
+        # a war that was active in an earlier save has since ended
+        if war.get("end") and not held.get("end"):
+            held["end"] = war["end"]
+        if war.get("start") and (not held.get("start")
+                or year_fraction(war["start"]) < year_fraction(held["start"])):
+            held["start"] = war["start"]
+        if not war.get("active"):
+            held["active"] = False
+        for field in ("attackers", "defenders"):
+            held[field] = sorted(set(held[field]) | set(war[field]))
+        # Earliest date each tag is seen joining each side, across every save
+        # that caught the war. A later save can only add events an earlier one
+        # hadn't happened yet -- never move one earlier -- so keeping the
+        # minimum date per (tag, side) is always safe.
+        jd = held.setdefault("join_dates", {})
+        for d, w, a in war.get("joins", ()):
+            if not d:
+                continue
+            k = (w, a)
+            if k not in jd or year_fraction(d) < year_fraction(jd[k]):
+                jd[k] = d
+        # Goals added mid-war vanish when it ends, so take them from whichever
+        # save caught the war still running.
+        goals = held.setdefault("goalbook", {})
+        for g in war.get("goals", ()):
+            gkey = (g["actor"], g["receiver"], g["province"], g["casus_belli"])
+            if gkey not in goals or g["fulfilled"]:
+                goals[gkey] = g
+        seen = {}
+        for battle in war["battles"]:
+            bkey = _battle_key(battle, seen)
+            there = held["battles"].get(bkey)
+            if there is None:
+                held["battles"][bkey] = battle
+            elif battle["date"] and not there["date"]:
+                there["date"] = battle["date"]          # a save that still knew
+
+
 def build_wars(parsed, province_names=None, province_regions=None,
-               state_names=None, unit_kinds=None):
+               state_names=None, unit_kinds=None, book=None):
     """
     Every war in the campaign, with battle dates recovered across saves.
 
@@ -309,52 +411,9 @@ def build_wars(parsed, province_names=None, province_regions=None,
     # sorts before "mp_The_United States1840". Diffing province ownership down
     # that list compares 1884 against 1840 and invents transfers.
     parsed = sorted(parsed, key=lambda pair: year_fraction(pair[0].get("date") or ""))
-    wars = {}
-    order = []
-    for meta, _nations in parsed:
-        for war in meta.get("wars", ()):
-            key = _war_key(war)
-            if key not in wars:
-                wars[key] = {k: v for k, v in war.items() if k != "battles"}
-                wars[key]["battles"] = {}
-                order.append(key)
-            held = wars[key]
-            # a war that was active in an earlier save has since ended
-            if war.get("end") and not held.get("end"):
-                held["end"] = war["end"]
-            if war.get("start") and (not held.get("start")
-                    or year_fraction(war["start"]) < year_fraction(held["start"])):
-                held["start"] = war["start"]
-            if not war.get("active"):
-                held["active"] = False
-            for field in ("attackers", "defenders"):
-                held[field] = sorted(set(held[field]) | set(war[field]))
-            # Earliest date each tag is seen joining each side, across every
-            # save that caught the war. A later save can only add events an
-            # earlier one hadn't happened yet -- never move one earlier -- so
-            # keeping the minimum date per (tag, side) is always safe.
-            jd = held.setdefault("join_dates", {})
-            for d, w, a in war.get("joins", ()):
-                if not d:
-                    continue
-                k = (w, a)
-                if k not in jd or year_fraction(d) < year_fraction(jd[k]):
-                    jd[k] = d
-            # Goals added mid-war vanish when it ends, so take them from
-            # whichever save caught the war still running.
-            book = held.setdefault("goalbook", {})
-            for g in war.get("goals", ()):
-                key = (g["actor"], g["receiver"], g["province"], g["casus_belli"])
-                if key not in book or g["fulfilled"]:
-                    book[key] = g
-            seen = {}
-            for battle in war["battles"]:
-                bkey = _battle_key(battle, seen)
-                there = held["battles"].get(bkey)
-                if there is None:
-                    held["battles"][bkey] = battle
-                elif battle["date"] and not there["date"]:
-                    there["date"] = battle["date"]      # a save that still knew
+    if book is None:
+        book = merge_wars(parsed)
+    wars, order = book["wars"], book["order"]
 
     # --- who took what, from the province ledger either side of each save
     shifts = []
@@ -543,7 +602,12 @@ def build_succession(parsed, formations=None):
             _primary, accepts = home.get(tag, ("", set()))
             declared = formations.get(tag) or set()
             came = []
-            for old in vanished:
+            # Sorted, because two predecessors that handed over the same share
+            # sort equal and would otherwise be ordered by however the set
+            # happened to iterate -- which is not the same twice, since Python
+            # salts string hashing per process. A report should read the same
+            # every time it is built from the same saves.
+            for old in sorted(vanished):
                 shared = was[old] & land
                 if not shared:
                     continue
@@ -567,12 +631,71 @@ def build_succession(parsed, formations=None):
     return out
 
 
+# How many suppliers of one good are named at one date before the rest are
+# rolled into a single "everyone else". A glut is made by the handful of
+# nations at the top of this list; the ninetieth is noise, and naming all of
+# them for every good at every save is most of a megabyte of report.
+SUPPLY_NAMED = 14
+
+
+def pack(payload):
+    """
+    The payload as the page carries it: JSON, gzipped, base64.
+
+    A campaign saved by hand thirty times makes about seven megabytes of JSON,
+    which is a large mail attachment. The same campaign autosaved every month
+    makes a hundred and twenty, which is not a file anybody sends anyone. The
+    shape compresses about nine-fold -- it is mostly repeated key names and
+    columns of similar numbers -- so it travels compressed and the browser
+    inflates it on the way in, which it does with `DecompressionStream`, built
+    in and needing nothing shipped alongside.
+
+    Base64 costs a third back on top. That is the price of putting bytes inside
+    an HTML file and still having one file that opens off a disk with no server
+    behind it, and it is worth paying: a report goes from 119 MB to about 17,
+    and opens quicker than it did, because inflating a megabyte is faster than
+    reading a hundred off a disk and parsing them.
+    """
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    # Level 6 rather than 9: the last 5% of size costs three times the wall
+    # clock, and this runs once per report over a hundred megabytes.
+    return base64.b64encode(gzip.compress(raw, 6)).decode("ascii")
+
+
+def _trim_supply(supply, dates):
+    """
+    {good: {date: {"t": world total, "n": [[tag, amount], ...]}}}, biggest first.
+
+    What is dropped is still counted: `t` is the total over every supplier, so
+    the share the named ones do not account for is the rest of the world.
+    """
+    if not supply:
+        return {}
+    keep = set(dates)
+    out = {}
+    for good, by_date in supply.items():
+        rows = {}
+        for date, by_tag in by_date.items():
+            if date not in keep:
+                continue
+            total = sum(by_tag.values())
+            if total <= 0:
+                continue
+            top = sorted(by_tag.items(), key=lambda kv: -kv[1])[:SUPPLY_NAMED]
+            rows[date] = {"t": round(total, 2),
+                          "n": [[tag, round(amount, 2)] for tag, amount in top]}
+        if rows:
+            out[good] = rows
+    return out
+
+
 def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
                  snapshot_rows, brigade_rows, tech_rows, outdir,
                  tag_names=None, map_data=None,
                  base_prices=None, great_powers=None, flags=None,
                  technology=None, wars=None, succession=None,
-                 filename="report.html"):
+                 naval=None, supply=None, culture_names=None,
+                 display_names=None, filename="report.html"):
     os.makedirs(outdir, exist_ok=True)
     tag_names = tag_names or {}
 
@@ -597,17 +720,45 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
             except (TypeError, ValueError):
                 pass
 
+    # Growth is a rate, so it needs two readings and the time between them. The
+    # anchor only moves when a reading is far enough from the last one to say
+    # something -- see MIN_GROWTH_SPAN -- which also means a nation missing from
+    # a save measures across the gap rather than losing the series entirely.
+    year_of = {d: year_fraction(d) for d in dates}
+    growth_keys = []
+    for key, source, _label in GROWTH_METRICS:
+        if source not in metric_keys:
+            continue
+        growth_keys.append(key)
+        for tag in tags:
+            have = series[tag][source]
+            out = {}
+            anchor = None
+            for date in dates:
+                value = have.get(date)
+                if value is None or value <= 0:
+                    continue
+                if anchor is not None:
+                    span = year_of[date] - year_of[anchor[0]]
+                    if span >= MIN_GROWTH_SPAN:
+                        out[date] = round(
+                            ((value / anchor[1]) ** (1.0 / span) - 1.0) * 100, 4)
+                        anchor = (date, value)
+                    continue
+                anchor = (date, value)
+            series[tag][key] = out
+
     ships, ship_types = {}, set()
-    for row in ship_rows:
-        ship_types.add(row["ship_type"])
-        ships.setdefault(row["tag"], {}).setdefault(row["date"], {})[
-            row["ship_type"]] = int(row["count"])
+    # The four big tables arrive as tuples in their CSV column order -- see
+    # `write_outputs` for the columns, and the row loop in `main` for why.
+    for date, _year, tag, stype, count in ship_rows:
+        ship_types.add(stype)
+        ships.setdefault(tag, {}).setdefault(date, {})[stype] = int(count)
 
     brigades, regiment_types = {}, set()
-    for row in brigade_rows:
-        regiment_types.add(row["regiment_type"])
-        brigades.setdefault(row["tag"], {}).setdefault(row["date"], {})[
-            row["regiment_type"]] = int(row["count"])
+    for date, _year, tag, rtype, count in brigade_rows:
+        regiment_types.add(rtype)
+        brigades.setdefault(tag, {}).setdefault(date, {})[rtype] = int(count)
 
     # Techs are referenced by index so the payload does not repeat 100+ names
     # once per nation per save.
@@ -618,32 +769,31 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
                 tech_order.append(tech)
                 tech_meta.append([branch, line])
     seen_tech = set(tech_order)
-    extra = sorted({r["technology"] for r in tech_rows} - seen_tech)
+    extra = sorted({r[3] for r in tech_rows} - seen_tech)
     for tech in extra:
         tech_order.append(tech)
         tech_meta.append(["other", "Other"])
     tech_index = {t: i for i, t in enumerate(tech_order)}
 
     techs_by = {}
-    for row in tech_rows:
-        idx = tech_index.get(row["technology"])
+    for date, _year, tag, tech, _branch, _line in tech_rows:
+        idx = tech_index.get(tech)
         if idx is None:
             continue
-        techs_by.setdefault(row["tag"], {}).setdefault(row["date"], []).append(idx)
+        techs_by.setdefault(tag, {}).setdefault(date, []).append(idx)
     for tag in techs_by:
         for date in techs_by[tag]:
             techs_by[tag][date].sort()
 
     pops, pop_types = {}, set()
-    for row in pop_rows:
-        pop_types.add(row["pop_type"])
-        pops.setdefault(row["tag"], {}).setdefault(row["date"], {})[
-            row["pop_type"]] = int(row["size"])
+    for date, _year, tag, ptype, size in pop_rows:
+        pop_types.add(ptype)
+        pops.setdefault(tag, {}).setdefault(date, {})[ptype] = int(size)
 
     cultures = {}
-    for row in culture_rows:
-        cultures.setdefault(row["tag"], {}).setdefault(row["date"], []).append(
-            [row["culture"], int(row["size"]), int(row["accepted"])])
+    for date, _year, tag, culture, size, accepted in culture_rows:
+        cultures.setdefault(tag, {}).setdefault(date, []).append(
+            [culture, int(size), int(accepted)])
     for tag in cultures:
         for date in cultures[tag]:
             cultures[tag][date].sort(key=lambda c: -c[1])
@@ -672,16 +822,20 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
 
     snapshot = {}
     for row in snapshot_rows:
-        # Vic2 pins a good at its price floor by adding a ~2e9 sentinel to
-        # `demand`. `real_demand` is the honest number, and the sentinel is
-        # itself a useful signal about which goods are bottomed out.
+        # A demand of order a billion is nobody's economy: it is a standing
+        # order to buy without limit, which some mods give a nation so that raw
+        # materials always find a buyer. Every reading in the campaigns this was
+        # checked against that carries one sits at exactly five times the good's
+        # base cost, which is the engine's price ceiling -- so the flag means
+        # "pegged at its maximum", and `real_demand` is what is left when the
+        # standing order is set aside.
         raw_demand = float(row["demand"])
         snapshot.setdefault(row["date"], {})[row["good"]] = {
             "price": float(row["price"]),
             "supply": float(row["supply"]),
             "demand": float(row["real_demand"]),
             "actual_sold": float(row["actual_sold"]),
-            "floored": int(raw_demand > 1e9),
+            "pegged": int(raw_demand > 1e9),
             "discovered": int(row["discovered"]),
         }
 
@@ -707,6 +861,8 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
             "provinces": int(float(row.get("provinces") or 0)),
             "prestige": float(row.get("prestige") or 0),
             "primary_culture": row.get("primary_culture", ""),
+            "is_player": int(float(row.get("is_player") or 0)),
+            "soldiers_noncolonial": int(float(row.get("soldiers_noncolonial") or 0)),
             "techs": int(float(row.get("techs") or 0)),
             "army_techs": int(float(row.get("army_techs") or 0)),
             "navy_techs": int(float(row.get("navy_techs") or 0)),
@@ -718,9 +874,14 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
         "years": [year_fraction(d) for d in dates],
         "tags": tags,
         "tagNames": {t: tag_names.get(t, t) for t in tags},
+        "cultureNames": culture_names or {},
+        "names": display_names or {},
         "metrics": [
             {"key": key, "label": label, "fmt": fmt}
             for key, label, fmt in METRICS if key in metric_keys
+        ] + [
+            {"key": key, "label": label, "fmt": "percent", "rate": 1}
+            for key, _source, label in GROWTH_METRICS if key in growth_keys
         ],
         "series": series,
         "facts": facts,
@@ -751,13 +912,16 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
         "movement": movement,
         "snapshot": snapshot,
         "snapshotDates": sorted(snapshot, key=year_fraction),
+        "naval": naval,
+        "supply": _trim_supply(supply, dates),
+        "growthSpan": MIN_GROWTH_SPAN,
     }
 
     span = f"{dates[0]} – {dates[-1]}" if dates else "—"
     price_span = (f"{price_dates[0]} – {price_dates[-1]}"
                   if price_dates else "no price data")
 
-    html = TEMPLATE.replace("__DATA__", json.dumps(payload, separators=(",", ":")))
+    html = TEMPLATE.replace("__DATA__", pack(payload))
     html = html.replace("__SAVECOUNT__", str(len(dates)))
     html = html.replace("__NATIONCOUNT__", str(len(tags)))
     html = html.replace("__SPAN__", span)

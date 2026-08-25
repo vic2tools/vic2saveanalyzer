@@ -29,6 +29,10 @@ TEMPLATE = r"""<!DOCTYPE html>
   --gilt-hi:#F0D68C; --gilt-lo:#7C5E22;
   --parchment:#EADFC2;
   --sheet-pad:clamp(16px,4vw,44px);
+  /* Tells the browser this page is dark, so the parts it draws itself -- the
+     open list under a <select>, its scrollbar, the focus ring -- come out dark
+     too instead of on a white ground this page's pale ink cannot be read on. */
+  color-scheme:dark;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
@@ -37,8 +41,13 @@ body{
   font-family:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
   font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;
 }
+/* The column was 1180px, chosen when the widest thing on it was a paragraph.
+   Most of what is on it now is a table with twenty columns, a chart, or a
+   world map, so it takes the window instead: 96vw fills a 1080p screen and
+   still fits a laptop, since a max-width only ever gives room back. The cap
+   is for the very wide screen, where 96vw would be a wall of text. */
 .sheet{
-  max-width:1180px;margin:0 auto;padding:var(--sheet-pad);
+  max-width:min(1800px,96vw);margin:0 auto;padding:var(--sheet-pad);
   background:
     radial-gradient(120% 60% at 50% 0%,rgba(231,196,100,.10),transparent 60%),
     linear-gradient(180deg,#54212E 0%,var(--ground) 32%,#3E1622 100%);
@@ -94,15 +103,44 @@ h2{
 .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
 select,button,input[type=search]{
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;
-  background:linear-gradient(180deg,var(--panel),#431B26);color:var(--ink);
+  /* A solid colour under the gradient. The list a <select> opens is drawn by
+     the browser, which cannot use a gradient and falls back to a flat colour;
+     without one named here that is the platform's, and this page's near-white
+     ink lands on a near-white ground. */
+  background-color:#431B26;
+  background-image:linear-gradient(180deg,var(--panel),#431B26);
+  color:var(--ink);
   border:1px solid var(--rule);border-radius:0;padding:7px 11px;
 }
+/* And the rows in that list, named at both ends for the same reason. */
+option{background-color:var(--ground-deep);color:var(--ink)}
+option:checked{background-color:var(--brass);color:var(--ground-deep)}
+option:disabled{color:var(--ink-dim)}
 select,button{cursor:pointer}
 select:focus-visible,button:focus-visible,input:focus-visible{
   outline:2px solid var(--brass);outline-offset:2px}
 .controls > button[aria-pressed="true"]{
   background:linear-gradient(180deg,var(--gilt-hi),var(--brass));
   color:#3A1420;border-color:var(--gilt-hi);font-weight:500}
+
+/* A slider the same weight as the buttons beside it: a brass thumb on a thin
+   rule, rather than whatever the platform draws. */
+.timeline{
+  -webkit-appearance:none;appearance:none;background:transparent;
+  width:180px;height:22px;cursor:pointer;padding:0;margin:0;
+}
+.timeline:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+.timeline::-webkit-slider-runnable-track{
+  height:3px;background:var(--grid);border:1px solid var(--rule);border-width:0 0 0 0}
+.timeline::-moz-range-track{height:3px;background:var(--grid)}
+.timeline::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:11px;height:17px;margin-top:-8px;
+  background:linear-gradient(180deg,var(--gilt-hi),var(--brass));
+  border:1px solid var(--ground-deep)}
+.timeline::-moz-range-thumb{
+  width:11px;height:17px;border-radius:0;
+  background:linear-gradient(180deg,var(--gilt-hi),var(--brass));
+  border:1px solid var(--ground-deep)}
 
 /* ---- searchable picker ---- */
 .picker{position:relative;display:inline-block}
@@ -341,6 +379,11 @@ table.mini.fitmini th,table.mini.fitmini td{white-space:normal;
 .up{color:#9BD65E}.down{color:var(--minium)}
 /* Centre labels sit over the donut hole; they must never eat hover events. */
 #milpies text{pointer-events:none}
+/* A note explains the figure above it, so it is set to the same width. It had
+   a reading measure of its own for a while, which only made it look like the
+   text had been cut short of the chart it belongs to -- a paragraph ending
+   half a screen inside the frame above it reads as a mistake, and the long
+   line is the smaller cost. */
 .note{color:var(--ink-dim);font-size:13px;margin:10px 2px 0}
 .stackwrap{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
 .slegend{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;
@@ -378,7 +421,11 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
       <div class="controls">
         <label for="mapsave">Save</label>
         <select id="mapsave"></select>
-        <button id="mapocc" aria-pressed="true" title="Shade land by who currently controls it rather than who owns it">Control</button>
+        <button id="mapplay" aria-pressed="false" title="Step through every save in order, so the campaign plays out on the map">Play</button>
+        <button id="mapspeed" title="How fast Play steps: 1x, 2x or 5x">1&times;</button>
+        <input type="range" id="mapstep" class="timeline" min="0" step="1" value="0"
+               aria-label="Move through the campaign save by save">
+        <button id="mapocc" aria-pressed="true" title="Hatch occupied land in the colour of whoever is holding it">Occupation</button>
         <button id="mapreset" title="Back to the whole world">Reset</button>
         <span class="rk" id="mapzoom">1.0&times;</span>
         <span id="pick-map"></span>
@@ -393,8 +440,14 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         marker for the province, the nations stacked there and what they are made
         of. Narrow the nation list to strip the map back to the ones you care
         about &mdash; the land stays shaded, only the markers are filtered.
-        Land is shaded by whoever controls it; press <strong>Control</strong> to
-        switch to who owns it, which separates occupied ground from annexed.
+        Land is shaded by whoever <em>owns</em> it, and ground somebody else is
+        holding is hatched diagonally in the occupier's colour on top &mdash; so a
+        front line and an annexation no longer look the same. The hatching never
+        crosses a province border, and hovering any land names both the nation
+        that owns it and the one holding it. <strong>Occupation</strong> turns the
+        hatching off. <strong>Play</strong> steps through every save in
+        order &mdash; at 1&times;, 2&times; or 5&times; &mdash; or drag the slider beside it to
+        move through the campaign by hand.
         Scroll to zoom, drag to pan, double-click to zoom in, and click a marker
         to pin its readout while you look elsewhere.</p>
     </section>
@@ -413,7 +466,7 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
   <!-- ============ COMPARE ============ -->
   <div role="tabpanel" id="panel-compare" aria-labelledby="tab-compare" hidden>
     <section>
-      <h2>Series</h2>
+      <h2>Data visualizer</h2>
       <div class="controls">
         <label class="tb-label" for="metric" style="margin:0">Measure</label>
         <select id="metric"></select>
@@ -424,6 +477,7 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         <svg id="chart" viewBox="0 0 1000 460" role="img" aria-label="Metric plotted over time by nation"></svg>
         <div class="readout" id="readout"></div>
       </figure>
+      <p class="note" id="ratenote" hidden></p>
       <p class="note" id="succnote"></p>
     </section>
 
@@ -457,7 +511,15 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         <div class="readout" id="milreadout"></div>
       </figure>
       <div class="stackwrap" id="millegend"></div>
-      <p class="note">Hover a slice on either pie and both nations' counts for that type are shown together.</p>
+      <p class="note">Hover a slice on either pie and both nations' counts for that type are shown together.
+        In <strong>Navy</strong> mode each side also carries a <strong>fleet power</strong>:
+        every hull scored as <code>gun power &times; hull &divide; (1 &minus; evasion)</code>, which is
+        how two ships trading fire actually compare once each one's terms are moved to its own
+        side of the sum. Stats come from the mod's own <code>units/</code> files and are upgraded by
+        the inventions each nation rolled, so the same hull type is worth more to a nation that
+        researched further. Torpedoes work only against big ships, so where any are carried a
+        second figure is given for a fight against heavy hulls. Composition adds what one hull of
+        each type is worth to each side.</p>
     </section>
 
     <section>
@@ -545,6 +607,7 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         <svg id="fleetchart" viewBox="0 0 1000 460" role="img" aria-label="Ship counts over time by nation"></svg>
         <div class="readout" id="fleetreadout"></div>
       </figure>
+      <p class="note" id="fleetspan" hidden></p>
     </section>
 
     <section>
@@ -567,7 +630,10 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         <svg id="navy" viewBox="0 0 1000 360" role="img" aria-label="Ship counts by type over time"></svg>
       </figure>
       <div class="stackwrap" id="navlegend"></div>
-      <p class="note">Hull types are read straight from the save, so mod-added ships appear under their own names.</p>
+      <p class="note">Hull types are read straight from the save and named the way the mod
+        names them, so mod-added ships appear under their own names. One bar a year, taken from
+        the last save in each, so the chart reads the same whether the campaign was saved by
+        hand or every month.</p>
     </section>
   </div>
 
@@ -604,6 +670,9 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         <svg id="popchart" viewBox="0 0 1000 360" role="img" aria-label="Pop sizes by type over time"></svg>
       </figure>
       <div class="stackwrap" id="poplegend"></div>
+      <p class="note">One bar a year, taken from the last save in each. Pop types carry the
+        mod's own names &mdash; IGoR's aristocrats are Landowners. Hover a band for its exact
+        count.</p>
     </section>
   </div>
 
@@ -631,10 +700,34 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         <select id="snapsel"></select>
       </div>
       <div class="tablewrap"><table id="market"><thead><tr></tr></thead><tbody></tbody></table></div>
-      <p class="note">Supply, demand and quantity sold are stored only for the save's own date, so this
-        is a snapshot rather than a series. Demand is the real figure: Victoria&nbsp;II inflates the
-        stored value by about two billion to hold a good at its price floor, and those goods are
-        marked. Change is measured across the whole price span. Click a row to plot that good.</p>
+      <p class="note">Supply, demand and quantity sold are stored only for the save's own date, so
+        this is a snapshot rather than a series. <strong>Unsold</strong> is the share of that day's
+        supply that found no buyer at all, which is the plainest sign of a glut.
+        <strong>Pegged</strong> marks a good whose recorded demand runs to something like a billion
+        &mdash; a standing order to buy without limit, which some mods hand a nation so raw
+        materials always sell. Every pegged reading in these saves sits at exactly five times the
+        good's base cost, which is the engine's price ceiling: for those goods the price and the
+        demand both stop meaning anything, and only <strong>Unsold</strong> still reports on the
+        glut. A good that records no sale in any save &mdash; precious metal goes straight to the
+        mint rather than to a buyer &mdash; is left blank rather than read as permanently unsold. Demand is the real figure, with the standing order set aside. Change is measured
+        across the whole price span. Click a row to plot that good and to name its producers
+        below.</p>
+    </section>
+
+    <section>
+      <h2>Who produces it at <span id="proddate"></span></h2>
+      <div class="controls">
+        <label class="tb-label" for="prodsave" style="margin:0">Save</label>
+        <select id="prodsave"></select>
+        <label class="tb-label" for="prodgood" style="margin:0">Good</label>
+        <select id="prodgood"></select>
+      </div>
+      <figure>
+        <svg id="prodchart" viewBox="0 0 1000 430" role="img"
+             aria-label="Supply of one good by nation"></svg>
+        <div class="readout" id="prodreadout"></div>
+      </figure>
+      <p class="note" id="prodnote"></p>
     </section>
   </div>
 
@@ -647,7 +740,60 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
 </main>
 
 <script>
-const DATA = __DATA__;
+/* The payload is JSON, gzipped, then base64'd, because the uncompressed shape
+   of a long campaign is a hundred megabytes of repeated key names and columns
+   of similar numbers -- a file nobody can send anybody. Compressed it is about
+   a ninth of that, and the page opens faster for it: inflating a megabyte
+   costs less than reading nine off a disk and parsing them.
+
+   `DecompressionStream` is asynchronous and there is no synchronous gzip in a
+   browser, which is why everything below runs inside one async function rather
+   than at the top level. Nothing else about the page changes. */
+const PACKED = "__DATA__";
+
+async function unpack(text) {
+  if (typeof DecompressionStream !== 'function')
+    throw new Error('this browser has no DecompressionStream; Chrome 80, '
+      + 'Firefox 113, Safari 16.4 or newer will open this file');
+  const bin = atob(text);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const stream = new Blob([bytes]).stream()
+    .pipeThrough(new DecompressionStream('gzip'));
+  return JSON.parse(await new Response(stream).text());
+}
+
+/* A report is a file somebody was sent, so a failure has to say so on the page
+   rather than only in a console the reader will never open. */
+function bootNote(text) {
+  let box = document.getElementById('bootnote');
+  if (!box) {
+    box = document.createElement('p');
+    box.id = 'bootnote';
+    box.className = 'note';
+    box.style.cssText = 'margin:1.5rem 2rem;color:var(--ink)';
+    document.body.prepend(box);
+  }
+  box.textContent = text;
+  return box;
+}
+
+function bootFailed(err) {
+  bootNote('This report could not be unpacked: '
+    + (err && err.message ? err.message : err) + '.');
+  throw err;
+}
+
+(async () => {
+/* A campaign of a few dozen saves unpacks in well under a tenth of a second and
+   should say nothing at all; one autosaved every month for a century takes long
+   enough that a page of empty tables needs explaining. Hence the delay: the
+   notice only ever appears when there is something to wait for. */
+const slow = setTimeout(() => bootNote('Unpacking the campaign\u2026'), 200);
+const DATA = await unpack(PACKED);
+clearTimeout(slow);
+const said = document.getElementById('bootnote');
+if (said) said.remove();
 const C = DATA.colours;
 /**
  * A stable colour for the nth series in a set.
@@ -762,6 +908,20 @@ const NATION_INK = {};
 })();
 
 const colourFor = t => NATION_INK[t] || seriesColour(DATA.tags.indexOf(t));
+/* A save names a culture by its key. The mod's localisation has the name the
+   game shows; without a mod folder there is none, so the key stands in, tidied
+   the way every other raw key here is. */
+const cultureName = c => (DATA.cultureNames || {})[c] || (c || '').replace(/_/g, ' ');
+/* Same again for the other bare keys a save writes down -- goods, unit types,
+   pop types, technologies, casus belli. The mod's localisation holds the name
+   the game shows, so `cattle` reads Livestock in IGoR and Cattle in vanilla;
+   with no mod folder there is nothing to look it up in and the key stands in,
+   tidied. */
+const gameName = k => (DATA.names || {})[k] || (k || '').replace(/_/g, ' ');
+// Any list a reader scans for a name has to be in the order of the names it
+// shows, not of the keys behind them: IGoR calls `barrels` Tanks and `cattle`
+// Livestock, and sorted by key those land under B and C.
+const byGameName = (a, b) => gameName(a).localeCompare(gameName(b));
 const goodColour = g => seriesColour(DATA.goods.indexOf(g));
 
 const fmtCount = v => {
@@ -1105,34 +1265,16 @@ function plot(svg, cfg) {
     label.textContent = cfg.fmt(log ? Math.pow(10, tick) : tick);
     axis.appendChild(label);
   });
-  // One save can sit weeks from the next while the whole plot spans decades,
-  // so a tick label per save (the old behaviour) ran them together into an
-  // unreadable smear. Gridlines still mark every save -- useful reference
-  // points on hover -- but a label only draws once it clears the minimum
-  // pixel gap from the last one shown. The final tick always shows -- a
-  // reader needs the plot's actual end date -- but forcing it on unmodified
-  // could still land it right next to whatever the greedy pass had already
-  // placed just before it, so any of those that are now too close to it get
-  // dropped in a second pass instead of just the first tick being exempted.
-  const xTickGap = cfg.xLabelGap || 44;
-  const ticked = cfg.xTicks.map(t => ({...t, x: xOf(t.v)}));
-  ticked.forEach(({x}) => axis.appendChild(
-    el('line', {x1: x, x2: x, y1: M.t, y2: H - M.b, class: 'gridline'})));
-  if (ticked.length) {
-    const shown = [];
-    for (let i = 0; i < ticked.length - 1; i++) {
-      const t = ticked[i];
-      if (!shown.length || t.x - shown[shown.length - 1].x >= xTickGap) shown.push(t);
-    }
-    const last = ticked[ticked.length - 1];
-    while (shown.length && last.x - shown[shown.length - 1].x < xTickGap) shown.pop();
-    shown.push(last);
-    shown.forEach(({x, label: txt}) => {
-      const label = el('text', {x, y: H - M.b + 17, 'text-anchor': 'middle'});
-      label.textContent = txt;
-      axis.appendChild(label);
-    });
-  }
+  // Every tick the caller gave, gridline and label together. The callers hand
+  // over round years spaced far enough apart to read, so there is nothing left
+  // here to thin out.
+  cfg.xTicks.forEach(({v, label: txt}) => {
+    const x = xOf(v);
+    axis.appendChild(el('line', {x1: x, x2: x, y1: M.t, y2: H - M.b, class: 'gridline'}));
+    const label = el('text', {x, y: H - M.b + 17, 'text-anchor': 'middle'});
+    label.textContent = txt;
+    axis.appendChild(label);
+  });
   if (cfg.baseline != null) {
     const y = yOf(cfg.baseline);
     if (y > M.t && y < H - M.b)
@@ -1164,8 +1306,15 @@ function plot(svg, cfg) {
       path.style.setProperty('--len', len.toFixed(0));
       svg.appendChild(path);
     }
+    // A marker on every reading is a row of boxes with a line threaded
+    // through it once the saves come monthly, and it says nothing the line has
+    // not already said. Only the two ends carry one, which is the one thing
+    // the line cannot show on its own: where this nation's run of data starts
+    // and where it stops.
+    // A series with a single reading has no line, so its one marker is the
+    // whole of it; drawing the same box twice would only thicken its edge.
     if (cfg.markers)
-      xy.forEach(p => svg.appendChild(el('rect', {
+      (xy.length > 1 ? [xy[0], xy[xy.length - 1]] : [xy[0]]).forEach(p => svg.appendChild(el('rect', {
         x: p[0] - 2.5, y: p[1] - 2.5, width: 5, height: 5,
         fill: 'var(--ground)', stroke: s.colour, 'stroke-width': 1.5})));
     const last = xy[xy.length - 1];
@@ -1275,8 +1424,12 @@ function renderTable(table, cols, rows, state, onRow) {
   });
   const body = table.querySelector('tbody');
   body.textContent = '';
+  // A column whose text is a localised name still sorts on the key underneath
+  // unless it says otherwise, which would put Livestock under C for cattle.
+  const sortCol = cols.find(c => c.key === state.key);
+  const readSort = sortCol && sortCol.sortBy ? sortCol.sortBy : r => r[state.key];
   [...rows].sort((a, b) => {
-    const x = a[state.key], y = b[state.key];
+    const x = readSort(a), y = readSort(b);
     if (x === undefined) return 1;
     if (y === undefined) return -1;
     return state.dir * (typeof x === 'string' ? x.localeCompare(y) : x - y);
@@ -1299,7 +1452,26 @@ function renderTable(table, cols, rows, state, onRow) {
 const years = DATA.years;
 const xMin = Math.min(...years), xMax = Math.max(...years);
 const xOfSave = y => M.l + (xMax === xMin ? 0 : (y - xMin) / (xMax - xMin)) * (W - M.l - M.r);
-const saveTicks = DATA.dates.map((d, i) => ({v: years[i], label: d.split('.')[0]}));
+/* Vertical rules at round years, evenly spaced.
+   They used to mark the saves themselves, one gridline and one label each,
+   which reads as a calendar when a campaign is thirty hand-made saves and as
+   a picket fence the moment it is monthly autosaves -- a rule every few
+   pixels behind the very lines it is there to help read. Years do not care
+   how the campaign was saved: the spacing stays even and the count stays
+   the same whether the run holds thirty saves or nine hundred.
+   The step is the first of the usual round numbers that leaves the labels
+   room to breathe, so they never need thinning out afterwards. */
+const TICK_STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 200];
+function yearTicks(lo, hi) {
+  const room = Math.max(2, Math.floor((W - M.l - M.r) / 74));
+  const step = TICK_STEPS.find(v => (hi - lo) / v <= room)
+            || TICK_STEPS[TICK_STEPS.length - 1];
+  const out = [];
+  for (let y = Math.ceil(lo / step) * step; y <= hi; y += step)
+    out.push({v: y, label: String(y)});
+  return out;
+}
+const saveTicks = yearTicks(xMin, xMax);
 const saveHovers = DATA.dates.map((d, i) => ({v: years[i], label: d}));
 
 /* The eight great powers, in the game's own rank order, at whichever save is
@@ -1349,6 +1521,16 @@ function biggestAt(date, key, n) {
     .slice(0, n);
 }
 
+/* Every country somebody was playing. Each carries `human=yes` in its own
+   block of the save, so a multiplayer campaign names all of its players rather
+   than only whoever pressed save -- which is what the report used to have to
+   assume. A nation counts if it was played at any point in the run: the tags
+   worth picking out of a hundred and twenty are the ones a person steered,
+   whether or not they were still steering it at the end. */
+const PLAYER_TAGS = DATA.tags.filter(t =>
+  DATA.dates.some(d => ((DATA.facts[d] || {})[t] || {}).is_player));
+const isPlayer = t => PLAYER_TAGS.includes(t);
+
 function tagPickerCfg(selected, onChange, dateOf) {
   return {
     items: DATA.tags,
@@ -1360,6 +1542,8 @@ function tagPickerCfg(selected, onChange, dateOf) {
     available: dateOf ? () => tagsAt(dateOf()) : null,
     fallback: dateOf ? () => biggestAt(dateOf(), 'total_pop', 1) : null,
     presets: [
+      ...(PLAYER_TAGS.length ? [['Players', () => dateOf
+        ? PLAYER_TAGS.filter(t => tagsAt(dateOf()).includes(t)) : PLAYER_TAGS]] : []),
       ['Great powers', () => greatPowersNear(dateOf ? dateOf() : DATA.lastDate)],
       ['Top 8 by pop', () => dateOf ? biggestAt(dateOf(), 'total_pop', 8)
         : [...DATA.tags].sort((a, b) =>
@@ -1388,6 +1572,56 @@ function limitSelect(select, allowed, fallback) {
   if (ok.size && !ok.has(select.value)) select.value = fallback || first;
 }
 DATA.lastDate = DATA.dates[DATA.dates.length - 1];
+
+/* =============== fleet power ===============
+   How much a hull is worth in a fight, after Boltun's reading of the naval
+   combat code. Two ships trading fire deal damage in proportion to their own
+   gun power and in inverse proportion to the other's hull, and evasion throws
+   away a share of the ticks aimed at it -- so asking "who out-damages whom"
+   and moving each ship's terms to its own side of the comparison leaves
+
+       power = gun power x hull / (1 - evasion)
+
+   which is a number that can be added up over a fleet and compared. Torpedoes
+   count only against a big ship, so they are a second power level rather than
+   part of the first. The stats are the mod's own, upgraded by the inventions
+   each nation actually rolled; without a mod folder there are no unit files
+   and the whole measure is unavailable. */
+const NAVAL = DATA.naval || null;
+const navalStats = (tag, date) => {
+  if (!NAVAL) return null;
+  const idx = (NAVAL.of[tag] || {})[date];
+  return idx === undefined ? null : NAVAL.profiles[idx];
+};
+const shipPower = (stats, vsHeavy) => !stats ? 0
+  : (stats.gun_power + (vsHeavy ? stats.torpedo_attack : 0))
+    * stats.hull / (1 - stats.evasion);
+/** What one hull of this type is worth to this nation at this date. */
+function shipPowerOf(tag, date, type, vsHeavy) {
+  const stats = navalStats(tag, date);
+  return stats && stats[type] ? shipPower(stats[type], vsHeavy) : 0;
+}
+/** Every hull a side has, added up. */
+function fleetPower(tags, date, vsHeavy) {
+  let total = 0;
+  tags.forEach(tag => {
+    const at = (DATA.ships[tag] || {})[date] || {};
+    for (const type in at) total += shipPowerOf(tag, date, type, vsHeavy) * at[type];
+  });
+  return total;
+}
+/** Whether any hull on either side carries a torpedo, which is the only thing
+    that makes the second power level differ from the first. */
+function torpedoesAbout(tags, date) {
+  return tags.some(tag => {
+    const stats = navalStats(tag, date);
+    const at = (DATA.ships[tag] || {})[date] || {};
+    return stats && Object.keys(at).some(t => stats[t] && stats[t].torpedo_attack > 0);
+  });
+}
+const fmtPower = v => !v ? '0'
+  : v >= 100 ? Math.round(v).toLocaleString()
+  : v >= 10 ? v.toFixed(1) : v.toFixed(2);
 
 /* =============== NATIONS =============== */
 let natTags = defaultTags.slice();
@@ -1445,9 +1679,15 @@ const SUCCESSIONS = Object.entries(DATA.succession || {}).flatMap(
     : 'No nation in this campaign turned into another one.';
 })();
 
+/* Growth is not a quantity a save holds; it is the difference between two of
+   them. That makes it read differently from every other measure here, so the
+   chart says so, and draws the line that separates growing from shrinking. */
+const isRate = key => (DATA.metrics.find(m => m.key === key) || {}).rate === 1;
+
 function drawChart() {
   const key = metricSel.value;
   const shown = DATA.tags.filter(t => natTags.includes(t));
+  const rate = isRate(key);
   plot(document.getElementById('chart'), {
     series: shown.map(tag => ({
       name: tag, colour: colourFor(tag),
@@ -1457,16 +1697,33 @@ function drawChart() {
     xOf: xOfSave, xTicks: saveTicks, hoverXs: saveHovers,
     fmt: fmtFor(key), log: logScale, markers: true,
     links: SUCCESSIONS,
+    baseline: rate ? 0 : null,
     readout: document.getElementById('readout'),
     idle: 'Hover the plot to read values at a date.',
     emptyMsg: shown.length ? 'No data for this measure.' : 'Select a nation.',
   });
+  const note = document.getElementById('ratenote');
+  note.hidden = !rate;
+  if (rate) note.innerHTML = 'Compounded yearly, between one save and the one '
+    + 'before it: a nation that grew 3% over six months plots at about 6%. '
+    + `Two saves less than ${(DATA.growthSpan * 12).toFixed(0)} months apart are `
+    + 'measured across the gap to the next one far enough away instead &mdash; a '
+    + 'fortnight of ordinary growth annualises into hundreds of percent and would '
+    + 'bury everything else on the chart. Conquest, annexation and independence '
+    + 'move population as surely as births do, so the sharp spikes and drops are '
+    + 'usually a border moving rather than a demographic event.';
 }
 
 const LEDGER_COLS = [
   {key: 'tag', label: 'Tag', colour: r => colourFor(r.tag)},
   {key: 'name', label: 'Nation'},
-  {key: 'primary_culture', label: 'Primary culture', fmt: v => v || '—'},
+  {key: 'player', label: 'Player', fmt: v => v ? 'yes' : '—',
+   cls: r => r.player ? 'up' : '',
+   title: 'Somebody was playing this nation. Read from the human=yes marker '
+        + 'each save writes into the country block, so a multiplayer campaign '
+        + 'names every player and not just whoever saved the game.'},
+  {key: 'primary_culture', label: 'Primary culture',
+   fmt: v => v ? cultureName(v) : '—'},
   {key: 'provinces', label: 'Prov', fmt: v => v.toLocaleString()},
   {key: 'total_pop', label: 'Population', fmt: v => v.toLocaleString()},
   {key: 'accepted_pct', label: 'Accepted', fmt: v => v.toFixed(1) + '%'},
@@ -1479,7 +1736,8 @@ const LEDGER_COLS = [
 const ledgerState = {key: 'total_pop', dir: -1};
 function drawLedger() {
   const at = DATA.facts[DATA.lastDate] || {};
-  const rows = natTags.filter(t => at[t]).map(t => ({tag: t, name: nameOf(t), ...at[t]}));
+  const rows = natTags.filter(t => at[t])
+    .map(t => ({tag: t, name: nameOf(t), player: isPlayer(t) ? 1 : 0, ...at[t]}));
   renderTable(document.getElementById('ledger'), LEDGER_COLS, rows, ledgerState);
 }
 
@@ -1700,6 +1958,24 @@ function drawMilPies() {
   }
 
   const ratioText = totals[1] ? (totals[0] / totals[1]).toFixed(2) + '×' : '—';
+  // Hulls are not interchangeable: five frigates are not a cruiser. Fleet power
+  // is what a side's ships are worth in a fight, so it sits beside the count
+  // rather than replacing it -- the two disagreeing is the interesting part.
+  const powers = NAVAL && milMode === 'navy'
+    ? [fleetPower(sideA, date, false), fleetPower(sideB, date, false)] : null;
+  const heavyPowers = powers && torpedoesAbout(sideA.concat(sideB), date)
+    ? [fleetPower(sideA, date, true), fleetPower(sideB, date, true)] : null;
+  const powerRatio = powers && powers[1]
+    ? (powers[0] / powers[1]).toFixed(2) + '×' : '—';
+  const powerBits = !powers ? ''
+    : `<span><span class="rk">fleet power</span> `
+      + `<b style="color:${SIDE_COLOUR[0]}">${fmtPower(powers[0])}</b>`
+      + ` <span class="rk">v</span> `
+      + `<b style="color:${SIDE_COLOUR[1]}">${fmtPower(powers[1])}</b></span>`
+      + `<span><span class="rk">power ratio</span> <b>${powerRatio}</b></span>`
+      + (heavyPowers ? `<span><span class="rk">vs heavy</span> `
+        + `<b>${fmtPower(heavyPowers[0])}</b> <span class="rk">v</span> `
+        + `<b>${fmtPower(heavyPowers[1])}</b></span>` : '');
   const mobOf = tags => tags.reduce((sum, t) =>
     sum + (((DATA.facts[date] || {})[t] || {}).mobilized_brigades || 0), 0);
   const mobBits = milMode === 'army'
@@ -1721,6 +1997,7 @@ function drawMilPies() {
     + `<span><span class="rk">right</span> <b style="color:${SIDE_COLOUR[1]}">`
     + `${totals[1].toLocaleString()}</b></span>`
     + `<span><span class="rk">ratio</span> <b>${ratioText}</b></span>` + split
+    + powerBits
     + mobBits
     + `<span class="rk">${totals[0] + totals[1] ? '' : 'no ' + noun + ' at this save'}</span>`;
   const setIdle = () => readout.innerHTML = idle;
@@ -1778,6 +2055,20 @@ function drawMilPies() {
             + `+ ${mobilized[side].toLocaleString()} mobilized`;
         svg.appendChild(breakdown);
       }
+      // The same slot under the navy's count carries what those hulls are
+      // worth, which is the number that actually decides a battle.
+      if (powers) {
+        const worth = el('text', {x, y: 122, 'text-anchor': 'middle',
+          fill: 'var(--brass)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 11});
+        worth.textContent = `${fmtPower(powers[side])} fleet power`;
+        svg.appendChild(worth);
+        if (heavyPowers && heavyPowers[side] > powers[side] + 0.5) {
+          const vs = el('text', {x, y: 138, 'text-anchor': 'middle',
+            fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
+          vs.textContent = `${fmtPower(heavyPowers[side])} against heavy ships`;
+          svg.appendChild(vs);
+        }
+      }
     });
     const ratio = el('text', {x: 500, y: 362, 'text-anchor': 'middle', fill: 'var(--brass)',
       'font-family': 'IBM Plex Mono, monospace', 'font-size': 16, 'font-weight': 600});
@@ -1818,10 +2109,31 @@ function drawMilPies() {
       const [x, y] = type === '__mob' ? remainingMob
                    : [counts[0][type] || 0, counts[1][type] || 0];
       const r = y ? (x / y).toFixed(2) + '×' : (x ? '—' : '');
-      const label = type === '__mob' ? 'still mobilizable' : type.replace(/_/g, ' ');
+      const label = type === '__mob' ? 'still mobilizable' : gameName(type);
+      // What one of these hulls is worth, side by side. The two sides can
+      // differ on the same hull type: inventions upgrade guns and armour, so
+      // one nation's cruiser is not another's.
+      let worth = '';
+      if (powers && type !== '__mob') {
+        const each = [0, 1].map(i => {
+          const per = sideCount[i] ? shipPowerOf(sideCount[i], date, type, false) : 0;
+          return `<span><span class="rk">${i ? 'right' : 'left'} each</span> `
+               + `<b style="color:${SIDE_COLOUR[i]}">${fmtPower(per)}</b> `
+               + `<span class="rk">x${(counts[i][type] || 0).toLocaleString()} `
+               + `= ${fmtPower(per * (counts[i][type] || 0))}</span></span>`;
+        });
+        worth = `<span class="rk">power</span>` + each.join('');
+      }
       readout.innerHTML = `<span class="rk">${label}</span>` + parts.join('')
-        + (r ? `<span><span class="rk">ratio</span> <b>${r}</b></span>` : '');
+        + (r ? `<span><span class="rk">ratio</span> <b>${r}</b></span>` : '')
+        + worth;
     };
+    // A side is one nation or several. Power per hull belongs to a nation, so
+    // the readout quotes the side's largest fleet rather than pretending a
+    // coalition of nations on different technology shares one cruiser.
+    const shipsOf = t => ((DATA.facts[date] || {})[t] || {}).ships || 0;
+    const sideCount = [sideA, sideB].map(
+      tags => tags.slice().sort((a, b) => shipsOf(b) - shipsOf(a))[0]);
 
     [[sideA, 0, 268], [sideB, 1, 732]].forEach(([tags, side, cx]) => {
       const head = el('text', {x: cx, y: 34, 'text-anchor': 'middle', fill: SIDE_COLOUR[side],
@@ -1829,7 +2141,7 @@ function drawMilPies() {
       head.textContent = sideLabel(tags);
       svg.appendChild(head);
       const slices = present.map(type => ({
-        label: `${sideLabel(tags)} · ${type}`, value: counts[side][type] || 0,
+        label: `${sideLabel(tags)} · ${gameName(type)}`, value: counts[side][type] || 0,
         colour: milColour(type), type,
       }));
       if (remainingMob[side]) slices.push({
@@ -1838,6 +2150,16 @@ function drawMilPies() {
       });
       donut(svg, cx, 196, 74, 122, slices, slice => setType(slice.type));
       centreText(svg, cx, 196, totals[side].toLocaleString(), noun);
+      if (powers) {
+        const worth = el('text', {x: cx, y: 348, 'text-anchor': 'middle',
+          fill: 'var(--brass)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 13});
+        worth.textContent = fmtPower(powers[side]);
+        svg.appendChild(worth);
+        const cap = el('text', {x: cx, y: 364, 'text-anchor': 'middle',
+          fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
+        cap.textContent = 'fleet power';
+        svg.appendChild(cap);
+      }
     });
 
     const ratio = el('text', {x: 500, y: 190, 'text-anchor': 'middle', fill: 'var(--brass)',
@@ -1852,7 +2174,7 @@ function drawMilPies() {
     present.forEach(type => {
       const item = document.createElement('span');
       item.className = 'slegend';
-      item.innerHTML = `<i style="background:${milColour(type)}"></i>${type.replace(/_/g, ' ')}`;
+      item.innerHTML = `<i style="background:${milColour(type)}"></i>${gameName(type)}`;
       item.style.cursor = 'pointer';
       item.onmouseenter = () => setType(type);
       legend.appendChild(item);
@@ -1907,7 +2229,14 @@ function drawMilTable() {
     {key: 'soldiers', label: 'Soldier pops', fmt: v => v.toLocaleString()},
     {key: 'soldier_pct', label: 'Soldier %', fmt: v => v.toFixed(2) + '%',
      title: "Soldier pops as a share of the nation's population"},
-    ...usedReg.map(rt => ({key: rt, label: rt.replace(/_/g, ' '),
+    {key: 'noncol_soldier_pct', label: 'Non-colonial soldier %',
+     fmt: v => v.toFixed(2) + '%',
+     title: "Soldier pops living in the nation's own states, colonies left out, "
+          + 'as a share of its whole population. A colonial soldier pop raises no '
+          + 'brigade, so this is the part of the soldier base an army can be built '
+          + 'on -- and an empire with a lot of colonial population reads lower here '
+          + 'than its plain soldier share suggests.'},
+    ...usedReg.map(rt => ({key: rt, label: gameName(rt),
                            fmt: v => (v || 0).toLocaleString()})),
   ];
   const rows = milTags.map(tag => {
@@ -1929,6 +2258,8 @@ function drawMilTable() {
       navy_techs: f.navy_techs || 0,
       soldiers,
       soldier_pct: f.total_pop ? soldiers / f.total_pop * 100 : 0,
+      noncol_soldier_pct: f.total_pop
+        ? (f.soldiers_noncolonial || 0) / f.total_pop * 100 : 0,
     };
     usedReg.forEach(rt => row[rt] = at[rt] || 0);
     return row;
@@ -1993,7 +2324,7 @@ function drawTechTable() {
     }
     const tr = document.createElement('tr');
     const name = document.createElement('td');
-    name.textContent = tech.replace(/_/g, ' ');
+    name.textContent = gameName(tech);
     tr.appendChild(name);
     tags.forEach(t => {
       const td = document.createElement('td');
@@ -2018,7 +2349,8 @@ let fleetTags = defaultTags.slice();
 let fleetLog = false;
 
 const shipSel = document.getElementById('shiptype');
-[['__all', 'All ships'], ...DATA.shipTypes.map(s => [s, s])].forEach(([v, label]) => {
+[['__all', 'All ships'],
+ ...[...DATA.shipTypes].sort(byGameName).map(s => [s, gameName(s)])].forEach(([v, label]) => {
   const o = document.createElement('option'); o.value = v; o.textContent = label;
   shipSel.appendChild(o);
 });
@@ -2045,18 +2377,47 @@ const shipCount = (tag, date, type) => {
 function drawFleetChart() {
   const type = shipSel.value;
   const shown = DATA.tags.filter(t => fleetTags.includes(t));
+  const series = shown.map(tag => ({
+    name: tag, colour: colourFor(tag),
+    pts: DATA.dates.map((d, i) => [years[i], shipCount(tag, d, type)])
+                   .filter(p => p[1] !== undefined),
+  }));
+  /* A hull nobody had before 1882 spent two thirds of this chart as empty
+     floor, with the years that actually had ships crushed into the last
+     third. The axis starts where the first one was launched and stops where
+     the last one was still afloat, so the span the hull existed for is the
+     span the chart draws. Doing it off the plotted points rather than off a
+     date in the tech tree also covers the other end: a hull every navy has
+     since scrapped stops the axis there instead of trailing off flat. */
+  const seen = [].concat(...series.map(x => x.pts.map(pt => pt[0])));
+  const lo = seen.length ? Math.min(...seen) : xMin;
+  const hi = seen.length ? Math.max(...seen) : xMax;
+  // No padding either side: the first reading sits on the vertical axis and
+  // the last on the right edge, the way it does on every other chart here.
+  const a = lo, b = hi;
+  const xOf = y => M.l + (b === a ? 0.5 : (y - a) / (b - a)) * (W - M.l - M.r);
   plot(document.getElementById('fleetchart'), {
-    series: shown.map(tag => ({
-      name: tag, colour: colourFor(tag),
-      pts: DATA.dates.map((d, i) => [years[i], shipCount(tag, d, type)])
-                     .filter(p => p[1] !== undefined),
-    })),
-    xOf: xOfSave, xTicks: saveTicks, hoverXs: saveHovers,
+    series,
+    xOf, xTicks: yearTicks(a, b),
+    hoverXs: saveHovers.filter(h => h.v >= a && h.v <= b),
     fmt: fmtCount, log: fleetLog, markers: true,
     readout: document.getElementById('fleetreadout'),
     idle: 'Hover the plot to read fleet sizes at a date.',
     emptyMsg: shown.length ? 'No ships of this type in these saves.' : 'Select a nation.',
   });
+  const note = document.getElementById('fleetspan');
+  const whole = !seen.length || (lo <= years[0] && hi >= years[years.length - 1]);
+  note.hidden = whole;
+  if (!whole) {
+    const at = v => DATA.dates[years.indexOf(v)] || '';
+    // Mods name hulls, so the article cannot be baked into the sentence.
+    const name = gameName(type);
+    const one = (/^[aeiou]/i.test(name) ? 'an ' : 'a ') + name;
+    note.textContent = lo === hi
+      ? `The ${at(lo)} save is the only one with ${one} in it.`
+      : `Nobody in these saves held ${one} outside `
+        + `${at(lo)} – ${at(hi)}, so the chart stops there.`;
+  }
 }
 
 const fleetSave = document.getElementById('fleetsave');
@@ -2076,7 +2437,7 @@ function drawFleetTable() {
     {key: 'tag', label: 'Tag', colour: r => colourFor(r.tag)},
     {key: 'name', label: 'Nation'},
     {key: 'total', label: 'Total', fmt: v => v.toLocaleString()},
-    ...used.map(st => ({key: st, label: st.replace(/_/g, ' '),
+    ...used.map(st => ({key: st, label: gameName(st),
                         fmt: v => (v || 0).toLocaleString()})),
   ];
   const rows = DATA.tags.map(tag => {
@@ -2097,14 +2458,42 @@ DATA.tags.forEach(t => {
 navSel.value = largestBy('ships');
 navSel.onchange = () => drawNavy();
 
+/* One bar per save is one bar per year while a campaign is saved by hand, and
+   a thicket the moment it is saved every month: nine hundred columns four
+   pixels wide with their totals printed over each other. A year is the unit
+   anyone reads a population by, so these charts keep the last save in each
+   year and drop the rest. The run has the same shape and the bars have room
+   to be labelled. */
+const YEAR_DATES = (() => {
+  const last = new Map();
+  DATA.dates.forEach(d => last.set(d.split('.')[0], d));
+  return [...last.values()];
+})();
+
+/* Which bars can carry a label without colliding with the one before: greedy
+   from the left, and the final bar always gets one, since a chart whose last
+   column is unlabelled asks the reader to count. Anything the greedy pass put
+   too close to that final label gives way to it. */
+function labelSlots(xs, gap) {
+  const keep = [];
+  for (let i = 0; i < xs.length - 1; i++)
+    if (!keep.length || xs[i] - xs[keep[keep.length - 1]] >= gap) keep.push(i);
+  if (xs.length) {
+    while (keep.length && xs[xs.length - 1] - xs[keep[keep.length - 1]] < gap) keep.pop();
+    keep.push(xs.length - 1);
+  }
+  return new Set(keep);
+}
+
 function stackedBars(svgId, legendId, byDate, keys, emptyMsg) {
   const svg = document.getElementById(svgId);
   svg.textContent = '';
   const legend = document.getElementById(legendId);
   legend.textContent = '';
   const NW = 1000, NH = 360, NM = {t: 16, r: 20, b: 38, l: 70};
-  const used = keys.filter(k => DATA.dates.some(d => (byDate[d] || {})[k]));
-  const totals = DATA.dates.map(d =>
+  const dates = YEAR_DATES;
+  const used = keys.filter(k => dates.some(d => (byDate[d] || {})[k]));
+  const totals = dates.map(d =>
     used.reduce((s, k) => s + ((byDate[d] || {})[k] || 0), 0));
   const peak = Math.max(1, ...totals);
 
@@ -2127,10 +2516,13 @@ function stackedBars(svgId, legendId, byDate, keys, emptyMsg) {
   axis.appendChild(el('line', {x1: NM.l, x2: NW - NM.r, y1: NH - NM.b, y2: NH - NM.b, class: 'axisline'}));
   svg.appendChild(axis);
 
-  const slot = (NW - NM.l - NM.r) / DATA.dates.length;
+  const slot = (NW - NM.l - NM.r) / dates.length;
   const barW = Math.min(56, slot * 0.62);
-  DATA.dates.forEach((d, i) => {
-    const x = NM.l + slot * (i + 0.5) - barW / 2;
+  const mids = dates.map((d, i) => NM.l + slot * (i + 0.5));
+  const yearSlots = labelSlots(mids, 30);
+  const totalSlots = labelSlots(mids, 42);
+  dates.forEach((d, i) => {
+    const x = mids[i] - barW / 2;
     let y = NH - NM.b;
     used.forEach((k, si) => {
       const count = (byDate[d] || {})[k] || 0;
@@ -2141,24 +2533,24 @@ function stackedBars(svgId, legendId, byDate, keys, emptyMsg) {
         fill: seriesColour(si), 'fill-opacity': .82,
         stroke: 'var(--ground)', 'stroke-width': .5});
       const title = document.createElementNS(SVGNS, 'title');
-      title.textContent = `${d} · ${k}: ${count.toLocaleString()}`;
+      title.textContent = `${d} · ${gameName(k)}: ${count.toLocaleString()}`;
       rect.appendChild(title);
       svg.appendChild(rect);
     });
     const mk = (txt, yy, size, fill) => {
-      const t = el('text', {x: x + barW/2, y: yy, 'text-anchor': 'middle'});
+      const t = el('text', {x: mids[i], y: yy, 'text-anchor': 'middle'});
       t.setAttribute('font-family', 'IBM Plex Mono, monospace');
       t.setAttribute('font-size', size); t.setAttribute('fill', fill);
       t.textContent = txt; svg.appendChild(t);
     };
-    mk(d.split('.')[0], NH - NM.b + 17, 10, '#C9AC80');
-    if (totals[i]) mk(fmtCount(totals[i]), y - 6, 10.5, '#F4E7CC');
+    if (yearSlots.has(i)) mk(d.split('.')[0], NH - NM.b + 17, 10, '#C9AC80');
+    if (totals[i] && totalSlots.has(i)) mk(fmtCount(totals[i]), y - 6, 10.5, '#F4E7CC');
   });
 
   used.forEach((k, si) => {
     const item = document.createElement('span');
     item.className = 'slegend';
-    item.innerHTML = `<i style="background:${seriesColour(si)}"></i>${k.replace(/_/g, ' ')}`;
+    item.innerHTML = `<i style="background:${seriesColour(si)}"></i>${gameName(k)}`;
     legend.appendChild(item);
   });
 }
@@ -2204,7 +2596,7 @@ function drawPopTable() {
     {key: 'avg_literacy', label: 'Literacy', fmt: v => (v * 100).toFixed(1) + '%'},
     {key: 'avg_militancy', label: 'Mil', fmt: v => v.toFixed(2)},
     {key: 'avg_consciousness', label: 'Con', fmt: v => v.toFixed(2)},
-    ...used.map(pt => ({key: pt, label: pt, fmt: cell})),
+    ...used.map(pt => ({key: pt, label: gameName(pt), fmt: cell})),
   ];
   const rows = DATA.tags.map(tag => {
     const at = (DATA.pops[tag] || {})[date] || {};
@@ -2244,7 +2636,7 @@ function drawCultureTable() {
   const list = ((DATA.cultures[tag] || {})[date]) || [];
   const total = list.reduce((s, c) => s + c[1], 0);
   const rows = list.map(([culture, size, accepted]) => ({
-    culture, size, accepted,
+    culture: cultureName(culture), key: culture, size, accepted,
     share: total ? size / total * 100 : 0,
   }));
   const cols = [
@@ -2284,8 +2676,8 @@ const topMovers = n => [...DATA.goods]
   .slice(0, n);
 
 const goodsPicker = makePicker(document.getElementById('pick-goods'), {
-  items: DATA.goods,
-  labelFor: g => g,
+  items: [...DATA.goods].sort(byGameName),
+  labelFor: g => gameName(g),
   subLabelFor: g => DATA.categoryLabels[DATA.goodCategory[g]] || DATA.goodCategory[g] || '',
   colourFor: goodColour,
   selected: [],
@@ -2335,14 +2727,10 @@ function priceSeries(good) {
 function drawPrices() {
   const note = document.getElementById('pricenote');
   const shown = DATA.goods.filter(g => goodsOn.includes(g));
-  const firstYear = Math.ceil(pxMin), lastYear = Math.floor(pxMax);
-  const step = Math.max(1, Math.ceil((lastYear - firstYear + 1) / 12));
-  const xTicks = [];
-  for (let yr = firstYear; yr <= lastYear; yr += step) xTicks.push({v: yr, label: yr});
-
   plot(document.getElementById('pricechart'), {
-    series: shown.map(g => ({name: g, colour: goodColour(g), pts: priceSeries(g)})),
-    xOf: pxOf, xTicks,
+    series: shown.map(g => ({name: gameName(g), colour: goodColour(g),
+                             pts: priceSeries(g)})),
+    xOf: pxOf, xTicks: yearTicks(pxMin, pxMax),
     hoverXs: PD.map((d, i) => ({v: PY[i], label: d})),
     fmt: v => priceIndex ? Math.round(v).toString() : (v >= 10 ? v.toFixed(0) : v.toFixed(2)),
     log: priceLog, thin: true, baseline: priceIndex ? 100 : null,
@@ -2359,6 +2747,17 @@ function drawPrices() {
     : '';
 }
 
+/* A good that records no sale in any save is not traded on the market at all.
+   Precious metal is the standing example: the engine turns it straight into
+   money at the mint rather than putting it up for sale, so its supply is real
+   and its sales are always nil. Reading that as "100% unsold, for ever" would
+   put it at the top of every glut list and say nothing. */
+const NEVER_SOLD = new Set(DATA.goods.filter(g =>
+  DATA.snapshotDates.every(d => !(((DATA.snapshot[d] || {})[g]) || {}).actual_sold)));
+const unsoldShare = (good, snap) =>
+  (!snap || !snap.supply || NEVER_SOLD.has(good)) ? null
+    : Math.max(0, (snap.supply - snap.actual_sold) / snap.supply * 100);
+
 const snapSel = document.getElementById('snapsel');
 DATA.snapshotDates.forEach(d => {
   const o = document.createElement('option'); o.value = d; o.textContent = d;
@@ -2369,7 +2768,8 @@ if (DATA.snapshotDates.length)
 snapSel.onchange = drawMarketTable;
 
 const MARKET_COLS = [
-  {key: 'good', label: 'Good', colour: r => goodColour(r.good)},
+  {key: 'good', label: 'Good', fmt: gameName, sortBy: r => gameName(r.good),
+   colour: r => goodColour(r.good)},
   {key: 'category', label: 'Category'},
   {key: 'price', label: 'Price', fmt: v => v.toFixed(2)},
   {key: 'base', label: 'Base', fmt: v => v == null ? '—' : v.toFixed(2),
@@ -2384,7 +2784,19 @@ const MARKET_COLS = [
   {key: 'supply', label: 'Supply', fmt: fmtCount},
   {key: 'demand', label: 'Demand', fmt: fmtCount},
   {key: 'actual_sold', label: 'Sold', fmt: fmtCount},
-  {key: 'floored', label: 'At floor', fmt: v => v ? 'yes' : '—'},
+  {key: 'unsold', label: 'Unsold', fmt: v => v == null ? '—' : v.toFixed(0) + '%',
+   title: "The share of the day's supply nobody bought. A good left on the "
+        + 'quayside is being overproduced whatever its demand figure says, '
+        + 'which matters in a mod where one nation stands ready to buy the '
+        + "world's surplus.",
+   cls: r => r.unsold == null ? '' : r.unsold > 25 ? 'down' : r.unsold < 2 ? 'up' : ''},
+  {key: 'pegged', label: 'Pegged', fmt: v => v ? 'yes' : '—',
+   title: 'A buyer with no limit is standing in this good\'s market: demand is '
+        + 'recorded as something on the order of a billion, which no economy '
+        + 'produces. Every pegged reading in these saves sits at exactly five '
+        + "times the good's base cost, the engine's price ceiling -- so the price "
+        + 'says nothing about whether the good is scarce or drowning.',
+   cls: r => r.pegged ? 'down' : ''},
 ];
 const marketState = {key: 'change', dir: -1};
 function drawMarketTable() {
@@ -2406,26 +2818,210 @@ function drawMarketTable() {
       supply: snap[good].supply,
       demand: snap[good].demand,
       actual_sold: snap[good].actual_sold,
-      floored: snap[good].floored,
+      unsold: unsoldShare(good, snap[good]),
+      pegged: snap[good].pegged,
       discovered: snap[good].discovered,
     };
   }).filter(r => r.discovered);
   renderTable(document.getElementById('market'), MARKET_COLS, rows, marketState,
-              row => goodsPicker.set([row.good]));
+              row => { goodsPicker.set([row.good]); showProducers(row.good, date); });
+}
+
+/* =============== WHO PRODUCES IT ===============
+   Each country block carries `saved_country_supply`: what that nation put on
+   the world market. Added up over every nation it comes back to the market's
+   own supply pool, which is what makes it production as the market sees it
+   rather than a stockpile or an income.
+
+   Overproduction is the thing worth finding here, and demand is a poor guide
+   to it. A mod with a nation that stands ready to buy any surplus -- IGoR's
+   world bank -- keeps demand permanently above supply for goods that are
+   plainly drowning, so the honest signals are elsewhere: how much of the day's
+   supply went unsold, and how far the price has sunk below the good's own base
+   cost. Both are in the table above; this names who is doing it. */
+const SUPPLY = DATA.supply || {};
+
+const prodSave = document.getElementById('prodsave');
+const prodGood = document.getElementById('prodgood');
+const prodDates = DATA.dates.filter(d => Object.values(SUPPLY).some(by => by[d]));
+prodDates.forEach(d => {
+  const o = document.createElement('option'); o.value = d; o.textContent = d;
+  prodSave.appendChild(o);
+});
+if (prodDates.length) prodSave.value = prodDates[prodDates.length - 1];
+prodSave.onchange = drawSupply;
+
+const prodGoods = DATA.goods.filter(g => SUPPLY[g]).sort(byGameName);
+prodGoods.forEach(g => {
+  const o = document.createElement('option'); o.value = g;
+  o.textContent = gameName(g);
+  prodGood.appendChild(o);
+});
+prodGood.onchange = drawSupply;
+// Open on whatever the world makes most of, which is a good with enough
+// suppliers to be worth a chart rather than whatever sorts first.
+if (prodGoods.length) {
+  const at = prodDates[prodDates.length - 1];
+  prodGood.value = prodGoods.slice().sort((a, b) =>
+    ((SUPPLY[b][at] || {}).t || 0) - ((SUPPLY[a][at] || {}).t || 0))[0];
+}
+
+/* Jump the panel to one good -- a click in the market table means that good. */
+function showProducers(good, date) {
+  if (!SUPPLY[good]) return;
+  prodGood.value = good;
+  if (date && prodDates.includes(date)) prodSave.value = date;
+  drawSupply();
+}
+
+function drawSupply() {
+  const svg = document.getElementById('prodchart');
+  svg.textContent = '';
+  const note = document.getElementById('prodnote');
+  const readout = document.getElementById('prodreadout');
+  const date = prodSave.value, good = prodGood.value;
+  document.getElementById('proddate').textContent = date || '\u2014';
+  const rec = (SUPPLY[good] || {})[date];
+  const PW = 1000, PH = 430;
+  if (!rec || !rec.t) {
+    const t = el('text', {x: PW / 2, y: PH / 2, 'text-anchor': 'middle', fill: '#C9AC80',
+      'font-family': 'IBM Plex Mono, monospace', 'font-size': 14});
+    t.textContent = prodDates.length
+      ? `Nobody supplied ${good ? gameName(good) : 'this good'} at ${date}.`
+      : 'These saves carry no per-nation supply.';
+    svg.appendChild(t);
+    readout.textContent = '';
+    note.textContent = '';
+    return;
+  }
+
+  const named = rec.n.reduce((sum, pair) => sum + pair[1], 0);
+  const rest = rec.t - named;
+  const bars = rec.n.map(pair => ({tag: pair[0], value: pair[1], colour: colourFor(pair[0])}));
+  // Everyone the payload did not name, kept as one bar so the shares still add
+  // up to the world's supply instead of quietly to less than it.
+  if (rest > rec.t * 0.005)
+    bars.push({tag: '', value: rest, colour: 'var(--grid)', rest: true});
+
+  const snap = (DATA.snapshot[date] || {})[good] || {};
+  const base = (DATA.basePrices || {})[good];
+  const unsold = unsoldShare(good, snap);
+
+  const left = 132, right = 156, top = 58, bottom = 14;
+  const rowH = Math.min(26, (PH - top - bottom) / Math.max(1, bars.length));
+  const barH = Math.max(6, rowH - 7);
+  const peak = Math.max(...bars.map(b => b.value));
+  const spanX = PW - left - right;
+  const at = v => v / (peak || 1) * spanX;
+
+  const head = el('text', {x: left, y: 28, fill: 'var(--ink)',
+    'font-family': 'Barlow Condensed, sans-serif', 'font-size': 22, 'font-weight': 600});
+  head.textContent = gameName(good);
+  svg.appendChild(head);
+  const sub = el('text', {x: left, y: 47, fill: 'var(--ink-dim)',
+    'font-family': 'IBM Plex Mono, monospace', 'font-size': 11});
+  sub.textContent = `world supply ${fmtCount(rec.t)}`
+    + (snap.actual_sold !== undefined ? ` \u00b7 sold ${fmtCount(snap.actual_sold)}` : '')
+    + (unsold !== null ? ` \u00b7 ${unsold.toFixed(0)}% unsold` : '')
+    + (snap.price !== undefined ? ` \u00b7 price ${snap.price.toFixed(2)}` : '')
+    + (base ? ` \u00b7 ${((snap.price - base) / base * 100).toFixed(0)}% vs base` : '')
+    + (snap.pegged ? ' \u00b7 price pegged at its ceiling' : '');
+  svg.appendChild(sub);
+
+  const tell = bar => {
+    const share = bar.value / rec.t * 100;
+    readout.innerHTML =
+      `<span class="rk">${bar.rest ? 'everyone else' : nameOf(bar.tag)}</span>`
+      + `<span><b style="color:${bar.rest ? 'var(--ink)' : colourFor(bar.tag)}">`
+      + `${fmtCount(bar.value)}</b> <span class="rk">of ${fmtCount(rec.t)}</span></span>`
+      + `<span><span class="rk">share</span> <b>${share.toFixed(1)}%</b></span>`
+      + (bar.rest ? '<span class="rk">every supplier outside the top '
+                    + `${rec.n.length}</span>` : '');
+  };
+
+  bars.forEach((bar, i) => {
+    const y = top + i * rowH;
+    const w = Math.max(1, at(bar.value));
+    const label = el('text', {x: left - 10, y: y + barH * 0.5 + 4, 'text-anchor': 'end',
+      fill: bar.rest ? 'var(--ink-dim)' : colourFor(bar.tag),
+      'font-family': 'IBM Plex Mono, monospace', 'font-size': 11});
+    label.textContent = bar.rest ? 'everyone else' : bar.tag;
+    svg.appendChild(label);
+
+    const rect = el('rect', {x: left, y, width: w, height: barH,
+      fill: bar.colour, 'fill-opacity': bar.rest ? .35 : .82,
+      stroke: 'var(--ground)', 'stroke-width': .5});
+    rect.style.cursor = 'pointer';
+    rect.onpointerenter = () => { rect.setAttribute('fill-opacity', 1); tell(bar); };
+    rect.onpointerleave = () => rect.setAttribute('fill-opacity', bar.rest ? .35 : .82);
+    const title = document.createElementNS(SVGNS, 'title');
+    title.textContent = `${bar.rest ? 'everyone else' : nameOf(bar.tag)}: `
+      + `${fmtCount(bar.value)} (${(bar.value / rec.t * 100).toFixed(1)}%)`;
+    rect.appendChild(title);
+    svg.appendChild(rect);
+
+    const value = el('text', {x: left + w + 8, y: y + barH * 0.5 + 4,
+      fill: 'var(--ink)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 11});
+    value.textContent =
+      `${fmtCount(bar.value)}   ${(bar.value / rec.t * 100).toFixed(1)}%`;
+    svg.appendChild(value);
+  });
+
+  const three = rec.n.slice(0, 3).reduce((sum, pair) => sum + pair[1], 0);
+  const idle = `<span class="rk">${bars.length} bars</span>`
+    + `<span><span class="rk">largest</span> <b style="color:${colourFor(rec.n[0][0])}">`
+    + `${rec.n[0][0]}</b> <span class="rk">`
+    + `${(rec.n[0][1] / rec.t * 100).toFixed(1)}%</span></span>`
+    + `<span><span class="rk">top three</span> <b>${(three / rec.t * 100).toFixed(1)}%</b></span>`
+    + (unsold !== null ? `<span><span class="rk">unsold</span> <b>${unsold.toFixed(0)}%</b></span>` : '');
+  svg.onpointerleave = () => readout.innerHTML = idle;
+  readout.innerHTML = idle;
+
+  note.innerHTML = 'What each nation itself put on the world market, out of the country '
+    + 'block the save writes it in. Added up over every nation it comes back to the '
+    + 'market&rsquo;s own supply pool, so these are shares of the same quantity the price '
+    + `responds to. Only the ${rec.n.length} largest suppliers are named singly. `
+    + '<strong>Demand is not the test for overproduction.</strong> A mod with a nation that '
+    + 'stands ready to buy any surplus &mdash; a world bank &mdash; keeps demand above supply '
+    + 'for goods that are plainly drowning. What survives that is the share of the day&rsquo;s '
+    + 'supply left <em>unsold</em>, and a price sitting under the good&rsquo;s own base cost: '
+    + 'both are columns in the table above, and clicking a row there brings its producers here.';
 }
 
 /* =============== MAP =============== */
 const MAP = DATA.map;
 let mapTags = null;          // null means every nation
-let mapByControl = true;
+let mapHatchOccupied = true;
 let mapProv = null;          // province id for every pixel
+let mapEdge = null;          // 1 wherever a pixel sits on a province boundary
 let mapOwners = null;        // date -> {own: Map, occ: Map}
 let mapDots = [];            // what is currently drawn, for hit testing
 let mapBase = null;          // the political map, painted once per view
+let mapOccLayer = null;      // occupied land alone, everything else clear
+let mapOccAny = false;
 let mapBaseKey = '';
+let mapStopPlay = () => {};  // set once the controls exist
 let mapZoom = 1;             // 1 fits the whole world to the panel width
 let mapOX = 0, mapOY = 0;    // map coordinate sitting at the panel's top left
 let mapPinned = null;        // a marker clicked, so the readout stays put
+
+/* Which pixels are province boundaries. Province shapes never change, so this
+   is worked out once and reused, rather than per save as it used to be. Both
+   layers need it: the base paints it dark, and the occupation layer leaves it
+   alone. */
+function mapEdgeMask() {
+  if (mapEdge) return mapEdge;
+  mapEdge = new Uint8Array(mapProv.length);
+  for (let y = 0; y < MAP.h; y++) {
+    for (let x = 0; x < MAP.w; x++) {
+      const i = y * MAP.w + x;
+      const p = mapProv[i];
+      if (p !== (x + 1 < MAP.w ? mapProv[i + 1] : p) ||
+          p !== (y + 1 < MAP.h ? mapProv[i + MAP.w] : p)) mapEdge[i] = 1;
+    }
+  }
+  return mapEdge;
+}
 
 function mapDecode() {
   const grid = new Int32Array(MAP.w * MAP.h);
@@ -2486,7 +3082,6 @@ const mapDim = hex => {
 function mapPalette(date) {
   const book = mapOwners[date] || {own: new Map(), occ: new Map()};
   const owners = new Map(book.own);
-  if (mapByControl) book.occ.forEach((idx, pid) => owners.set(pid, idx));
   let top = 0;
   mapSea.forEach(p => { if (p > top) top = p; });
   owners.forEach((_i, p) => { if (p > top) top = p; });
@@ -2501,10 +3096,26 @@ function mapPalette(date) {
   return table;
 }
 
-/* The political map only changes with the save or the shading, so it is painted
-   into an offscreen canvas and then blitted at whatever zoom is in force. */
+/* Who is holding land that belongs to somebody else, as a colour per province
+   and -1 for everywhere nobody is. Kept apart from the owner table because
+   occupation is drawn over the top rather than instead: shading occupied ground
+   in the occupier's colour made a siege and an annexation look identical. */
+function mapOccPalette(date) {
+  const book = mapOwners[date] || {own: new Map(), occ: new Map()};
+  let top = 0;
+  book.occ.forEach((_i, p) => { if (p > top) top = p; });
+  const table = new Int32Array(top + 1).fill(-1);
+  book.occ.forEach((idx, pid) => {
+    const hex = MAP.colours[MAP.tags[idx]];
+    if (hex) table[pid] = parseInt(hex.slice(1), 16);
+  });
+  return table;
+}
+
+/* The political map only changes with the save, so it is painted into an
+   offscreen canvas and then blitted at whatever zoom is in force. */
 function mapPaintBase(date) {
-  const key = date + '|' + mapByControl;
+  const key = date;
   if (mapBase && mapBaseKey === key) return;
   if (!mapProv) { mapProv = mapDecode(); mapOwners = mapOwnerTables(); }
   mapBase = document.createElement('canvas');
@@ -2522,19 +3133,78 @@ function mapPaintBase(date) {
     px[o + 3] = 255;
   }
   // a one-pixel edge wherever neighbouring pixels sit in different provinces
-  for (let y = 0; y < MAP.h; y++) {
-    for (let x = 0; x < MAP.w; x++) {
-      const i = y * MAP.w + x;
-      const p = mapProv[i];
-      if (p !== (x + 1 < MAP.w ? mapProv[i + 1] : p) ||
-          p !== (y + 1 < MAP.h ? mapProv[i + MAP.w] : p)) {
-        const o = i * 4;
-        px[o] = MAP_EDGE[0]; px[o + 1] = MAP_EDGE[1]; px[o + 2] = MAP_EDGE[2];
-      }
-    }
+  const edge = mapEdgeMask();
+  for (let i = 0; i < edge.length; i++) {
+    if (!edge[i]) continue;
+    const o = i * 4;
+    px[o] = MAP_EDGE[0]; px[o + 1] = MAP_EDGE[1]; px[o + 2] = MAP_EDGE[2];
   }
   ctx.putImageData(img, 0, 0);
+
+  // The occupation layer, same raster, everything unoccupied left transparent.
+  const occ = mapOccPalette(date);
+  mapOccAny = occ.some(c => c >= 0);
+  mapOccLayer = document.createElement('canvas');
+  mapOccLayer.width = MAP.w; mapOccLayer.height = MAP.h;
+  if (mapOccAny) {
+    const octx = mapOccLayer.getContext('2d');
+    const oimg = octx.createImageData(MAP.w, MAP.h);
+    const opx = oimg.data;
+    for (let i = 0, o = 0; i < mapProv.length; i++, o += 4) {
+      // Province borders are left out of this layer entirely. Hatching over
+      // them buried the one line that says where one province stops and the
+      // next begins, and a solid stripe of occupier colour running across two
+      // provinces made it a guess which of them the ground belonged to.
+      if (edge[i]) continue;
+      const pid = mapProv[i];
+      const c = pid < occ.length ? occ[pid] : -1;
+      if (c < 0) continue;
+      opx[o] = (c >> 16) & 255; opx[o + 1] = (c >> 8) & 255; opx[o + 2] = c & 255;
+      opx[o + 3] = 255;
+    }
+    octx.putImageData(oimg, 0, 0);
+  }
   mapBaseKey = key;
+}
+
+/* One tile of diagonal stripes, built once and used as a mask on the screen
+   rather than painted into the map. On the screen the hatching keeps the same
+   width however far the map is zoomed; baked into a 5,616-pixel raster, one
+   stripe would be a hair at zoom 1 and half a province at zoom 24. */
+let mapHatchTile = null;
+function mapHatchPattern(ctx) {
+  if (!mapHatchTile) {
+    const p = 9, ink = 3;
+    mapHatchTile = document.createElement('canvas');
+    mapHatchTile.width = mapHatchTile.height = p;
+    const t = mapHatchTile.getContext('2d');
+    const img = t.createImageData(p, p);
+    for (let y = 0; y < p; y++) {
+      for (let x = 0; x < p; x++) {
+        const o = (y * p + x) * 4;
+        img.data[o] = img.data[o + 1] = img.data[o + 2] = 255;
+        // x + y wraps cleanly at the tile edge, so the stripes join up.
+        // Three pixels on and six off, rather than the five and four it began
+        // as: the occupier has to be legible, but it is the owner's province
+        // and the owner's colour should still be the one the eye lands on.
+        img.data[o + 3] = ((x + y) % p) < ink ? 255 : 0;
+      }
+    }
+    t.putImageData(img, 0, 0);
+  }
+  return ctx.createPattern(mapHatchTile, 'repeat');
+}
+
+/* A screen-sized canvas to build the hatched layer in, since masking with
+   `destination-in` eats whatever else is on the canvas it runs on. */
+let mapScratchCanvas = null;
+function mapScratch(w, h) {
+  if (!mapScratchCanvas) mapScratchCanvas = document.createElement('canvas');
+  if (mapScratchCanvas.width !== w || mapScratchCanvas.height !== h) {
+    mapScratchCanvas.width = w;
+    mapScratchCanvas.height = h;
+  }
+  return mapScratchCanvas;
 }
 
 function mapFit() {          // screen pixels per map pixel at zoom 1
@@ -2609,6 +3279,21 @@ function mapRender() {
   ctx.imageSmoothingEnabled = s < 1;
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(mapBase, -mapOX * s, -mapOY * s, MAP.w * s, MAP.h * s);
+
+  if (mapHatchOccupied && mapOccAny) {
+    const scratch = mapScratch(canvas.width, canvas.height);
+    const sc = scratch.getContext('2d');
+    sc.setTransform(dpr, 0, 0, dpr, 0, 0);
+    sc.clearRect(0, 0, cw, ch);
+    sc.imageSmoothingEnabled = s < 1;
+    sc.imageSmoothingQuality = 'high';
+    sc.drawImage(mapOccLayer, -mapOX * s, -mapOY * s, MAP.w * s, MAP.h * s);
+    sc.globalCompositeOperation = 'destination-in';
+    sc.fillStyle = mapHatchPattern(sc);
+    sc.fillRect(0, 0, cw, ch);
+    sc.globalCompositeOperation = 'source-over';
+    ctx.drawImage(scratch, 0, 0, cw, ch);
+  }
 
   mapDots = mapStacks(date);
   // markers grow with zoom, but slower than the map, so a dense theatre thins
@@ -2721,13 +3406,51 @@ function mapIdle() {
   document.getElementById('mapreadout').innerHTML =
     `<span class="rk">stacks</span> <b>${mapDots.length.toLocaleString()}</b>`
     + `<span><span class="rk">brigades shown</span> <b>${shown.toLocaleString()}</b></span>`
-    + `<span><span class="rk">shading</span> <b>${mapByControl ? 'controller' : 'owner'}</b></span>`
+    + `<span><span class="rk">shading</span> <b>owner</b>`
+    + `<span class="rk">${mapHatchOccupied
+        ? (mapOccAny ? ', occupied land hatched' : ', nothing occupied') : ''}</span></span>`
     + (mapUnplaced
         ? `<span><span class="rk">no map position</span> `
           + `<b>${mapUnplaced.toLocaleString()}</b>`
           + `<span class="rk"> provinces, ${mapUnplacedBrigades.toLocaleString()} brigades</span></span>`
         : '')
-    + `<span class="rk">hover a marker, click to pin it</span>`;
+    + `<span class="rk">hover the land for its owner, a marker for its armies</span>`;
+}
+
+/* The province under the cursor, which is the painting's own lookup run
+   backwards: `mapProv` holds a province id per raster pixel. */
+function mapProvinceAt(p) {
+  if (!mapProv) return -1;
+  const s = mapFit() * mapZoom;
+  const x = Math.floor(mapOX + p.x / s), y = Math.floor(mapOY + p.y / s);
+  if (x < 0 || y < 0 || x >= MAP.w || y >= MAP.h) return -1;
+  return mapProv[y * MAP.w + x];
+}
+
+/* Who owns a province and who is standing on it, as readout spans. Hatching
+   says a province is held by somebody else, but no pattern can say *which*
+   nation owns the ground under it once a stripe is across it -- so the readout
+   names both outright, which is the one answer that is never ambiguous. */
+function landBits(pid) {
+  const date = document.getElementById('mapsave').value || DATA.lastDate;
+  const book = (mapOwners || {})[date] || {own: new Map(), occ: new Map()};
+  const tagOf = idx => (idx === undefined ? null : MAP.tags[idx]);
+  const own = tagOf(book.own.get(pid)), occ = tagOf(book.occ.get(pid));
+  const chip = (label, tag) => `<span><span class="rk">${label}</span> `
+    + `<b style="color:${MAP.colours[tag] || '#fff'}">${tag}</b>`
+    + (nameOf(tag) === tag ? '' : ` <span class="rk">${nameOf(tag)}</span>`)
+    + `</span>`;
+  if (!own) return [`<span class="rk">unclaimed</span>`];
+  return occ ? [chip('owned by', own), chip('held by', occ)]
+             : [chip('owned by', own)];
+}
+
+/* Land with no army on it still has an owner worth naming. */
+function mapShowLand(pid) {
+  if (pid < 0 || mapSea.has(pid)) return mapIdle();
+  const name = (MAP.names && MAP.names[pid]) || ('province ' + pid);
+  document.getElementById('mapreadout').innerHTML =
+    `<span class="rk">${name}</span>` + landBits(pid).join('');
 }
 
 function mapShow(dot) {
@@ -2743,6 +3466,7 @@ function mapShow(dot) {
   });
   document.getElementById('mapreadout').innerHTML =
     `<span class="rk">${name}</span>`
+    + landBits(dot.pid).join('')
     + `<span><b>${dot.total.toLocaleString()}</b> <span class="rk">brigades</span></span>`
     + bits.join('');
 }
@@ -2776,14 +3500,80 @@ if (MAP) {
   });
   mapSave.value = DATA.lastDate;
   mapSave.onchange = () => {
+    mapStep.value = DATA.dates.indexOf(mapSave.value);
     mapPinned = null; mapPicker.refresh(); mapRender(); drawGreatPowers();
+  };
+
+  /* A run of saves is a campaign in the order it happened, and until now the
+     only way to see it move was to pick each date in turn. The slider is the
+     same choice as the dropdown -- both set the save -- and Play walks it. */
+  const mapStep = document.getElementById('mapstep');
+  const playBtn = document.getElementById('mapplay');
+  mapStep.max = Math.max(0, DATA.dates.length - 1);
+  mapStep.value = DATA.dates.length - 1;
+  mapStep.disabled = DATA.dates.length < 2;
+  playBtn.disabled = DATA.dates.length < 2;
+
+  const goToSave = i => {
+    mapStep.value = i;
+    mapSave.value = DATA.dates[i];
+    mapSave.onchange();
+  };
+  mapStep.oninput = () => { mapStopPlay(); goToSave(+mapStep.value); };
+
+  /* How long a frame is held. A quarter of a second is about as slow as
+     anyone wants to watch a campaign that has thirty saves in it, and the
+     multipliers are there for the one that has nine hundred. */
+  const SPEEDS = [1, 2, 5];
+  let mapSpeed = 0;
+  const speedBtn = document.getElementById('mapspeed');
+  speedBtn.disabled = DATA.dates.length < 2;
+  speedBtn.onclick = () => {
+    mapSpeed = (mapSpeed + 1) % SPEEDS.length;
+    speedBtn.textContent = SPEEDS[mapSpeed] + '×';
+  };
+  const frameDelay = () => 250 / SPEEDS[mapSpeed];
+
+  let mapTimer = null;
+  mapStopPlay = () => {
+    if (!mapTimer) return;
+    clearTimeout(mapTimer);
+    mapTimer = null;
+    playBtn.setAttribute('aria-pressed', 'false');
+    playBtn.textContent = 'Play';
+  };
+  playBtn.onclick = () => {
+    if (mapTimer) return mapStopPlay();
+    // Pressing Play while sitting on the last save means "again from the top",
+    // which is what anyone who has just watched it to the end wants next.
+    if (+mapStep.value >= DATA.dates.length - 1) goToSave(0);
+    playBtn.setAttribute('aria-pressed', 'true');
+    playBtn.textContent = 'Pause';
+    /* Each frame schedules the next one after it has finished drawing, rather
+       than every frame being booked in advance on an interval. A repaint is
+       about a tenth of a second of work and the picker refresh doubles it, so
+       an interval would keep firing while the last frame was still drawing
+       and the queue would run away with itself; this way a slow machine plays
+       back slower instead of falling behind.
+       What is waited is the rest of the frame's slot, not the whole slot on
+       top of the work, so 1x really is a quarter of a second a frame rather
+       than a quarter of a second plus however long the drawing took. */
+    const tick = () => {
+      const next = +mapStep.value + 1;
+      if (next > DATA.dates.length - 1) return mapStopPlay();
+      const started = performance.now();
+      goToSave(next);
+      const left = frameDelay() - (performance.now() - started);
+      mapTimer = setTimeout(tick, Math.max(16, left));
+    };
+    mapTimer = setTimeout(tick, frameDelay());
   };
 
   const occBtn = document.getElementById('mapocc');
   occBtn.onclick = () => {
-    mapByControl = !mapByControl;
-    occBtn.setAttribute('aria-pressed', mapByControl);
-    occBtn.textContent = mapByControl ? 'Control' : 'Ownership';
+    mapHatchOccupied = !mapHatchOccupied;
+    occBtn.setAttribute('aria-pressed', mapHatchOccupied);
+    occBtn.textContent = mapHatchOccupied ? 'Occupation' : 'Ownership';
     mapRender();
   };
   document.getElementById('mapreset').onclick = () => {
@@ -2829,7 +3619,9 @@ if (MAP) {
       mapRender();
       return;
     }
-    if (!mapPinned) mapShow(mapPick(p));
+    if (mapPinned) return;
+    const hit = mapPick(p);
+    if (hit) mapShow(hit); else mapShowLand(mapProvinceAt(p));
   });
   canvas.addEventListener('pointerup', e => {
     const moved = drag && drag.moved;
@@ -3202,7 +3994,7 @@ function belColumn(title, parties) {
 function sideUnits(s) {
   const units = s[3] ? s[3].split(';').map(p => {
     const [kind, n] = p.split(':');
-    return [kind.replace(/_/g, ' '), +n];
+    return [gameName(kind), +n];
   }) : [];
   return {units, army: units.reduce((sum, [, n]) => sum + n, 0)};
 }
@@ -3290,7 +4082,7 @@ function drawWarDetail() {
       + `<th>State</th><th>Taken at the peace</th><th>Occupied mid-war</th>`
       + `</tr></thead><tbody>`
       + w.goals.map(g =>
-          `<tr><td>${g.cb.replace(/_/g, ' ')}</td>`
+          `<tr><td>${gameName(g.cb)}</td>`
           + `<td>${warTag(g.actor)}</td><td>${warTag(g.receiver)}</td>`
           + `<td>${g.state || '—'}</td>`
           + `<td class="${g.met ? 'up' : g.part ? '' : g.checkable ? 'down' : ''}">`
@@ -3372,6 +4164,7 @@ if (WARS.length) {
 /* =============== TABS =============== */
 const tabs = [...document.querySelectorAll('.tab')];
 function selectTab(id) {
+  if (id !== 'tab-nations') mapStopPlay();
   tabs.forEach(t => {
     const on = t.id === id;
     t.setAttribute('aria-selected', on);
@@ -3398,11 +4191,18 @@ drawPopTable(); drawCultureTable(); drawPopChart();
 searchSelect(document.getElementById('cultagsel'), 'search nations');
 searchSelect(document.getElementById('poptag'), 'search nations');
 drawMarketTable();
+drawSupply();
+searchSelect(document.getElementById('prodgood'), 'search goods');
 if (TECH) drawTechTree();
 if (WARS.length) drawWarTable();
 searchSelect(document.getElementById('techtag'), 'search nations');
 if (MAP) mapRender();
 drawGreatPowers();
+
+/* The campaign itself, for anyone who wants to read it out of the console. The
+   report is one file with everything in it; this is the handle on that. */
+window.campaign = DATA;
+})().catch(bootFailed);
 </script>
 </body>
 </html>

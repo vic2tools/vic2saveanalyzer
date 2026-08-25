@@ -28,15 +28,27 @@ TOKEN_RE = re.compile(r'"[^"]*"|[{}=]|[^\s{}=]+')
 # set is skipped by `read_province`, so its people vanish from every total.
 # `register_pop_types` lets the caller fold in whatever the mod's `poptypes/`
 # folder declares before any save is read.
-POP_TYPES = {
+VANILLA_POP_TYPES = frozenset((
     "aristocrats", "artisans", "bureaucrats", "capitalists", "clergymen",
     "clerks", "craftsmen", "farmers", "labourers", "officers", "slaves",
     "soldiers",
-}
+))
+POP_TYPES = set(VANILLA_POP_TYPES)
 
 
 def register_pop_types(names):
-    """Add mod-defined pop types so their province blocks are read, not skipped."""
+    """
+    The pop types to read, as the twelve the game ships plus the mod's own.
+
+    This *replaces* rather than adds. The GUI runs one campaign after another
+    inside a single process, and a set that only ever grew carried IGoR's
+    `bankers` into the next campaign: Divergences of Darkness, which has no
+    such pop type, read one anyway and then cached it under a key that said it
+    had not. Which pop types exist is a property of the mod in hand, so it is
+    set from scratch each time.
+    """
+    POP_TYPES.clear()
+    POP_TYPES.update(VANILLA_POP_TYPES)
     POP_TYPES.update(n for n in names if n)
 
 
@@ -69,10 +81,10 @@ class Tokens:
 
     __slots__ = ("_text", "_it", "_pos", "_pushed", "_last")
 
-    def __init__(self, text):
+    def __init__(self, text, pos=0):
         self._text = text
-        self._it = TOKEN_RE.finditer(text)
-        self._pos = 0
+        self._it = TOKEN_RE.finditer(text, pos)
+        self._pos = pos
         self._pushed = None
         self._last = None
 
@@ -122,6 +134,152 @@ class Tokens:
         self._it = TOKEN_RE.finditer(text, i)
 
 
+# --- reading a save by its layout rather than a token at a time -------------
+#
+# The token cursor above is indifferent to whitespace, which is what makes it
+# safe, and it is also why a 46 MB save took 1.3 seconds: eight million tokens,
+# every one of them a Python step, and most of them inside blocks nothing here
+# reads. Five attempts to make that walk cheaper all came back under 1.1x, for
+# the same reason each time -- the cost is walking the bytes, not what gets
+# built out of them.
+#
+# The engine writes a save to a fixed layout, though, and mods cannot change it:
+# a top-level key sits at column zero with its `{` alone on the next line, a
+# province's own fields one tab in, a pop's two. Anchoring to that turns finding
+# the blocks into a single C-level scan -- 118 MB/s against 35 -- and the blocks
+# nothing reads are never looked at at all.
+#
+# This was checked against the walk on 69,106 top-level blocks across seventeen
+# saves and four mods: same keys, same order, same block-or-scalar, every time.
+# `layout_is_flat` is the cheap check that a file still looks like that, and
+# when it does not -- a save reflowed by a text editor, a future version of the
+# game -- everything falls back to the walk, which needs no layout at all.
+
+_BARE_KEY = re.compile(r'[^\s={}"]+\Z')
+HEAD_SCALAR = re.compile(r'(?m)^([^\s={}"]+)=([^\r\n]+)')
+# `\n\t` rather than `(?m)^\t`: with a literal to look for, the engine can
+# jump from newline to newline instead of offering it every line start in the
+# file. Same matches, and about a third off the scan.
+_ONE_TAB = re.compile(r'\n\t([^\s={}"]+)=([^\r\n]*)')
+# A province's own entries and its pops' fields in one pass, so that a pop's
+# numbers can be attributed to the pop block they follow.
+#
+# The two deep branches are what keeps this cheap. A pop has about two dozen
+# fields and seven of them are ever read: six numbers, and the culture line,
+# which has no fixed key -- it is literally `french=catholic` -- and so is
+# picked out by having a value that does not begin with a digit. Matching only
+# those turns half a million matches per save into two hundred thousand.
+# Everything else in a pop, and the `ideology`, `issues` and `stockpile` blocks
+# it carries, is never looked at, exactly as the token reader never looked at
+# them.
+PROVINCE_FIELDS = re.compile(
+    r'\n\t(?:'
+    r'\t(id|size|money|con|mil|literacy)=([^\r\n]+)'
+    r'|\t([^\s={}"]+)=([^\r\n0-9][^\r\n]*)'
+    r'|([^\s={}"]+)=([^\r\n]*))')
+
+
+class _Block:
+    """Marks an entry whose value is a block rather than a scalar."""
+    __slots__ = ()
+
+    def __repr__(self):
+        return "BLOCK"
+
+
+BLOCK = _Block()
+
+
+def top_level_blocks(text):
+    """
+    Every top-level block, as (key, content start, content stop).
+
+    Found from the braces rather than from the keys. A top-level block opens
+    with a `{` alone at column zero -- four thousand of them in a save -- and
+    its key is the line above. Looking for the key means offering three million
+    line starts to a regex, which came to a quarter of the whole parse; looking
+    for `\n{` is a memchr, and the key is then read backwards off one line.
+
+    A block runs to the key line of the next one. That is more than the block
+    itself, and deliberately so: every reader stops at its own closing brace and
+    ignores the rest, and finding that brace exactly would mean counting braces
+    through the whole file again.
+
+    Returns None if any of those braces has anything other than a bare `key=`
+    above it, which is the whole of the layout this depends on. A save reflowed
+    by a text editor fails here and is read by the token walk instead.
+    """
+    found = []
+    pos = text.find("\n{")
+    while pos >= 0:
+        line = text.rfind("\n", 0, pos) + 1
+        key = text[line:pos]
+        if key[-1:] == "\r":
+            key = key[:-1]
+        if key[-1:] != "=" or not _BARE_KEY.match(key, 0, len(key) - 1):
+            return None
+        found.append((key[:-1], pos + 2, line))
+        pos = text.find("\n{", pos + 2)
+    if not found:
+        return None
+    return [(key, at, found[i + 1][2] if i + 1 < len(found) else len(text))
+            for i, (key, at, _line) in enumerate(found)]
+
+
+def scan_entries(text, start, stop):
+    """
+    Entries one level inside a block, read off the layout.
+
+    Yields (key, value, at). `value` is the scalar as written, or `BLOCK`, in
+    which case `at` is the position just past that block's `{`.
+    """
+    for m in _ONE_TAB.finditer(text, start, stop):
+        value = m.group(2).strip()
+        if value and value[0] != "{":
+            yield m.group(1), unquote(value), -1
+        else:
+            brace = text.find("{", m.end(1), stop)
+            if brace >= 0:
+                yield m.group(1), BLOCK, brace + 1
+
+
+def walk_entries(tok, top=False):
+    """
+    The same, tokenised, for a save whose whitespace cannot be trusted.
+
+    Each block is skipped before it is handed over, so a caller reading it with
+    a cursor of its own cannot disturb this one.
+
+    `top` says there is no enclosing block to be closed, so a brace that turns
+    up on its own is stepped over rather than taken as the end of anything.
+    """
+    while True:
+        t = tok.next()
+        if t is None:
+            return
+        if t == "}":
+            if not top:
+                return
+            continue
+        if top and t in ("{", "="):
+            continue
+        nxt = tok.next()
+        if nxt is None:
+            return
+        if nxt != "=":
+            tok.push(nxt)
+            continue
+        val = tok.next()
+        if val is None:
+            return
+        if val == "{":
+            at = tok._last.end()
+            tok.skip_to_close()
+            yield unquote(t), BLOCK, at
+        else:
+            yield unquote(t), unquote(val), -1
+
+
 def unquote(tok):
     if len(tok) >= 2 and tok[0] == '"' and tok[-1] == '"':
         return tok[1:-1]
@@ -133,12 +291,17 @@ def skip_block(tok):
     tok.skip_to_close()
 
 
-def parse_block(tok):
+def parse_block(tok, skip=frozenset()):
     """
     Parse a block whose opening `{` has already been consumed.
 
     Returns a dict. Repeated keys collapse into a list under that key. A block
     made of bare values (`{ "irish" "welsh" }`) returns a list instead.
+
+    `skip` names sub-blocks to step over at any depth rather than build. A
+    state's `employment` is the reason it exists: it lists every employed pop of
+    every factory and is most of the block by size, and nothing here has ever
+    read it.
     """
     out = {}
     items = []
@@ -147,7 +310,7 @@ def parse_block(tok):
         if t is None or t == "}":
             break
         if t == "{":
-            items.append(parse_block(tok))
+            items.append(parse_block(tok, skip))
             continue
         if t == "=":
             continue
@@ -155,7 +318,11 @@ def parse_block(tok):
         if nxt == "=":
             val_tok = tok.next()
             if val_tok == "{":
-                val = parse_block(tok)
+                key = unquote(t)
+                if key in skip:
+                    tok.skip_to_close()
+                    continue
+                val = parse_block(tok, skip)
             elif val_tok is None:
                 break
             else:
