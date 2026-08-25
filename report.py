@@ -65,6 +65,37 @@ GROWTH_METRICS = [
     ("accepted_growth", "accepted_pop", "Accepted-culture growth (%/yr)"),
 ]
 
+def growth_series(readings, year_of, span=None):
+    """
+    A compounded yearly rate from a run of readings, as {date: percent}.
+
+    Growth is a rate, so it needs two readings and the time between them. The
+    anchor only moves once a reading is far enough from the last one to say
+    something, which also means a nation missing from a save is measured across
+    the gap rather than losing its series entirely.
+
+    `readings` is (date, value) in chronological order, `year_of` turns a date
+    into a fractional year. Lifted out of `build_report` so the cross-campaign
+    block can compute the same measure the same way rather than keeping a
+    second copy of this arithmetic that could drift from it.
+    """
+    if span is None:
+        span = MIN_GROWTH_SPAN
+    out, anchor = {}, None
+    for date, value in readings:
+        if value is None or value <= 0:
+            continue
+        if anchor is not None:
+            gap = year_of(date) - year_of(anchor[0])
+            if gap >= span:
+                out[date] = round(
+                    ((value / anchor[1]) ** (1.0 / gap) - 1.0) * 100, 4)
+                anchor = (date, value)
+            continue
+        anchor = (date, value)
+    return out
+
+
 # Saves a few days apart say nothing useful about a yearly rate: a fortnight of
 # ordinary growth annualises into hundreds of percent. So a reading is only
 # taken once this much of a year has passed since the last one, and the ones in
@@ -695,7 +726,7 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
                  base_prices=None, great_powers=None, flags=None,
                  technology=None, wars=None, succession=None,
                  naval=None, supply=None, culture_names=None,
-                 display_names=None, filename="report.html"):
+                 display_names=None, cross=None, filename="report.html"):
     os.makedirs(outdir, exist_ok=True)
     tag_names = tag_names or {}
 
@@ -732,21 +763,8 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
         growth_keys.append(key)
         for tag in tags:
             have = series[tag][source]
-            out = {}
-            anchor = None
-            for date in dates:
-                value = have.get(date)
-                if value is None or value <= 0:
-                    continue
-                if anchor is not None:
-                    span = year_of[date] - year_of[anchor[0]]
-                    if span >= MIN_GROWTH_SPAN:
-                        out[date] = round(
-                            ((value / anchor[1]) ** (1.0 / span) - 1.0) * 100, 4)
-                        anchor = (date, value)
-                    continue
-                anchor = (date, value)
-            series[tag][key] = out
+            series[tag][key] = growth_series(
+                ((d, have.get(d)) for d in dates), year_of.__getitem__)
 
     ships, ship_types = {}, set()
     # What those hulls are worth as they stand, when that is not simply the
@@ -923,6 +941,9 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
         "naval": naval,
         "supply": _trim_supply(supply, dates),
         "growthSpan": MIN_GROWTH_SPAN,
+        # Present only when several campaigns were read at once, so a
+        # single-campaign report carries none of this weight.
+        "cross": cross or None,
     }
 
     span = f"{dates[0]} – {dates[-1]}" if dates else "—"

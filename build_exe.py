@@ -95,6 +95,9 @@ def build():
     # they are named here in case the bundler's scan ever stops following them.
     carried = ["vic2_analyzer", "v2parse", "mod_reader", "report", "template",
                "tech_groups",
+               # reached only from inside functions, in both the window and the
+               # analyzer, so the scan has nothing at module level to follow
+               "cross",
                # saves are read on several cores, and the machinery for that is
                # reached through function-level imports
                "multiprocessing", "multiprocessing.spawn",

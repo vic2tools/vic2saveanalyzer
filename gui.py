@@ -47,6 +47,54 @@ def human_size(count):
 def _plural(n, one, many):
     """`1 entry`, `12 entries`, `1,128 entries`."""
     return "%s %s" % (format(n, ","), one if n == 1 else many)
+
+
+def saves_kind(path):
+    """
+    Whether a folder holds saves, or holds folders of saves.
+
+    Both are things somebody would reasonably drop here: one campaign, or the
+    directory all the campaigns live in. The analyzer's own walker answers this,
+    rather than a second one here that could disagree with it about what counts.
+    Returns (kind, how many campaigns).
+    """
+    try:
+        import cross
+        found = cross.campaigns_in(path)
+    except Exception:
+        return "bad", 0
+    if not found:
+        return "bad", 0
+    if len(found) == 1 and os.path.normpath(found[0][1]) == os.path.normpath(path):
+        return "one", 1
+    return "many", len(found)
+
+
+def mod_kind(path):
+    """
+    Whether this is one mod, or the folder every mod lives in.
+
+    Pointing at `Victoria 2/mod` used to be an error. It is now the way to say
+    "work out which mod each campaign used", which the analyzer can do from the
+    saves themselves. Returns (kind, the game root to search from).
+    """
+    if not path:
+        return "none", None
+    if os.path.isdir(os.path.join(path, "common")):
+        return "mod", path
+    bare = os.path.normpath(path)
+    home = bare if os.path.basename(bare).lower() == "mod" \
+        else os.path.join(bare, "mod")
+    if os.path.isdir(home):
+        try:
+            for name in os.listdir(home):
+                if os.path.isdir(os.path.join(home, name, "common")):
+                    return "home", os.path.dirname(home)
+        except OSError:
+            pass
+    return "bad", None
+
+
 SETTINGS = os.path.join(
     os.environ.get("APPDATA") or os.path.expanduser("~"),
     "vic2saveanalyzer", "settings.json")
@@ -207,9 +255,11 @@ class App:
 
         rows = [
             ("Saves folder", self.saves,
-             "The folder holding this campaign's .v2 files"),
+             "One campaign's .v2 files, or the folder all your campaigns "
+             "live in"),
             ("Mod folder", self.mod,
-             "The mod's own folder, the one with common/ and map/ inside"),
+             "The mod's own folder, the one with common/ inside -- or "
+             "Victoria 2/mod, to work each campaign's mod out from its saves"),
             ("Report goes to", self.out,
              "Where to write the report and the spreadsheets"),
         ]
@@ -223,39 +273,57 @@ class App:
             ttk.Label(frame, text=hint, foreground="#666").grid(
                 row=i * 2 + 1, column=1, sticky="w", padx=8, pady=(0, 8))
 
+        # Only meaningful when the saves folder holds more than one campaign,
+        # so it stays out of the way until it does.
+        self.primary = tk.StringVar(value="")
+        self.primary_row = ttk.Frame(frame)
+        ttk.Label(self.primary_row, text="Main campaign").pack(side="left")
+        self.primary_box = ttk.Combobox(self.primary_row, state="readonly",
+                                        textvariable=self.primary, width=34)
+        self.primary_box.pack(side="left", padx=8)
+        ttk.Label(self.primary_row,
+                  text="the one the map, wars and tech tree are about",
+                  foreground="#666").pack(side="left")
+        self.primary_row.grid(row=6, column=1, columnspan=2, sticky="w",
+                              padx=8, pady=(0, 6))
+        self.primary_row.grid_remove()
+
         ttk.Checkbutton(frame, text="Open the report when it is finished",
                         variable=self.open_after).grid(
-            row=6, column=1, sticky="w", padx=8)
+            row=7, column=1, sticky="w", padx=8)
 
         buttons = ttk.Frame(frame)
-        buttons.grid(row=7, column=1, sticky="w", padx=8, pady=(10, 6))
+        buttons.grid(row=8, column=1, sticky="w", padx=8, pady=(10, 6))
         self.button = ttk.Button(buttons, text="Analyze", command=self.start)
         self.button.pack(side="left")
         self.stop_button = ttk.Button(buttons, text="Stop", command=self.cancel,
                                       state="disabled")
         self.stop_button.pack(side="left", padx=(8, 0))
         self.status = ttk.Label(frame, text="Pick a saves folder to begin.")
-        self.status.grid(row=7, column=2, sticky="e", pady=(10, 6))
+        self.status.grid(row=8, column=2, sticky="e", pady=(10, 6))
 
         self.log = tk.Text(frame, height=14, wrap="none",
                            background="#2A0F17", foreground="#F4E7CC",
                            insertbackground="#F4E7CC", relief="flat")
-        self.log.grid(row=8, column=0, columnspan=3, sticky="nsew")
-        frame.rowconfigure(8, weight=1)
+        self.log.grid(row=9, column=0, columnspan=3, sticky="nsew")
+        frame.rowconfigure(9, weight=1)
         bar = ttk.Scrollbar(frame, command=self.log.yview)
-        bar.grid(row=8, column=3, sticky="ns")
+        bar.grid(row=9, column=3, sticky="ns")
         self.log.configure(yscrollcommand=bar.set, state="disabled")
 
         # A footer rather than a place in the main flow: emptying the
         # cache is housekeeping, not a step in running an analysis.
         foot = ttk.Frame(frame)
-        foot.grid(row=9, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        foot.grid(row=10, column=0, columnspan=4, sticky="ew", pady=(8, 0))
         self.cache_label = ttk.Label(foot, text="", foreground="#666")
         self.cache_label.pack(side="left")
         self.cache_button = ttk.Button(foot, text="Wipe cache", width=12,
                                        command=self.wipe_cache)
         self.cache_button.pack(side="right")
         self.refresh_cache()
+
+        self.saves.trace_add("write", lambda *_a: self.refresh_campaigns())
+        self.refresh_campaigns()
 
         root.after(80, self.drain)
         root.protocol("WM_DELETE_WINDOW", self.close)
@@ -270,6 +338,30 @@ class App:
             title=label, initialdir=start or os.path.expanduser("~"))
         if chosen:
             var.set(os.path.normpath(chosen))
+
+    def refresh_campaigns(self):
+        """Offer the campaigns under the saves folder, if there are several."""
+        path = self.saves.get().strip()
+        names = []
+        if path and os.path.isdir(path):
+            try:
+                import cross
+                found = cross.campaigns_in(path)
+                if len(found) > 1:
+                    names = ["%s  (%d saves)" % (n, len(f))
+                             for n, _p, f in sorted(
+                                 found, key=lambda e: -len(e[2]))]
+            except Exception:
+                names = []
+        self.campaign_names = [n.split("  (")[0] for n in names]
+        self.primary_box.configure(values=names)
+        if not names:
+            self.primary_row.grid_remove()
+            self.primary.set("")
+            return
+        self.primary_row.grid()
+        if self.primary.get() not in names:
+            self.primary.set(names[0])      # the most saves, as before
 
     def refresh_cache(self):
         """Put what the cache currently weighs on the footer."""
@@ -354,12 +446,23 @@ class App:
         if not saves or not os.path.exists(saves):
             messagebox.showerror(APP, "Pick the folder holding your .v2 saves.")
             return
-        mod = self.mod.get().strip()
-        if mod and not os.path.isdir(os.path.join(mod, "common")):
+        shape, campaigns = saves_kind(saves)
+        if shape == "bad":
             messagebox.showerror(
-                APP, "That mod folder has no common/ inside it.\n\n"
-                     "Point it at the mod's own folder, the one holding "
-                     "common/, map/ and history/.")
+                APP, "No .v2 saves in that folder, or in any folder inside "
+                     "it.\n\nPoint it either at one campaign's saves, or at "
+                     "the folder all your campaigns live in.")
+            return
+
+        mod = self.mod.get().strip()
+        kind, game_root = mod_kind(mod)
+        if kind == "bad":
+            messagebox.showerror(
+                APP, "That folder is neither a mod nor the folder mods live "
+                     "in.\n\nPoint it at the mod's own folder, the one "
+                     "holding common/, map/ and history/ -- or at "
+                     "Victoria 2/mod itself, and each campaign's mod will be "
+                     "worked out from its own saves.")
             return
         if not mod and not messagebox.askokcancel(
                 APP, "Without a mod folder the report loses the map, the "
@@ -367,6 +470,15 @@ class App:
                      "mobilisation size falls back to a fixed guess.\n\n"
                      "Carry on anyway?"):
             return
+        # Several campaigns, or a mod that has to be identified, both mean
+        # the cross-campaign path. It reads one campaign quite happily, so a
+        # single folder with an unidentified mod goes through it too.
+        cross = shape == "many" or kind == "home"
+        if cross and shape == "many":
+            self.log_queue.put(
+                "%d campaigns under that folder. Each will be read under the "
+                "mod its own saves point to.\n\n" % campaigns)
+
         out = self.out.get().strip() or default_out()
         self.out.set(out)
         save_settings({"saves": saves, "mod": mod, "out": out,
@@ -381,12 +493,26 @@ class App:
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
-        threading.Thread(target=self.work, args=(saves, mod, out),
+        chosen = ""
+        if cross and self.primary.get():
+            chosen = self.primary.get().split("  (")[0]
+        threading.Thread(target=self.work,
+                         args=(saves, mod, out, cross, game_root, chosen),
                          daemon=True).start()
 
-    def work(self, saves, mod, out):
+    def work(self, saves, mod, out, cross=False, game_root=None, primary=""):
         argv = [sys.argv[0], saves, "-o", out]
-        if mod:
+        if cross:
+            argv += ["--cross"]
+            if game_root:
+                argv += ["--game-root", game_root]
+            if primary:
+                argv += ["--primary", primary]
+        # A folder of mods is not a mod; it is where the search starts, and
+        # --game-root already carries it.
+        if mod and not cross:
+            argv += ["--mod-path", mod]
+        elif mod and cross and not game_root:
             argv += ["--mod-path", mod]
         old_argv, old_out, old_err = sys.argv, sys.stdout, sys.stderr
         sys.argv = argv

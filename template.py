@@ -481,6 +481,25 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
       <p class="note" id="succnote"></p>
     </section>
 
+    <section id="crosssec" hidden>
+      <h2>Cross-campaign comparison</h2>
+      <p class="note" id="crossintro"></p>
+      <div class="controls">
+        <label class="tb-label" for="crossnation" style="margin:0">Nation</label>
+        <select id="crossnation"></select>
+        <label class="tb-label" for="crossmetric" style="margin:0">Measure</label>
+        <select id="crossmetric"></select>
+        <button id="crossaxis" aria-pressed="false" title="Switch between calendar years and years since each campaign began">Calendar years</button>
+      </div>
+      <figure>
+        <svg id="crosschart" viewBox="0 0 1000 460" role="img" aria-label="One nation compared across several campaigns"></svg>
+        <div class="readout" id="crossreadout"></div>
+      </figure>
+      <p class="note" id="crosssummary"></p>
+      <p class="note" id="crossrule" hidden></p>
+      <p class="note">Hovering reads every campaign at one moment. They save on different days, so a value marked <b>&middot;</b> is that campaign's last reading at or before the line rather than one taken on it. Campaigns rarely start on the same day or run for the same length. On <b>calendar years</b> each line sits where it actually happened, so two games only overlap where they really did. On <b>campaign years</b> every line starts at zero, which is the fair way to ask how two runs of the same nation developed. Every measure the data visualizer offers is here. Most are counted straight off the save and compare directly; the few marked &dagger; are worked out from each mod's own files, and say so when you pick one.</p>
+    </section>
+
     <section>
       <h2>Standing at <span id="lastdate"></span></h2>
       <div class="tablewrap"><table id="ledger"><thead><tr></tr></thead><tbody></tbody></table></div>
@@ -1405,9 +1424,22 @@ function plot(svg, cfg) {
     hover.setAttribute('opacity', .65);
     const parts = cfg.series.map(s => {
       const hit = s.pts.find(p => p[0] === at.v);
-      return hit ? [s, hit[1]] : null;
+      if (hit) return [s, hit[1], false];
+      // Series that share their dates -- every chart but the cross-campaign
+      // one -- want an exact hit and nothing else, so this stays off by
+      // default. Two campaigns saved on different days never share an x, and
+      // an exact match would show whichever one happens to own the line and
+      // hide the other, which is the opposite of a comparison. With `carry`
+      // the last reading at or before the line stands in.
+      if (!cfg.carry) return null;
+      let prev = null;
+      for (const p of s.pts) { if (p[0] > at.v) break; prev = p; }
+      return prev ? [s, prev[1], true] : null;
     }).filter(Boolean).sort((a, b) => b[1] - a[1])
-      .map(([s, v]) => `<span><span class="rk">${s.name}</span> <b style="color:${s.colour}">${cfg.fmt(v)}</b></span>`);
+      .map(([s, v, carried]) => `<span><span class="rk">${s.name}</span> `
+        + `<b style="color:${s.colour}"${carried
+            ? ' title="its last reading at or before this date"' : ''}>`
+        + `${cfg.fmt(v)}${carried ? ' ·' : ''}</b></span>`);
     readout.innerHTML = `<span class="rk">${at.label}</span>` + parts.join('');
   };
 }
@@ -4244,6 +4276,192 @@ drawGreatPowers();
 
 /* The campaign itself, for anyone who wants to read it out of the console. The
    report is one file with everything in it; this is the handle on that. */
+/* --- one nation, several games -------------------------------------------
+   The rest of the report is about a single campaign. This is the exception:
+   each line is a different game, and the nation is what is held still. Only
+   nations that appear in two or more of them can be drawn, and only measures
+   read straight off a save -- anything computed from a mod own files would be
+   comparing two different rulebooks and calling it a result. */
+const CROSS = DATA.cross;
+if (CROSS && CROSS.campaigns.length > 1) {
+  document.getElementById('crosssec').hidden = false;
+  const csel = document.getElementById('crossnation');
+  const msel2 = document.getElementById('crossmetric');
+  const axisBtn = document.getElementById('crossaxis');
+  let relative = false;
+
+  document.getElementById('crossintro').textContent =
+    CROSS.campaigns.length + ' campaigns read together, '
+    + CROSS.campaigns.map(c => c.name + ' on ' + c.mod).join('; ')
+    + '. ' + CROSS.tags.length + ' nations appear in more than one of them.';
+
+  const has = (tag, key) => CROSS.series.filter(
+    b => b[tag] && b[tag][key] && b[tag][key].length).length;
+
+  for (const m of CROSS.metrics) {
+    const o = document.createElement('option');
+    o.value = m.key;
+    /* Most measures are counted off the save and mean the same thing whoever
+       made the mod. A few are worked out from the mod's own files, so two
+       campaigns answer them from different rulebooks -- offered all the same,
+       because "how big an army could this nation raise" is a fair question,
+       but marked rather than passed off as like for like. */
+    o.textContent = m.label + (m.rulebound ? '  \u2020' : '');
+    msel2.appendChild(o);
+  }
+
+  function fillNations() {
+    const key = msel2.value || CROSS.metrics[0].key;
+    /* A nation is only offered when the chosen measure exists for it in at
+       least two campaigns; one line is not a comparison. Biggest first, so the
+       list opens on something worth looking at. */
+    const usable = CROSS.tags.filter(t => has(t, key) >= 2).sort((a, b) => {
+      const peak = t => Math.max(...CROSS.series.map(
+        bl => (bl[t] && bl[t].pop ? bl[t].pop[bl[t].pop.length - 1][2] : 0)));
+      return peak(b) - peak(a);
+    });
+    const keep = csel.value;
+    csel.textContent = '';
+    for (const t of usable) {
+      const o = document.createElement('option');
+      o.value = t;
+      o.textContent = (CROSS.tagNames[t] || t) + '  (' + t + ')';
+      csel.appendChild(o);
+    }
+    if (usable.indexOf(keep) >= 0) csel.value = keep;
+  }
+
+  function drawCross() {
+    const tag = csel.value, key = msel2.value;
+    const svg = document.getElementById('crosschart');
+    const summary = document.getElementById('crosssummary');
+    const metric = CROSS.metrics.find(m => m.key === key) || {};
+    const fmt = formatters[metric.fmt] || fmtCount;
+    summary.textContent = '';
+    const rule = document.getElementById('crossrule');
+    rule.hidden = !metric.rulebound;
+    if (metric.rulebound) {
+      rule.innerHTML = '\u2020 This one is not read off the save. It is worked '
+        + 'out from the mod\'s own technologies, inventions and modifiers, and '
+        + 'these campaigns were played on different mods, so the two lines are '
+        + 'each correct under their own rules rather than measured against one '
+        + 'yardstick. The counts either side of it &mdash; brigades, '
+        + 'population, ships &mdash; are read straight from the save and do '
+        + 'compare directly.';
+    }
+    if (!tag || !key) {
+      plot(svg, {series: [], xOf: v => v, xTicks: [],
+        readout: document.getElementById('crossreadout'),
+        emptyMsg: 'Pick a nation that appears in more than one campaign.'});
+      return;
+    }
+
+    /* Which of the two numbers on each point is the x axis: the calendar year
+       it happened in, or the years since that campaign's own first save. */
+    const ax = relative ? 1 : 0;
+    const series = [], xs = new Set();
+    CROSS.series.forEach((block, i) => {
+      const pts = (block[tag] || {})[key];
+      if (!pts || !pts.length) return;
+      series.push({
+        name: CROSS.campaigns[i].name,
+        colour: seriesColour(i),
+        pts: pts.map(pt => [pt[ax], pt[2]]),
+      });
+      pts.forEach(pt => xs.add(pt[ax]));
+    });
+    const all = [...xs].sort((a, b) => a - b);
+    if (!all.length) {
+      plot(svg, {series: [], xOf: v => v, xTicks: [],
+        readout: document.getElementById('crossreadout'),
+        emptyMsg: 'No readings for this measure.'});
+      return;
+    }
+    const lo = all[0], hi = all[all.length - 1];
+    const xOf = v => M.l + (hi === lo ? 0 : (v - lo) / (hi - lo))
+                          * (W - M.l - M.r);
+
+    /* Calendar years get the same round-year rules the rest of the report
+       uses. Campaign years are small numbers from zero, so they get their own
+       ticks rather than being labelled 0, 10, 20 as though they were AD. */
+    let ticks;
+    if (relative) {
+      ticks = niceTicks(lo, hi, 8).map(v => ({v, label: '+' + Math.round(v)}));
+    } else {
+      ticks = yearTicks(Math.floor(lo), Math.ceil(hi));
+    }
+
+    /* The hover wants the date a reading came from, not the fraction the axis
+       plots it at. Every campaign's dates are pooled and the nearest is taken,
+       so a point lands on the save that made it. */
+    const dateAt = {};
+    CROSS.campaigns.forEach((c, i) => {
+      const first = c.from;
+      (c.dates || []).forEach(([y, d]) => {
+        dateAt[relative ? (y - first).toFixed(3) : y.toFixed(3)] = d;
+      });
+    });
+    const hoverXs = all.map(v => ({
+      v,
+      label: dateAt[v.toFixed(3)]
+        || (relative ? '+' + v.toFixed(1) + ' years' : v.toFixed(1)),
+    }));
+
+    plot(svg, {
+      series, xOf, xTicks: ticks, hoverXs, fmt, markers: true, carry: true,
+      readout: document.getElementById('crossreadout'),
+      idle: 'Hover the plot to read every campaign at one moment.',
+      emptyMsg: 'Pick a nation that appears in more than one campaign.',
+    });
+
+    /* Reading two lines off a chart is guesswork, so the last moment every
+       campaign still covers is stated outright. Comparing the ends instead
+       would be comparing 1894 against 1874. */
+    if (series.length > 1) {
+      const startAll = Math.max(...series.map(L => L.pts[0][0]));
+      const endAll = Math.min(...series.map(L => L.pts[L.pts.length - 1][0]));
+      if (endAll > startAll) {
+        const at = (L, x) => {
+          let best = null;
+          for (const pt of L.pts) if (pt[0] <= x) best = pt;
+          return best ? best[1] : null;
+        };
+        const here = series.map(L => ({name: L.name, v: at(L, endAll)}))
+                           .filter(r => r.v !== null);
+        if (here.length > 1) {
+          const vals = here.map(r => r.v);
+          const top = Math.max(...vals), bot = Math.min(...vals);
+          summary.textContent = (CROSS.tagNames[tag] || tag) + ' at '
+            + (dateAt[endAll.toFixed(3)]
+               || (relative ? '+' + Math.round(endAll) + ' years'
+                            : Math.round(endAll)))
+            + ', the last point all ' + here.length + ' cover: '
+            + here.map(r => r.name + ' ' + fmt(r.v)).join(', ')
+            + (bot > 0 && top / bot >= 1.01
+               ? '.  Widest gap ' + (top / bot).toFixed(2) + ' times.' : '.');
+        }
+      } else {
+        summary.textContent = relative
+          ? 'These campaigns share no stretch even in campaign years.'
+          : 'These campaigns never overlap on the calendar. Switch to campaign'
+            + ' years to set them side by side from their own starts.';
+      }
+    }
+  }
+
+  msel2.onchange = () => { fillNations(); drawCross(); };
+  csel.onchange = drawCross;
+  axisBtn.onclick = () => {
+    relative = !relative;
+    axisBtn.setAttribute('aria-pressed', relative);
+    axisBtn.textContent = relative ? 'Campaign years' : 'Calendar years';
+    drawCross();
+  };
+  msel2.value = CROSS.metrics[0].key;
+  fillNations();
+  drawCross();
+}
+
 window.campaign = DATA;
 })().catch(bootFailed);
 </script>

@@ -1838,6 +1838,155 @@ def peek_save(path):
 
 
 
+def campaign_rows(parsed, mod, args):
+    """
+    One campaign's saves as finalized rows: (date, tag, nation).
+
+    The same `finalize` the single-campaign path runs, so a measure means here
+    exactly what it means on the report's own charts. Building the cross block
+    from a handful of fields read off the raw parse instead would have been a
+    second, quietly different definition of every number.
+    """
+    from mod_reader import attainable_inventions, breakdown, index_base_for
+
+    every, all_techs = [], {}
+    for _meta, nations in parsed:
+        for tag, nat in nations.items():
+            every.append(nat)
+            all_techs.setdefault(tag, set()).update(nat["tech_list"])
+    live = attainable_inventions(mod, all_techs) if mod else None
+    if mod is not None:
+        mod["index_base"] = index_base_for(mod, every)
+
+    out = []
+    for meta, nations in parsed:
+        stage = save_world(meta, mod) if mod else None
+        humans = {t for t, n in nations.items() if n.get("human")}
+        for tag, nat in nations.items():
+            if nat["total_pop"] < max(1, args.min_pop):
+                continue
+            nat["is_player"] = tag in humans
+            if mod is not None:
+                # Floored at zero for the same reason the single-campaign path
+                # floors it: a nation can be modified below zero, and the engine
+                # does not hand out negative mobilisation.
+                parts = breakdown(nat, mod, live=live, world=stage)
+                rate = max(0.0, sum(v for _k, _n, v in parts))
+            else:
+                rate = args.mob_rate
+            done = finalize(nat, rate, args.pop_per_regiment,
+                            mob_types=frozenset(args.mob_types),
+                            include_occupied=args.mob_include_occupied,
+                            mod=mod, world=stage)
+            done["mobilisation_size"] = round(rate, 5)
+            out.append((meta["date"], tag, done))
+    return out
+
+
+def run_cross(parent, game_root, args, verbose=True):
+    """
+    Read every campaign under `parent`, each under its own mod.
+
+    Returns (cross payload, the largest campaign's files, its mod path). The
+    largest campaign becomes the subject of the ordinary report, so the
+    cross-campaign block is an addition rather than a replacement.
+
+    The globals the parser keeps are reset between campaigns for the same reason
+    `main` resets them between runs: a set that only grew would carry one mod's
+    pop types into the next campaign's saves, which have none.
+    """
+    import cross as crossmod
+    from mod_reader import load_mod, name_for
+    from v2parse import register_pop_types
+
+    if not game_root:
+        # The mod folder the user already pointed at sits inside the install,
+        # so the install is its parent's parent.
+        if args.mod_path:
+            game_root = os.path.dirname(os.path.dirname(
+                os.path.abspath(args.mod_path)))
+        else:
+            sys.exit("--cross needs --game-root (the Victoria 2 install folder) "
+                     "or a --mod-path to infer it from.")
+
+    survey = crossmod.survey(parent, game_root)
+    if verbose:
+        print("Campaigns found under %s:" % parent)
+        for entry in survey:
+            fits = sum(1 for _l, v, _d in entry["candidates"] if v == "fits")
+            print("  %-22s %3d saves  ->  %-32s %s"
+                  % (entry["name"], len(entry["files"]),
+                     entry["mod_label"] or "no mod fits",
+                     "" if fits == 1 else "(%d candidates fit -- ambiguous)" % fits))
+            for stray, worst, of in crossmod.history_breaks(entry["files"]):
+                print("      note: %s disagrees with all %d later saves by at "
+                      "least %d event flags; it may be from another game"
+                      % (stray, of, worst))
+
+    results, names, primary = [], {}, None
+    for entry in survey:
+        if not entry["mod_path"]:
+            if verbose:
+                print("  skipping %s: no mod in %s explains its saves"
+                      % (entry["name"], game_root))
+            continue
+        register_pop_types(())
+        set_reform_keys(())
+        mod = load_mod(entry["mod_path"])
+        register_pop_types(mod["pop_types"])
+        mob_types = sorted(mod["mob_types"]) or args.mob_types
+        set_mob_candidates(mob_types)
+        set_reform_keys(mod["reform_names"])
+        world = mod_fingerprint(entry["mod_path"], v2parse.POP_TYPES, REFORM_KEYS)
+        if verbose:
+            print("Reading %s (%d saves) under %s"
+                  % (entry["name"], len(entry["files"]), entry["mod_label"]))
+        parsed = parse_saves(entry["files"], verbose=False,
+                             use_cache=not args.no_cache, world=world,
+                             pop_types=sorted(v2parse.POP_TYPES),
+                             mob_types=mob_types,
+                             reform_keys=sorted(REFORM_KEYS), jobs=args.jobs)
+        if not parsed:
+            continue
+        parsed.sort(key=lambda p: save_sort_key(p[0]["file"], p[0]["date"]))
+        results.append((entry["name"], entry["mod_label"],
+                        campaign_rows(parsed, mod, args)))
+        # Nation names come from whichever mod names them: a tag any mod names
+        # is better than the bare tag, and where two mods share a tag they were
+        # measured to agree on it. Country names live in the localisation, not
+        # in `display_names`, which is goods and unit types.
+        loc = mod.get("localisation") or {}
+        for _meta, nations in parsed:
+            for tag, nat in nations.items():
+                if tag not in names:
+                    label = name_for(tag, str(nat.get("government") or ""), loc)
+                    if label and label != tag:
+                        names[tag] = label
+        # The report around the cross-campaign block has to be about one
+        # campaign. Whichever the caller named, else the one with most saves.
+        if args.primary:
+            if entry["name"].lower() == args.primary.lower():
+                primary = entry
+        elif primary is None or len(entry["files"]) > len(primary["files"]):
+            primary = entry
+
+    if args.primary and primary is None and results:
+        known = ", ".join(name for name, _m, _p in results)
+        sys.exit("No campaign called %r under %s. There is: %s"
+                 % (args.primary, parent, known))
+    if not results or primary is None:
+        return None, [], args.mod_path
+    payload = crossmod.series_payload(results, names=names)
+    if verbose:
+        print("Cross-campaign: %d campaigns, %d nations in two or more of them."
+              % (len(payload["campaigns"]), len(payload["tags"])))
+        print("The rest of the report is %s%s."
+              % (primary["name"],
+                 "" if args.primary else " (the most saves; --primary picks "
+                                         "another)"))
+    return payload, primary["files"], primary["mod_path"]
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Aggregate Victoria 2 saves from one campaign into per-nation time series.",
@@ -1924,6 +2073,20 @@ def main():
                     help="print the structure of the first save and exit")
     ap.add_argument("--verify", action="store_true",
                     help="cross-check unit counts against an independent scan")
+    ap.add_argument("--cross", action="store_true",
+                    help="treat the saves path as a folder OF campaign folders "
+                         "and compare the same nation across all of them. Each "
+                         "campaign's mod is worked out from its own saves, so "
+                         "--mod-path is not needed; --game-root says where the "
+                         "mods live. The rest of the report is built from "
+                         "whichever campaign has the most saves.")
+    ap.add_argument("--primary", metavar="NAME",
+                    help="with --cross, which campaign the rest of the report "
+                         "is built from. The folder's own name. Without it the "
+                         "one with the most saves is used.")
+    ap.add_argument("--game-root",
+                    help="the Victoria 2 install folder, the one with mod/ "
+                         "inside. Only used by --cross, to find candidates.")
     ap.add_argument("-q", "--quiet", action="store_true")
     args = ap.parse_args()
 
@@ -1941,7 +2104,9 @@ def main():
             for f in os.listdir(saves_path)
             if f.lower().endswith(".v2")
         )
-        if not files:
+        # With --cross the saves sit in subfolders, so a parent holding none of
+        # its own is the ordinary case rather than a mistake.
+        if not files and not args.cross:
             sys.exit(
                 f"No .v2 files in {saves_path}\n"
                 f"Point this at the folder that holds your saves, not at a "
@@ -1950,12 +2115,23 @@ def main():
     else:
         files = [saves_path]
 
-    if not files:
+    if not files and not args.cross:
         sys.exit(f"No .v2 saves found in {args.saves}")
 
     if args.peek:
         peek_save(files[0])
         return
+
+    # Several campaigns at once. Each is read under the mod it was actually
+    # played on, worked out from its own saves, and the results are kept side by
+    # side. The heavy single-campaign report that follows is built from the
+    # largest of them, so this adds a section rather than replacing anything.
+    cross_payload = None
+    if args.cross:
+        cross_payload, files, args.mod_path = run_cross(
+            saves_path, args.game_root, args, verbose=not args.quiet)
+        if not files:
+            sys.exit("--cross found no campaigns under %s" % saves_path)
 
     if args.verify:
         for path in files:
@@ -2445,6 +2621,7 @@ def main():
             base_prices=(mod or {}).get("base_prices"),
             great_powers=great_powers,
             flags=flags,
+            cross=cross_payload,
             technology=(mod or {}).get("technology"),
             wars=build_wars(parsed, (mod or {}).get("province_names"),
                             (mod or {}).get("province_regions"),
