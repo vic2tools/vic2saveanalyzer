@@ -5,6 +5,10 @@ report: every nation's population, literacy, army, navy, industry, technology
 and trade over the whole game, a political map with every army on it, and a
 record of every war that was fought.
 
+Point it at a folder of campaigns instead and it reads them all, works out which
+mod each was played on, and sets the same nation's run in one game beside its
+run in another.
+
 Works with vanilla and with mods, including total conversions.
 
 ---
@@ -15,8 +19,8 @@ Double-click **`vic2saveanalyzer.exe`**. A window asks for two folders:
 
 | | |
 |---|---|
-| **Saves folder** | Where this campaign's `.v2` files are. |
-| **Mod folder** | The mod's own folder — the one with `common/`, `map/` and `history/` inside. |
+| **Saves folder** | One campaign's `.v2` files — or the folder all your campaigns live in. |
+| **Mod folder** | The mod's own folder, the one with `common/`, `map/` and `history/` inside — or `Victoria 2/mod` itself, in which case each campaign's mod is worked out from its own saves. |
 
 A third box says where the report goes. It defaults to
 `Documents/Victoria 2 Save Analyzer`, deliberately *not* inside your saves
@@ -46,6 +50,27 @@ rather than replacing it, and a long-lived install ends up holding mostly
 history. Wiping costs one slow run per campaign and touches neither your saves
 nor your reports.
 
+### Several campaigns at once
+
+Point the saves box at the folder your campaigns live in rather than at one of
+them, and every campaign underneath is read together. Nothing else has to be
+filled in: campaigns are found by looking, and each one's mod is worked out
+from its own saves.
+
+Campaigns grouped into folders of their own are found too — the search goes
+down through subfolders rather than looking only at the children — so a tidy
+saves directory reads the same as a flat one.
+
+Because the report's map, wars and technology tree can only be about one game,
+a **Main campaign** picker appears when there is a choice to make, listing each
+campaign with its save count. It opens on whichever has the most saves. The
+comparison itself covers all of them whichever you pick.
+
+Two campaigns' saves in one folder is the one mistake worth catching, and it is:
+the global event flags a save carries accumulate as a game runs, so an earlier
+save's flags are a later save's past, and one holding flags its successors never
+had is named in the log as possibly from another game.
+
 ### About the mod folder
 
 Give it one. Without it the report loses the map, the technology tree, the great
@@ -55,6 +80,14 @@ nation colours, the province map, the tech tree, pop types and the rules behind
 the mobilization numbers, so a report built without it is a much thinner thing.
 
 For an unmodded game, point it at the Victoria 2 install folder itself.
+
+You can also decline to choose. Point the box at `Victoria 2/mod` — the folder
+mods live in rather than a mod — and each campaign is matched to one by
+elimination: a country tag a mod has never heard of, a pop type it does not
+define, or an invention index past the end of the array it builds each rule it
+out. On the campaigns this was built against exactly one candidate survived
+each time, including for two mods from the same family that differ only in
+places. Where more than one fits, the log says so rather than pretending.
 
 A mod is read the way the game reads one: file by file, with the mod's copy
 winning and anything it does not ship taken from the Victoria 2 install
@@ -174,6 +207,37 @@ starting and stopping in mid-air.
 
 Below it, **Standing**: the closing table at the final save for the nations you
 have selected.
+
+#### Cross-campaign comparison
+
+Present only when several campaigns were read together. One nation, one measure,
+one line per game: how did Italy fare in this campaign against the last one?
+Every measure the data visualizer offers is here, drawn from the same numbers,
+so they mean what they mean above.
+
+Only nations that turn up in at least two of the campaigns are offered — a
+nation in one game has nothing to be set beside. Whether there are any depends
+on the mods: two builds of the same total conversion share almost all their
+countries, while two unrelated total conversions share none at all and the
+section has nothing to say.
+
+**Calendar years / Campaign years** decides what the horizontal axis means.
+On calendar years each line sits where it actually happened, so two games
+overlap only where they really did. On campaign years every line starts at zero,
+which is the fair way to ask how two runs developed, since campaigns rarely
+begin on the same date or run the same length. Under the chart, the last moment
+every campaign still covers is stated with each one's value there — comparing
+the closing figures instead would be comparing 1894 against 1874.
+
+Hovering reads every campaign at once. They save on different days, so a value
+marked **·** is that campaign's most recent reading at or before the line rather
+than one taken on it.
+
+A few measures are marked **†**. Those are not read off a save: they are worked
+out from a mod's own technologies, inventions and modifiers, so two campaigns on
+two mods answer them from different rulebooks. They are still worth asking
+about — a mobilization ceiling is a real fact about a game — so they are shown
+with that said plainly rather than left out.
 
 ### Pops
 
@@ -386,6 +450,16 @@ almost only by nations that have that technology, so its holders fingerprint the
 gate it came through and a campaign can mark its own reading. `--help` lists
 everything.
 
+Three more read a folder of campaigns rather than one. `--cross` treats the
+saves path as a folder of campaign folders; `--game-root` says where the mods
+live, so each campaign can be matched to one; `--primary NAME` picks which
+campaign the rest of the report is about, instead of whichever has the most
+saves.
+
+```bash
+vic2saveanalyzer.exe "C:\path\to\campaigns" --cross --game-root "C:\path\to\Victoria 2"
+```
+
 Saves are ordered by their in-game date, so filenames do not matter.
 
 ### Multiplayer
@@ -456,6 +530,7 @@ runs it.
 | `vic2_analyzer.py` | Command line, aggregation, CSV output |
 | `v2parse.py` | The save-file parser |
 | `mod_reader.py` | Reads the mod: names, colours, map, tech, pop types, modifiers |
+| `cross.py` | Finds campaigns, works out which mod each was played on |
 | `report.py` | Prepares everything the report needs |
 | `template.py` | The report's HTML, CSS and JavaScript |
 | `tech_groups.py` | Which technologies count as army or navy |
