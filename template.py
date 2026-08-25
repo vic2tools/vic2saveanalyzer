@@ -520,6 +520,13 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         researched further. Torpedoes work only against big ships, so where any are carried a
         second figure is given for a fight against heavy hulls. Composition adds what one hull of
         each type is worth to each side.</p>
+      <p class="note">That figure rates the ships as <em>designed</em>, at full strength and no
+        experience, which is what makes it comparable between nations and across a campaign.
+        Underneath it, <strong>at current strength</strong> is the same fleet as the save actually
+        finds it: the damage a hull deals runs with its strength and the damage it takes runs
+        against its experience, so a battered fleet fights below its paper figure and a veteran one
+        above. The two are shown together rather than one replacing the other, because a fleet
+        somebody has stopped paying for should still show what it would be worth repaired.</p>
     </section>
 
     <section>
@@ -1601,12 +1608,26 @@ function shipPowerOf(tag, date, type, vsHeavy) {
   const stats = navalStats(tag, date);
   return stats && stats[type] ? shipPower(stats[type], vsHeavy) : 0;
 }
-/** Every hull a side has, added up. */
-function fleetPower(tags, date, vsHeavy) {
+/** Every hull a side has, added up.
+
+    `atStrength` asks for the fleet as it stands rather than as it was drawn:
+    the damage formula multiplies by the firing ship's strength and divides by
+    one minus the target's experience, and rearranging the duel leaves both on
+    their owner's side. Boltun holds them equal because he is ranking ship
+    designs -- "all ships have the same experience... strength is maxed at
+    100%" -- which is right for that question and not for this one. A fleet at
+    half strength fights at half strength, and a veteran one above its paper
+    figure; `crews` carries the sum of `strength / (1 - experience)` over the
+    hulls of each type, and is absent wherever it comes to the count. */
+function fleetPower(tags, date, vsHeavy, atStrength) {
   let total = 0;
   tags.forEach(tag => {
     const at = (DATA.ships[tag] || {})[date] || {};
-    for (const type in at) total += shipPowerOf(tag, date, type, vsHeavy) * at[type];
+    const crew = atStrength ? ((DATA.crews || {})[tag] || {})[date] || {} : null;
+    for (const type in at) {
+      const hulls = crew && crew[type] !== undefined ? crew[type] : at[type];
+      total += shipPowerOf(tag, date, type, vsHeavy) * hulls;
+    }
   });
   return total;
 }
@@ -1965,6 +1986,14 @@ function drawMilPies() {
     ? [fleetPower(sideA, date, false), fleetPower(sideB, date, false)] : null;
   const heavyPowers = powers && torpedoesAbout(sideA.concat(sideB), date)
     ? [fleetPower(sideA, date, true), fleetPower(sideB, date, true)] : null;
+  // The same fleets at the strength and experience the save records. Shown
+  // under the design figure rather than instead of it, so a fleet somebody has
+  // stopped paying for still appears at what it could be worth again.
+  const nowPowers = powers
+    ? [fleetPower(sideA, date, false, true), fleetPower(sideB, date, false, true)]
+    : null;
+  const powersDiffer = nowPowers && [0, 1].some(i =>
+    Math.abs(nowPowers[i] - powers[i]) > Math.max(0.5, powers[i] * 0.005));
   const powerRatio = powers && powers[1]
     ? (powers[0] / powers[1]).toFixed(2) + '×' : '—';
   const powerBits = !powers ? ''
@@ -1973,6 +2002,9 @@ function drawMilPies() {
       + ` <span class="rk">v</span> `
       + `<b style="color:${SIDE_COLOUR[1]}">${fmtPower(powers[1])}</b></span>`
       + `<span><span class="rk">power ratio</span> <b>${powerRatio}</b></span>`
+      + (powersDiffer ? `<span><span class="rk">at current strength</span> `
+        + `<b>${fmtPower(nowPowers[0])}</b> <span class="rk">v</span> `
+        + `<b>${fmtPower(nowPowers[1])}</b></span>` : '')
       + (heavyPowers ? `<span><span class="rk">vs heavy</span> `
         + `<b>${fmtPower(heavyPowers[0])}</b> <span class="rk">v</span> `
         + `<b>${fmtPower(heavyPowers[1])}</b></span>` : '');
@@ -2062,8 +2094,19 @@ function drawMilPies() {
           fill: 'var(--brass)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 11});
         worth.textContent = `${fmtPower(powers[side])} fleet power`;
         svg.appendChild(worth);
+        let line = 138;
+        if (powersDiffer) {
+          const now = el('text', {x, y: line, 'text-anchor': 'middle',
+            fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
+          const pct = powers[side]
+            ? Math.round(100 * nowPowers[side] / powers[side]) : 100;
+          now.textContent = `${fmtPower(nowPowers[side])} at current strength `
+            + `(${pct}%)`;
+          svg.appendChild(now);
+          line += 15;
+        }
         if (heavyPowers && heavyPowers[side] > powers[side] + 0.5) {
-          const vs = el('text', {x, y: 138, 'text-anchor': 'middle',
+          const vs = el('text', {x, y: line, 'text-anchor': 'middle',
             fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
           vs.textContent = `${fmtPower(heavyPowers[side])} against heavy ships`;
           svg.appendChild(vs);

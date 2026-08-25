@@ -232,6 +232,12 @@ def blank_nation():
         "ships": 0,
         "navies": 0,
         "ships_by_type": defaultdict(int),
+        # Per ship type, the sum over its hulls of `strength / (1 - experience)`
+        # -- the two terms of the damage formula that differ between two real
+        # fleets. It equals the hull count for a fresh, green navy, falls with
+        # damage and rises with veterancy, and multiplying it by the type's
+        # power level gives what those hulls are worth as they stand.
+        "ship_crew": defaultdict(float),
         "regiments_by_type": defaultdict(int),
         "regiment_pops": [],
         # province id -> {unit type: brigades}, for the deployment map
@@ -493,7 +499,16 @@ def count_units(node, nat, where=None):
         elif key == "ship":
             for ship in sub_blocks(value):
                 nat["ships"] += 1
-                nat["ships_by_type"][str(ship.get("type", "unknown"))] += 1
+                kind = str(ship.get("type", "unknown"))
+                nat["ships_by_type"][kind] += 1
+                # Both are written as percentages. Strength scales the damage a
+                # hull deals; experience is subtracted from the damage it takes,
+                # so rearranging the duel leaves it as a divisor on its owner's
+                # side. A ship missing either reads as fresh and green.
+                strength = to_float(ship.get("strength"), 100.0) / 100.0
+                experience = to_float(ship.get("experience"), 0.0) / 100.0
+                experience = min(0.95, max(0.0, experience))
+                nat["ship_crew"][kind] += max(0.0, strength) / (1.0 - experience)
         elif key in ("army", "navy"):
             blocks = sub_blocks(value)
             nat["armies" if key == "army" else "navies"] += len(blocks)
@@ -1614,7 +1629,8 @@ def write_outputs(rows, ship_rows, pop_rows, culture_rows, price_rows,
         ("market_snapshot.csv", snapshot_rows,
          ["date", "year", "good", "category", "price", "world_pool", "supply",
           "demand", "real_demand", "actual_sold", "discovered"]),
-        ("ships_by_type.csv", ship_rows, ["date", "year", "tag", "ship_type", "count"]),
+        ("ships_by_type.csv", ship_rows,
+         ["date", "year", "tag", "ship_type", "count", "effective"]),
         ("brigades_by_type.csv", brigade_rows,
          ["date", "year", "tag", "regiment_type", "count"]),
         ("technologies.csv", tech_rows,
@@ -1775,6 +1791,18 @@ def main():
                          "inventions/. When given, each nation's mobilisation "
                          "size is computed from the mod's own rules and "
                          "--mobilisation-size becomes a fallback only.")
+    ap.add_argument("--check-inventions", action="store_true",
+                    dest="check_inventions",
+                    help="check the invention decode against the saves "
+                         "themselves rather than against the mod folder, and "
+                         "exit. Wants a folder of saves rather than one save. "
+                         "Needs --mod-path.")
+    ap.add_argument("--inventions", metavar="TAG",
+                    help="print every invention the last save says that nation "
+                         "holds, with the index it was decoded from and the "
+                         "file it lives in, then exit. Made for checking the "
+                         "decode against the game's own technology screen. "
+                         "Needs --mod-path.")
     ap.add_argument("--explain-mob", metavar="TAG",
                     help="print every tech and invention contributing to that "
                          "nation's mobilisation size in the last save, then "
@@ -1930,7 +1958,8 @@ def main():
     live = None
     if mod is not None:
         from mod_reader import (attainable_inventions, index_base_for,
-                                unjudged_triggers, validate_indices)
+                                index_coverage, unjudged_triggers,
+                                validate_indices)
         all_techs = {}
         every_nation = []
         for _meta, _nats in parsed:
@@ -1953,6 +1982,23 @@ def main():
                       f"{len(mod['invention_sequence'])} inventions "
                       f"(base {mod['index_base']}): {bad} of {total} nation-invention "
                       f"pairs are unreachable ({bad / total * 100:.1f}%).")
+                odd, seen = index_coverage(mod, parsed, mod["index_base"])
+                if odd:
+                    lost = sum(v[1] for v in odd.values())
+                    print(
+                        f"  {len(odd)} of {len(parsed)} saves name inventions "
+                        f"past the end of that array, so {lost} of {seen} "
+                        f"holdings ({lost / seen * 100:.1f}%) cannot be read:")
+                    for name in sorted(odd):
+                        count, gone, lo, hi = odd[name]
+                        print(f"    {name}: {count} indices, {lo}..{hi} "
+                              f"({gone} holdings)")
+                    print(
+                        "  Those saves were written by a different build than "
+                        "--mod-path -- another version of the mod, or one over "
+                        "the top of it. Their ship stats and mobilisation size "
+                        "are short by whatever those inventions grant; the rest "
+                        "of the campaign is unaffected.")
         if verbose:
             rules = mod["invention_rules"]
             print(f"\nMod scan: {mod['tech_count']} techs "
@@ -2066,7 +2112,8 @@ def main():
             # rather than dicts. A dict per row costs about twice the memory
             # and names the same six columns over and over.
             for stype, count in sorted(done["ships_by_type"].items()):
-                ship_rows.append((date, year, tag, stype, count))
+                ship_rows.append((date, year, tag, stype, count,
+                                  round(done["ship_crew"].get(stype, count), 3)))
             if mod is not None and done["ships"]:
                 from mod_reader import naval_profile
                 profile = naval_profile(done, mod)
@@ -2102,6 +2149,118 @@ def main():
         else:
             rate = args.mob_rate
         explain_mob_pool(tag, nat, meta, rate, args)
+        return
+
+    if args.check_inventions:
+        if mod is None:
+            sys.exit("--check-inventions needs --mod-path.")
+        from mod_reader import (alignment_score, index_holdings,
+                                invention_files, ungated_inventions)
+        holdings = index_holdings(parsed)
+        base = mod["index_base"]
+        seq = mod["invention_sequence"]
+        print(f"\nChecking {len(seq)} inventions against {len(parsed)} saves.")
+        if base is None:
+            sys.exit("  the indices did not decode at all, so there is "
+                     "nothing to check.")
+        if len(holdings) < 40:
+            print(f"  only {len(holdings)} indices are held often enough to "
+                  f"say anything about. Run this on a whole campaign.")
+        print(f"  {len(holdings)} indices held often enough to judge\n")
+        print(f"  {'offset':<10}{'confirmed':>11}{'granted':>10}"
+              f"{'suspect':>10}{'unjudged':>10}")
+        table = {}
+        for shift in (-2, -1, 0, 1, 2):
+            good, granted, bad, unjudged, ungated, detail = alignment_score(
+                mod, holdings, base + shift)
+            table[shift] = (good, granted, bad, detail)
+            print(f"  {('as used' if not shift else '%+d' % shift):<10}"
+                  f"{good:>11}{granted:>10}{bad:>10}{unjudged + ungated:>10}"
+                  f"{'   <-- the decode in use' if not shift else ''}")
+        loose = ungated_inventions(mod)
+        if loose:
+            print(f"\n  {len(loose)} invention(s) in this mod are gated on a "
+                  f"technology it never defines, so the gate never closes and "
+                  f"every nation has them from the start. They are left out of "
+                  f"the count above:")
+            for name in sorted(loose):
+                print(f"    {name:<40} asks for {' '.join(loose[name])}")
+        good, granted, bad, detail = table[0]
+        judged = good + granted + bad
+        best = max(table, key=lambda k: table[k][0])
+        print()
+        if best != 0:
+            print(f"  Offset {best:+d} confirms more indices than the one in use. "
+                  f"The base is probably wrong.")
+        elif bad == 0:
+            one = granted == 1
+            tail = ("" if not granted else
+                    f" {granted} of them {'is' if one else 'are'} held by a few "
+                    f"nations that could not have researched "
+                    f"{'it' if one else 'them'}, which is the engine granting "
+                    f"inventions outside the tech tree.")
+            print(f"  Every index the saves can judge sits where the array says "
+                  f"it does.{tail}\n"
+                  f"  The decode is right: who holds which invention is exact.")
+        else:
+            print(f"  {bad} of {judged} indices are held mostly by nations that "
+                  f"could not have researched them. That is what a misaligned "
+                  f"stretch of the array looks like, and it is worth reading the "
+                  f"list below before trusting anything taken off an invention.")
+        if detail:
+            where = invention_files(args.mod_path)
+            print(f"\n  {'index':>6}  {'invention':<38} {'holders':>16}  needs")
+            for idx, have, lack in detail[:26]:
+                entry = seq[idx - base]
+                flag = "" if have >= lack else "  <-- suspect"
+                print(f"  {idx:>6}  {entry['name']:<38} "
+                      f"{have:>6} with {lack:>4} without  "
+                      f"{' '.join(sorted(entry['techs']))}{flag}")
+            if len(detail) > 26:
+                print(f"  ... and {len(detail) - 26} more")
+        return
+
+    if args.inventions:
+        if mod is None:
+            sys.exit("--inventions needs --mod-path.")
+        from mod_reader import invention_files
+        tag = args.inventions.upper()
+        meta, nations = parsed[-1]
+        nat = nations.get(tag)
+        if nat is None:
+            sys.exit(f"{tag} is not in {meta['file']}.")
+        seq = mod["invention_sequence"]
+        base = mod["index_base"]
+        where = invention_files(args.mod_path)
+        held = sorted(nat.get("invention_ids", ()))
+        print(f"\n{tag} at {meta['date']} in {meta['file']}")
+        print(f"the mod rebuilds {len(seq)} inventions; this save names "
+              f"{len(held)} of them, indices {min(held, default=0)}"
+              f"..{max(held, default=0)}")
+        if base is None:
+            sys.exit("  indices could not be decoded for this install, so "
+                     "there is nothing to print.")
+        print(f"decoded with base {base}\n")
+        shown = 0
+        last_file = None
+        for idx in held:
+            j = idx - base
+            if not (0 <= j < len(seq)):
+                print(f"  {idx:>4}  *** past the end of the array -- this save "
+                      f"is from a different build ***")
+                continue
+            entry = seq[j]
+            fname = where.get(entry["name"], "?")
+            if fname != last_file:
+                print(f"  -- {fname}")
+                last_file = fname
+            gates = " ".join(sorted(entry["techs"])) or "(no technology)"
+            has = "" if entry["techs"] <= set(nat["tech_list"]) else "   <-- the nation does not have that technology"
+            print(f"  {idx:>4}  {entry['name']:<42} {gates}{has}")
+            shown += 1
+        print(f"\n{shown} decoded. Compare against the technology screen: every "
+              f"invention shown as discovered there should appear here, and "
+              f"nothing else should.")
         return
 
     if args.explain_mob:

@@ -749,11 +749,18 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
             series[tag][key] = out
 
     ships, ship_types = {}, set()
+    # What those hulls are worth as they stand, when that is not simply the
+    # count: a fleet at half strength fights at half strength, and a veteran
+    # one above its paper figure. Only carried where it differs, since for most
+    # navies most of the time it does not.
+    crews = {}
     # The four big tables arrive as tuples in their CSV column order -- see
     # `write_outputs` for the columns, and the row loop in `main` for why.
-    for date, _year, tag, stype, count in ship_rows:
+    for date, _year, tag, stype, count, effective in ship_rows:
         ship_types.add(stype)
         ships.setdefault(tag, {}).setdefault(date, {})[stype] = int(count)
+        if abs(effective - count) > 0.005:
+            crews.setdefault(tag, {}).setdefault(date, {})[stype] = round(effective, 2)
 
     brigades, regiment_types = {}, set()
     for date, _year, tag, rtype, count in brigade_rows:
@@ -886,6 +893,7 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
         "series": series,
         "facts": facts,
         "ships": ships,
+        "crews": crews,
         "shipTypes": sorted(ship_types),
         "brigades": brigades,
         "regimentTypes": sorted(regiment_types),

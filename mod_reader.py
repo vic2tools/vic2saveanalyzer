@@ -1941,9 +1941,11 @@ def load_mod(path):
     nv_file = _resolved_file(path, "common", "nationalvalues.txt")
 
     tech_mob, tech_count = {}, 0
+    tech_names = set()
     for fname in sorted(tech_files, key=str.lower):
         for name, block in _read_clausewitz(tech_files[fname]):
             tech_count += 1
+            tech_names.add(name)
             size = _find_mob_size(block)
             if size:
                 tech_mob[name] = size
@@ -2033,6 +2035,9 @@ def load_mod(path):
         # Set by index_base_for once a save is in hand; None means the indices
         # could not be decoded and inventions fall back to requirement matching.
         "index_base": None,
+        # Every technology the mod defines, so an invention gated on one it
+        # does not can be told from one a nation simply has not researched.
+        "technologies": frozenset(tech_names),
         "defines": read_defines(path),
         "strata": strata,
         "pop_types": frozenset(strata),
@@ -2073,6 +2078,138 @@ def invention_sequence(path):
             seq.append({"name": name, "size": _find_mob_size(block),
                         "techs": reqs, "tags": tags})
     return seq
+
+
+def index_holdings(parsed, floor=8):
+    """
+    {index: [(tag, its technologies), ...]} for every index held often enough
+    to say anything about.
+
+    An invention gated on a technology is held almost only by nations that have
+    it, so who holds an index -- and what they know -- is a fingerprint of what
+    the invention at that index requires, built from the saves and nothing else.
+    """
+    out = {}
+    for _meta, nations in parsed:
+        for tag, nat in nations.items():
+            techs = frozenset(nat.get("tech_list") or ())
+            if not techs:
+                continue
+            for idx in nat.get("invention_ids", ()):
+                out.setdefault(idx, []).append((tag, techs))
+    return {idx: rows for idx, rows in out.items() if len(rows) >= floor}
+
+
+def alignment_score(mod, holdings, base, settled=0.95, suspect=0.5):
+    """
+    How well the array lines up at one base offset, index by index.
+
+    Returns (settled, granted, suspect, unjudged, ungated, [(index, with,
+    without)]). Each index is scored by the share of its holders that actually
+    have the technologies the invention there requires:
+
+      >= `settled`   the invention is where the array says it is
+      >= `suspect`   most holders have the technology and a few do not, which
+                     is the engine granting it outside the tech tree -- the
+                     game's own screens confirm this for the Ideological
+                     Thought inventions and for `commerce_raiders`
+      below that     hardly anyone who holds it could have researched it, which
+                     is what a misaligned array looks like
+
+    An invention whose `limit` names a technology the mod never defines is
+    counted `ungated` and judged neither way. Ferrum Mare's `transport_convoys`
+    asks for `clipper_designs` where the technology is `clipper_design`, so the
+    gate never closes and every nation has it from the start -- which says
+    nothing at all about whether the array is right.
+    """
+    seq = mod.get("invention_sequence") or ()
+    known = mod.get("technologies") or frozenset()
+    counts = [0, 0, 0, 0, 0]        # settled, granted, suspect, unjudged, ungated
+    detail = []
+    for idx, rows in sorted(holdings.items()):
+        j = idx - base
+        if not (0 <= j < len(seq)) or not seq[j]["techs"]:
+            counts[3] += 1
+            continue
+        needs = seq[j]["techs"]
+        if known and not needs <= known:
+            counts[4] += 1
+            continue
+        have = sum(1 for _tag, techs in rows if needs <= techs)
+        share = have / len(rows)
+        if share >= settled:
+            counts[0] += 1
+        elif share >= suspect:
+            counts[1] += 1
+            detail.append((idx, have, len(rows) - have))
+        else:
+            counts[2] += 1
+            detail.append((idx, have, len(rows) - have))
+    return tuple(counts) + (detail,)
+
+
+def ungated_inventions(mod):
+    """
+    {invention: the technologies it asks for that the mod never defines}.
+
+    A gate that never closes: the engine cannot match the name against a
+    technology, so the invention is available to everyone from the first day.
+    Ferrum Mare has one and CE 1v1 has four; the base game and the other five
+    mods here have none.
+    """
+    known = mod.get("technologies") or frozenset()
+    out = {}
+    if not known:
+        return out
+    for entry in mod.get("invention_sequence") or ():
+        missing = sorted(entry["techs"] - known)
+        if missing:
+            out[entry["name"]] = missing
+    return out
+
+
+def index_coverage(mod, parsed, base=1):
+    """
+    Which saves name an invention the mod folder cannot account for.
+
+    Returns {save file: (distinct indices past the end, holdings lost, lowest,
+    highest)}, plus the total holdings looked at, as
+    ({file: (...)}, total).
+
+    A save names inventions by index into the engine's global array, so an
+    index past the end of the array rebuilt from the folder is proof that this
+    save was written by a different build -- a different version of the mod, or
+    another one over the top. Everything read off an invention is then short by
+    whatever those grant, which is worth saying out loud rather than reporting
+    a confident decode.
+
+    It is per save on purpose. The Divergences campaign here has one save out
+    of twenty-nine from another build of the mod -- two country tags the folder
+    does not know and a hundred and forty more inventions -- and blaming the
+    folder for it sends you looking in the wrong place.
+    """
+    top = len(mod.get("invention_sequence") or ()) + base - 1
+    out, total = {}, 0
+    for meta, nations in parsed:
+        past, lost = set(), 0
+        for nat in nations.values():
+            for idx in nat.get("invention_ids", ()):
+                total += 1
+                if idx > top:
+                    past.add(idx)
+                    lost += 1
+        if past:
+            out[meta.get("file", "?")] = (len(past), lost, min(past), max(past))
+    return out, total
+
+
+def invention_files(path):
+    """{invention: the file it is defined in}, for reading a decode back."""
+    out = {}
+    for fname, target in _resolved_files(path, "inventions").items():
+        for name, _block in _read_clausewitz(target):
+            out.setdefault(name, fname)
+    return out
 
 
 def validate_indices(mod, nations, base=1):

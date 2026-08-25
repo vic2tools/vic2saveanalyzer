@@ -230,6 +230,16 @@ a second figure is given for a fight against heavy hulls. **Composition** adds
 what one hull of each type is worth to each side, and each side's total under its
 pie. Without a mod folder there are no unit files and the measure is unavailable.
 
+That figure rates the ships as *designed*, at full strength and no experience,
+which is what makes it comparable between nations and across a campaign.
+Underneath it, **at current strength** is the same fleet as the save finds it:
+the damage a hull deals runs with its strength, and the damage it takes runs
+against its experience, so a battered fleet fights below its paper figure and a
+veteran one above. It matters more than it sounds — in the campaigns here it
+moves individual navies by anywhere from −34% to +25%, and changes who ranks
+where. Both are shown rather than one replacing the other, so a fleet somebody
+has stopped paying for still shows what it would be worth repaired.
+
 Below that, a sortable overview of the nations you select — brigades, ships,
 army and navy tech counts, soldier pops, soldier pops as a share of population,
 and the same share counting only soldiers in the nation's own states. A colonial
