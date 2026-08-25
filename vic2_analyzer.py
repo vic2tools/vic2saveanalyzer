@@ -1926,7 +1926,15 @@ def run_cross(parent, game_root, args, verbose=True):
                 print("  %-22s %3d saves  ->  %s"
                       % (entry["name"], len(entry["files"]),
                          entry["mod_label"] or "no mod in that folder fits"))
-                if fits > 1:
+                nearest = [r for r in entry["candidates"] if r[1] == "nearest"]
+                if nearest:
+                    print("      WARNING: nothing in %s explains these saves. "
+                          "The closest is %s, and it does not match: %s. The "
+                          "numbers below are computed against a mod this "
+                          "campaign was not played on -- name the right one "
+                          "with --mod-path."
+                          % (game_root, nearest[0][0], nearest[0][2]))
+                elif fits > 1:
                     print("      note: %d mods fit these saves; picked the one "
                             "the campaign leaves least of unused. Name it with "
                             "--mod-path, or in the window pick the mod itself "

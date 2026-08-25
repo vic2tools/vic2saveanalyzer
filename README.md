@@ -88,16 +88,29 @@ played on the same one.
 You can also decline to choose. Point the box at `Victoria 2/mod` — the folder
 mods live in rather than a mod — and each campaign is matched to one by
 elimination. A country tag the folder has never heard of, a pop type it does not
-define, a technology name it lacks, a province past the end of its map, or an
-invention index past the end of the array it builds each rule it out, because a
-save cannot hold a name the folder that made it never defined. On the campaigns
-this was built against exactly one candidate survived each time, from a single
-save as readily as from thirty-eight, including for two mods of the same family
-that differ only in places.
+define, a technology name it lacks, or an invention index past the end of the
+array it builds each rule it out, because a save cannot hold a name the folder
+that made it never defined.
+
+The map settles what those cannot, and it settles it by identity rather than by
+size: a save carries every province the map defines, so the two are the same set
+or the save did not come from that folder. This is what separates mods sharing a
+base, where nothing else does. Two PUIR derivatives here agree on all 309
+countries, all 150 technologies and all 566 inventions in the same order, and
+differ by three provinces.
+
+It is worth getting right rather than nearly right. Those same two mods give the
+cruiser different guns, different evasion and different torpedoes, so reading a
+campaign under the wrong one of them rates every cruiser 18% low and invents
+torpedoes it never had. A wrong answer here does not mislabel the report; it
+changes the numbers in it.
 
 Where several still fit, the one whose own country list the campaign comes
-closest to exhausting is taken, and the log says the answer was not forced. That
-is a judgement, not a measurement — naming the mod yourself settles it.
+closest to exhausting is taken, and the log says the answer was not forced. If
+nothing fits at all — usually the right mod at a different version — the closest
+is named, loudly, as not matching. Both are judgements rather than measurements:
+naming the mod yourself settles it, and doing so reads every campaign in the
+folder under that one mod.
 
 A mod is read the way the game reads one: file by file, with the mod's copy
 winning and anything it does not ship taken from the Victoria 2 install

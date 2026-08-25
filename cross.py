@@ -25,10 +25,15 @@ past, and a save holding flags its successors never had did not come from the
 same history.
 
 The mod is worked out by elimination. A country tag the folder has never heard
-of, a pop type it does not define, a technology name it lacks, a province past
-the end of its map, or an invention index past the end of the array it builds --
-each rules a candidate out outright, because a save cannot hold a name the
-folder that made it never defined.
+of, a pop type it does not define, a technology name it lacks, or an invention
+index past the end of the array it builds each rules a candidate out, because a
+save cannot hold a name the folder that made it never defined.
+
+The map decides the rest, and it decides by identity rather than by size: a save
+carries every province the map defines, so the two sets are equal or the save
+did not come from that folder. This is what separates mods sharing a base, where
+nothing else does -- CoRGI and IGoR agree on all 309 countries, all 150
+technologies and all 566 inventions, and differ by three provinces.
 
 Where several still fit, the one whose own country list the campaign comes
 closest to exhausting wins, and the caller is told the answer was not forced.
@@ -123,13 +128,16 @@ def _sniff(path):
     techs = set()
     for block in _TECH_BLOCK.findall(text):
         techs |= set(_TECH_NAME.findall(block))
-    provinces = [int(n) for n in _PROVINCE.findall(text)]
     return {
         "tags": tags,
         "pops": {k for k, c in pops.items() if c > _POP_FLOOR},
         "techs": techs,
         "top_invention": max(ids) if ids else 0,
-        "top_province": max(provinces) if provinces else 0,
+        # Every province on the map is written to the save whoever owns it, so
+        # this is not a sample of the map -- it is the map. Measured on four
+        # campaigns it matched their mod's `definition.csv` exactly, with
+        # nothing on either side that the other lacked.
+        "provinces": frozenset(int(n) for n in _PROVINCE.findall(text)),
     }
 
 
@@ -146,22 +154,22 @@ def _mod_facts(root):
                     techs.add(name)
         except Exception:
             techs = set()
-        top = 0
+        provinces = set()
         try:
             target = _resolved_file(root, "map", "definition.csv")
             with io.open(target, encoding='latin-1') as fh:
                 for line in fh:
                     head = line.split(";")[0].strip()
                     if head.isdigit():
-                        top = max(top, int(head))
+                        provinces.add(int(head))
         except Exception:
-            top = 0
+            provinces = set()
         _MOD_FACTS[root] = {
             "tags": {t for t, _f in _country_entries(root)},
             "pops": set(read_poptypes(root)),
             "techs": techs,
             "inventions": _capacity(root),
-            "provinces": top,
+            "provinces": frozenset(provinces),
         }
     return _MOD_FACTS[root]
 
@@ -198,13 +206,13 @@ def match_mod(files, candidates, sample=2):
     so they rule the most out.
     """
     blank = {"tags": set(), "pops": set(), "techs": set(),
-             "top_invention": 0, "top_province": 0}
+             "top_invention": 0, "provinces": frozenset()}
     facts = [_sniff(p) for p in files[-sample:]] or [blank]
     tags = set().union(*(f["tags"] for f in facts))
     pops = set().union(*(f["pops"] for f in facts))
     techs = set().union(*(f["techs"] for f in facts))
     top = max(f["top_invention"] for f in facts)
-    top_province = max(f["top_province"] for f in facts)
+    provinces = set().union(*(f["provinces"] for f in facts))
 
     known = {label: _mod_facts(root) for label, root in candidates}
 
@@ -215,7 +223,7 @@ def match_mod(files, candidates, sample=2):
     if known:
         pops &= set().union(*(f["pops"] for f in known.values()))
 
-    rows, fits = [], []
+    rows, fits, near = [], [], []
     for label, root in candidates:
         f = known[label]
         why = []
@@ -235,14 +243,27 @@ def match_mod(files, candidates, sample=2):
             why.append("%d unknown technolog%s (%s)"
                        % (len(stray), "y" if len(stray) == 1 else "ies",
                           " ".join(sorted(stray)[:3])))
-        # A province the map does not have cannot have been owned on it.
-        if top_province > f["provinces"] > 0:
-            why.append("save holds province %d, map ends at %d"
-                       % (top_province, f["provinces"]))
+        # The map, as identity rather than as a ceiling. A save carries every
+        # province the map defines, so the two sets are the same set or the save
+        # did not come from this folder. This is what tells apart mods built on
+        # a shared base: CoRGI and IGoR agree on all 309 countries, all 150
+        # technologies and all 566 inventions, and differ by three provinces.
+        # A ceiling test passed both and the winner was decided alphabetically.
+        gap = len(provinces ^ f["provinces"])
+        if provinces and f["provinces"] and gap:
+            why.append("map has %d provinces, these saves %d"
+                       % (len(f["provinces"]), len(provinces)))
         if top > f["inventions"]:
             why.append("save names invention %d, folder builds %d"
                        % (top, f["inventions"]))
         if why:
+            # How far off it is, for the case where nothing fits at all: the
+            # tests are strict enough that a mod updated since the save was
+            # made is rejected, and the nearest miss is worth naming rather
+            # than leaving the campaign unread.
+            near.append((len(unknown) + len(missing) + len(stray) + gap
+                         + max(0, top - f["inventions"]),
+                         label, root, "; ".join(why)))
             rows.append((label, "no", "; ".join(why)))
             continue
         # Among folders that could have produced this save, prefer the one whose
@@ -264,9 +285,17 @@ def match_mod(files, candidates, sample=2):
                      "invention slots"
                      % (unused, len(f["tags"]), f["inventions"] - top)))
     if not fits:
-        return None, None, rows
+        # Nothing explains these saves. Rather than dropping the campaign, name
+        # the closest folder and let the caller say plainly that it is a near
+        # miss -- usually the right mod at the wrong version.
+        if not near:
+            return None, None, rows
+        near.sort()
+        _distance, label, root, _why = near[0]
+        rows.append((label, "nearest", _why))
+        return label, root, rows
     fits.sort()
-    _slack, label, root = fits[0]
+    _rank, label, root = fits[0]
     return label, root, rows
 
 
