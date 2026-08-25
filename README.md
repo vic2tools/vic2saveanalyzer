@@ -39,6 +39,13 @@ campaigns by mistake costs you a moment rather than a coffee break. Every save
 read before you stopped stays cached, so starting again picks up where it left
 off.
 
+Along the bottom is what that cache currently weighs, and a **Wipe cache**
+button. Nothing here expires: an entry is keyed to the version of the program
+that wrote it, so every update leaves the previous generation behind unreadable
+rather than replacing it, and a long-lived install ends up holding mostly
+history. Wiping costs one slow run per campaign and touches neither your saves
+nor your reports.
+
 ### About the mod folder
 
 Give it one. Without it the report loses the map, the technology tree, the great

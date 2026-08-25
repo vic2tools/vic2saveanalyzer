@@ -1045,6 +1045,11 @@ def mod_fingerprint(mod_path, pop_types, reform_keys=()):
         .encode("utf-8")).hexdigest()[:10]
 
 
+def cache_dir():
+    """Where parsed saves are remembered between runs."""
+    return os.path.join(tempfile.gettempdir(), "vic2_analyzer_cache")
+
+
 def _cache_slot(path, fingerprint, world="no-mod"):
     """Where this save's parsed form lives, keyed by the file, the parser and
     the mod it is being read under."""
@@ -1055,8 +1060,7 @@ def _cache_slot(path, fingerprint, world="no-mod"):
     key = hashlib.md5(
         f"{os.path.abspath(path)}|{stat.st_size}|{int(stat.st_mtime)}"
         f"|{fingerprint}|{world}".encode("utf-8")).hexdigest()
-    folder = os.path.join(tempfile.gettempdir(), "vic2_analyzer_cache")
-    return os.path.join(folder, key + ".pkl")
+    return os.path.join(cache_dir(), key + ".pkl")
 
 
 def _cache_read(slot):
@@ -1080,6 +1084,61 @@ def _cache_write(slot, meta, nations):
                 pickle.dumps((meta, dict(nations)), protocol=5), 1))
     except Exception:
         pass                          # caching is an optimisation, not a duty
+
+
+def cache_stats():
+    """How many entries the cache holds and what they weigh, as (count, bytes).
+
+    Nothing here evicts anything. A slot is keyed by the save, the mod, and a
+    hash of the parser itself, so editing the parser does not replace the old
+    entries -- it stands a fresh generation up beside them, and the previous one
+    can never be read again. An install that has seen a few updates is therefore
+    mostly holding generations it has no use for, which is the case for offering
+    to empty it.
+    """
+    count = size = 0
+    try:
+        with os.scandir(cache_dir()) as entries:
+            for entry in entries:
+                if not entry.name.endswith(".pkl"):
+                    continue
+                try:
+                    size += entry.stat().st_size
+                except OSError:
+                    continue          # vanished under us; it is not in the total
+                count += 1
+    except OSError:
+        return 0, 0                   # no cache folder yet, which is not a fault
+    return count, size
+
+
+def clear_cache():
+    """Empty the cache. Returns (entries removed, bytes freed).
+
+    Only this program's own `.pkl` files go, and the folder itself stays: it
+    sits in the system temp directory, which belongs to everybody, so taking
+    the tree out wholesale is not this program's business. An entry another run
+    still has open is skipped rather than fought over -- it will be caught by
+    the next wipe.
+    """
+    removed = freed = 0
+    folder = cache_dir()
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return 0, 0
+    for name in names:
+        if not name.endswith(".pkl"):
+            continue
+        path = os.path.join(folder, name)
+        try:
+            size = os.path.getsize(path)
+            os.remove(path)
+        except OSError:
+            continue
+        removed += 1
+        freed += size
+    return removed, freed
 
 
 # --- reading a folder of saves across however many cores the machine has -----

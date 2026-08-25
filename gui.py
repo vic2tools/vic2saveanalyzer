@@ -30,6 +30,23 @@ from tkinter import filedialog, messagebox, ttk
 import vic2_analyzer
 
 APP = "Victoria 2 Save Analyzer"
+
+
+def human_size(count):
+    """A byte count the way a person would say it."""
+    if count < 1024:
+        return "%d byte%s" % (count, "" if count == 1 else "s")
+    for unit in ("KB", "MB", "GB"):
+        count /= 1024.0
+        if count < 1024 or unit == "GB":
+            break
+    return "%.0f %s" % (count, unit) if count >= 10 else (
+        "%.1f %s" % (count, unit))
+
+
+def _plural(n, one, many):
+    """`1 entry`, `12 entries`, `1,128 entries`."""
+    return "%s %s" % (format(n, ","), one if n == 1 else many)
 SETTINGS = os.path.join(
     os.environ.get("APPDATA") or os.path.expanduser("~"),
     "vic2saveanalyzer", "settings.json")
@@ -229,6 +246,17 @@ class App:
         bar.grid(row=8, column=3, sticky="ns")
         self.log.configure(yscrollcommand=bar.set, state="disabled")
 
+        # A footer rather than a place in the main flow: emptying the
+        # cache is housekeeping, not a step in running an analysis.
+        foot = ttk.Frame(frame)
+        foot.grid(row=9, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        self.cache_label = ttk.Label(foot, text="", foreground="#666")
+        self.cache_label.pack(side="left")
+        self.cache_button = ttk.Button(foot, text="Wipe cache", width=12,
+                                       command=self.wipe_cache)
+        self.cache_button.pack(side="right")
+        self.refresh_cache()
+
         root.after(80, self.drain)
         root.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -242,6 +270,46 @@ class App:
             title=label, initialdir=start or os.path.expanduser("~"))
         if chosen:
             var.set(os.path.normpath(chosen))
+
+    def refresh_cache(self):
+        """Put what the cache currently weighs on the footer."""
+        count, size = vic2_analyzer.cache_stats()
+        if not count:
+            self.cache_label.configure(text="Parse cache: empty")
+            self.cache_button.configure(state="disabled")
+            return
+        self.cache_label.configure(
+            text="Parse cache: %s in %s"
+                 % (human_size(size), _plural(count, "entry", "entries")))
+        self.cache_button.configure(
+            state="disabled" if self.running else "normal")
+
+    def wipe_cache(self):
+        """Empty the cache, having said plainly what that costs."""
+        if self.running:
+            return
+        count, size = vic2_analyzer.cache_stats()
+        if not count:
+            self.refresh_cache()
+            return
+        if not messagebox.askokcancel(
+                APP,
+                "Delete %s of remembered saves?\n\n"
+                "Your saves and your reports are untouched. What goes is "
+                "the record of what each save was read as, which is what "
+                "makes a second run of the same campaign take seconds "
+                "instead of reading every file again. The cost is one "
+                "slow run per campaign.\n\n"
+                "Most of it is usually spent already: an entry is tied to "
+                "the version of the program that wrote it, so every update "
+                "leaves the previous entries behind unread."
+                % human_size(size)):
+            return
+        removed, freed = vic2_analyzer.clear_cache()
+        self.say("\nWiped %s from the parse cache, freeing %s.\n"
+                 % (_plural(removed, "entry", "entries"),
+                    human_size(freed)))
+        self.refresh_cache()
 
     def say(self, chunk):
         """Append output, treating a carriage return the way a console does."""
@@ -306,6 +374,7 @@ class App:
 
         self.running = True
         self.stop.clear()
+        self.cache_button.configure(state="disabled")
         self.button.configure(state="disabled")
         self.stop_button.configure(state="normal")
         self.status.configure(text="Working…")
@@ -352,6 +421,7 @@ class App:
         self.running = False
         self.button.configure(state="normal")
         self.stop_button.configure(state="disabled")
+        self.refresh_cache()          # the run just added to it
         done = ok and os.path.isfile(self.report or "")
         self.status.configure(
             text="Done." if done else "Stopped." if stopped
