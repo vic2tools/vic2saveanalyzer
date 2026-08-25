@@ -387,11 +387,9 @@ table.mini.fitmini th,table.mini.fitmini td{white-space:normal;
 .note{color:var(--ink-dim);font-size:13px;margin:10px 2px 0}
 .stackwrap{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
 /* The cross-campaign picker can hold every nation two campaigns share -- 96 in
-   one pairing here -- which is more than a dropdown is any use for. */
-#crossfind{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;
-  background:var(--ground);color:var(--ink);border:1px solid var(--rule);
-  border-radius:3px;padding:4px 7px;width:150px}
-#crossfind::placeholder{color:var(--ink-dim);opacity:.75}
+   one pairing here -- which is more than a dropdown is any use for. It gets the
+   same `searchSelect` the Pops, Cultures and Technology pickers get, so it
+   looks and behaves like them rather than like a second idea about searching. */
 #crossnation{min-width:230px}
 .slegend{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;
   color:var(--ink-dim);display:flex;align-items:center;gap:6px}
@@ -492,9 +490,7 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
       <h2>Cross-campaign comparison</h2>
       <p class="note" id="crossintro"></p>
       <div class="controls">
-        <label class="tb-label" for="crossfind" style="margin:0">Nation</label>
-        <input id="crossfind" type="search" placeholder="search tag or name"
-               autocomplete="off" spellcheck="false">
+        <label class="tb-label" for="crossnation" style="margin:0">Nation</label>
         <select id="crossnation"></select>
         <label class="tb-label" for="crossmetric" style="margin:0">Measure</label>
         <select id="crossmetric"></select>
@@ -4299,7 +4295,10 @@ const CROSS = DATA.cross;
 if (CROSS && CROSS.campaigns.length > 1) {
   document.getElementById('crosssec').hidden = false;
   const csel = document.getElementById('crossnation');
-  const find = document.getElementById('crossfind');
+  // Declared before `fillNations` can run: it is a `const` assigned further
+  // down, and reading one before its declaration is a ReferenceError, not a
+  // falsy value.
+  let crossFind = null;
   const msel2 = document.getElementById('crossmetric');
   const axisBtn = document.getElementById('crossaxis');
   let relative = false;
@@ -4326,7 +4325,6 @@ if (CROSS && CROSS.campaigns.length > 1) {
 
   function fillNations() {
     const key = msel2.value || CROSS.metrics[0].key;
-    const needle = (find.value || '').trim().toLowerCase();
     /* A nation is only offered when the chosen measure exists for it in at
        least two campaigns; one line is not a comparison. Biggest first, so the
        list opens on something worth looking at. */
@@ -4335,26 +4333,20 @@ if (CROSS && CROSS.campaigns.length > 1) {
         bl => (bl[t] && bl[t].pop ? bl[t].pop[bl[t].pop.length - 1][2] : 0)));
       return peak(b) - peak(a);
     });
-    /* Filtering hides options rather than dropping the nation currently
-       drawn: a search that emptied the chart the moment it stopped matching
-       would take the reader's place away for a keystroke. */
-    const shown = needle
-      ? usable.filter(t => (t + ' ' + (CROSS.tagNames[t] || ''))
-                             .toLowerCase().includes(needle))
-      : usable;
     const keep = csel.value;
-    const list = shown.length ? shown : usable;
     csel.textContent = '';
-    for (const t of list) {
+    for (const t of usable) {
       const o = document.createElement('option');
       o.value = t;
-      o.textContent = (CROSS.tagNames[t] || t) + '  (' + t + ')';
+      // `TAG - Name`, the way every other nation picker in the report reads.
+      o.textContent = CROSS.tagNames[t] === t ? t
+        : t + ' \u00b7 ' + CROSS.tagNames[t];
       csel.appendChild(o);
     }
-    csel.value = list.indexOf(keep) >= 0 ? keep : list[0];
-    find.title = needle
-      ? shown.length + ' of ' + usable.length + ' nations match'
-      : usable.length + ' nations in more than one campaign';
+    csel.value = usable.indexOf(keep) >= 0 ? keep : usable[0];
+    // The options were just rebuilt, so whatever the search box was hiding is
+    // no longer hidden. Re-running it puts the filter back over the new list.
+    if (crossFind && crossFind.value) crossFind.oninput();
     return csel.value !== keep;
   }
 
@@ -4476,12 +4468,6 @@ if (CROSS && CROSS.campaigns.length > 1) {
     }
   }
 
-  /* Typing narrows the list; it only redraws when the narrowing actually
-     moved which nation is selected. */
-  find.oninput = () => { if (fillNations()) drawCross(); };
-  find.onkeydown = ev => {
-    if (ev.key === 'Escape' && find.value) { find.value = ''; fillNations(); }
-  };
   msel2.onchange = () => { fillNations(); drawCross(); };
   csel.onchange = drawCross;
   axisBtn.onclick = () => {
@@ -4492,6 +4478,11 @@ if (CROSS && CROSS.campaigns.length > 1) {
   };
   msel2.value = CROSS.metrics[0].key;
   fillNations();
+  // Added after the options exist, so the first keystroke has something to
+  // filter. `searchSelect` fires the select's own onchange when the search
+  // moves the selection, which is what redraws the chart.
+  searchSelect(csel, 'search nations');
+  crossFind = csel.parentNode.querySelector('.selsearch');
   drawCross();
 }
 

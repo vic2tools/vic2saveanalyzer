@@ -263,7 +263,8 @@ so they mean what they mean above.
 
 Only nations that turn up in at least two of the campaigns are offered — a
 nation in one game has nothing to be set beside. There can be a great many of
-them, so the picker has a **search** beside it that filters by tag or by name. Whether there are any depends
+them, so the picker carries the same search box the Pops, Cultures and
+Technology pickers do. Whether there are any depends
 on the mods: two builds of the same total conversion share almost all their
 countries, while two unrelated total conversions share none at all and the
 section has nothing to say.
