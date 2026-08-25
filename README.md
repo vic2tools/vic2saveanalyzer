@@ -77,7 +77,7 @@ cost anything. Saves are read on every core the machine can spare.
 The report is one HTML file. It needs no server and no internet: open it in any
 browser, keep it, mail it, put it on a stick.
 
-Seven tabs across the top, and they share three habits worth knowing:
+Eight tabs across the top, and they share five habits worth knowing:
 
 **Nation pickers.** Anything comparing nations uses a searchable dropdown rather
 than a wall of tags. Type to filter by tag or by name, or use the presets:
@@ -323,7 +323,7 @@ there for when you want to do your own arithmetic.
 | `market_snapshot.csv` | Supply, demand and quantity sold per good, per save. |
 | `pops_by_type.csv` | Long format: date, tag, pop type, size. |
 | `pops_by_culture.csv` | Long format, with whether the culture was accepted. |
-| `ships_by_type.csv` | Long format: date, tag, ship type, count. |
+| `ships_by_type.csv` | Long format: date, tag, ship type, count, and the same ships at the strength the save finds them in. |
 | `brigades_by_type.csv` | Long format: date, tag, regiment type, count. |
 | `technologies.csv` | One row per nation per technology per save. |
 
@@ -368,8 +368,16 @@ Useful flags:
 
 There are a few more for interrogating the mobilization numbers —
 `--explain-mob TAG` and `--explain-mob-pool TAG` print exactly which
-technologies, inventions and modifiers produced a nation's figures. `--help`
-lists everything.
+technologies, inventions and modifiers produced a nation's figures.
+
+Two more read the inventions themselves. `--inventions TAG` prints every
+invention the last save says that nation has discovered, which is a list you can
+hold against the game's own technology screen. `--check-inventions` takes a
+folder of saves instead and grades the decode against those saves rather than
+against the mod folder: an invention gated behind a technology should be held
+almost only by nations that have that technology, so its holders fingerprint the
+gate it came through and a campaign can mark its own reading. `--help` lists
+everything.
 
 Saves are ordered by their in-game date, so filenames do not matter.
 
@@ -393,7 +401,7 @@ great power ranking, unit counts, populations, prices, war casualties. Where
 they cannot, the rule was measured against the game rather than guessed, and
 checked against readings from a hundred test nations plus several campaigns.
 
-Two things worth knowing:
+Four things worth knowing:
 
 - **Mobilization ceilings** are computed, not stored. They match the game
   exactly in nearly every case tested; the misses are single-brigade rounding at
@@ -406,6 +414,13 @@ Two things worth knowing:
   answer, the modifier is left out rather than guessed at, and
   `--explain-mob TAG` names which ones those were along with every source that
   did count.
+- **Inventions** are stored as bare numbers — positions in an array the
+  engine builds when it loads and writes down nowhere. That array is rebuilt by
+  reading the mod's `inventions/` folder the way the engine reads it, and the
+  result was confirmed against the game: inventions watched as they fired in a
+  live campaign decoded to their exact names, out of index order. Each campaign
+  also grades its own decode without the mod folder having to be trusted, which
+  is what `--check-inventions` reports.
 - **Battle dates** are recovered by reading the whole folder, which dates about
   90% of battles. The rest are shown as undated rather than filled in with a
   guess.
