@@ -371,7 +371,8 @@ def series_payload(results, names=None, floor=2):
     or run the same length, and which of the two is honest depends on the
     question being asked.
     """
-    from report import METRICS, GROWTH_METRICS, growth_series, year_fraction
+    from report import (METRICS, GAIN_METRICS, GROWTH_METRICS, gain_series,
+                        growth_series, year_fraction)
 
     names = names or {}
     seen = {}
@@ -408,6 +409,10 @@ def series_payload(results, names=None, floor=2):
                     slot[key] = growth_series(
                         ((d, slot[source].get(d)) for d in dates),
                         year_of.__getitem__)
+            for key, source, _label in GAIN_METRICS:
+                if source in slot:
+                    slot[key] = gain_series(
+                        (d, slot[source].get(d)) for d in dates)
 
         block = {}
         for tag, slot in by_tag.items():
@@ -440,6 +445,10 @@ def series_payload(results, names=None, floor=2):
         if key in used:
             metrics.append({"key": key, "label": label, "fmt": "percent",
                             "rate": 1, "rulebound": False})
+    for key, _source, label in GAIN_METRICS:
+        if key in used:
+            metrics.append({"key": key, "label": label, "fmt": "count",
+                            "delta": 1, "rulebound": False})
 
     return {
         "campaigns": campaigns,

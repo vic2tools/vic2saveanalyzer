@@ -226,14 +226,26 @@ nations you pick. Population, literacy, brigades, ships, factories, prestige, tr
 infamy and about twenty more. **Linear/Log** switches the vertical scale, which
 is what makes a small nation and a great power readable on one chart.
 
-Two of the measures are rates rather than quantities: **population growth** and
-**accepted-culture growth**, both as a percentage a year, compounded between one
-save and the one before it. A nation that grew 3% over six months plots at about
+**Literacy in own states** sits beside average literacy and leaves the colonies
+out. A colony's pops are counted in the national average and drag it down
+without saying anything about the metropole: in one campaign here Italy reads
+46.9% overall and 97.4% at home. It is the same restriction the soldier measure
+in the Military tab uses, so the two agree about what "our own states" means.
+
+Four of the measures are not quantities but changes in one. **Population growth**
+and **accepted-culture growth** are rates, as a percentage a year, compounded
+between one save and the one before it. A nation that grew 3% over six months plots at about
 6%. Saves less than three months apart are measured across the gap to the next one
 far enough away instead, because a fortnight of ordinary growth annualises into
 hundreds of percent and would bury everything else on the chart.
 Conquest moves population as surely as births do, so a spike is usually a border
 moving.
+
+**Population gain** and **accepted-culture gain** are the same two as counts:
+how many people, from one save to the next. A rate flatters a small nation --
+three thousand people on a hundred thousand outruns a million on eighty million
+-- and the two orderings disagree, which is the point of having both. In one
+campaign Burgundy adds 685,000 at 2.4% a year while China adds 400,000 at 1.2%.
 
 A dashed line joins a nation to the one it became, so Prussia's line runs into
 the North German Federation's and that into Germany's rather than three lines
@@ -250,7 +262,8 @@ Every measure the data visualizer offers is here, drawn from the same numbers,
 so they mean what they mean above.
 
 Only nations that turn up in at least two of the campaigns are offered — a
-nation in one game has nothing to be set beside. Whether there are any depends
+nation in one game has nothing to be set beside. There can be a great many of
+them, so the picker has a **search** beside it that filters by tag or by name. Whether there are any depends
 on the mods: two builds of the same total conversion share almost all their
 countries, while two unrelated total conversions share none at all and the
 section has nothing to say.
@@ -373,6 +386,12 @@ how many of its war goals were met. Search by war name or by any nation in it.
 
 Click a war for the detail:
 
+- **Belligerents**, split into those who were there from the start and those who
+  intervened later, each with the date it joined. A nation that was knocked out
+  before the end — a separate peace, or annexation — also carries the date it
+  left, which the war's own dates do not say. The engine removes everyone when
+  a war ends, so only an exit earlier than that is shown: of 18,657 recorded
+  removals in one campaign, 17,964 were simply the war finishing.
 - **War goals** — every demand the war carried: the one it opened with plus any
   added while it ran. **Taken at the peace** compares who held the state before
   the war against who held it after. **Occupied mid-war** is a different thing

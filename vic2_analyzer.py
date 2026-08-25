@@ -279,6 +279,11 @@ def blank_nation():
         # and which provinces those are is only known once the country block
         # has been read -- provinces come first in a save.
         "soldiers_at": defaultdict(int),
+        # Per province, because whether a province is colonial is not known
+        # until the country's state blocks are read, and provinces are read
+        # first. Same shape as `soldiers_at`, which exists for the same reason.
+        "pop_at": defaultdict(int),
+        "literacy_at": defaultdict(float),
         # good -> what this nation put on the world market, from the save's own
         # `saved_country_supply`. Summed over the nations still holding land it
         # comes back to the world market's supply pool exactly, which is what
@@ -441,12 +446,15 @@ def read_province(text, at, stop, nations, province_owner_sink,
         nat["pop_by_type"][poptype] += size
         if poptype == "soldiers":
             nat["soldiers_at"][province_id] += size
+        nat["pop_at"][province_id] += size
         if culture:
             nat["pop_by_culture"][culture] += size
             if poptype in MOB_CANDIDATES:
                 nat["mobilizable_pops"].append(
                     (poptype, culture, size, province_id))
-        nat["literacy_weighted"] += to_float(pop[_POP_LITERACY]) * size
+        literate = to_float(pop[_POP_LITERACY]) * size
+        nat["literacy_weighted"] += literate
+        nat["literacy_at"][province_id] += literate
         nat["con_weighted"] += to_float(pop[_POP_CON]) * size
         nat["mil_weighted"] += to_float(pop[_POP_MIL]) * size
         nat["money_total"] += to_float(pop[_POP_MONEY])
@@ -611,7 +619,8 @@ def read_war(block, active):
                     joined.append((key, unquote(str(who)),
                                    what == "add_attacker"))
                 elif what in ("rem_attacker", "rem_defender"):
-                    left.append((key, unquote(str(who))))
+                    left.append((key, unquote(str(who)),
+                                 what == "rem_attacker"))
 
     def read_goal(raw):
         if not isinstance(raw, dict):
@@ -640,7 +649,7 @@ def read_war(block, active):
     # `action` is not the war's start -- one war runs 1854 to 1858 with an
     # action of 1858.3.30, another has an action in the middle of its history.
     # The history's own dates are the reliable bounds.
-    dates = ([d for d, _w, _a in joined] + [d for d, _w in left]
+    dates = ([d for d, _w, _a in joined] + [d for d, _w, _a in left]
              + [b["date"] for b in battles if b["date"]])
     return {
         "name": unquote(str(block.get("name", ""))),
@@ -655,6 +664,10 @@ def read_war(block, active):
         # sets above so a consumer can tell an original belligerent from a
         # later intervention -- the sets alone collapse that distinction.
         "joins": [[d, w, a] for d, w, a in joined],
+        # And the other end of it. A nation can be knocked out of a war years
+        # before the war finishes -- a separate peace, or annexation -- and the
+        # join date alone reads as though it fought to the end.
+        "leaves": [[d, w, a] for d, w, a in left],
         "goals": goals,
         "goal": {
             "casus_belli": unquote(str(goal.get("casus_belli", ""))),
@@ -1526,13 +1539,26 @@ def finalize(nat, rate=1.0, pop_per_regiment=POP_SIZE_PER_REGIMENT,
     out["soldiers_noncolonial"] = stated
     out["soldiers_noncolonial_pct"] = (
         round(100.0 * stated / total, 3) if total else 0.0)
+    # Literacy the same way. A colony's pops are counted in the national average
+    # and drag it down without saying anything about the metropole -- Britain
+    # reads one way with India in the figure and another without. This is the
+    # same restriction the soldier measure above uses, so the two agree about
+    # what "our own states" means.
+    home_pop = sum(size for pid, size in nat["pop_at"].items()
+                   if pid not in colonial)
+    home_literate = sum(v for pid, v in nat["literacy_at"].items()
+                        if pid not in colonial)
+    out["avg_literacy_stated"] = (
+        round(home_literate / home_pop, 5) if home_pop else 0.0)
+    out["pop_noncolonial"] = home_pop
     return out
 
 
 BASE_COLUMNS = [
     "date", "year", "tag", "is_player", "primary_culture", "civilized",
     "provinces", "states", "total_pop", "accepted_pop", "accepted_pct",
-    "primary_culture_pop", "avg_literacy", "avg_consciousness", "avg_militancy",
+    "primary_culture_pop", "avg_literacy", "avg_literacy_stated",
+    "pop_noncolonial", "avg_consciousness", "avg_militancy",
     "brigades", "regular_brigades", "mobilized_brigades", "mobilizing",
     "is_mobilized", "armies", "ships", "navies",
     "factory_count", "factory_levels", "ports", "naval_base_levels",

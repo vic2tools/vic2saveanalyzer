@@ -31,6 +31,7 @@ METRICS = [
     ("accepted_pct", "Accepted share", "percent"),
     ("primary_culture_pop", "Primary-culture population", "count"),
     ("avg_literacy", "Average literacy", "fraction"),
+    ("avg_literacy_stated", "Literacy in own states", "fraction"),
     ("brigades", "Brigades (all)", "count"),
     ("regular_brigades", "Standing brigades", "count"),
     ("mobilized_brigades", "Mobilized brigades", "count"),
@@ -65,6 +66,17 @@ GROWTH_METRICS = [
     ("accepted_growth", "accepted_pop", "Accepted-culture growth (%/yr)"),
 ]
 
+# The same two as a count rather than a rate: how many people, not what
+# percentage. A rate flatters a small nation -- three thousand people on a
+# hundred thousand outruns a million on eighty million -- and buries who is
+# actually adding the most. Measured save to save rather than annualised,
+# because the question is what happened between these two readings.
+GAIN_METRICS = [
+    ("pop_gain", "total_pop", "Population gain (per save)"),
+    ("accepted_gain", "accepted_pop", "Accepted-culture gain (per save)"),
+]
+
+
 def growth_series(readings, year_of, span=None):
     """
     A compounded yearly rate from a run of readings, as {date: percent}.
@@ -93,6 +105,26 @@ def growth_series(readings, year_of, span=None):
                 anchor = (date, value)
             continue
         anchor = (date, value)
+    return out
+
+
+def gain_series(readings):
+    """
+    The change in a measure from one reading to the next, as {date: delta}.
+
+    Unlike a rate this needs no minimum span: a difference between two readings
+    is a fact about those two readings whenever they were taken. The first
+    reading has nothing before it and so records no gain.
+
+    `readings` is (date, value) in chronological order.
+    """
+    out, last = {}, None
+    for date, value in readings:
+        if value is None:
+            continue
+        if last is not None:
+            out[date] = round(value - last, 4)
+        last = value
     return out
 
 
@@ -275,7 +307,8 @@ def _war_key(war):
             war["start"])
 
 
-def _participants(tags, join_dates, is_attacker, original_tag, start):
+def _participants(tags, join_dates, is_attacker, original_tag, start,
+                  leave_dates=None, end=""):
     """
     Split one side's belligerents into original combatants and later
     interventions.
@@ -295,7 +328,25 @@ def _participants(tags, join_dates, is_attacker, original_tag, start):
             tag == original_tag or not joined
             or cutoff is None or year_fraction(joined) <= cutoff
         )
-        out.append({"tag": tag, "joined": joined, "original": original})
+        row = {"tag": tag, "joined": joined, "original": original}
+        # The engine removes everybody when a war ends, so most recorded exits
+        # are the war finishing rather than anyone leaving it: 17,964 of 18,657
+        # in one campaign fall on the war's own end date. Only an exit before
+        # that says something the war's dates do not already say.
+        #
+        # An exit outside the war's own span is not this war's. A save keeps
+        # only its most recent history and drops the rest, so an old war can be
+        # reported ending earlier by a later save than by an earlier one, and a
+        # handful of war names repeat with the same seeded start date. Either
+        # can leave a date here that belongs to a different fight; shown, it
+        # would read as a nation leaving a war years after that war ended.
+        gone = (leave_dates or {}).get((tag, is_attacker), "")
+        if gone and gone != end:
+            after_start = not joined or year_fraction(gone) >= year_fraction(joined)
+            before_end = not end or year_fraction(gone) < year_fraction(end)
+            if after_start and before_end:
+                row["left"] = gone
+        out.append(row)
     out.sort(key=lambda p: (not p["original"],
                              year_fraction(p["joined"]) if p["joined"] else 0.0,
                              p["tag"]))
@@ -406,6 +457,16 @@ def fold_wars(book, war_list):
             k = (w, a)
             if k not in jd or year_fraction(d) < year_fraction(jd[k]):
                 jd[k] = d
+        # And when each left. The latest, not the earliest: a nation that was
+        # knocked out, came back and was knocked out again finished on the last
+        # of those, and that is the one the war ended for it on.
+        ld = held.setdefault("leave_dates", {})
+        for d, w, a in war.get("leaves", ()):
+            if not d:
+                continue
+            k = (w, a)
+            if k not in ld or year_fraction(d) > year_fraction(ld[k]):
+                ld[k] = d
         # Goals added mid-war vanish when it ends, so take them from whichever
         # save caught the war still running.
         goals = held.setdefault("goalbook", {})
@@ -534,11 +595,13 @@ def build_wars(parsed, province_names=None, province_regions=None,
             "attacker_parties": _participants(
                 war["attackers"] or [war["original_attacker"]],
                 war.get("join_dates", {}), True,
-                war["original_attacker"], war["start"]),
+                war["original_attacker"], war["start"],
+                war.get("leave_dates", {}), war["end"]),
             "defender_parties": _participants(
                 war["defenders"] or [war["original_defender"]],
                 war.get("join_dates", {}), False,
-                war["original_defender"], war["start"]),
+                war["original_defender"], war["start"],
+                war.get("leave_dates", {}), war["end"]),
             "goal": war["goal"],
             "losses": [atk, dfd],
             "outcome": outcome,
@@ -765,6 +828,13 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
             have = series[tag][source]
             series[tag][key] = growth_series(
                 ((d, have.get(d)) for d in dates), year_of.__getitem__)
+    for key, source, _label in GAIN_METRICS:
+        if source not in metric_keys:
+            continue
+        growth_keys.append(key)
+        for tag in tags:
+            have = series[tag][source]
+            series[tag][key] = gain_series((d, have.get(d)) for d in dates)
 
     ships, ship_types = {}, set()
     # What those hulls are worth as they stand, when that is not simply the
@@ -907,6 +977,9 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
         ] + [
             {"key": key, "label": label, "fmt": "percent", "rate": 1}
             for key, _source, label in GROWTH_METRICS if key in growth_keys
+        ] + [
+            {"key": key, "label": label, "fmt": "count", "delta": 1}
+            for key, _source, label in GAIN_METRICS if key in growth_keys
         ],
         "series": series,
         "facts": facts,

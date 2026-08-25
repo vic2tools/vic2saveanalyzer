@@ -386,6 +386,13 @@ table.mini.fitmini th,table.mini.fitmini td{white-space:normal;
    line is the smaller cost. */
 .note{color:var(--ink-dim);font-size:13px;margin:10px 2px 0}
 .stackwrap{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
+/* The cross-campaign picker can hold every nation two campaigns share -- 96 in
+   one pairing here -- which is more than a dropdown is any use for. */
+#crossfind{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;
+  background:var(--ground);color:var(--ink);border:1px solid var(--rule);
+  border-radius:3px;padding:4px 7px;width:150px}
+#crossfind::placeholder{color:var(--ink-dim);opacity:.75}
+#crossnation{min-width:230px}
 .slegend{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;
   color:var(--ink-dim);display:flex;align-items:center;gap:6px}
 .slegend i{width:9px;height:9px;display:block}
@@ -485,7 +492,9 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
       <h2>Cross-campaign comparison</h2>
       <p class="note" id="crossintro"></p>
       <div class="controls">
-        <label class="tb-label" for="crossnation" style="margin:0">Nation</label>
+        <label class="tb-label" for="crossfind" style="margin:0">Nation</label>
+        <input id="crossfind" type="search" placeholder="search tag or name"
+               autocomplete="off" spellcheck="false">
         <select id="crossnation"></select>
         <label class="tb-label" for="crossmetric" style="margin:0">Measure</label>
         <select id="crossmetric"></select>
@@ -4047,7 +4056,11 @@ function belRow(p) {
   return `<div class="belrow">${warFlag(p.tag)}`
     + `<b style="color:${colourFor(p.tag)}">${known ? nameOf(p.tag) : p.tag}</b>`
     + `<span class="belleader"></span>`
-    + `<span class="rk">${p.joined || 'from the start'}</span></div>`;
+    + `<span class="rk">${p.joined || 'from the start'}`
+    /* A nation can be knocked out years before the war ends -- a separate
+       peace, or annexation -- and a join date on its own reads as though it
+       fought to the finish. */
+    + (p.left ? ` &rarr; out ${p.left}` : '') + `</span></div>`;
 }
 function belColumn(title, parties) {
   const original = parties.filter(p => p.original);
@@ -4286,6 +4299,7 @@ const CROSS = DATA.cross;
 if (CROSS && CROSS.campaigns.length > 1) {
   document.getElementById('crosssec').hidden = false;
   const csel = document.getElementById('crossnation');
+  const find = document.getElementById('crossfind');
   const msel2 = document.getElementById('crossmetric');
   const axisBtn = document.getElementById('crossaxis');
   let relative = false;
@@ -4312,6 +4326,7 @@ if (CROSS && CROSS.campaigns.length > 1) {
 
   function fillNations() {
     const key = msel2.value || CROSS.metrics[0].key;
+    const needle = (find.value || '').trim().toLowerCase();
     /* A nation is only offered when the chosen measure exists for it in at
        least two campaigns; one line is not a comparison. Biggest first, so the
        list opens on something worth looking at. */
@@ -4320,15 +4335,27 @@ if (CROSS && CROSS.campaigns.length > 1) {
         bl => (bl[t] && bl[t].pop ? bl[t].pop[bl[t].pop.length - 1][2] : 0)));
       return peak(b) - peak(a);
     });
+    /* Filtering hides options rather than dropping the nation currently
+       drawn: a search that emptied the chart the moment it stopped matching
+       would take the reader's place away for a keystroke. */
+    const shown = needle
+      ? usable.filter(t => (t + ' ' + (CROSS.tagNames[t] || ''))
+                             .toLowerCase().includes(needle))
+      : usable;
     const keep = csel.value;
+    const list = shown.length ? shown : usable;
     csel.textContent = '';
-    for (const t of usable) {
+    for (const t of list) {
       const o = document.createElement('option');
       o.value = t;
       o.textContent = (CROSS.tagNames[t] || t) + '  (' + t + ')';
       csel.appendChild(o);
     }
-    if (usable.indexOf(keep) >= 0) csel.value = keep;
+    csel.value = list.indexOf(keep) >= 0 ? keep : list[0];
+    find.title = needle
+      ? shown.length + ' of ' + usable.length + ' nations match'
+      : usable.length + ' nations in more than one campaign';
+    return csel.value !== keep;
   }
 
   function drawCross() {
@@ -4449,6 +4476,12 @@ if (CROSS && CROSS.campaigns.length > 1) {
     }
   }
 
+  /* Typing narrows the list; it only redraws when the narrowing actually
+     moved which nation is selected. */
+  find.oninput = () => { if (fillNations()) drawCross(); };
+  find.onkeydown = ev => {
+    if (ev.key === 'Escape' && find.value) { find.value = ''; fillNations(); }
+  };
   msel2.onchange = () => { fillNations(); drawCross(); };
   csel.onchange = drawCross;
   axisBtn.onclick = () => {
