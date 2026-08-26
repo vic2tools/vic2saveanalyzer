@@ -1947,15 +1947,29 @@ def run_cross(parent, game_root, args, verbose=True):
     # anything that can be inferred, so the search is skipped entirely.
     if args.mod_path:
         label = os.path.basename(os.path.normpath(args.mod_path))
-        survey = [{"name": name, "path": path, "files": files,
-                   "mod_label": label, "mod_path": args.mod_path,
-                   "candidates": []}
-                  for name, path, files in crossmod.campaigns_in(parent)]
+        survey = []
+        for name, path, files in crossmod.campaigns_in(parent):
+            # One mod for all of them is the general instruction; a campaign
+            # named outright is the particular one, and the particular wins.
+            # They used to be read in the other order, so `--campaign-mod`
+            # went unread whenever `--mod-path` was there beside it.
+            told = chosen.get(name.lower())
+            survey.append({
+                "name": name, "path": path, "files": files,
+                "mod_label": os.path.basename(os.path.normpath(told))
+                             if told else label,
+                "mod_path": told or args.mod_path,
+                "candidates": [], "told": bool(told)})
         if verbose:
-            print("Campaigns found under %s, all read under %s:"
-                  % (parent, label))
+            odd = sum(1 for e in survey if e.get("told"))
+            print("Campaigns found under %s, read under %s%s:"
+                  % (parent, label,
+                     "" if not odd else " except where named"))
             for entry in survey:
-                print("  %-22s %3d saves" % (entry["name"], len(entry["files"])))
+                print("  %-22s %3d saves%s"
+                      % (entry["name"], len(entry["files"]),
+                         "  ->  %s   (as told)" % entry["mod_label"]
+                         if entry.get("told") else ""))
     elif not game_root and not chosen:
         sys.exit("--cross needs --game-root (the Victoria 2 install folder, the "
                  "one with mod/ inside) to work each campaign's mod out, "
@@ -2174,7 +2188,8 @@ def main():
                          "given as its folder name then the mod path. Repeat "
                          "for as many as you like. Campaigns not named this "
                          "way are still worked out from their own saves, so "
-                         "you only have to settle the ones you care about.")
+                         "you only have to settle the ones you care about. "
+                         "Beats --mod-path for the campaigns it names.")
     ap.add_argument("--primary", metavar="NAME",
                     help="with --cross, which campaign the rest of the report "
                          "is built from. The folder's own name. Without it the "

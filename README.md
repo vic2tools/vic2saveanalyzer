@@ -62,9 +62,17 @@ down through subfolders rather than looking only at the children — so a tidy
 saves directory reads the same as a flat one.
 
 A **Campaigns** panel then lists what it found, one row each, with the save
-count and a mod. Every row starts on *work it out from the saves*; set one to a
-named mod and that campaign is read under it with no guessing at all. Settle the
-ones you care about and leave the rest — the two are not exclusive.
+count and a mod. What a row starts on follows the mod box above it, which has
+already answered the question one way or the other: name a mod there and every
+row starts on *the mod picked above*, so that is what they are read under; point
+the box at `Victoria 2/mod` and every row starts on *work it out from the
+saves*.
+
+Either way the rest of your installed mods stay on the list, which is the point
+of a row per campaign: move the one campaign that was played on something else
+onto it, or send a single row back to being worked out while the others keep the
+mod you named. Settle the ones you care about and leave the rest — the two are
+not exclusive.
 
 Doing that is worth knowing about, because two mods built on the same base can
 agree on every country, every technology and every invention a save records,
@@ -507,8 +515,8 @@ everything.
 Four more read a folder of campaigns rather than one. `--cross` treats the
 saves path as a folder of campaign folders; `--game-root` says where the mods
 live, so each campaign can be matched to one; `--campaign-mod "NAME=PATH"`
-names the mod for one campaign outright and can be repeated, with anything
-unnamed still worked out; `--primary NAME` picks which campaign the rest of the
+names the mod for one campaign outright and can be repeated, beating
+`--mod-path` for the campaigns it names, with anything unnamed still worked out; `--primary NAME` picks which campaign the rest of the
 report is about, instead of whichever has the most saves.
 
 ```bash

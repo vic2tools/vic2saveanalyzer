@@ -31,6 +31,7 @@ import vic2_analyzer
 
 APP = "Victoria 2 Save Analyzer"
 AUTO = "(work it out from the saves)"
+SELECTED = "(the mod picked above)"
 
 
 def human_size(count):
@@ -94,6 +95,25 @@ def mod_kind(path):
         except OSError:
             pass
     return "bad", None
+
+
+def search_root(path):
+    """The install to search for mods, given whatever is in the mod box.
+
+    The folder of mods answers this outright. One mod answers it too: a mod
+    lives in `Victoria 2/mod/<name>`, so the install is two folders up. That
+    is what lets one campaign be left on "work it out" while the rest are
+    read under the mod that was picked. Returns None when there is nowhere
+    to search, which is the mod box holding a mod kept off on its own.
+    """
+    kind, where = mod_kind(path)
+    if kind == "home":
+        return where
+    if kind == "mod":
+        home = os.path.dirname(os.path.normpath(path))
+        if os.path.basename(home).lower() == "mod":
+            return os.path.dirname(home)
+    return None
 
 
 SETTINGS = os.path.join(
@@ -371,7 +391,19 @@ class App:
             var.set(os.path.normpath(chosen))
 
     def mod_choices(self):
-        """`(work it out)` plus every mod beside the one in the mod box."""
+        """What a campaign row offers, and which of those it starts on.
+
+        The mod box has already asked the question one way or the other, and
+        the rows should not contradict it. A named mod in the box is an
+        answer: every campaign is read under it unless a row says otherwise,
+        so that is what the rows show, and working it out from the saves
+        becomes one of the alternatives. The folder mods live in is not an
+        answer but a place to look, so there the search leads instead.
+
+        Either way the neighbouring mods stay on the list, because the whole
+        reason for a row per campaign is the one campaign that was played on
+        a different mod from the rest.
+        """
         mod = self.mod.get().strip()
         kind, where = mod_kind(mod)
         if kind == "home":
@@ -379,7 +411,8 @@ class App:
         elif kind == "mod":
             home = os.path.dirname(os.path.normpath(mod))
         else:
-            return [AUTO]
+            self.mod_paths = {}
+            return [AUTO], AUTO
         out = {}
         try:
             for name in sorted(os.listdir(home)):
@@ -389,7 +422,16 @@ class App:
         except OSError:
             pass
         self.mod_paths = out
-        return [AUTO] + list(out)
+        if kind != "mod":
+            return [AUTO] + list(out), AUTO
+        # The one in the box is already the first entry; listing it again
+        # under its own name would be two ways to say the same thing.
+        here = os.path.normcase(os.path.normpath(mod))
+        rest = [n for n in out
+                if os.path.normcase(os.path.normpath(out[n])) != here]
+        # Offered only when there is somewhere to search.
+        search = [AUTO] if search_root(mod) else []
+        return [SELECTED] + search + rest, SELECTED
 
     def refresh_campaigns(self):
         """
@@ -397,8 +439,8 @@ class App:
 
         Only the folders are read here, never the saves: this runs on every
         keystroke in the saves box, and identifying a mod means reading a whole
-        30 MB file. Rows default to working it out, which happens during the
-        run, and a row set to a named mod skips that entirely.
+        30 MB file. Which mod a row starts on follows the mod box, and a row
+        that names one skips the identifying entirely.
         """
         path = self.saves.get().strip()
         found = []
@@ -420,7 +462,7 @@ class App:
         for child in self.camp_inner.winfo_children():
             child.destroy()
         self.rows = []
-        choices = self.mod_choices()
+        choices, fallback = self.mod_choices()
         for name, _path, files in found:
             line = ttk.Frame(self.camp_inner)
             line.pack(fill="x", pady=1)
@@ -429,9 +471,11 @@ class App:
             ttk.Label(line, text=name, width=22).pack(side="left")
             ttk.Label(line, text="%d saves" % len(files), width=9,
                       foreground="#666").pack(side="left")
+            # A row keeps what it was set to as long as that still means
+            # something; changing the mod box out from under it does not.
             picked = tk.StringVar(
                 value=keep_mods.get(name) if keep_mods.get(name) in choices
-                else AUTO)
+                else fallback)
             box = ttk.Combobox(line, state="readonly", width=32,
                                textvariable=picked, values=choices)
             box.pack(side="left", padx=6)
@@ -535,10 +579,7 @@ class App:
             return
 
         mod = self.mod.get().strip()
-        # `mod_kind` hands back the mod when one was picked and the game root
-        # when the folder of mods was, so only the second is a search root.
-        kind, where = mod_kind(mod)
-        game_root = where if kind == "home" else None
+        kind, _where = mod_kind(mod)
         if kind == "bad":
             messagebox.showerror(
                 APP, "That folder is neither a mod nor the folder mods live "
@@ -547,20 +588,63 @@ class App:
                      "Victoria 2/mod itself, and each campaign's mod will be "
                      "worked out from its own saves.")
             return
+        # Several campaigns, or a mod that has to be identified, both mean
+        # the cross-campaign path. It reads one campaign quite happily, so a
+        # single folder with an unidentified mod goes through it too.
+        cross = shape == "many" or kind == "home"
+
+        # With the rows on screen they are the instruction, and every campaign
+        # is named to the run one at a time. Before this the rows were only
+        # read where they named a mod outright, and a mod in the box was passed
+        # as "all of them, under this" -- the same answer the rows were showing
+        # but arrived at without them, so a row moved to a neighbouring mod was
+        # quietly overruled. Naming every campaign settles every campaign, and
+        # leaves the search to run only where a row asked for it.
+        told, wants_search = [], False
+        rows = self.rows if cross else []
+        for row in rows:
+            pick = row["mod"].get()
+            if pick == AUTO:
+                wants_search = True
+                continue
+            told.append("%s=%s" % (
+                row["name"],
+                mod if pick == SELECTED else self.mod_paths.get(pick, pick)))
+        if rows:
+            mod_arg = ""
+            game_root = search_root(mod) if wants_search else None
+        else:
+            # One campaign, or none listed: the box speaks for itself.
+            mod_arg = mod
+            game_root = search_root(mod) if kind == "home" else None
+
+        # Asked before the question below, not after: there is no point
+        # offering to carry on without a mod and then refusing to.
+        if wants_search and not game_root:
+            messagebox.showerror(
+                APP, "There is nowhere to look for the mod of every campaign "
+                     "still set to work it out from its saves.\n\nPoint the "
+                     "mod box at Victoria 2/mod, or name each campaign's mod "
+                     "in the list beside it.")
+            return
         if not mod and not messagebox.askokcancel(
                 APP, "Without a mod folder the report loses the map, the "
                      "technology tree, the great powers and the war goals, and "
                      "mobilisation size falls back to a fixed guess.\n\n"
                      "Carry on anyway?"):
             return
-        # Several campaigns, or a mod that has to be identified, both mean
-        # the cross-campaign path. It reads one campaign quite happily, so a
-        # single folder with an unidentified mod goes through it too.
-        cross = shape == "many" or kind == "home"
+
         if cross and shape == "many":
+            left = campaigns - len(told)
             self.log_queue.put(
-                "%d campaigns under that folder. Each will be read under the "
-                "mod its own saves point to.\n\n" % campaigns)
+                "%d campaigns under that folder. %s\n\n"
+                % (campaigns,
+                   "Each will be read under the mod its own saves point to."
+                   if not told else
+                   "Each will be read under the mod named beside it."
+                   if not left else
+                   "%d read under the mod named beside it, %d under the mod "
+                   "their own saves point to." % (len(told), left)))
 
         out = self.out.get().strip() or default_out()
         self.out.set(out)
@@ -577,15 +661,9 @@ class App:
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
         chosen = self.primary.get() if cross else ""
-        told = []
-        if cross:
-            for row in self.rows:
-                pick = row["mod"].get()
-                if pick and pick != AUTO:
-                    told.append("%s=%s" % (row["name"],
-                                           self.mod_paths.get(pick, pick)))
         threading.Thread(target=self.work,
-                         args=(saves, mod, out, cross, game_root, chosen, told),
+                         args=(saves, mod_arg, out, cross, game_root, chosen,
+                               told),
                          daemon=True).start()
 
     def work(self, saves, mod, out, cross=False, game_root=None, primary="",
@@ -604,6 +682,8 @@ class App:
         # root made the search look for candidates *inside* that mod, where
         # the only thing it could find was the mod itself under the wrong
         # name -- so every campaign was matched to it whether it fitted or not.
+        # Where the campaign rows are showing, neither is sent as a blanket:
+        # `mod` arrives empty and each campaign has been named instead.
         if game_root:
             argv += ["--game-root", game_root]
         elif mod:
