@@ -3245,6 +3245,7 @@ function mapPaintBase(date) {
     octx.putImageData(oimg, 0, 0);
   }
   mapBaseKey = key;
+  mapMini = null;          // made from the base that has just been replaced
 }
 
 /* One tile of diagonal stripes, built once and used as a mask on the screen
@@ -3315,16 +3316,65 @@ function mapBlit(target, layer, s, cw, ch) {
                    (sx - mapOX) * s, (sy - mapOY) * s, sw * s, sh * s);
 }
 
-function mapFit() {          // screen pixels per map pixel at zoom 1
-  const canvas = document.getElementById('mapcanvas');
-  return (canvas.clientWidth || MAP.w) / MAP.w;
+/* The raster reduced to the size it is actually being drawn at.
+
+   Zoomed out -- which is where the map starts and where most panning happens --
+   every frame handed the browser 12.1 megapixels and asked for a fifth-size
+   copy, and got charged for the reduction each time: 6.7ms a frame at zoom 1
+   against 0.9ms zoomed in, where far less of the raster is in play. Panning
+   does not change that reduction, only where it is read from, so it is done
+   once and kept.
+
+   Keyed on the scale, so a pan reuses it and only a zoom rebuilds. Only built
+   when shrinking; magnifying reads from the full raster through `mapBlit`,
+   which is already cheap and would otherwise mean building something larger
+   than the map itself. */
+let mapMini = null;
+function mapMinified(s) {
+  const w = Math.max(1, Math.round(MAP.w * s));
+  const h = Math.max(1, Math.round(MAP.h * s));
+  const key = mapBaseKey + '|' + w + 'x' + h;
+  if (mapMini && mapMini.key === key) return mapMini;
+  const reduce = src => {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const x = c.getContext('2d');
+    x.imageSmoothingEnabled = true;
+    x.imageSmoothingQuality = 'high';
+    x.drawImage(src, 0, 0, w, h);
+    return c;
+  };
+  mapMini = {key, w, h, base: reduce(mapBase),
+             occ: mapOccAny ? reduce(mapOccLayer) : null};
+  return mapMini;
 }
 
-function mapClamp() {
+/* Whichever of the two is cheaper to read at this scale. Below 1:1 that is the
+   reduced copy, drawn at its own size; above it the full raster, clipped to
+   what shows. */
+function mapPaintLayer(target, layer, mini, s, cw, ch) {
+  if (mini) target.drawImage(layer, Math.round(-mapOX * s), Math.round(-mapOY * s));
+  else mapBlit(target, layer, s, cw, ch);
+}
+
+function mapFit(cw) {        // screen pixels per map pixel at zoom 1
+  if (cw === undefined) {
+    const canvas = document.getElementById('mapcanvas');
+    cw = canvas.clientWidth || MAP.w;
+  }
+  return cw / MAP.w;
+}
+
+function mapClamp(cw, ch) {
   const canvas = document.getElementById('mapcanvas');
-  const s = mapFit() * mapZoom;
-  const viewW = (canvas.clientWidth || MAP.w) / s;
-  const viewH = (canvas.clientHeight || MAP.h) / s;
+  // Reading `clientWidth` makes the browser settle the layout before it can
+  // answer. The render already knows the size, so it passes it in rather than
+  // asking again twice.
+  if (cw === undefined) cw = canvas.clientWidth || MAP.w;
+  if (ch === undefined) ch = canvas.clientHeight || MAP.h;
+  const s = mapFit(cw) * mapZoom;
+  const viewW = cw / s;
+  const viewH = ch / s;
   mapOX = viewW >= MAP.w ? (MAP.w - viewW) / 2
                          : Math.min(Math.max(mapOX, 0), MAP.w - viewW);
   mapOY = viewH >= MAP.h ? (MAP.h - viewH) / 2
@@ -3336,7 +3386,17 @@ function mapClamp() {
    With the base-game fallback in the mod loader this should stay at zero. */
 let mapUnplaced = 0, mapUnplacedBrigades = 0;
 
+/* The dots do not move when the map does. Panning changes where each one is
+   drawn, not which ones there are or what is in them, so the grouping is kept
+   until the save or the nation picker changes it -- the two things that can. */
+let mapStackCache = null;
 function mapStacks(date) {
+  const stamp = date + '|' + (mapTags === null ? '*' : mapTags.join(','));
+  if (mapStackCache && mapStackCache.stamp === stamp) {
+    mapUnplaced = mapStackCache.unplaced;
+    mapUnplacedBrigades = mapStackCache.unplacedBrigades;
+    return mapStackCache.dots;
+  }
   const armies = (MAP.armies || {})[date] || {};
   // `mapTags` is null until the picker is touched, which is what makes the
   // map open showing every nation. After that an empty list is a real
@@ -3360,6 +3420,8 @@ function mapStacks(date) {
                total: stacks.reduce((s, a) => s + a.n, 0)});
   }
   dots.sort((a, b) => b.total - a.total);   // small stacks draw last, on top
+  mapStackCache = {stamp, dots, unplaced: mapUnplaced,
+                   unplacedBrigades: mapUnplacedBrigades};
   return dots;
 }
 
@@ -3395,13 +3457,15 @@ function mapRender() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cw, ch);
 
-  mapClamp();
-  const s = mapFit() * mapZoom;
+  mapClamp(cw, ch);
+  const s = mapFit(cw) * mapZoom;
   // crisp province edges when magnifying, but let the browser average when the
   // raster is finer than the screen, or shrinking it turns into noise
   ctx.imageSmoothingEnabled = s < 1;
   ctx.imageSmoothingQuality = 'high';
-  mapBlit(ctx, mapBase, s, cw, ch);
+  // Below 1:1 the reduction is cached and this is a straight copy.
+  const mini = s < 1 ? mapMinified(s) : null;
+  mapPaintLayer(ctx, mini ? mini.base : mapBase, mini, s, cw, ch);
 
   if (mapHatchOccupied && mapOccAny) {
     const scratch = mapScratch(canvas.width, canvas.height);
@@ -3410,7 +3474,7 @@ function mapRender() {
     sc.clearRect(0, 0, cw, ch);
     sc.imageSmoothingEnabled = s < 1;
     sc.imageSmoothingQuality = 'high';
-    mapBlit(sc, mapOccLayer, s, cw, ch);
+    mapPaintLayer(sc, mini ? mini.occ : mapOccLayer, mini, s, cw, ch);
     sc.globalCompositeOperation = 'destination-in';
     sc.fillStyle = mapHatchPattern(sc);
     sc.fillRect(0, 0, cw, ch);
