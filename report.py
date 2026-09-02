@@ -844,7 +844,8 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
                  base_prices=None, great_powers=None, flags=None,
                  technology=None, wars=None, succession=None,
                  naval=None, supply=None, culture_names=None,
-                 display_names=None, cross=None, filename="report.html"):
+                 display_names=None, cross=None, world_pop=None,
+                 filename="report.html"):
     os.makedirs(outdir, exist_ok=True)
     tag_names = tag_names or {}
 
@@ -1052,6 +1053,8 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
         "techOrder": tech_order,
         "techMeta": tech_meta,
         "techsBy": techs_by,
+        # Everyone alive, not just everyone with a government.
+        "worldPop": world_pop or {},
         "pops": pops,
         "popTypes": sorted(pop_types),
         "cultures": cultures,

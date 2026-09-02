@@ -484,6 +484,9 @@ well is a different number in each case.">
         <select id="metric"></select>
         <span id="pick-nations"></span>
         <button id="scale" aria-pressed="false" title="Switch between linear and logarithmic vertical scale">Linear</button>
+        <button id="worldline" aria-pressed="false" title="Add everyone alive as
+a line of its own, land nobody owns included. Off by default because the world
+is larger than any nation in it and flattens them against the axis.">World</button>
       </div>
       <figure>
         <svg id="chart" viewBox="0 0 1000 460" role="img" aria-label="Metric plotted over time by nation"></svg>
@@ -1714,6 +1717,13 @@ scaleBtn.onclick = () => {
   drawChart();
 };
 
+const worldBtn = document.getElementById('worldline');
+worldBtn.onclick = () => {
+  worldLine = !worldLine;
+  worldBtn.setAttribute('aria-pressed', worldLine);
+  drawChart();
+};
+
 /* [predecessor, successor] for every nation that turned into another one. */
 const SUCCESSIONS = Object.entries(DATA.succession || {}).flatMap(
   ([to, info]) => (info.from || []).map(([from]) => [from, to]));
@@ -1749,23 +1759,50 @@ const SUCCESSIONS = Object.entries(DATA.succession || {}).flatMap(
    chart says so, and draws the line that separates growing from shrinking. */
 const isRate = key => (DATA.metrics.find(m => m.key === key) || {}).rate === 1;
 
+/* Everyone alive, as a series the chart can draw beside the nations.
+
+   It is not a nation and cannot be one: it counts pops on land nobody owns,
+   which belong to no tag at all -- 6.4% of the world in 1836 and none of it by
+   1908 -- so it comes from its own total rather than from adding the nations
+   up. Offered only against population, since nothing else on the measure list
+   has a world figure behind it. */
+let worldLine = false;
+function worldSeries(key) {
+  if (!worldLine || key !== 'total_pop' || !DATA.worldPop) return [];
+  const pts = DATA.dates
+    .map((d, i) => [years[i], DATA.worldPop[d]])
+    .filter(p => p[1] !== undefined);
+  return pts.length ? [{name: 'World', colour: 'var(--ink-dim)', pts}] : [];
+}
+
 function drawChart() {
   const key = metricSel.value;
   const shown = DATA.tags.filter(t => natTags.includes(t));
   const rate = isRate(key);
+  const worldBtn = document.getElementById('worldline');
+  // Nothing else on the list has a world total behind it, so the button says
+  // so by going quiet rather than drawing a line that would be a guess. Being
+  // switched on does not survive that: a measure with no world figure cannot
+  // be showing one, so the button gives up the state as well as the colour.
+  worldBtn.disabled = key !== 'total_pop' || !DATA.worldPop;
+  if (worldBtn.disabled && worldLine) {
+    worldLine = false;
+    worldBtn.setAttribute('aria-pressed', 'false');
+  }
   plot(document.getElementById('chart'), {
     series: shown.map(tag => ({
       name: tag, colour: colourFor(tag),
       pts: DATA.dates.map((d, i) => [years[i], DATA.series[tag][key][d]])
                      .filter(p => p[1] !== undefined),
-    })),
+    })).concat(worldSeries(key)),
     xOf: xOfSave, xTicks: saveTicks, hoverXs: saveHovers,
     fmt: fmtFor(key), log: logScale, markers: true,
     links: SUCCESSIONS,
     baseline: rate ? 0 : null,
     readout: document.getElementById('readout'),
     idle: 'Hover the plot to read values at a date.',
-    emptyMsg: shown.length ? 'No data for this measure.' : 'Select a nation.',
+    emptyMsg: shown.length || worldSeries(key).length
+      ? 'No data for this measure.' : 'Select a nation.',
   });
   const note = document.getElementById('ratenote');
   note.hidden = !rate;
@@ -3523,12 +3560,39 @@ function mapRenderSoon() {
   mapFrame = requestAnimationFrame(() => { mapFrame = 0; mapRender(); });
 }
 
+/* Everyone alive at this save, land nobody owns included.
+
+   Summing the nations would have been easier and would have been wrong: pops
+   on land nobody has colonised yet belong to no nation, and they are 6.4% of
+   the world in 1836 and none of it by 1908. A total built that way would climb
+   as the map was carved up and read as people being born. */
+function mapWorldPop(date) {
+  const el = document.getElementById('mapworld');
+  if (!el) return;
+  const n = (DATA.worldPop || {})[date];
+  if (!n) { el.textContent = ''; return; }
+  const first = (DATA.worldPop || {})[DATA.dates[0]] || 0;
+  const since = first && n !== first
+    ? '  ' + (n > first ? '+' : '−')
+      + Math.abs((n / first - 1) * 100).toFixed(1) + '% since ' + DATA.dates[0]
+    : '';
+  el.textContent = '·  world population ' + n.toLocaleString() + since;
+}
+
 function mapRender() {
   if (!MAP) return;
   const canvas = document.getElementById('mapcanvas');
   const date = document.getElementById('mapsave').value || DATA.lastDate;
   document.getElementById('mapdate').textContent = date;
-  mapPaintBase(date);
+  mapWorldPop(date);          // beside the date it was counted on
+  /* Zoomed out, nothing reads the full 12-megapixel raster -- the layers are
+     painted straight onto a canvas the size of the panel instead. It is built
+     only when magnifying actually needs it, which is what takes the cost of
+     changing save off the common path. */
+  mapDecoded();               // the palettes below read the decoded tables
+  mapSmallDate = date;
+  mapOccAny = mapOccPalette(date).some(c => c >= 0);
+  if (mapMiniDate !== date) { mapMini = null; mapMiniDate = date; }
 
   const dpr = window.devicePixelRatio || 1;
   const cw = canvas.clientWidth || MAP.w, ch = canvas.clientHeight || MAP.h;

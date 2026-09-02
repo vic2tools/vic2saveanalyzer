@@ -468,6 +468,15 @@ def read_province(text, at, stop, nations, province_owner_sink,
             elif key in ("naval_base", "fort", "railroad"):
                 buildings[key] = parse_block(Tokens(text, block_at))
 
+    # Counted before the owner check, because land nobody has colonised yet
+    # still holds people and they are still part of the world. In 1836 that is
+    # 6.4% of everyone alive, and by 1908 it is none of them -- so a world
+    # total summed from nations alone would show the population climbing partly
+    # because the map was being carved up, which is not what anyone reading it
+    # would take it to mean.
+    if world_sink is not None:
+        for pop in pops:
+            world_sink[0] += to_int(pop[_POP_SIZE])
     if not owner:
         return
     if owner_map is not None and province_id is not None:
@@ -901,6 +910,7 @@ def analyze_save(path, verbose=True):
     province_counts = defaultdict(int)
     pop_registry = {}
     meta = {"file": os.path.basename(path), "date": "", "player": "", "market": None}
+    world_pop = [0]
     province_owner = {}
     great_nations = []
     wars = []
@@ -929,7 +939,8 @@ def analyze_save(path, verbose=True):
         if key.isdigit():
             read_province(text, at, stop, nations, province_counts,
                           pop_registry, province_id=int(key),
-                          owner_map=province_owner, flat=flat)
+                          owner_map=province_owner, flat=flat,
+                          world_sink=world_pop)
         elif looks_like_country_tag(key):
             read_country(text, at, stop, key, nations, flat=flat)
         elif key in ("active_war", "previous_war"):
@@ -984,6 +995,7 @@ def analyze_save(path, verbose=True):
         nat["mob_excluded_culture"] = dropped
         nat["mobilizable_pops"] = keep
 
+    meta["world_pop"] = world_pop[0]
     meta["province_owner"] = province_owner
     meta["great_nations"] = great_nations
     meta["wars"] = wars
@@ -2899,6 +2911,10 @@ def main():
                    "exact": (mod or {}).get("index_base") is not None}
                   if naval_profiles else None,
             supply=supply_by,
+            # One number a save rather than one a nation, so it is gathered
+            # here from the metas rather than from the finalized rows.
+            world_pop={m["date"]: m.get("world_pop", 0)
+                       for m, _n in parsed if m.get("date")},
         )
         paths.insert(0, html_path)
 
