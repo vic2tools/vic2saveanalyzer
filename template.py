@@ -4074,6 +4074,18 @@ let warPick = null;
 let warSort = {key: 'losses', dir: -1};
 
 function warLosses(w) { return w.losses[0] + w.losses[1]; }
+/* The two coalitions' shares of that total. Older reports predate the split
+   and simply do not show it. */
+function warSideLosses(w) {
+  const s = w.side_losses;
+  if (!s) return '';
+  const cell = (label, n) => `<span><span class="rk">${label}</span> `
+    + `<b>${n.toLocaleString()}</b></span>`;
+  return cell('attacker losses', s[0]) + cell('defender losses', s[1])
+    // Only ever drawn when some battle could not be placed on either side,
+    // so the three still add up to the casualties figure beside them.
+    + (s[2] ? cell('unplaced', s[2]) : '');
+}
 function warSide(list) {
   return list.map(t => `<b style="color:${colourFor(t)}">${t}</b>`).join(' ');
 }
@@ -4322,6 +4334,7 @@ function drawWarDetail() {
     +   `<span><span class="rk">from</span> <b>${w.start || '—'}</b></span>`
     +   `<span><span class="rk">to</span> <b>${w.active ? 'ongoing' : (w.end || '—')}</b></span>`
     +   `<span><span class="rk">casualties</span> <b>${warLosses(w).toLocaleString()}</b></span>`
+    +   warSideLosses(w)
     + `</div>`
     + `<div class="belligerents">`
     +   belColumn('Defenders', belParties(w, 'defender'))
