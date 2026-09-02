@@ -422,12 +422,19 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
   <!-- ============ NATIONS ============ -->
   <div role="tabpanel" id="panel-nations" aria-labelledby="tab-nations">
     <section>
-      <h2>Deployment at <span id="mapdate"></span></h2>
+      <h2>Deployment at <span id="mapdate"></span>
+        <span id="mapworld" class="rk"></span></h2>
       <div class="controls">
         <label for="mapsave">Save</label>
         <select id="mapsave"></select>
         <button id="mapplay" aria-pressed="false" title="Step through every save in order, so the campaign plays out on the map">Play</button>
-        <button id="mapspeed" title="How fast Play steps: 1x, 2x or 5x">1&times;</button>
+        <label for="mapspeed">Speed</label>
+        <input type="range" id="mapspeed" class="timeline narrow" min="0" max="8"
+               step="1" value="3"
+               title="How long Play holds each save. A campaign of monthly
+autosaves runs to a thousand saves and a yearly one to a hundred, so what reads
+well is a different number in each case.">
+        <span class="rk" id="mapspeedout"></span>
         <input type="range" id="mapstep" class="timeline" min="0" step="1" value="0"
                aria-label="Move through the campaign save by save">
         <button id="mapocc" aria-pressed="true" title="Hatch occupied land in the colour of whoever is holding it">Occupation</button>
@@ -3787,15 +3794,33 @@ if (MAP) {
   /* How long a frame is held. A quarter of a second is about as slow as
      anyone wants to watch a campaign that has thirty saves in it, and the
      multipliers are there for the one that has nine hundred. */
-  const SPEEDS = [1, 2, 5];
-  let mapSpeed = 0;
+  /* How long Play holds each save, in milliseconds.
+
+     One number cannot suit every campaign: a folder of monthly autosaves runs
+     to about a thousand saves and a folder of yearly ones to about a hundred,
+     and a pace that reads well at one is unwatchable at the other. The button
+     this replaced started at 250ms -- four saves a second, faster than anything
+     can actually be read -- and could only go up from there. */
+  const HOLD = [4000, 3000, 2000, 1500, 1000, 750, 500, 350, 250, 125,
+                50, 25];
+  const holdText = ms => ms >= 1000
+    ? (ms / 1000) + 's a save' : ms + 'ms a save';
   const speedBtn = document.getElementById('mapspeed');
+  const speedOut = document.getElementById('mapspeedout');
   speedBtn.disabled = DATA.dates.length < 2;
-  speedBtn.onclick = () => {
-    mapSpeed = (mapSpeed + 1) % SPEEDS.length;
-    speedBtn.textContent = SPEEDS[mapSpeed] + '×';
-  };
-  const frameDelay = () => 250 / SPEEDS[mapSpeed];
+  speedBtn.max = HOLD.length - 1;
+  /* Longer campaigns open faster, so the run is watchable rather than starting
+     at the same pace whether there are twenty saves or a thousand. The reader
+     can move it either way from there. */
+  const wantHold = DATA.dates.length > 400 ? 125
+                 : DATA.dates.length > 150 ? 250
+                 : DATA.dates.length > 60 ? 500
+                 : DATA.dates.length > 25 ? 750 : 1000;
+  speedBtn.value = HOLD.indexOf(wantHold);
+  const showSpeed = () => { speedOut.textContent = holdText(HOLD[+speedBtn.value]); };
+  speedBtn.oninput = showSpeed;
+  showSpeed();
+  const frameDelay = () => HOLD[+speedBtn.value];
 
   let mapTimer = null;
   mapStopPlay = () => {
