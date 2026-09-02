@@ -520,7 +520,7 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
         <label class="tb-label" for="milsave" style="margin:0">Save</label>
         <select id="milsave"></select>
         <button id="milmode" aria-pressed="false" title="Switch the pies between land regiments and naval hulls">Army</button>
-        <button id="milmob" aria-pressed="true" title="Show each side's full potential -- standing brigades plus everything its mobilization ceiling could still add -- instead of just its brigades right now. Army only.">Potential</button>
+        <button id="milmob" aria-pressed="true" title="Show each side's full potential -- everything its soldier pops could raise, plus everything its mobilization ceiling could add on top -- instead of just its brigades right now. Army only.">Potential</button>
       </div>
       <div class="controls">
         <label class="tb-label" style="margin:0">Left</label>
@@ -1809,6 +1809,9 @@ let milPotential = true;    // true = standing + mobilization ceiling, false = b
 // the same blue and grey held back to a khaki, so an added ceiling reads as
 // part of the same army rather than a third force.
 const MOB_COLOUR = '#B79B6E';
+// Brigades the cap allows that nobody has raised. Kept clearly apart from the
+// mobilization brass, since the two are different kinds of "not yet".
+const CAP_COLOUR = '#6B7C8C';
 const SIDE_COLOUR = ['#5E8CB8', '#9DA08D'];
 
 const milSave = document.getElementById('milsave');
@@ -1897,6 +1900,19 @@ function groupStanding(tags, date) {
   const at = DATA.facts[date] || {};
   return tags.reduce((sum, t) => sum + ((at[t] || {}).regular_brigades || 0), 0);
 }
+/**
+ * The standing brigades a side's soldier pops could support.
+ *
+ * Potential used to mean the brigades already standing plus the mobilization
+ * ceiling, which understated a nation that had not recruited its soldier pops
+ * out -- and nations differ enormously there. This is the other half: what
+ * could be raised without mobilizing at all.
+ */
+function groupCap(tags, date) {
+  if (milMode !== 'army') return groupTotal(tags, date);
+  const at = DATA.facts[date] || {};
+  return tags.reduce((sum, t) => sum + ((at[t] || {}).brigade_cap || 0), 0);
+}
 /** Mobilization ceiling for a side. Naval hulls cannot be mobilized. */
 function groupMob(tags, date) {
   if (milMode !== 'army') return 0;
@@ -1919,7 +1935,7 @@ function groupMobilized(tags, date) {
  */
 function sideTotal(tags, date) {
   return milPotential
-    ? groupStanding(tags, date) + groupMob(tags, date)
+    ? groupCap(tags, date) + groupMob(tags, date)
     : groupTotal(tags, date);
 }
 const sideLabel = tags => !tags.length ? 'nobody'
@@ -2004,6 +2020,14 @@ function drawMilPies() {
   const raised = [groupTotal(sideA, date), groupTotal(sideB, date)];
   const standing = [groupStanding(sideA, date), groupStanding(sideB, date)];
   const mobs = [groupMob(sideA, date), groupMob(sideB, date)];
+  const caps = [groupCap(sideA, date), groupCap(sideB, date)];
+  // The cap counts brigades that do not exist yet, so they have no unit type to
+  // be drawn as; they get a slice of their own, and the slices then still add
+  // up to the headline -- standing + mobilized + unbuilt + remaining ceiling is
+  // the cap plus the ceiling. Declared here with the other side arrays because
+  // the labels under each donut read it well before the slices are built.
+  const unbuilt = milPotential
+    ? [0, 1].map(i => Math.max(0, caps[i] - standing[i])) : [0, 0];
   const mobilized = [groupMobilized(sideA, date), groupMobilized(sideB, date)];
   const totals = [sideTotal(sideA, date), sideTotal(sideB, date)];
   if (!sideA.length && !sideB.length) {
@@ -2057,6 +2081,12 @@ function drawMilPies() {
   const split = milMode === 'army' && (milPotential ? (mobs[0] || mobs[1]) : (mobilized[0] || mobilized[1]))
     ? `<span><span class="rk">standing</span> <b>${standing[0].toLocaleString()}</b>`
       + ` <span class="rk">v</span> <b>${standing[1].toLocaleString()}</b></span>`
+      + (milPotential && (caps[0] || caps[1])
+          ? `<span title="The standing brigades each side's soldier pops can `
+            + `support, never read below what it already has."><span `
+            + `class="rk">brigade cap</span> `
+            + `<b>${caps[0].toLocaleString()}</b> <span class="rk">v</span> `
+            + `<b>${caps[1].toLocaleString()}</b></span>` : '')
       + `<span><span class="rk">${milPotential ? 'mob ceiling' : 'mobilized'}</span> `
       + `<b>${(milPotential ? mobs[0] : mobilized[0]).toLocaleString()}</b>`
       + ` <span class="rk">v</span> <b>${(milPotential ? mobs[1] : mobilized[1]).toLocaleString()}</b></span>`
@@ -2114,11 +2144,13 @@ function drawMilPies() {
       // A second line under each side's number only when there is something
       // to split it into -- a side with no mobilization ceiling (navy, or a
       // nation that can't mobilize) has nothing worth breaking out.
-      if (milMode === 'army' && (milPotential ? mobs[side] : mobilized[side])) {
+      if (milMode === 'army'
+          && (milPotential ? (mobs[side] || unbuilt[side]) : mobilized[side])) {
         const breakdown = el('text', {x, y: 122, 'text-anchor': 'middle',
           fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
         breakdown.textContent = milPotential
           ? `${standing[side].toLocaleString()} standing `
+            + (unbuilt[side] ? `+ ${unbuilt[side].toLocaleString()} unbuilt ` : '')
             + `+ ${mobs[side].toLocaleString()} mob ceiling`
           : `${standing[side].toLocaleString()} standing `
             + `+ ${mobilized[side].toLocaleString()} mobilized`;
@@ -2180,21 +2212,24 @@ function drawMilPies() {
     const present = milTypes().filter(t => counts.some(c => c[t]));
     const setType = type => {
       const parts = [0, 1].map(i => {
-        const n = type === '__mob' ? remainingMob[i] : (counts[i][type] || 0);
+        const n = type === '__mob' ? remainingMob[i]
+              : type === '__unbuilt' ? unbuilt[i] : (counts[i][type] || 0);
         const pct = totals[i] ? (n / totals[i] * 100).toFixed(1) : '0.0';
         return `<span><span class="rk">${i ? 'right' : 'left'}</span> `
              + `<b style="color:${SIDE_COLOUR[i]}">${n.toLocaleString()}</b> `
              + `<span class="rk">(${pct}%)</span></span>`;
       });
       const [x, y] = type === '__mob' ? remainingMob
+                   : type === '__unbuilt' ? unbuilt
                    : [counts[0][type] || 0, counts[1][type] || 0];
       const r = y ? (x / y).toFixed(2) + '×' : (x ? '—' : '');
-      const label = type === '__mob' ? 'still mobilizable' : gameName(type);
+      const label = type === '__mob' ? 'still mobilizable'
+                  : type === '__unbuilt' ? 'cap not yet raised' : gameName(type);
       // What one of these hulls is worth, side by side. The two sides can
       // differ on the same hull type: inventions upgrade guns and armour, so
       // one nation's cruiser is not another's.
       let worth = '';
-      if (powers && type !== '__mob') {
+      if (powers && type !== '__mob' && type !== '__unbuilt') {
         const each = [0, 1].map(i => {
           const per = sideCount[i] ? shipPowerOf(sideCount[i], date, type, false) : 0;
           return `<span><span class="rk">${i ? 'right' : 'left'} each</span> `
@@ -2224,6 +2259,10 @@ function drawMilPies() {
         label: `${sideLabel(tags)} · ${gameName(type)}`, value: counts[side][type] || 0,
         colour: milColour(type), type,
       }));
+      if (unbuilt[side]) slices.push({
+        label: `${sideLabel(tags)} · cap not yet raised`, value: unbuilt[side],
+        colour: CAP_COLOUR, type: '__unbuilt',
+      });
       if (remainingMob[side]) slices.push({
         label: `${sideLabel(tags)} · still mobilizable`, value: remainingMob[side],
         colour: MOB_COLOUR, type: '__mob',
@@ -2259,6 +2298,14 @@ function drawMilPies() {
       item.onmouseenter = () => setType(type);
       legend.appendChild(item);
     });
+    if (unbuilt[0] || unbuilt[1]) {
+      const item = document.createElement('span');
+      item.className = 'slegend';
+      item.innerHTML = `<i style="background:${CAP_COLOUR}"></i>cap not yet raised`;
+      item.style.cursor = 'pointer';
+      item.onmouseenter = () => setType('__unbuilt');
+      legend.appendChild(item);
+    }
     if (remainingMob[0] || remainingMob[1]) {
       const item = document.createElement('span');
       item.className = 'slegend';
@@ -2286,6 +2333,19 @@ function drawMilTable() {
     {key: 'regular_brigades', label: 'Professionals', fmt: v => v.toLocaleString(),
      title: 'Brigades raised from soldier pops, which stand whether or not the '
           + 'nation is mobilized'},
+    {key: 'brigade_cap', label: 'Brigade cap', fmt: v => v.toLocaleString(),
+     title: 'The standing brigades this nation\u2019s soldier pops could support: '
+          + 'nothing from a pop below the mod\u2019s POP_MIN_SIZE_FOR_REGIMENT, and '
+          + 'one plus one per whole POP_SIZE_PER_REGIMENT above it, with the step '
+          + '(not the minimum) multiplied off-core, in a colony and in a '
+          + 'protectorate. Read from the mod\u2019s own defines.lua. Culture makes no '
+          + 'difference. Never read below the brigades already standing: a '
+          + 'brigade is not disbanded when the pop that raised it shrinks, so '
+          + 'a nation over that line simply cannot recruit any more.'},
+    {key: 'cap_headroom', label: 'Unbuilt', fmt: v => v.toLocaleString(),
+     title: 'Brigade cap less the professionals already standing: what the '
+          + 'nation could still raise from the soldier pops it has.',
+     cls: r => r.cap_headroom > 0 ? 'up' : ''},
     {key: 'mobilized_brigades', label: 'Mobilized', fmt: v => v.toLocaleString(),
      title: 'Brigades raised from non-soldier pops, which only exist while mobilized',
      cls: r => r.mobilized_brigades ? 'up' : ''},
@@ -2296,9 +2356,11 @@ function drawMilTable() {
           + 'size the report was built with. A ceiling, not the in-game number.'},
     {key: 'total_military_potential', label: 'Total military potential',
      fmt: v => v.toLocaleString(),
-     title: 'Professionals plus the mobilization ceiling: the largest army this '
-          + 'nation could field. Mobilized brigades are already inside the '
-          + 'ceiling, so they are not added again.'},
+     title: 'The brigade cap plus the mobilization ceiling: the largest army '
+          + 'this nation could field if it recruited its soldier pops out and '
+          + 'then mobilized. It reads above the professionals standing today '
+          + 'by however much of the cap is unbuilt. Mobilized brigades are '
+          + 'already inside the ceiling, so they are not added again.'},
     {key: 'mobilisation_size', label: 'Mob size', fmt: v => (v * 100).toFixed(2) + '%',
      title: "Share of the poor strata this nation can mobilize"},
     {key: 'mobilization_pool', label: 'Mobilizable pop', fmt: v => v.toLocaleString(),
@@ -2330,7 +2392,10 @@ function drawMilTable() {
       mobilized_brigades: f.mobilized_brigades || 0,
       mobilizing: f.mobilizing || 0,
       mobilization_brigades: f.mobilization_brigades || 0,
-      total_military_potential: (f.regular_brigades || 0) + (f.mobilization_brigades || 0),
+      brigade_cap: f.brigade_cap || 0,
+      cap_headroom: (f.brigade_cap || 0) - (f.regular_brigades || 0),
+      total_military_potential: (f.brigade_cap || 0)
+                              + (f.mobilization_brigades || 0),
       mobilisation_size: f.mobilisation_size || 0,
       mobilization_pool: f.mobilization_pool || 0,
       ships: f.ships || 0,
