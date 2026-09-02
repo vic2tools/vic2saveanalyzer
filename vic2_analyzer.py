@@ -279,6 +279,22 @@ def blank_nation():
         # and which provinces those are is only known once the country block
         # has been read -- provinces come first in a save.
         "soldiers_at": defaultdict(int),
+        # The cap is a per-pop rule, not a per-province one: two pops of 1000
+        # raise two brigades where a single pop of 2000 raises one, so the
+        # sizes cannot be added up before the rule is applied to each.
+        "soldier_pops_at": defaultdict(list),
+        # Which of the nation's provinces it holds a core on, and which of its
+        # colonies are protectorates -- the two facts that pick the multiplier.
+        "core_provinces": set(),
+        "colonial_level": {},
+        # A province carries its own `colonial=` beside the `is_colonial` on the
+        # state holding it. They agree in ordinary saves -- 498 of 498 in one
+        # here, 285 of 288 in another -- but it is the province's own flag the
+        # engine charges the multiplier against, measured on a test bed that
+        # set only that one. Kept separately rather than folded into
+        # `colonial_provinces`, which mobilization and the stated-states
+        # literacy were both measured against as they stand.
+        "province_colonial": {},
         # Per province, because whether a province is colonial is not known
         # until the country's state blocks are read, and provinces are read
         # first. Same shape as `soldiers_at`, which exists for the same reason.
@@ -354,6 +370,8 @@ def read_province(text, at, stop, nations, province_owner_sink,
     """One province block, attributing its pops to the owner."""
     owner = None
     controller = None
+    colonial_flag = 0
+    cores = set()
     pops = []
     buildings = {}
 
@@ -393,6 +411,10 @@ def read_province(text, at, stop, nations, province_owner_sink,
                     owner = unquote(value)
                 elif key == "controller":
                     controller = unquote(value)
+                elif key == "core":
+                    cores.add(unquote(value))
+                elif key == "colonial":
+                    colonial_flag = to_int(value, 0)
             elif key in POP_TYPES:
                 current = [key, None, None, None, None, None, None, None]
                 pops.append(current)
@@ -409,6 +431,10 @@ def read_province(text, at, stop, nations, province_owner_sink,
                     owner = value
                 elif key == "controller":
                     controller = value
+                elif key == "core":
+                    cores.add(value)
+                elif key == "colonial":
+                    colonial_flag = to_int(value, 0)
             elif key in POP_TYPES:
                 pops.append(_pop_fields(key, read_pop(Tokens(text, block_at))))
             elif key in ("naval_base", "fort", "railroad"):
@@ -423,6 +449,10 @@ def read_province(text, at, stop, nations, province_owner_sink,
     province_owner_sink[owner] += 1
     nat = nations[owner]
     nat["provinces"] += 1
+    if province_id is not None and owner in cores:
+        nat["core_provinces"].add(province_id)
+    if province_id is not None and colonial_flag:
+        nat["province_colonial"][province_id] = colonial_flag
     if controller and controller != owner:
         nat["occupied_provinces"].add(province_id)
 
@@ -446,6 +476,7 @@ def read_province(text, at, stop, nations, province_owner_sink,
         nat["pop_by_type"][poptype] += size
         if poptype == "soldiers":
             nat["soldiers_at"][province_id] += size
+            nat["soldier_pops_at"][province_id].append(size)
         nat["pop_at"][province_id] += size
         if culture:
             nat["pop_by_culture"][culture] += size
@@ -760,12 +791,18 @@ def read_country(text, at, stop, tag, nations, flat=True):
                 ordinal = nat["states"]
                 # Mobilization only draws from stated states; colonial and
                 # protectorate states are marked with is_colonial.
+                # `is_colonial=1` is a protectorate and `=2` a colony. Both
+                # are outside the stated states mobilization draws from, which
+                # is all this used to need; the brigade cap charges them
+                # different multipliers, so the level is kept as well.
                 colonial = "is_colonial" in block
+                level = to_int(block.get("is_colonial"), 0) if colonial else 0
                 for pid in ids:
                     pid = to_int(pid, -1)
                     nat["province_state"][pid] = ordinal
                     if colonial:
                         nat["colonial_provinces"].add(pid)
+                        nat["colonial_level"][pid] = level
                 for bld in as_list(block.get("state_buildings")):
                     if not isinstance(bld, dict):
                         continue
@@ -1444,6 +1481,71 @@ def save_sort_key(path, meta_date):
         return (1, 0, 0, 0)
 
 
+def brigade_cap(nat, defines, pop_per_regiment=POP_SIZE_PER_REGIMENT):
+    """
+    How many standing brigades a nation's soldier pops could support.
+
+    Measured on purpose-built test beds rather than fitted, the same way the
+    mobilization ceiling was. Two of them, 72 provinces each, every province
+    given one soldier pop of a known size across sizes either side of every
+    step, and every brigade the game would allow raised from each. The second
+    bed was needed because IGoR sets its non-core multiplier to 1, which cannot
+    show whether a multiplier gates anything; Modus Omnino Demens carries
+    vanilla's 3, 5 and 8. All 144 cells agreed with:
+
+        nothing                              below POP_MIN_SIZE_FOR_REGIMENT
+        1 + size // (POP_SIZE_PER_REGIMENT * multiplier)   at or above it
+
+    Two things about that are worth stating because they are not what the
+    define names suggest. The minimum is a *gate* and never a deduction: a pop
+    of exactly 1000 raises one brigade and a pop of 3000 raises two, where
+    subtracting the minimum first would have given one. And the multipliers
+    scale the step, not the gate -- a colonial pop of 1000 still raises a
+    brigade, though three times the minimum would have denied it one.
+
+    Culture does not enter into it. Pops of a culture the nation does not
+    accept were measured raising exactly as many brigades as accepted ones, at
+    all eighteen sizes.
+
+    A colony is charged its own multiplier and not the colonial and non-core
+    ones compounded: on the mod where those are 5 and 3, a colonial pop steps
+    every 15000 rather than every 45000. `is_colonial=1` is the protectorate
+    the defines name, stepping every 24000 where its multiplier is 8. The
+    province's own `colonial=` is what the engine charges against, which is why
+    it is read in preference to the state's.
+
+    Real campaigns cannot be used to check this: a regiment is not disbanded
+    when its pop shrinks, so counts read out of a played save describe the
+    pop's history rather than its capacity.
+    """
+    floor = int(defines.get("POP_MIN_SIZE_FOR_REGIMENT") or 1000)
+    colony = float(defines.get("POP_MIN_SIZE_FOR_REGIMENT_COLONY_MULTIPLIER") or 1)
+    noncore = float(defines.get("POP_MIN_SIZE_FOR_REGIMENT_NONCORE_MULTIPLIER") or 1)
+    protect = float(
+        defines.get("POP_MIN_SIZE_FOR_REGIMENT_PROTECTORATE_MULTIPLIER") or 1)
+    colonial = nat["colonial_provinces"]
+    levels = nat["colonial_level"]
+    own = nat["province_colonial"]
+    cored = nat["core_provinces"]
+
+    total = 0
+    for pid, sizes in nat["soldier_pops_at"].items():
+        # The province's own flag first, then the state's, since it is the
+        # province the multiplier is charged against.
+        level = own.get(pid) or (levels.get(pid, 2) if pid in colonial else 0)
+        if level:
+            mult = protect if level == 1 else colony
+        elif pid not in cored:
+            mult = noncore
+        else:
+            mult = 1.0
+        step = pop_per_regiment * mult
+        for size in sizes:
+            if size >= floor:
+                total += 1 + int(size // step)
+    return total
+
+
 def finalize(nat, rate=1.0, pop_per_regiment=POP_SIZE_PER_REGIMENT,
              mob_types=MOBILIZABLE_TYPES, include_occupied=False, mod=None,
              world=None):
@@ -1462,6 +1564,15 @@ def finalize(nat, rate=1.0, pop_per_regiment=POP_SIZE_PER_REGIMENT,
     brigades = brigades_from_clusters(buckets, rate, pop_per_regiment)
 
     out = dict(nat)
+    # A nation can stand above what its pops now support, because a brigade is
+    # not disbanded when the pop that raised it shrinks. Reported as the larger
+    # of the two: a cap under the standing army is not a cap the nation is held
+    # to, it is only a statement that it cannot recruit any more, and every
+    # reading of it -- headroom, total potential, the head-to-head -- wants the
+    # number the nation can actually field.
+    out["brigade_cap"] = max(
+        brigade_cap(nat, (mod or {}).get("defines") or {}, pop_per_regiment),
+        nat["regular_brigades"])
     out["mobilization_pool"] = pool_stated
     out["mobilization_pops"] = entries
     # A nation already mobilized has (some of) its ceiling standing in the army
@@ -1560,6 +1671,7 @@ BASE_COLUMNS = [
     "primary_culture_pop", "avg_literacy", "avg_literacy_stated",
     "pop_noncolonial", "avg_consciousness", "avg_militancy",
     "brigades", "regular_brigades", "mobilized_brigades", "mobilizing",
+    "brigade_cap",
     "is_mobilized", "armies", "ships", "navies",
     "factory_count", "factory_levels", "ports", "naval_base_levels",
     "max_naval_base", "railroad_levels", "fort_levels",

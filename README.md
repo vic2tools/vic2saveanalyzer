@@ -545,11 +545,41 @@ great power ranking, unit counts, populations, prices, war casualties. Where
 they cannot, the rule was measured against the game rather than guessed, and
 checked against readings from a hundred test nations plus several campaigns.
 
-Four things worth knowing:
+Five things worth knowing:
 
 - **Mobilization ceilings** are computed, not stored. They match the game
   exactly in nearly every case tested; the misses are single-brigade rounding at
   the boundary.
+- **The brigade cap** — how many standing brigades a nation's soldier pops
+  could support — is computed the same way, and was measured rather than
+  guessed. A soldier pop raises nothing below `POP_MIN_SIZE_FOR_REGIMENT` and
+  `1 + size / POP_SIZE_PER_REGIMENT` at or above it. Two things about that are
+  worth stating because the define names suggest otherwise. The minimum is a
+  *gate*, never a deduction: a pop of exactly 1,000 raises one brigade and a pop
+  of 3,000 raises two, where subtracting the minimum first would give one. And
+  the colony, non-core and protectorate multipliers scale the *step* rather than
+  the gate — a colonial pop of 1,000 still raises a brigade. Culture makes no
+  difference at all: pops of a culture the nation rejects were measured raising
+  exactly as many as accepted ones, at every size tested.
+
+  It was settled on two purpose-built test beds, one per mod, each of 72
+  provinces given a single soldier pop of a known size across sizes either side
+  of every step. The first, on IGoR, covered core, non-core, colonial and
+  non-accepted-culture pops; the second, on Modus Omnino Demens, was needed
+  because IGoR sets its non-core multiplier to 1 and so cannot tell whether a
+  multiplier gates anything. Between them the four multipliers 1, 3, 5 and 8
+  were all exercised, and all 144 cells agreed with the rule above — including
+  that a colony is charged its own multiplier rather than the colonial and
+  non-core ones compounded, and that `is_colonial=1` is the protectorate the
+  defines name.
+
+  Finished campaigns cannot answer any of this: a regiment is not disbanded
+  when its pop shrinks, so counts read from a played save describe the pop's
+  history rather than its capacity, and 38.8% of pops in one late save were
+  holding more brigades than any formula allows. That is also why the reported
+  cap is never below the brigades already standing — a nation over that line
+  is not held to a smaller army, it simply cannot recruit a further one. As an independent check, the
+  great powers in that same save sit at 95–99% of the computed cap.
 - **Mobilisation size** adds up every source the mod has: technologies,
   inventions, national values, reforms, event modifiers, the flat penalty an
   uncivilized nation carries, and triggered modifiers — which are re-evaluated
