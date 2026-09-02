@@ -129,6 +129,17 @@ def _stop_if_asked():
 # Victoria II defines. A mod can change these; --mod-path reads the real values
 # out of common/defines.lua, and the command line overrides both.
 POP_SIZE_PER_REGIMENT = 3000
+# Below this share of its life needs a pop is losing people, and not slowly.
+# Measured rather than chosen: 144 consecutive monthly saves of one session,
+# 2.2 million pop-to-pop comparisons, each pop matched by id across a month.
+# A pop getting nothing shrinks by a median 0.448% a month and 77% of them
+# shrink at all, against 0.000% and 25% for a pop with its needs met -- and
+# the 25% is the floor that promotion and migration alone produce. The drop
+# is a cliff at the bottom rather than a slope: every band above 0.1 has a
+# median of 0.000%, while everything below 0.05 is between -0.07% and
+# -0.45%. So the line sits just above zero, which also keeps a pop written
+# as 0.00100 on the same side of it as one written as 0.
+STARVING_BELOW = 0.05
 # The engine applies no minimum pop size to *mobilization*. POP_MIN_SIZE_FOR_REGIMENT
 # governs how small a *soldier* pop may be and still support a standing brigade,
 # which is a different rule on a different pop type -- IGoR sets it to 1000.
@@ -278,6 +289,17 @@ def blank_nation():
         # as one total because soldiers in a colonial state raise no brigades,
         # and which provinces those are is only known once the country block
         # has been read -- provinces come first in a save.
+        # People in pops that cannot afford everything they need to live.
+        # Not the same as starving to death -- a pop short of its life needs
+        # shrinks, migrates and grows militant -- but it is the line under
+        # which a population is in trouble.
+        "life_unmet": 0,
+        # And the sharper reading: pops at or near nothing, which are the
+        # ones actually losing people. The two are nothing like the same
+        # size -- in one 1836 save 64% of the world is short of something
+        # while under 1% is starving -- so which is meant has to be said
+        # rather than implied.
+        "starving": 0,
         "soldiers_at": defaultdict(int),
         # The cap is a per-pop rule, not a per-province one: two pops of 1000
         # raise two brigades where a single pop of 2000 raises one, so the
@@ -352,21 +374,27 @@ def building_level(value):
 # each built, filled and read back one key at a time.
 _POP_TYPE, _POP_ID, _POP_SIZE, _POP_CULTURE = 0, 1, 2, 3
 _POP_MONEY, _POP_CON, _POP_MIL, _POP_LITERACY = 4, 5, 6, 7
+# How much of its life needs a pop is actually getting. The save writes this
+# only for a pop that is short: across three saves every recorded value came
+# out below 1, and the field is simply absent from a pop that wants for
+# nothing. So its presence is the signal and its value is the severity.
+_POP_LIFE = 8
 _POP_SLOT = {"id": _POP_ID, "size": _POP_SIZE, "money": _POP_MONEY,
-             "con": _POP_CON, "mil": _POP_MIL, "literacy": _POP_LITERACY}
+             "con": _POP_CON, "mil": _POP_MIL, "literacy": _POP_LITERACY,
+             "life_needs": _POP_LIFE}
 
 
 def _pop_fields(poptype, pop):
-    """The same seven, out of a pop block the token reader built."""
+    """The same fields, out of a pop block the token reader built."""
     culture, _religion = pop_culture(pop)
     return [poptype, pop.get("id"), pop.get("size"), culture,
             pop.get("money"), pop.get("con"), pop.get("mil"),
-            pop.get("literacy")]
+            pop.get("literacy"), pop.get("life_needs")]
 
 
 def read_province(text, at, stop, nations, province_owner_sink,
                   pop_registry=None, province_id=None, owner_map=None,
-                  flat=True):
+                  flat=True, world_sink=None):
     """One province block, attributing its pops to the owner."""
     owner = None
     controller = None
@@ -478,6 +506,15 @@ def read_province(text, at, stop, nations, province_owner_sink,
             nat["soldiers_at"][province_id] += size
             nat["soldier_pops_at"][province_id].append(size)
         nat["pop_at"][province_id] += size
+        # Absent means the pop wants for nothing; present and short of 1 means
+        # it is going without some part of what it needs to live.
+        life = pop[_POP_LIFE]
+        if life is not None:
+            got = to_float(life)
+            if got < 1.0:
+                nat["life_unmet"] += size
+            if got < STARVING_BELOW:
+                nat["starving"] += size
         if culture:
             nat["pop_by_culture"][culture] += size
             if poptype in MOB_CANDIDATES:
@@ -1570,6 +1607,10 @@ def finalize(nat, rate=1.0, pop_per_regiment=POP_SIZE_PER_REGIMENT,
     # to, it is only a statement that it cannot recruit any more, and every
     # reading of it -- headroom, total potential, the head-to-head -- wants the
     # number the nation can actually field.
+    out["life_unmet_pct"] = round(100.0 * nat["life_unmet"] / total, 3) \
+        if total else 0.0
+    out["starving_pct"] = round(100.0 * nat["starving"] / total, 3) \
+        if total else 0.0
     out["brigade_cap"] = max(
         brigade_cap(nat, (mod or {}).get("defines") or {}, pop_per_regiment),
         nat["regular_brigades"])
@@ -1682,6 +1723,7 @@ BASE_COLUMNS = [
     "war_exhaustion", "plurality",
     "pop_poor", "pop_middle", "pop_rich",
     "soldiers_noncolonial", "soldiers_noncolonial_pct",
+    "life_unmet", "life_unmet_pct", "starving", "starving_pct",
 ]
 
 

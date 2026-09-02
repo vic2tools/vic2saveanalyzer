@@ -174,7 +174,7 @@ _ONE_TAB = re.compile(r'\n\t([^\s={}"]+)=([^\r\n]*)')
 # them.
 PROVINCE_FIELDS = re.compile(
     r'\n\t(?:'
-    r'\t(id|size|money|con|mil|literacy)=([^\r\n]+)'
+    r'\t(id|size|money|con|mil|literacy|life_needs)=([^\r\n]+)'
     r'|\t([^\s={}"]+)=([^\r\n0-9][^\r\n]*)'
     r'|([^\s={}"]+)=([^\r\n]*))')
 
