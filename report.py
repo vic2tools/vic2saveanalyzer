@@ -280,9 +280,16 @@ def build_map(mod, parsed, scale=5):
                 total = sum(types.values())
                 if not total:
                     continue
+                men = nat.get("men_at", {}).get(pid, {})
                 here.setdefault(str(pid), []).append([
                     index.get(tag, -1), total,
                     ";".join(f"{t}:{n}" for t, n in
+                             sorted(types.items(), key=lambda kv: -kv[1])),
+                    # Men rather than regiments, and per type, so a stack worn
+                    # down by fighting reads smaller than a fresh one the same
+                    # size on paper.
+                    sum(men.values()),
+                    ";".join(f"{t}:{men.get(t, 0)}" for t, _n in
                              sorted(types.items(), key=lambda kv: -kv[1])),
                 ])
         armies[date] = here
@@ -304,6 +311,10 @@ def build_map(mod, parsed, scale=5):
                   if p in spots},
         "owners": owners,
         "armies": armies,
+        # What a regiment holds at full strength, so the map can say whether a
+        # brigade is under-strength rather than just how many men it has.
+        "regimentSize": int((mod.get("defines") or {}).get(
+            "POP_SIZE_PER_REGIMENT") or 3000),
     }
 
 

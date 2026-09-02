@@ -122,6 +122,13 @@ select:focus-visible,button:focus-visible,input:focus-visible{
 .controls > button[aria-pressed="true"]{
   background:linear-gradient(180deg,var(--gilt-hi),var(--brass));
   color:#3A1420;border-color:var(--gilt-hi);font-weight:500}
+/* A control that cannot be used has to look like it, and the pressed styling
+   above must not outrank that -- a button left switched on and then disabled
+   otherwise sat there in full brass looking like it was still doing something. */
+.controls > button:disabled,
+.controls > button[aria-pressed="true"]:disabled{
+  background:none;color:var(--ink-dim);border-color:var(--rule);
+  font-weight:400;cursor:not-allowed;opacity:.55}
 
 /* A slider the same weight as the buttons beside it: a brass thumb on a thin
    rule, rather than whatever the platform draws. */
@@ -129,6 +136,7 @@ select:focus-visible,button:focus-visible,input:focus-visible{
   -webkit-appearance:none;appearance:none;background:transparent;
   width:180px;height:22px;cursor:pointer;padding:0;margin:0;
 }
+.timeline.narrow{width:84px}
 .timeline:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .timeline::-webkit-slider-runnable-track{
   height:3px;background:var(--grid);border:1px solid var(--rule);border-width:0 0 0 0}
@@ -277,6 +285,20 @@ table.mini td .rk{font-size:11px;white-space:normal}
   border-top:1px solid var(--rule);padding:11px 14px;
   display:flex;flex-wrap:wrap;gap:5px 22px;min-height:42px;align-items:center;
 }
+/* Several nations on one tile ran as one long wrapping sentence, which put
+   Austria's brigade count under Spain's composition and left the widest column
+   of the readout empty. One row a nation, and the numbers line up down the
+   page where they can be compared. */
+.readout .natgrid{
+  display:grid;grid-template-columns:auto auto auto auto minmax(0,1fr);
+  gap:3px 16px;width:100%;align-items:baseline;margin-top:2px;
+}
+.readout .natgrid .num{text-align:right;font-variant-numeric:tabular-nums}
+.readout .natgrid .mix{color:var(--ink-dim);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.readout .sidehead{width:100%;margin-top:5px;
+  border-top:1px solid var(--rule);padding-top:5px}
+.readout .sidehead:first-of-type{border-top:0;margin-top:0}
 .readout .rk{color:var(--ink-dim)}
 .readout b{font-weight:500}
 table{width:100%;border-collapse:collapse;
@@ -3192,14 +3214,24 @@ function drawSupply() {
 const MAP = DATA.map;
 let mapTags = null;          // null means every nation
 let mapHatchOccupied = true;
+/* Contested tiles are always marked. It was a toggle while the rule was a
+   guess about recent battles and worth being able to switch off; now that it
+   is simply "enemies are standing here", there is nothing to disbelieve. */
+const mapShowBattles = true;
 let mapProv = null;          // province id for every pixel
 let mapEdge = null;          // 1 wherever a pixel sits on a province boundary
 let mapOwners = null;        // date -> {own: Map, occ: Map}
 let mapDots = [];            // what is currently drawn, for hit testing
+let mapCrowded = 0;          // counters held back because one was already there
 let mapBase = null;          // the political map, painted once per view
 let mapOccLayer = null;      // occupied land alone, everything else clear
 let mapOccAny = false;
 let mapBaseKey = '';
+let mapOccKey = '';          // the save mapOccLayer was painted for, if any
+let mapSmallDate = '';       // the save the panel-sized layers are drawn for
+let mapMiniDate = '';
+let mapBaseRect = null;      // the part of the raster painted for that save
+let mapOccRect = null;
 let mapStopPlay = () => {};  // set once the controls exist
 let mapZoom = 1;             // 1 fits the whole world to the panel width
 let mapOX = 0, mapOY = 0;    // map coordinate sitting at the panel's top left
@@ -3209,6 +3241,123 @@ let mapPinned = null;        // a marker clicked, so the readout stays put
    is worked out once and reused, rather than per save as it used to be. Both
    layers need it: the base paints it dark, and the occupation layer leaves it
    alone. */
+/* Which province each *screen* pixel belongs to, at one particular size.
+
+   The stored map is 5616 by 2160 and the panel is about a fifth of that, so
+   colouring every stored pixel means computing twenty-five for every one that
+   can be seen. This is the same question asked once at the smaller size: the
+   province holding the most of each block wins it.
+
+   Built once per size and kept, since it depends on the map rather than on the
+   save. A block's tally is cleared by walking it a second time rather than by
+   remembering which ids were touched, which is a little slower to build and
+   cannot get the reset wrong. */
+let mapSmallIdx = null;
+function mapDecoded() {
+  if (!mapProv) { mapProv = mapDecode(); mapOwners = mapOwnerTables(); }
+}
+
+function mapSmallIndex(w, h) {
+  const key = w + 'x' + h;
+  if (mapSmallIdx && mapSmallIdx.key === key) return mapSmallIdx;
+  mapDecoded();
+  let maxId = 0;
+  for (let i = 0; i < mapProv.length; i++) if (mapProv[i] > maxId) maxId = mapProv[i];
+  const counts = new Int32Array(maxId + 1);
+  const prov = new Int32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.floor(y * MAP.h / h);
+    const y1 = Math.max(y0 + 1, Math.floor((y + 1) * MAP.h / h));
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.floor(x * MAP.w / w);
+      const x1 = Math.max(x0 + 1, Math.floor((x + 1) * MAP.w / w));
+      let best = 0, bestN = -1;
+      for (let sy = y0; sy < y1; sy++) {
+        const row = sy * MAP.w;
+        for (let sx = x0; sx < x1; sx++) {
+          const p = mapProv[row + sx];
+          const n = ++counts[p];
+          if (n > bestN) { bestN = n; best = p; }
+        }
+      }
+      for (let sy = y0; sy < y1; sy++) {
+        const row = sy * MAP.w;
+        for (let sx = x0; sx < x1; sx++) counts[mapProv[row + sx]] = 0;
+      }
+      prov[y * w + x] = best;
+    }
+  }
+  // the same border rule as the full-size raster, applied at this size
+  const edge = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x, p = prov[i];
+      if ((x + 1 < w && prov[i + 1] !== p) || (y + 1 < h && prov[i + w] !== p)) {
+        edge[i] = 1;
+      }
+    }
+  }
+  mapSmallIdx = {key, w, h, prov, edge};
+  return mapSmallIdx;
+}
+
+/* One layer, coloured straight onto a canvas the size of the panel. */
+function mapSmallLayer(idx, table, wild, occupied) {
+  const c = document.createElement('canvas');
+  c.width = idx.w; c.height = idx.h;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(idx.w, idx.h);
+  const w32 = new Uint32Array(img.data.buffer);
+  const packed = mapWords(table, wild);
+  const top = table.length;
+  const prov = idx.prov, edge = idx.edge;
+  if (occupied) {
+    // Borders are left out of the occupation layer for the same reason they
+    // are at full size: hatching over them hides which side the ground is on.
+    for (let i = 0; i < prov.length; i++) {
+      if (edge[i]) continue;
+      const p = prov[i];
+      if (p < top && table[p] >= 0) w32[i] = packed[p];
+    }
+  } else {
+    for (let i = 0; i < prov.length; i++) {
+      const p = prov[i];
+      w32[i] = p < top ? packed[p] : packed[top];
+    }
+    const edgeWord = mapWord(
+      (MAP_EDGE[0] << 16) | (MAP_EDGE[1] << 8) | MAP_EDGE[2]);
+    for (let i = 0; i < edge.length; i++) if (edge[i]) w32[i] = edgeWord;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
+/* A colour in the byte order `putImageData` actually reads.
+
+   The canvas buffer is bytes R,G,B,A, so on a little-endian machine one 32-bit
+   store must carry them reversed. Every machine this runs on is little-endian,
+   but the order is derived rather than assumed: a single pixel is written
+   through the byte view and read back through the word view, once. */
+let mapEndian = 0;
+function mapWord(rgb) {
+  if (!mapEndian) {
+    const probe = new Uint8ClampedArray(4);
+    probe[0] = 1;
+    mapEndian = new Uint32Array(probe.buffer)[0] === 1 ? 1 : 2;
+  }
+  return mapEndian === 1
+    ? (0xFF000000 | ((rgb & 255) << 16) | (rgb & 0xFF00) | ((rgb >> 16) & 255))
+    : (((rgb & 0xFFFFFF) << 8) | 0xFF);
+}
+
+/* A palette converted once, with the unclaimed-land colour on the end. */
+function mapWords(table, wild) {
+  const out = new Uint32Array(table.length + 1);
+  for (let i = 0; i < table.length; i++) out[i] = mapWord(table[i]);
+  out[table.length] = mapWord(wild);
+  return out;
+}
+
 function mapEdgeMask() {
   if (mapEdge) return mapEdge;
   mapEdge = new Uint8Array(mapProv.length);
@@ -3314,58 +3463,105 @@ function mapOccPalette(date) {
 
 /* The political map only changes with the save, so it is painted into an
    offscreen canvas and then blitted at whatever zoom is in force. */
-function mapPaintBase(date) {
-  const key = date;
-  if (mapBase && mapBaseKey === key) return;
-  if (!mapProv) { mapProv = mapDecode(); mapOwners = mapOwnerTables(); }
-  mapBase = document.createElement('canvas');
-  mapBase.width = MAP.w; mapBase.height = MAP.h;
-  const ctx = mapBase.getContext('2d');
-  const img = ctx.createImageData(MAP.w, MAP.h);
-  const px = img.data;
-  const table = mapPalette(date);
-  const top = table.length;
-  const wild = (MAP_WILD[0] << 16) | (MAP_WILD[1] << 8) | MAP_WILD[2];
-  for (let i = 0, o = 0; i < mapProv.length; i++, o += 4) {
-    const pid = mapProv[i];
-    const c = pid < top ? table[pid] : wild;
-    px[o] = (c >> 16) & 255; px[o + 1] = (c >> 8) & 255; px[o + 2] = c & 255;
-    px[o + 3] = 255;
-  }
-  // a one-pixel edge wherever neighbouring pixels sit in different provinces
-  const edge = mapEdgeMask();
-  for (let i = 0; i < edge.length; i++) {
-    if (!edge[i]) continue;
-    const o = i * 4;
-    px[o] = MAP_EDGE[0]; px[o + 1] = MAP_EDGE[1]; px[o + 2] = MAP_EDGE[2];
-  }
-  ctx.putImageData(img, 0, 0);
+/* The political map at full resolution, but only where it is being looked at.
 
-  // The occupation layer, same raster, everything unoccupied left transparent.
+   Magnified, the screen holds a window onto the raster rather than the whole
+   of it -- at 4x that is about a sixteenth. Colouring all twelve million
+   pixels to show three quarters of a million was most of what made stepping
+   through saves slow while zoomed in.
+
+   The canvas stays full-size, so everything downstream is unchanged; what
+   moves is how much of it gets rewritten. Pixels outside the window keep the
+   previous save's colours, which is harmless because the window is the
+   visible region and nothing else is ever drawn from. */
+function mapPaintBase(date, x0, y0, x1, y1) {
+  mapDecoded();
+  if (!mapBase) {
+    mapBase = document.createElement('canvas');
+    mapBase.width = MAP.w; mapBase.height = MAP.h;
+  }
+  if (mapBaseKey !== date) { mapBaseKey = date; mapBaseRect = null; }
+  if (mapBaseRect && x0 >= mapBaseRect.x0 && y0 >= mapBaseRect.y0
+      && x1 <= mapBaseRect.x1 && y1 <= mapBaseRect.y1) return;
+  const ww = x1 - x0, wh = y1 - y0;
+  if (ww <= 0 || wh <= 0) return;
+  const ctx = mapBase.getContext('2d');
+  const img = ctx.createImageData(ww, wh);
+  const table = mapPalette(date);
+  const wild = (MAP_WILD[0] << 16) | (MAP_WILD[1] << 8) | MAP_WILD[2];
+  /* Twelve million pixels, so how each one is written is the whole cost of a
+     save change. Four byte stores into the Uint8ClampedArray took 55ms;
+     one 32-bit store into a Uint32Array view of the same buffer takes 19ms
+     for byte-identical output. The colours are converted to the machine's
+     word order once per palette rather than once per pixel. */
+  const w32 = new Uint32Array(img.data.buffer);
+  const packed = mapWords(table, wild);
+  const edgeWord = mapWord(
+    (MAP_EDGE[0] << 16) | (MAP_EDGE[1] << 8) | MAP_EDGE[2]);
+  const top = table.length;
+  // One pass rather than two: the border test costs a lookup either way, and
+  // over a window it is cheaper to ask it once per pixel than to walk the
+  // whole thing again.
+  const edge = mapEdgeMask();
+  for (let y = 0; y < wh; y++) {
+    const src = (y0 + y) * MAP.w + x0;
+    const dst = y * ww;
+    for (let x = 0; x < ww; x++) {
+      const i = src + x;
+      if (edge[i]) { w32[dst + x] = edgeWord; continue; }
+      const pid = mapProv[i];
+      w32[dst + x] = pid < top ? packed[pid] : packed[top];
+    }
+  }
+  ctx.putImageData(img, x0, y0);
+  mapBaseRect = {x0, y0, x1, y1};
+  mapMini = null;          // any reduction of this raster is now out of date
+
+  // Whether there is anything occupied is settled here, because it is a walk
+  // of the palette rather than of the raster and the render needs the answer
+  // to know whether to bother. The twelve million pixels behind it are not
+  // painted until something is actually going to draw them: with the
+  // Occupation toggle off that layer was built for every save and never once
+  // looked at, which was half the cost of changing save.
+}
+
+/* The occupied land, on its own transparent raster. Built on demand. */
+function mapPaintOcc(date, x0, y0, x1, y1) {
+  if (!mapOccLayer) {
+    mapOccLayer = document.createElement('canvas');
+    mapOccLayer.width = MAP.w; mapOccLayer.height = MAP.h;
+  }
+  if (mapOccKey !== date) { mapOccKey = date; mapOccRect = null; }
+  if (mapOccRect && x0 >= mapOccRect.x0 && y0 >= mapOccRect.y0
+      && x1 <= mapOccRect.x1 && y1 <= mapOccRect.y1) return;
+  const ww = x1 - x0, wh = y1 - y0;
+  if (ww <= 0 || wh <= 0) return;
   const occ = mapOccPalette(date);
-  mapOccAny = occ.some(c => c >= 0);
-  mapOccLayer = document.createElement('canvas');
-  mapOccLayer.width = MAP.w; mapOccLayer.height = MAP.h;
-  if (mapOccAny) {
-    const octx = mapOccLayer.getContext('2d');
-    const oimg = octx.createImageData(MAP.w, MAP.h);
-    const opx = oimg.data;
-    for (let i = 0, o = 0; i < mapProv.length; i++, o += 4) {
+  const edge = mapEdgeMask();
+  const octx = mapOccLayer.getContext('2d');
+  const oimg = octx.createImageData(ww, wh);
+  const w32 = new Uint32Array(oimg.data.buffer);
+  const packed = mapWords(occ, 0);
+  for (let y = 0; y < wh; y++) {
+    const src = (y0 + y) * MAP.w + x0;
+    const dst = y * ww;
+    for (let x = 0; x < ww; x++) {
+      const i = src + x;
       // Province borders are left out of this layer entirely. Hatching over
       // them buried the one line that says where one province stops and the
       // next begins, and a solid stripe of occupier colour running across two
       // provinces made it a guess which of them the ground belonged to.
       if (edge[i]) continue;
       const pid = mapProv[i];
-      const c = pid < occ.length ? occ[pid] : -1;
-      if (c < 0) continue;
-      opx[o] = (c >> 16) & 255; opx[o + 1] = (c >> 8) & 255; opx[o + 2] = c & 255;
-      opx[o + 3] = 255;
+      if (pid < occ.length && occ[pid] >= 0) w32[dst + x] = packed[pid];
     }
-    octx.putImageData(oimg, 0, 0);
   }
-  mapBaseKey = key;
-  mapMini = null;          // made from the base that has just been replaced
+  // Replaces rather than blends, so land freed since the last save does not
+  // keep its old occupier's colour.
+  octx.clearRect(x0, y0, ww, wh);
+  octx.putImageData(oimg, x0, y0);
+  mapOccRect = {x0, y0, x1, y1};
+  mapMini = null;
 }
 
 /* One tile of diagonal stripes, built once and used as a mask on the screen
@@ -3453,8 +3649,33 @@ let mapMini = null;
 function mapMinified(s) {
   const w = Math.max(1, Math.round(MAP.w * s));
   const h = Math.max(1, Math.round(MAP.h * s));
-  const key = mapBaseKey + '|' + w + 'x' + h;
+  const wantOcc = mapHatchOccupied && mapOccAny;
+  /* Two ways to get a layer smaller than the raster, and which is cheaper
+     depends entirely on whether the size holds still.
+
+     At zoom 1 it does -- it is the panel, and it only changes when the window
+     does -- so the province index is built once and every save after that is
+     painted straight at that size for about 4ms.
+
+     Zooming changes the size on every step, and the index costs ~90ms to
+     build. Rebuilding it per step made zooming crawl, which is what this
+     branch exists to avoid: magnifying goes back to reducing the full raster,
+     about 7ms a step, exactly as it did before the panel-sized path existed. */
+  const small = mapZoom === 1;
+  const key = (small ? 'idx|' : 'red|') + mapSmallDate + '|' + w + 'x' + h
+            + (wantOcc ? '|o' : '');
   if (mapMini && mapMini.key === key) return mapMini;
+  if (small) {
+    const idx = mapSmallIndex(w, h);
+    const wild = (MAP_WILD[0] << 16) | (MAP_WILD[1] << 8) | MAP_WILD[2];
+    mapMini = {
+      key, w, h,
+      base: mapSmallLayer(idx, mapPalette(mapSmallDate), wild, false),
+      occ: wantOcc
+        ? mapSmallLayer(idx, mapOccPalette(mapSmallDate), 0, true) : null,
+    };
+    return mapMini;
+  }
   const reduce = src => {
     const c = document.createElement('canvas');
     c.width = w; c.height = h;
@@ -3465,7 +3686,7 @@ function mapMinified(s) {
     return c;
   };
   mapMini = {key, w, h, base: reduce(mapBase),
-             occ: mapOccAny ? reduce(mapOccLayer) : null};
+             occ: wantOcc && mapOccLayer ? reduce(mapOccLayer) : null};
   return mapMini;
 }
 
@@ -3510,6 +3731,73 @@ let mapUnplaced = 0, mapUnplacedBrigades = 0;
    drawn, not which ones there are or what is in them, so the grouping is kept
    until the save or the nation picker changes it -- the two things that can. */
 let mapStackCache = null;
+/* Who was at war with whom on a given date.
+
+   The first version of this marked provinces where a *battle* was recorded in
+   the interval before the save, which was wrong in both directions: a battle
+   fought last month leaves nobody on the tile today, so peaceful garrisons got
+   crossed swords, and a siege that has been grinding for a year without a
+   pitched battle in that particular fortnight got nothing.
+
+   What the map can say honestly is who is standing where. Two nations on one
+   tile who are on opposite sides of a war that is running are fighting -- that
+   is what being on the same tile as an enemy means in this game. It needs no
+   guess about timing, and it cannot mark an empty province.
+
+   Built once, since the wars do not depend on the view. */
+let mapWarBook = null;
+function mapEnemiesAt(date) {
+  if (!mapWarBook) {
+    const num = d => {
+      const p = String(d).split('.');
+      return (+p[0]) * 10000 + (+(p[1] || 1)) * 100 + (+(p[2] || 1));
+    };
+    mapWarBook = [];
+    for (const w of (DATA.wars || [])) {
+      if (!w.attackers.length || !w.defenders.length) continue;
+      mapWarBook.push({
+        from: w.start ? num(w.start) : 0,
+        to: w.active || !w.end ? Infinity : num(w.end),
+        a: new Set(w.attackers), d: new Set(w.defenders),
+      });
+    }
+    mapWarBook.num = num;
+  }
+  const n = mapWarBook.num(date);
+  return mapWarBook.filter(w => w.from <= n && n <= w.to);
+}
+
+/* The stacks on a contested tile, split into the two armies facing each other.
+
+   Blending them was the thing that made a contested counter useless: "138k"
+   over a province where 82k are besieging 56k says nothing anyone wants to
+   know, and the band across the counter put the two sides' colours next to
+   each other with no line between what they meant. Each side gets its own
+   box and its own total; whoever is not in the war at all -- a neutral with
+   troops parked in the middle -- keeps a box of their own on the end. */
+function mapSides(stacks, fight) {
+  if (!fight) return null;
+  const bag = t => fight.a.includes(t) ? 0 : fight.d.includes(t) ? 1 : 2;
+  const out = [[], [], []];
+  for (const st of stacks) out[bag(st.tag)].push(st);
+  return out.filter(g => g.length).map(g => ({
+    stacks: g,
+    men: g.reduce((n, a) => n + a.men, 0),
+    n: g.reduce((n, a) => n + a.n, 0),
+  }));
+}
+
+/* Are any two of these nations on opposite sides of a war running now? */
+function mapContested(tags, wars) {
+  if (tags.length < 2) return null;
+  for (const w of wars) {
+    const left = tags.filter(t => w.a.has(t));
+    const right = tags.filter(t => w.d.has(t));
+    if (left.length && right.length) return {a: left, d: right, war: w};
+  }
+  return null;
+}
+
 function mapStacks(date) {
   const stamp = date + '|' + (mapTags === null ? '*' : mapTags.join(','));
   if (mapStackCache && mapStackCache.stamp === stamp) {
@@ -3518,6 +3806,7 @@ function mapStacks(date) {
     return mapStackCache.dots;
   }
   const armies = (MAP.armies || {})[date] || {};
+  const wars = mapEnemiesAt(date);
   // `mapTags` is null until the picker is touched, which is what makes the
   // map open showing every nation. After that an empty list is a real
   // choice -- "None" -- and has to draw nothing rather than fall back to all.
@@ -3532,12 +3821,21 @@ function mapStacks(date) {
       continue;
     }
     const stacks = armies[pid]
-      .map(a => ({tag: MAP.tags[a[0]], n: a[1], mix: a[2]}))
+      .map(a => ({tag: MAP.tags[a[0]], n: a[1], mix: a[2],
+                  // Reports written before strength was carried have three
+                  // entries and no men in them; those fall back to regiments
+                  // at full strength rather than reading as empty.
+                  men: a.length > 3 ? a[3] : a[1] * 1000,
+                  menMix: a.length > 4 ? a[4] : ''}))
       .filter(a => !wanted || wanted.has(a.tag));
     if (!stacks.length) continue;
-    stacks.sort((a, b) => b.n - a.n);
+    stacks.sort((a, b) => b.men - a.men);
+    const fight = mapContested(stacks.map(a => a.tag), wars);
     dots.push({x: spot[0], y: spot[1], pid: +pid, stacks,
-               total: stacks.reduce((s, a) => s + a.n, 0)});
+               total: stacks.reduce((s, a) => s + a.n, 0),
+               men: stacks.reduce((s, a) => s + a.men, 0),
+               fighting: fight,
+               sides: mapSides(stacks, fight)});
   }
   dots.sort((a, b) => b.total - a.total);   // small stacks draw last, on top
   mapStackCache = {stamp, dots, unplaced: mapUnplaced,
@@ -3611,6 +3909,32 @@ function mapRender() {
   ctx.imageSmoothingEnabled = s < 1;
   ctx.imageSmoothingQuality = 'high';
   // Below 1:1 the reduction is cached and this is a straight copy.
+  // Only the zoom-1 view is painted at panel size; everything else reads the
+  // full raster, so it has to exist first.
+  if (mapZoom !== 1 || s >= 1) {
+    /* Which rectangle to paint depends on what happens to it next, and
+       getting that backwards is what made panning between zoom 1 and 1:1
+       crawl.
+
+       Magnified, the raster is read directly through a visible-rect blit, so
+       painting just that window is pure gain -- a sixteenth of the pixels at
+       4x.
+
+       Shrunk but not at zoom 1, every frame reduces the *whole* raster to
+       panel size and caches that per scale. Painting a window there is worse
+       than useless: the window moves with every pan step, each move counts as
+       a repaint, and a repaint has to throw away the cached reduction --- so
+       panning rebuilt a 3.4-megapixel window and a full-canvas reduction on
+       every frame. Painting the whole raster once per save instead lets the
+       reduction stand for the whole pan. */
+    const whole = s < 1;
+    const bx0 = whole ? 0 : Math.max(0, Math.floor(mapOX));
+    const by0 = whole ? 0 : Math.max(0, Math.floor(mapOY));
+    const bx1 = whole ? MAP.w : Math.min(MAP.w, bx0 + Math.ceil(cw / s) + 2);
+    const by1 = whole ? MAP.h : Math.min(MAP.h, by0 + Math.ceil(ch / s) + 2);
+    mapPaintBase(date, bx0, by0, bx1, by1);
+    if (mapHatchOccupied && mapOccAny) mapPaintOcc(date, bx0, by0, bx1, by1);
+  }
   const mini = s < 1 ? mapMinified(s) : null;
   mapPaintLayer(ctx, mini ? mini.base : mapBase, mini, s, cw, ch);
 
@@ -3634,78 +3958,171 @@ function mapRender() {
   // out as you go in instead of turning into one blob
   const grow = Math.pow(mapZoom, 0.45);
   const labelled = [];
+  /* Province anchors in a dense theatre are closer together than a counter is
+     wide, so two of them land on top of each other and neither number can be
+     read -- which is what made the map look broken rather than busy. The
+     stacks are drawn biggest first, and one that would cover a counter already
+     placed is held back rather than drawn over it. Nothing is lost: the count
+     of what is holding back is put on the readout, and zooming separates the
+     anchors until they all fit, since counters grow slower than the map. */
+  const placed = [];
+  mapCrowded = 0;
   for (const dot of mapDots) {
     dot.sx = (dot.x - mapOX) * s;
     dot.sy = (dot.y - mapOY) * s;
-    dot.sr = Math.max(2.2, Math.min(26, Math.sqrt(dot.total) * 1.3 * grow));
-    if (dot.sx < -20 || dot.sy < -20 || dot.sx > cw + 20 || dot.sy > ch + 20) continue;
-    const ink = t => mapDim(MAP.colours[t] || '#ffffff');
-    // The nation's hue, dropped toward black, so the counter reads against
-    // its own country without the map having to give up any colour.
-    ctx.beginPath();
-    ctx.arc(dot.sx, dot.sy, dot.sr, 0, Math.PI * 2);
-    ctx.fillStyle = ink(dot.stacks[0].tag);
-    ctx.fill();
-    // A province holding more than one nation -- a battle, or allies stacked
-    // together -- carries the split as a band round the rim rather than as a
-    // whole pie. The middle has to stay one flat colour for the numeral to be
-    // legible on it, and the rim is where a share is easiest to judge anyway,
-    // since that is where the counter has the most room. Below a few pixels
-    // the band would be noise, so a small counter stays the dominant colour
-    // and the breakdown is a hover away.
-    if (dot.stacks.length > 1 && dot.sr >= 5.5) {
-      const band = Math.max(2, dot.sr * 0.4);
-      const inner = dot.sr - band;
-      // Neutral middle, not the biggest nation's colour: an even split
-      // between two nations otherwise reads as mostly whoever holds the
-      // core. It leaves the ring to carry the proportion on its own, and
-      // makes a shared province tell itself apart from a plain one at a
-      // glance -- solid disc for one nation, ringed for several.
-      ctx.beginPath();
-      ctx.arc(dot.sx, dot.sy, inner, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgb(26 24 30)';
-      ctx.fill();
-      let angle = -Math.PI / 2;
-      for (const part of dot.stacks) {
-        const sweep = part.n / dot.total * Math.PI * 2;
-        ctx.beginPath();
-        ctx.arc(dot.sx, dot.sy, dot.sr, angle, angle + sweep);
-        ctx.arc(dot.sx, dot.sy, inner, angle + sweep, angle, true);
-        ctx.closePath();
-        ctx.fillStyle = ink(part.tag);
-        ctx.fill();
-        angle += sweep;
-      }
-      // Neighbouring nations can be close in colour, so the segments are
-      // parted rather than left to run together -- but only once the band is
-      // thick enough that a line across it is not most of the segment.
-      if (dot.sr >= 9) {
-        ctx.lineWidth = Math.min(1.1, .45 * grow);
-        ctx.strokeStyle = 'rgba(0,0,0,.6)';
-        angle = -Math.PI / 2;
-        for (const part of dot.stacks) {
-          ctx.beginPath();
-          ctx.moveTo(dot.sx + inner * Math.cos(angle), dot.sy + inner * Math.sin(angle));
-          ctx.lineTo(dot.sx + dot.sr * Math.cos(angle), dot.sy + dot.sr * Math.sin(angle));
-          ctx.stroke();
-          angle += part.n / dot.total * Math.PI * 2;
-        }
-        ctx.beginPath();
-        ctx.arc(dot.sx, dot.sy, inner, 0, Math.PI * 2);
-        ctx.stroke();
+    /* Every counter the same size -- sizing them by strength meant a big army
+       drew a block several times the width of its neighbours, which buried
+       them and made adjacent provinces collide. The number inside says how
+       big the stack is, and says it exactly rather than by area.
+
+       What the size does carry is how much detail there is room for. Zoomed
+       out the counter is a small mark that answers "who has troops, and
+       where"; zoomed in it grows into a block with the strength written in
+       it. So it starts smaller than it used to and grows faster. */
+    const half = Math.max(2.2, Math.min(14, 2.9 * Math.pow(mapZoom, 0.72)));
+    dot.sr = half;                      // hit testing still works in radii
+    const hw = half * 1.7, hh = half * 0.95;
+    dot.hw = hw; dot.hh = hh;
+    if (dot.sx < -30 || dot.sy < -30 || dot.sx > cw + 30 || dot.sy > ch + 30) continue;
+    // Overlapping by more than half in both directions is the point at which
+    // the number underneath stops being readable.
+    // A contested tile draws a counter a side, so it needs the room of both
+    // before anything else is allowed to sit next to it.
+    const boxes = dot.sides ? dot.sides.length : 1;
+    /* A contested tile draws a box a side, but not two full-width ones: at
+       full width the pair was two and a half times a plain counter and buried
+       whatever province sat next to it. Each side is drawn at four fifths,
+       touching, so the pair comes to about 1.6 counters rather than 2.4. */
+    const sideNarrow = boxes > 1 ? 0.8 : 1;
+    const reach = half * 1.7 * boxes * sideNarrow;
+    /* Two counters overlap when the distance between their centres is less
+       than their half-widths added together. The first version halved that
+       sum, which let them sit half on top of each other and still pass -- so
+       the map still had counters with their numbers half buried. */
+    /* A hair of overlap is allowed -- a counter clipping a neighbour's frame
+       by a few per cent costs nothing, while demanding perfect separation hid
+       four times as many. */
+    let hidden = false;
+    for (const p of placed) {
+      if (Math.abs(p.x - dot.sx) < (reach + p.reach) * 0.72
+          && Math.abs(p.y - dot.sy) < hh * 1.5) {
+        hidden = true;
+        break;
       }
     }
-    // A pale ring rather than a dark one, now that the counter is the dark
-    // thing: it is the edge that survives on a dark nation's land.
-    ctx.beginPath();
-    ctx.arc(dot.sx, dot.sy, dot.sr, 0, Math.PI * 2);
-    ctx.lineWidth = Math.min(1.6, .7 * grow);
-    ctx.strokeStyle = 'rgba(255,240,214,.7)';
-    ctx.stroke();
+    /* A held-back counter still leaves a pip where it stands.
+
+       Dropping it entirely was worse than the overlap it was avoiding: fifty
+       brigades in Udine were simply not on the map, and the only way to find
+       them was to hover apparently empty ground. A pip says "troops here, the
+       number is a hover away", which is what the zoomed-out view is for. It
+       reserves no space of its own, so it cannot push a third counter out in
+       turn. */
+    if (hidden) {
+      mapCrowded++;
+      const r = Math.max(1.6, half * 0.42);
+      ctx.beginPath();
+      ctx.arc(dot.sx, dot.sy, r, 0, Math.PI * 2);
+      ctx.fillStyle = mapDim(MAP.colours[dot.stacks[0].tag] || '#ffffff');
+      ctx.fill();
+      ctx.lineWidth = Math.min(1.2, .5 * grow);
+      ctx.strokeStyle = dot.fighting ? '#ff5c33' : 'rgba(255,240,214,.75)';
+      ctx.stroke();
+      continue;
+    }
+    placed.push({x: dot.sx, y: dot.sy, reach});
+    const ink = t => mapDim(MAP.colours[t] || '#ffffff');
+    const x0 = dot.sx - hw, y0 = dot.sy - hh, ww = hw * 2, hgt = hh * 2;
+
+    /* Somewhere fought over since the last save gets a burst behind its
+       counter -- spikes radiating past the corners, the way a fight is drawn
+       on a map. Behind rather than over, so it never touches the number; a
+       shape rather than a colour, because the map is already made of colour
+       and an orange edge was lost against whichever nation owned the ground.
+       The first go put small sabres above the counter, which collided with
+       whatever was drawn north of it and vanished at anything but full zoom. */
+    const inFight = mapShowBattles && dot.fighting;
+    // Below this the diamond is smaller than the counter it sits behind
+    // and only its tips show, so the counter's own edge carries it instead.
+    const burstFits = half >= 4.5;
+
+    /* One box, or one box a side where two armies are facing each other.
+       Each is banded by the nations in it, in proportion to their men. */
+    const groups = dot.sides || [{stacks: dot.stacks, men: dot.men, n: dot.total}];
+    const gap = 0;               // the sides touch; a rule marks the join
+    const bw = ww * sideNarrow;
+    const boxW = bw * groups.length;
+    let bx = dot.sx - boxW / 2;
+    dot.boxes = [];
+    /* The diamond goes behind the pair, which is where it read best -- but
+       sized so it stays a diamond. The version that scaled its width with the
+       box count and left its height alone came out a flattened lozenge with
+       points jutting out either side; giving it height in proportion keeps it
+       near 1.4:1, which reads as a shape rather than a smear. */
+    if (inFight && burstFits) {
+      const rx = boxW / 2 + half * 0.6, ry = hh + half * 1.35;
+      ctx.beginPath();
+      ctx.moveTo(dot.sx, dot.sy - ry);
+      ctx.lineTo(dot.sx + rx, dot.sy);
+      ctx.lineTo(dot.sx, dot.sy + ry);
+      ctx.lineTo(dot.sx - rx, dot.sy);
+      ctx.closePath();
+      ctx.fillStyle = '#a82c14';
+      ctx.fill();
+      ctx.lineWidth = Math.min(1.3, .55 * grow);
+      ctx.strokeStyle = 'rgba(255,196,150,.9)';
+      ctx.stroke();
+    }
+    groups.forEach((g, gi) => {
+      ctx.fillStyle = ink(g.stacks[0].tag);
+      ctx.fillRect(bx, y0, bw, hgt);
+      if (g.stacks.length > 1 && bw >= 8) {
+        let at = bx;
+        for (const part of g.stacks) {
+          const seg = bw * (part.men / Math.max(1, g.men));
+          ctx.fillStyle = ink(part.tag);
+          ctx.fillRect(at, y0, seg, hgt);
+          at += seg;
+        }
+        if (bw >= 16) {
+          ctx.lineWidth = Math.min(1.1, .45 * grow);
+          ctx.strokeStyle = 'rgba(0,0,0,.6)';
+          at = bx;
+          for (const part of g.stacks) {
+            at += bw * (part.men / Math.max(1, g.men));
+            ctx.beginPath();
+            ctx.moveTo(at, y0); ctx.lineTo(at, y0 + hgt);
+            ctx.stroke();
+          }
+        }
+      }
+      dot.boxes.push({x: bx + bw / 2, y: dot.sy, men: g.men, w: bw});
+      bx += bw;
+      // A bright rule where two sides meet, so the join is not read as one
+      // nation's colour running into the next.
+      if (gi < groups.length - 1) {
+        ctx.lineWidth = Math.max(1, Math.min(2, .9 * grow));
+        ctx.strokeStyle = 'rgba(255,232,200,.95)';
+        ctx.beginPath();
+        ctx.moveTo(bx, y0); ctx.lineTo(bx, y0 + hgt);
+        ctx.stroke();
+      }
+    });
+    /* A pale edge, which is what survives on a dark nation's land -- unless
+       this province is being fought over and the counter is too small for the
+       burst to show around it, in which case the edge itself carries it. At
+       twelve pixels across there is no room for a symbol, but there is room
+       for a colour. */
+    ctx.lineWidth = inFight && !burstFits
+      ? Math.max(1.4, Math.min(2.2, 1.1 * grow)) : Math.min(1.6, .7 * grow);
+    ctx.strokeStyle = inFight && !burstFits
+      ? '#ff5c33' : 'rgba(255,240,214,.7)';
+    for (const b of dot.boxes) ctx.strokeRect(b.x - b.w / 2, y0, b.w, hgt);
+
     if (mapPinned && mapPinned.pid === dot.pid) {
       ctx.lineWidth = 2.4;
       ctx.strokeStyle = '#ffffff';
-      ctx.stroke();
+      for (const b of dot.boxes) ctx.strokeRect(b.x - b.w / 2, y0, b.w, hgt);
     }
     labelled.push(dot);
   }
@@ -3715,21 +4132,26 @@ function mapRender() {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (const dot of labelled) {
-    const text = dot.total.toLocaleString();
-    // Fitted to whatever the numeral actually sits on: the whole circle, or
-    // just the core when a band has been taken out of the rim for the split.
-    const room = dot.stacks.length > 1 && dot.sr >= 5.5
-      ? dot.sr - Math.max(2, dot.sr * 0.4) : dot.sr;
-    // Circles are sized by area, so a 4-digit stack is not much wider than a
-    // 2-digit one; the fit has to be checked against the digits themselves.
-    const size = Math.min(room * 1.5, room * 3.2 / text.length);
-    if (size < 7) continue;
-    ctx.font = `600 ${size.toFixed(1)}px "IBM Plex Mono", monospace`;
-    ctx.lineWidth = Math.max(1.6, size / 5);
-    ctx.strokeStyle = 'rgba(0,0,0,.55)';
-    ctx.strokeText(text, dot.sx, dot.sy);
-    ctx.fillStyle = '#F6ECD8';
-    ctx.fillText(text, dot.sx, dot.sy);
+    for (const box of dot.boxes) {
+      // Men, not regiments: it is what the counter is sized on and what
+      // changes when a stack takes casualties. Rounded to thousands past 10k,
+      // where the exact figure is neither readable at this size nor what
+      // anyone is asking of a glance. On a contested tile each side carries
+      // its own, so the counter reads as the matchup it is.
+      const text = box.men >= 10000
+        ? Math.round(box.men / 1000).toLocaleString() + 'k'
+        : box.men.toLocaleString();
+      // Fitted to the box rather than a radius: monospace digits run about
+      // 0.6em wide, so the width test is against the count of them.
+      const size = Math.min(dot.hh * 1.6, box.w * 1.4 / text.length);
+      if (size < 7) continue;
+      ctx.font = `600 ${size.toFixed(1)}px "IBM Plex Mono", monospace`;
+      ctx.lineWidth = Math.max(1.6, size / 5);
+      ctx.strokeStyle = 'rgba(0,0,0,.55)';
+      ctx.strokeText(text, box.x, box.y);
+      ctx.fillStyle = '#F6ECD8';
+      ctx.fillText(text, box.x, box.y);
+    }
   }
   document.getElementById('mapzoom').textContent = mapZoom.toFixed(1) + '×';
   mapShow(mapPinned);
@@ -3739,6 +4161,10 @@ function mapIdle() {
   const shown = mapDots.reduce((s, d) => s + d.total, 0);
   document.getElementById('mapreadout').innerHTML =
     `<span class="rk">stacks</span> <b>${mapDots.length.toLocaleString()}</b>`
+    + (mapCrowded
+        ? `<span><span class="rk">drawn as pips, too close to label</span> `
+          + `<b>${mapCrowded.toLocaleString()}</b> <span class="rk">\u2014 zoom in`
+          + `</span></span>` : '')
     + `<span><span class="rk">brigades shown</span> <b>${shown.toLocaleString()}</b></span>`
     + `<span><span class="rk">shading</span> <b>owner</b>`
     + `<span class="rk">${mapHatchOccupied
@@ -3790,18 +4216,54 @@ function mapShowLand(pid) {
 function mapShow(dot) {
   if (!dot) return mapIdle();
   const name = (MAP.names && MAP.names[dot.pid]) || ('province ' + dot.pid);
-  const bits = dot.stacks.map(s => {
+  const row = s => {
     const mix = s.mix.split(';').map(part => {
       const c = part.lastIndexOf(':');
       return `${part.slice(0, c)} ${part.slice(c + 1)}`;
     }).join(', ');
-    return `<span><b style="color:${MAP.colours[s.tag] || '#fff'}">${s.tag}</b> `
-         + `<b>${s.n.toLocaleString()}</b> <span class="rk">${mix}</span></span>`;
-  });
+    // A brigade at less than full strength is the whole point of showing men,
+    // so the share is quoted where it is not a round hundred per cent.
+    const full = s.n * (MAP.regimentSize || 3000);
+    const pct = full ? Math.round(s.men / full * 100) : 100;
+    return `<b style="color:${MAP.colours[s.tag] || '#fff'}">${s.tag}</b>`
+         + `<b class="num">${s.men.toLocaleString()}</b>`
+         + `<span class="rk num">${s.n.toLocaleString()} `
+         + `${s.n === 1 ? 'bde' : 'bdes'}</span>`
+         + `<span class="rk num">${pct}%</span>`
+         + `<span class="mix">${mix}</span>`;
+  };
+  /* Contested tiles are listed side by side rather than as one run of
+     nations, with each side's total above its members -- which is the
+     comparison the province is actually posing. */
+  const bits = [];
+  if (dot.sides && dot.sides.length > 1) {
+    const label = ['attacking', 'defending', 'neither side'];
+    dot.sides.forEach((g, i) => {
+      const who = g.stacks.map(a => a.tag).join(' + ');
+      bits.push(`<div class="sidehead"><b>${who}</b> `
+        + `<span class="rk">${label[dot.fighting.a.includes(g.stacks[0].tag) ? 0
+             : dot.fighting.d.includes(g.stacks[0].tag) ? 1 : 2]}</span> `
+        + `<b>${g.men.toLocaleString()}</b> <span class="rk">men in `
+        + `${g.n.toLocaleString()} ${g.n === 1 ? 'brigade' : 'brigades'}</span>`
+        + `</div>`);
+      bits.push(`<div class="natgrid">${g.stacks.map(row).join('')}</div>`);
+    });
+  } else {
+    bits.push(`<div class="natgrid">${dot.stacks.map(row).join('')}</div>`);
+  }
+  const fight = dot.fighting
+    ? `<span><b style="color:#ff7043">contested</b> <span class="rk">`
+      + `${dot.fighting.a.join(' + ')} against ${dot.fighting.d.join(' + ')}`
+      + `</span></span>`
+    : '';
+
   document.getElementById('mapreadout').innerHTML =
     `<span class="rk">${name}</span>`
     + landBits(dot.pid).join('')
-    + `<span><b>${dot.total.toLocaleString()}</b> <span class="rk">brigades</span></span>`
+    + `<span><b>${dot.men.toLocaleString()}</b> <span class="rk">men, `
+    + `${dot.total.toLocaleString()} ${dot.total === 1 ? 'brigade' : 'brigades'}`
+    + `</span></span>`
+    + fight
     + bits.join('');
 }
 
@@ -3941,7 +4403,14 @@ if (MAP) {
   function mapZoomTo(factor, at) {
     const before = mapFit() * mapZoom;
     const mx = mapOX + at.x / before, my = mapOY + at.y / before;
-    mapZoom = Math.min(24, Math.max(1, mapZoom * factor));
+    /* 24x used to be the ceiling, which is where a dense theatre still had
+       counters shouldering each other: they stop growing at their cap while
+       the map keeps magnifying, so every further doubling of zoom pulls the
+       province anchors twice as far apart and crowding halves. 48x shows
+       about 117 map pixels across a panel -- blocky, since that is the
+       resolution the raster has, but it is the view where a front with a
+       dozen stacks on it can be read one counter at a time. */
+    mapZoom = Math.min(48, Math.max(1, mapZoom * factor));
     const after = mapFit() * mapZoom;
     mapOX = mx - at.x / after;
     mapOY = my - at.y / after;
@@ -3985,7 +4454,9 @@ if (MAP) {
     mapRender();
   });
   canvas.addEventListener('pointerleave', () => { if (!mapPinned) mapIdle(); });
-  window.addEventListener('resize', () => { if (mapBase) mapRenderSoon(); });
+  // `mapBase` used to stand for 'the map has been drawn', but zoomed out it
+  // is never built, so the question is whether there is a map at all.
+  window.addEventListener('resize', () => { if (MAP) mapRenderSoon(); });
 } else {
   // No --mod-path, so there is no province bitmap and no country order: hide the
   // map and the great power ranking rather than showing empty frames.

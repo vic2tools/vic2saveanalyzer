@@ -253,6 +253,13 @@ def blank_nation():
         "regiment_pops": [],
         # province id -> {unit type: brigades}, for the deployment map
         "units_at": defaultdict(Counter),
+        # The men standing in each province, by unit type. A regiment writes
+        # its `strength` in thousands -- a full one at POP_SIZE_PER_REGIMENT
+        # 3000 reads 3.000, and one that has taken 400 casualties reads
+        # 2.600 -- so counting regiments says a stack is the same size the
+        # day after a battle as the day before it. Ships use a different
+        # scale entirely (0 to 100, a percentage) and are not summed here.
+        "men_at": defaultdict(Counter),
         "mobilized_brigades": 0,
         "regular_brigades": 0,
         "mobilizing": 0,
@@ -444,7 +451,7 @@ def read_province(text, at, stop, nations, province_owner_sink,
                 elif key == "colonial":
                     colonial_flag = to_int(value, 0)
             elif key in POP_TYPES:
-                current = [key, None, None, None, None, None, None, None]
+                current = [key, None, None, None, None, None, None, None, None]
                 pops.append(current)
             else:
                 current = None
@@ -581,6 +588,8 @@ def count_units(node, nat, where=None):
                 nat["regiments_by_type"][rtype or "unknown"] += 1
                 if where is not None:
                     nat["units_at"][where][rtype or "unknown"] += 1
+                    nat["men_at"][where][rtype or "unknown"] += int(
+                        round(to_float(reg.get("strength")) * 1000))
         elif key == "ship":
             for ship in sub_blocks(value):
                 nat["ships"] += 1
