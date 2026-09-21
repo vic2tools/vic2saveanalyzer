@@ -47,6 +47,7 @@ from v2parse import (
     read_save_text,
     skip_block,
     to_float,
+    to_int,
     unquote,
 )
 from tech_groups import TECH_GROUP
@@ -1479,14 +1480,31 @@ def write_outputs(rows, ship_rows, pop_rows, culture_rows, price_rows,
     return paths
 
 
+# A province block opens with its number; anything else opening at the left
+# margin is not one. Both are anchored, because the game writes an
+# ideology's entries at the left margin too and they must not be mistaken
+# for the start of a block.
+PROVINCE_HEAD = re.compile(r"^\d+=\s*$")
+TOP_KEY = re.compile(r"^\w+=\s*$")
+
+
 def verify_save(path):
     """
-    Cross-check unit counts against an independent brace-tracking scan.
+    Cross-check the counts against an independent brace-tracking scan.
 
-    The analyzer walks structure; this counts `regiment` and `ship` blocks by
-    raw nesting and attributes them to whichever top-level country block they
-    fall in. If the two disagree, the structured reader is missing a nesting
-    the save actually uses.
+    The analyzer walks structure; this counts `regiment` and `ship` blocks
+    by raw nesting and attributes them to whichever top-level country block
+    they fall in, and adds up every pop in every province by its owner. If
+    the two disagree, the structured reader is missing a nesting the save
+    actually uses.
+
+    Population is worth the second walk because everything else is derived
+    from it -- the accepted share, the literacy average, the mobilizable
+    pool, the strata -- so a pop read wrong is a page of numbers read wrong,
+    and nothing downstream could tell. It is counted by line rather than by
+    token because the game writes an ideology's entries hard against the
+    left margin, inside a pop, inside a province: anything that decides
+    where it is by indentation gets that wrong, and quietly.
     """
     text = read_save_text(path)
     truth_reg, truth_ship = defaultdict(int), defaultdict(int)
@@ -1511,30 +1529,52 @@ def verify_save(path):
             if depth == 0 and looks_like_country_tag(unquote(tok)):
                 current = unquote(tok)
 
+    truth_pop = defaultdict(int)
+    depth, in_province, owner = 0, False, None
+    for line in text.split("\n"):
+        line = line.rstrip("\r")
+        bare = line.strip()
+        if depth == 0:
+            if PROVINCE_HEAD.match(line):
+                in_province, owner = True, None
+            elif TOP_KEY.match(line):
+                in_province, owner = False, None
+        if in_province and depth == 1 and bare.startswith("owner="):
+            owner = unquote(bare.split("=", 1)[1].strip())
+        elif in_province and depth == 2 and bare.startswith("size="):
+            if owner:
+                truth_pop[owner] += to_int(bare.split("=", 1)[1])
+        depth += line.count("{") - line.count("}")
+
     _meta, nations = analyze_save(path, verbose=False)
 
     say = ["\n=== %s ===" % os.path.basename(path),
            f"{'tag':<6}{'brigades':>10}{'scan':>8}{'diff':>7}"
-           f"{'ships':>10}{'scan':>8}{'diff':>7}"]
+           f"{'ships':>10}{'scan':>8}{'diff':>7}"
+           f"{'people':>14}{'scan':>14}"]
     mismatches = 0
-    for tag in sorted(set(truth_reg) | set(truth_ship) | set(nations)):
+    for tag in sorted(set(truth_reg) | set(truth_ship) | set(truth_pop)
+                      | set(nations)):
         nat = nations.get(tag)
         if not nat:
             continue
         got_r, want_r = nat["brigades"], truth_reg.get(tag, 0)
         got_s, want_s = nat["ships"], truth_ship.get(tag, 0)
-        if got_r != want_r or got_s != want_s:
+        got_p, want_p = nat["total_pop"], truth_pop.get(tag, 0)
+        if got_r != want_r or got_s != want_s or got_p != want_p:
             mismatches += 1
             say.append(f"{tag:<6}{got_r:>10}{want_r:>8}{got_r - want_r:>7}"
-                       f"{got_s:>10}{want_s:>8}{got_s - want_s:>7}")
+                       f"{got_s:>10}{want_s:>8}{got_s - want_s:>7}"
+                       f"{got_p:>14,}{want_p:>14,}")
     if mismatches:
         say.append("\n%d nations disagree. Please report this with the save."
                    % mismatches)
     else:
         total_r = sum(truth_reg.values())
         total_s = sum(truth_ship.values())
+        total_p = sum(truth_pop.values())
         say.append(f"All nations agree: {total_r:,} regiments, "
-                   f"{total_s:,} ships.")
+                   f"{total_s:,} ships, {total_p:,} people.")
     say.append("")
     return "\n".join(say), mismatches
 

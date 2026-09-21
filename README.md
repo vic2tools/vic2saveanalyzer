@@ -621,7 +621,7 @@ Useful flags:
 | `--no-cache` | Re-read every save from scratch |
 | `--map-scale N` | Map resolution: 2 is the default, 1 is sharper and bigger, 5 is small and blocky |
 | `--peek` | Print the structure of a save and stop |
-| `--verify` | Cross-check unit counts against a raw scan of the file |
+| `--verify` | Cross-check the brigades, the ships and the population against a raw scan of the file |
 | `--split` | Write the data beside the page rather than inside it, for hosting: see below |
 | `--rebuild` | Build the report again even when nothing has changed |
 | `-q` | Quiet |
