@@ -15,7 +15,23 @@ Works with vanilla and with mods, including total conversions.
 
 ## Getting started
 
-Double-click **`vic2saveanalyzer.exe`**. A window asks for two folders:
+Double-click **`vic2saveanalyzer.exe`**. One window, two tabs, and a bar along
+the bottom that joins them:
+
+| Tab | What it is for |
+|---|---|
+| **Build the report** | Turn a folder of saves into the report. This is the one most runs are for. |
+| **Keep autosaves** | Run this while you play and every autosave the game writes is copied out before the game's three-deep rotation drops it. A century of monthly autosaves instead of the last three months. See [Keeping every autosave](#keeping-every-autosave). |
+
+The bar at the bottom carries the two things that cross between them:
+**Read the kept saves** points the report at the folder the keeper is filling,
+so that path never has to be carried by hand, and **Share a link** turns a
+finished report into a URL — see [Sending someone a long
+campaign](#sending-someone-a-long-campaign).
+
+### Building the report
+
+The report tab asks for two folders:
 
 | | |
 |---|---|
@@ -443,6 +459,40 @@ good. Clicking a row in the table above brings that good's producers up here.
 
 ---
 
+## Keeping every autosave
+
+Victoria 2 keeps three. It writes `autosave.v2`, shifts the last one to
+`oldautosave.v2`, shifts that to `olderautosave.v2`, and drops whatever falls
+off the end. On monthly autosaves that is a three-month memory of a
+sixty-four-year game, and there is no setting for it — the depth is not
+configurable and never was.
+
+The **Keep autosaves** tab watches the game's save folder while you play and
+copies each autosave out before the rotation reaches it, into a folder per
+campaign, named for the date inside the save. Press Start before you play and
+leave the window open.
+
+It follows a nation through its own history rather than its tag. Sardinia
+forms Italy and every save after it says `ITA`, so sorting by tag would cut
+one campaign in half at the moment it got interesting; campaigns are matched
+on the event flags a save carries instead, and the folder is retitled
+`SWE-SCA 1836` when a nation is formed. Two runs as the same country from the
+same start date stay in separate folders for the same reason.
+
+It keeps up with the game, too. Windows reports the save folder changing
+rather than the folder being polled, so a copy starts within milliseconds: at
+speed five three autosaves rotate past in a couple of seconds, and a polling
+version of this lost 59 months of a 1836–1900 campaign.
+
+**Keep one save every N months** is the lever for how much disk this costs.
+Every month for a century is about 18 GB for one campaign; every third month
+is about 6 GB and still four times denser than the game's own yearly autosave.
+If the machine feels heavy while a long campaign runs, exclude the folder from
+Windows Search indexing and from your antivirus's real-time scanning — both
+otherwise read every one of those gigabytes as it lands.
+
+---
+
 ## What you get
 
 Everything lands in the output folder. The report is the point; the CSVs are
@@ -487,8 +537,21 @@ longer pays the third that base64 costs to sit inside HTML. The page loads
 first and inflates the data as it arrives, so a long campaign stops looking
 like a browser that has hung.
 
-The catch is that a browser will not fetch a file sitting next to a page opened
-from a plain disk path, so the two have to be served. Anything that serves
+**Share a link** in the bottom bar does the hosting for you. It puts the
+report in a repository of your own on GitHub, turns GitHub Pages on, and
+copies the URL to your clipboard. The link is yours: it keeps working, you can
+delete it, and nobody else's server holds your campaign. It asks once for a
+GitHub token with permission to create repositories and write to them, and
+keeps it in the settings file on your own machine.
+
+That is a deliberate choice of host rather than the easy one. The free file
+hosts that take a 20 MB upload without an account nearly all serve an HTML
+file as plain text or as a download — a host that renders strangers' HTML is a
+phishing site with extra steps — so a link that actually opens as a page has
+to point somewhere the reader owns.
+
+The catch with the split pair is that a browser will not fetch a file sitting
+next to a page opened from a plain disk path, so the two have to be served. Anything that serves
 static files will do, and the free one most people already have is GitHub
 Pages: put both files in a repository, turn Pages on in its settings, and the
 report is a URL you can give anybody. The page says so itself if it is opened

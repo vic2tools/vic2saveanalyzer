@@ -250,7 +250,9 @@ class Pipe:
 
 
 class App:
-    def __init__(self, root):
+    def __init__(self, root, parent=None):
+        # `parent` is the tab to build into when this is half of the campaign
+        # tools; on its own it owns the window.
         self.root = root
         self.log_queue = queue.Queue()
         self.running = False
@@ -261,9 +263,11 @@ class App:
         self.mod_paths = {}
         saved = load_settings()
 
-        root.title(APP)
-        root.minsize(680, 460)
-        frame = ttk.Frame(root, padding=14)
+        alone = parent is None
+        if alone:
+            root.title(APP)
+            root.minsize(680, 460)
+        frame = ttk.Frame(root if alone else parent, padding=14)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(1, weight=1)
 
@@ -377,7 +381,8 @@ class App:
         self.refresh_campaigns()
 
         root.after(80, self.drain)
-        root.protocol("WM_DELETE_WINDOW", self.close)
+        if alone:
+            root.protocol("WM_DELETE_WINDOW", self.close)
 
     # ---------------------------------------------------------------- helpers
     def pick(self, var, label):

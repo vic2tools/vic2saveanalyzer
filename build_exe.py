@@ -15,7 +15,8 @@ Packs the analyzer into dist/vic2saveanalyzer.exe.
 
 Everything the report needs is already Python -- there is no image library, no
 plotting library and no data files to carry -- so the bundle is the standard
-library, tkinter and these seven modules. The icon is drawn here rather than
+library, tkinter and these modules: the analyzer, the autosave keeper that
+feeds it, and the window that holds both. The icon is drawn here rather than
 shipped, which keeps the repository free of binaries.
 """
 
@@ -95,6 +96,9 @@ def build():
     # they are named here in case the bundler's scan ever stops following them.
     carried = ["vic2_analyzer", "v2parse", "mod_reader", "report", "template",
                "tech_groups",
+               # the window's two halves and the one thing that leaves the
+               # machine, all reached from app.py
+               "gui", "keeper", "keeper_gui", "publish",
                # reached only from inside functions, in both the window and the
                # analyzer, so the scan has nothing at module level to follow
                "cross",
@@ -112,7 +116,7 @@ def build():
     for junk in ("numpy", "pandas", "matplotlib", "PIL", "scipy", "setuptools",
                  "pip", "pytest", "test"):
         cmd += ["--exclude-module", junk]
-    cmd.append(os.path.join(HERE, "gui.py"))
+    cmd.append(os.path.join(HERE, "app.py"))
     print(" ".join(cmd))
     return subprocess.call(cmd, cwd=HERE)
 
