@@ -43,3 +43,8 @@ legacybackup/
 # machine without it the old fallback put them here, inside the checkout.
 settings.json
 keeper.json
+
+# The Rust scanner is built with cargo; its target directory is build
+# output, and the binary itself is carried into the executable rather than
+# tracked here.
+scanner/target/

@@ -702,6 +702,46 @@ models failed, what is still not modelled — it is in
 
 ---
 
+## The Rust scanner (optional)
+
+Reading a save is almost entirely scanning text and converting numbers, and
+the province blocks -- most of the file, and every pop in the game -- are
+about fifty-five percent of it. `scanner/` is that one loop written in Rust.
+It is optional in the strict sense: without it every save is read in Python
+exactly as before, a little slower, and nothing else changes.
+
+```
+cargo build --release --manifest-path scanner/Cargo.toml
+```
+
+No dependencies, so that works on a machine that has never talked to
+crates.io. `build_exe.py` then carries the binary inside the executable; run
+without it and the build says so and carries on.
+
+On 103 real saves, 3.5 GB:
+
+| | Python only | with the scanner |
+|---|---|---|
+| one 31 MB save | 0.598 s | **0.428 s** |
+| whole campaign, first run | 10.7 s | **8.0 s** |
+
+Two implementations of anything is a liability, so there is a check that they
+agree:
+
+```
+python3 testkit/parity.py "/path/to/saves" 10
+```
+
+It reads each save both ways and compares every field of every nation
+exactly -- not approximately, since both sides accumulate in the same order
+and a tolerance would hide the drift it exists to find. It has already earned
+its keep twice: once on cultures of equal size, where the scanner's
+alphabetical output reordered a table that a stable sort had been leaving in
+file order, and once on a nation with no naval base, where Python leaves an
+integer `0` and the scanner was handing back `0.0`.
+
+---
+
 ## Building the executable
 
 ```bash

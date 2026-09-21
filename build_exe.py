@@ -90,6 +90,20 @@ def write_icon(path=ICON):
     return path
 
 
+def scanner_binary():
+    """
+    The Rust province scanner, if this machine has built one.
+
+    Optional on purpose. Without it the analyzer reads every save in Python
+    exactly as it always did, a little slower; with it the executable carries
+    the binary alongside and finds it at run time. A release built where
+    there is no Rust compiler is a slower release, not a broken one.
+    """
+    name = "vic2scan.exe" if sys.platform == "win32" else "vic2scan"
+    built = os.path.join(HERE, "scanner", "target", "release", name)
+    return built if os.path.isfile(built) else None
+
+
 def build():
     write_icon()
     # These are imported inside functions rather than at the top of the file, so
@@ -98,7 +112,7 @@ def build():
                "tech_groups",
                # the window's two halves and the one thing that leaves the
                # machine, all reached from app.py
-               "gui", "keeper", "keeper_gui", "publish",
+               "gui", "keeper", "keeper_gui", "publish", "fastscan",
                # reached only from inside functions, in both the window and the
                # analyzer, so the scan has nothing at module level to follow
                "cross",
@@ -113,6 +127,16 @@ def build():
            "--specpath", os.path.join(HERE, "build")]
     for module in carried:
         cmd += ["--hidden-import", module]
+    scanner = scanner_binary()
+    if scanner:
+        # `.` puts it beside the unpacked modules, which is the first place
+        # fastscan looks.
+        cmd += ["--add-binary", "%s%s." % (scanner, os.pathsep)]
+        print("carrying the Rust scanner: %s" % scanner)
+    else:
+        print("no Rust scanner built; the executable will read saves in "
+              "Python. Build one with: cargo build --release --manifest-path "
+              "scanner/Cargo.toml")
     for junk in ("numpy", "pandas", "matplotlib", "PIL", "scipy", "setuptools",
                  "pip", "pytest", "test"):
         cmd += ["--exclude-module", junk]

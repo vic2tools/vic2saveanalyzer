@@ -972,8 +972,23 @@ def analyze_save(path, verbose=True):
     else:
         blocks = _walk_top(text, meta)
 
+    # The province blocks -- most of the file, and every pop in the game --
+    # go to the scanner when it has been built. It reads them in a fifth of
+    # the time this does, and what it hands back is folded into exactly the
+    # structures the loop below would have filled. When it is not there, or
+    # will not take this file, `scanned` is None and nothing changes.
+    scanned = None
+    if flat:
+        import fastscan
+        scanned = fastscan.scan(path, v2parse.POP_TYPES, MOB_CANDIDATES)
+        if scanned is not None:
+            fastscan.apply(scanned, nations, province_owner, pop_registry,
+                           world_pop, province_counts)
+
     for key, at, stop in blocks:
         if key.isdigit():
+            if scanned is not None:
+                continue
             read_province(text, at, stop, nations, province_counts,
                           pop_registry, province_id=int(key),
                           owner_map=province_owner, flat=flat,

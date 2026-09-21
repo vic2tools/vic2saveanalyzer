@@ -1,0 +1,19 @@
+# A faster province scanner for the Victoria 2 campaign analyzer.
+#
+# No dependencies, deliberately: `cargo build --release` then works on a
+# machine that has never seen crates.io, and the analyzer's build does not
+# acquire a package manager's worth of supply chain to save a few seconds.
+[package]
+name = "vic2scan"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "vic2scan"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
