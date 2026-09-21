@@ -78,8 +78,3 @@ for _branch, _lines in (("army", ARMY_LINES), ("navy", NAVY_LINES)):
         for _idx, _tech in enumerate(_techs):
             TECH_GROUP[_tech] = (_branch, _line, _idx)
 
-
-def branch_of(tech):
-    """'army', 'navy', or 'other' for anything not in the vanilla lists."""
-    entry = TECH_GROUP.get(tech)
-    return entry[0] if entry else "other"

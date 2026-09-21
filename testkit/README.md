@@ -32,6 +32,7 @@ python3 testkit/parity.py "/path/to/saves" 8
 python3 testkit/boots.py out/report.html
 python3 testkit/keeping.py                        # no saves needed
 python3 testkit/sharing.py                       # no saves needed
+python3 testkit/packing.py                       # no saves needed
 python3 testkit/window.py "/path/to/saves"
 python3 testkit/spawned.py "/path/to/saves"
 python3 testkit/smoke.py "/path/to/saves" --mod "/path/to/mod"
@@ -108,6 +109,14 @@ behaviour: nothing listening, an answer that is not JSON, a host that takes
 the file and forgets to say where it put it, one that says it is too large,
 one that refuses it, and one that works. Nothing leaves the machine and no
 real report is used.
+
+**`packing.py`** checks the executable would carry every module the program
+needs. `build_exe.py` names them explicitly, because most are imported
+inside functions and a bundler's scan does not always follow that — which is
+right, and has the obvious failure: add a module, forget the list, and the
+executable builds cleanly, starts cleanly, and dies on whichever button
+reaches the missing import, on somebody else's machine. This walks the
+imports out from `app.py` and compares.
 
 **`keeping.py`** drives the keeper through a campaign, without the game and
 without waiting. The keeper is the part that loses data when it is wrong:

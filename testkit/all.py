@@ -2,7 +2,7 @@
 """
 Run every check, fastest first, and say what held and what did not.
 
-There are thirteen of these now and they want running in an order: the ones
+There are fourteen of these now and they want running in an order: the ones
 that need nothing, then the ones that need saves, then the ones that need a
 built report, then the slow ones. Doing that by hand means doing it wrong
 or not at all.
@@ -66,6 +66,7 @@ def main():
         ("the keeper", [os.path.join(KIT, "keeping.py")]),
         ("campaigns nobody has", [os.path.join(KIT, "edges.py")]),
         ("sharing a report", [os.path.join(KIT, "sharing.py")]),
+        ("what the executable carries", [os.path.join(KIT, "packing.py")]),
     ]
 
     try:
