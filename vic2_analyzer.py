@@ -522,6 +522,18 @@ def clear_cache():
 SPENT_ON_FINALIZE = ("mobilizable_pops", "literacy_at", "pop_at",
                      "soldiers_at", "soldier_pops_at", "province_state")
 
+# Counted with a `Counter` or a `defaultdict` because that is what counting
+# wants, and sent as the plain dicts they already are. Rebuilding one on the
+# far side of a pipe runs its `__init__`, and a save carries sixteen of them
+# a nation: on a campaign of a hundred saves that is sixty-eight thousand
+# constructor calls in the one process that has everything else to do.
+# Nothing past here adds to them -- every reader does `.get`, `.items` or a
+# plain walk -- and `dict()` keeps the order they were counted in, which
+# several stable sorts downstream depend on.
+AS_PLAIN_DICTS = ("ships_by_type", "ship_crew", "regiments_by_type",
+                  "pop_by_type", "pop_by_culture")
+AS_PLAIN_DICTS_INSIDE = ("units_at", "men_at")
+
 # What a worker needs to finish a save where it read it. A named shape
 # rather than a dict of strings because it crosses a process boundary and
 # is read in a loop: `spec.rate` says what it is, `spec["rate"]` says only
@@ -582,6 +594,15 @@ def _finish_save(meta, nations, spec):
             done = nat
         for name in SPENT_ON_FINALIZE:
             done.pop(name, None)
+        for name in AS_PLAIN_DICTS:
+            counted = done.get(name)
+            if counted is not None:
+                done[name] = dict(counted)
+        for name in AS_PLAIN_DICTS_INSIDE:
+            counted = done.get(name)
+            if counted is not None:
+                done[name] = {where: dict(kinds)
+                              for where, kinds in counted.items()}
         out[tag] = done
     return meta, out
 
