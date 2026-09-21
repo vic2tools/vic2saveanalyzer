@@ -26,14 +26,12 @@ and re-save; the file gets about 10x bigger but becomes readable.
 
 import argparse
 import csv
-import math
 import json
 import hashlib
 import os
 import pickle
 import re
 import tempfile
-import threading
 import zlib
 import sys
 from collections import Counter, defaultdict
@@ -61,8 +59,7 @@ from v2parse import (
     to_int,
     unquote,
 )
-from tech_groups import (ARMY_LINES, ARMY_TECHS, NAVY_LINES,
-                         NAVY_TECHS, TECH_GROUP)
+from tech_groups import ARMY_TECHS, NAVY_TECHS, TECH_GROUP
 
 POP_TYPE_LIST = sorted(POP_TYPES)
 
@@ -2373,22 +2370,30 @@ def merge_prices(parsed):
     earliest buffer to the last save.
     """
     prices = {}
-    sources = {}
-    for meta, _ in parsed:
+    # Newest save first, and the first answer for a month is the one that
+    # stands. Walked oldest first, every one of the hundred and twenty
+    # thousand entries a campaign has had to be weighed against which save
+    # had written it -- a second dictionary the same size as the first, and
+    # a lookup in it per entry -- to settle that a later save's buffer is
+    # the more settled record. Coming the other way the question does not
+    # arise: whatever is already there was written by a later save.
+    for meta, _ in reversed(parsed):
         market = meta.get("market")
         if not market:
             continue
-        when = date_key(meta["date"])
+        # The save's own date carries the live price, which its monthly
+        # buffer has not recorded yet -- so it goes in before this save's
+        # own history, and after every later save's, which is exactly the
+        # order it won in before.
+        stamp = meta["date"]
+        for good, price in market["current"].items():
+            key = (stamp, good)
+            if key not in prices:
+                prices[key] = price
         for stamp, good, price in market["history"]:
             key = (stamp, good)
-            # A later save's buffer is the more settled record of the same month.
-            if key not in prices or when >= sources.get(key, (0, 0, 0)):
+            if key not in prices:
                 prices[key] = price
-                sources[key] = when
-        # The save's own date carries the live price, which the monthly buffer
-        # has not recorded yet.
-        for good, price in market["current"].items():
-            prices[(meta["date"], good)] = price
 
     rows = []
     for (stamp, good), price in prices.items():
@@ -3041,6 +3046,16 @@ def main():
         verify_all(files, args.jobs)
         return
 
+    # Asked for now rather than after the campaign has been read. A folder
+    # that cannot be made -- a typo, a drive that is not plugged in, a place
+    # this user may not write -- used to surface as a stack trace out of
+    # `os.makedirs` at the very end, after every save had been parsed.
+    try:
+        os.makedirs(args.out, exist_ok=True)
+    except OSError as exc:
+        sys.exit(f"Cannot write to {args.out}\n"
+                 f"{exc.strerror or exc}. Choose somewhere else with --out.")
+
     verbose = not args.quiet
     if verbose:
         print(f"Found {len(files)} save(s).")
@@ -3077,7 +3092,14 @@ def main():
     set_reform_keys(())
     if args.mod_path:
         from mod_reader import load_mod
-        mod = load_mod(args.mod_path)
+        try:
+            mod = load_mod(args.mod_path)
+        except (OSError, ValueError) as exc:
+            # A mod folder that has been renamed, moved or mistyped is an
+            # ordinary mistake and the message already says what to do
+            # about it. Wrapped in a stack trace it reads like a crash in
+            # the program, which is what the window used to show.
+            sys.exit(str(exc))
         extra = set(mod["pop_types"]) - VANILLA_POP_TYPES
         register_pop_types(mod["pop_types"])
         defines = mod["defines"]
@@ -3617,35 +3639,46 @@ def main():
                     got = flag_images(mod["path"], [tag], {})
                     if tag in got:
                         flags[tag + "|"] = got[tag]
-        html_path = build_report(
-            rows, ship_rows, pop_rows, culture_rows, price_rows, snapshot_rows,
-            brigade_rows, tech_rows, args.out,
-            tag_names=report_names,
-            map_data=map_data,
-            base_prices=(mod or {}).get("base_prices"),
-            great_powers=great_powers,
-            flags=flags,
-            cross=cross_payload,
-            technology=(mod or {}).get("technology"),
-            wars=build_wars(parsed, (mod or {}).get("province_names"),
-                            (mod or {}).get("province_regions"),
-                            (mod or {}).get("state_names"),
-                            (mod or {}).get("unit_kinds"), book=war_book),
-            succession=build_succession(parsed,
-                                        (mod or {}).get("formations")),
-            culture_names=(mod or {}).get("culture_names"),
-            display_names=(mod or {}).get("display_names"),
-            naval={"profiles": naval_profiles, "of": naval_of,
-                   "exact": (mod or {}).get("index_base") is not None}
-                  if naval_profiles else None,
-            supply=supply_by,
-            # One number a save rather than one a nation, so it is gathered
-            # here from the metas rather than from the finalized rows.
-            world_pop={m["date"]: m.get("world_pop", 0)
-                       for m, _n in parsed if m.get("date")},
-            split=args.split,
-            alongside=lambda: tables.append(Aside(write_tables)),
-        )
+        try:
+            html_path = build_report(
+                rows, ship_rows, pop_rows, culture_rows, price_rows,
+                snapshot_rows, brigade_rows, tech_rows, args.out,
+                tag_names=report_names,
+                map_data=map_data,
+                base_prices=(mod or {}).get("base_prices"),
+                great_powers=great_powers,
+                flags=flags,
+                cross=cross_payload,
+                technology=(mod or {}).get("technology"),
+                wars=build_wars(parsed, (mod or {}).get("province_names"),
+                                (mod or {}).get("province_regions"),
+                                (mod or {}).get("state_names"),
+                                (mod or {}).get("unit_kinds"), book=war_book),
+                succession=build_succession(parsed,
+                                            (mod or {}).get("formations")),
+                culture_names=(mod or {}).get("culture_names"),
+                display_names=(mod or {}).get("display_names"),
+                naval={"profiles": naval_profiles, "of": naval_of,
+                       "exact": (mod or {}).get("index_base") is not None}
+                      if naval_profiles else None,
+                supply=supply_by,
+                # One number a save rather than one a nation, so it is
+                # gathered here from the metas rather than from the rows.
+                world_pop={m["date"]: m.get("world_pop", 0)
+                           for m, _n in parsed if m.get("date")},
+                split=args.split,
+                alongside=lambda: tables.append(Aside(write_tables)),
+            )
+        except BaseException:
+            # The tables may already be being written on a thread nobody is
+            # now going to wait for. Let it finish before the failure goes
+            # up, so a half-written CSV is not left behind a stack trace.
+            if tables:
+                try:
+                    tables[0].result()
+                except BaseException:                    # noqa: BLE001
+                    pass
+            raise
     if html_path:
         _tell_report_ready(html_path)
     paths = tables[0].result() if tables else write_tables()

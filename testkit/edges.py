@@ -263,6 +263,29 @@ def _(folder, out):
     return run(path, out), "the positional argument takes a file too"
 
 
+@case("--mod-path at a folder that is not there")
+def _(folder, out):
+    a_save(os.path.join(folder, "a.v2"), "1840.1.1")
+    return (run(folder, out, ["--mod-path", os.path.join(folder, "nope")]),
+            "a mistyped mod folder is a sentence, not a stack trace")
+
+
+@case("--mod-path at a folder with no mod in it")
+def _(folder, out):
+    a_save(os.path.join(folder, "a.v2"), "1840.1.1")
+    empty = os.path.join(folder, "notamod")
+    os.makedirs(empty)
+    return run(folder, out, ["--mod-path", empty]), "same, for a real folder"
+
+
+@case("--out somewhere it cannot be written")
+def _(folder, out):
+    a_save(os.path.join(folder, "a.v2"), "1840.1.1")
+    # A path *under a file*, which no filesystem will make a folder of.
+    wall = os.path.join(folder, "a.v2", "report")
+    return run(folder, wall), "said before the campaign is read, not after"
+
+
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else ""
     width = max(len(n) for n, _ in CASES)

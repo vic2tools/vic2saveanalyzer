@@ -20,7 +20,6 @@ nothing.
 """
 
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -44,6 +43,25 @@ WATCHER = """<script>
                              : (r && r.message) ? r.message : r));
   });
   function say(k, v) { dump('%(mark)s' + k + '=' + v + '\\n'); }
+
+  // Every tab in turn. A tab draws when it is first shown, so seven of the
+  // eight have never run a line at the point the page finishes loading --
+  // which is where a chart that throws on a mod's thirteenth unit type, or
+  // a table of a nation with no navy, would be sitting unnoticed.
+  function visit(tabs, i, then) {
+    if (i >= tabs.length) { then(); return; }
+    var before = bad.length;
+    try { tabs[i].click(); }
+    catch (e) { bad.push('clicking ' + tabs[i].id + ': ' + e.message); }
+    setTimeout(function () {
+      if (bad.length > before) say('badtab', tabs[i].id);
+      else say('oktab', tabs[i].id + ':'
+               + (document.getElementById(
+                    tabs[i].getAttribute('aria-controls')) || {}).childElementCount);
+      visit(tabs, i + 1, then);
+    }, %(settle)d);
+  }
+
   function verdict() {
     for (var i = 0; i < bad.length; i++) say('error', bad[i]);
     var note = document.getElementById('bootnote');
@@ -56,13 +74,18 @@ WATCHER = """<script>
     say('done', 1);
     window.close();
   }
+
   // The report unpacks asynchronously and then draws. Long enough for a
-  // campaign far bigger than any test uses, and it closes as soon as it
-  // has looked, so the wait costs nothing when nothing is wrong.
-  window.addEventListener('load', function () { setTimeout(verdict, %(wait)d); });
+  // campaign far bigger than any test uses, and it closes as soon as it has
+  // looked, so the wait costs nothing when nothing is wrong.
+  window.addEventListener('load', function () {
+    setTimeout(function () {
+      visit(document.querySelectorAll('button.tab'), 0, verdict);
+    }, %(wait)d);
+  });
 }());
 </script>
-""" % {"mark": MARK, "wait": 6000}
+""" % {"mark": MARK, "wait": 5000, "settle": 700}
 
 
 def looked(html_path, seconds=90, wait_ms=6000):
@@ -101,13 +124,13 @@ def looked(html_path, seconds=90, wait_ms=6000):
             out = ((late.stdout or b"").decode("utf-8", "replace")
                    + (late.stderr or b"").decode("utf-8", "replace"))
 
-        said = {"error": []}
+        said = {"error": [], "badtab": [], "oktab": []}
         for line in out.splitlines():
             if not line.startswith(MARK):
                 continue
             key, _, value = line[len(MARK):].partition("=")
-            if key == "error":
-                said["error"].append(value)
+            if key in said and isinstance(said[key], list):
+                said[key].append(value)
             else:
                 said[key] = value
         return said if said.get("done") else None
@@ -140,12 +163,20 @@ def main():
         problems.append("nothing was drawn: no tables and no charts")
     if int(said.get("tabs", 0)) == 0:
         problems.append("no tabs, so the page shell did not render either")
+    for which in said["badtab"]:
+        problems.append("the %s tab threw when it was opened" % which)
+    empty = [t.split(":")[0] for t in said["oktab"] if t.endswith(":0")]
+    for which in empty:
+        problems.append("the %s tab opened but put nothing in its panel"
+                        % which)
 
     print("%s, %.1f MB" % (os.path.basename(path), size))
     print("  title   %s" % said.get("title", ""))
     print("  drew    %s tables, %s charts, %s rows, %s tabs"
           % (said.get("tables"), said.get("svgs"), said.get("rows"),
              said.get("tabs")))
+    print("  opened  %s" % ", ".join(t.replace("tab-", "").split(":")[0]
+                                     for t in said["oktab"]) or "nothing")
     if problems:
         print("\nPROBLEMS:")
         for one in problems:

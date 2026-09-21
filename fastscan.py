@@ -119,6 +119,23 @@ class Running:
             self._guard.cancel()
         return out
 
+    def __del__(self):
+        """
+        Stop a scanner nobody is going to collect.
+
+        A save that fails to read between the two halves -- the wars are
+        read there, and a file that is not the shape it claims can raise --
+        drops this on the floor with the scanner still running and its
+        watchdog thread still armed. In a worker that goes on to read
+        another hundred saves, that accumulates.
+        """
+        try:
+            self._guard.cancel()
+            if self.proc.poll() is None:
+                self.proc.kill()
+        except BaseException:                            # noqa: BLE001
+            pass                                         # shutting down
+
     def abandon(self):
         """Stop the scanner and stop waiting for it."""
         self._guard.cancel()

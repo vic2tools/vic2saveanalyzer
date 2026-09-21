@@ -14,7 +14,6 @@ Writes a save, reads it both ways, and says whether they agree.
 """
 
 import os
-import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

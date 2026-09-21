@@ -38,6 +38,12 @@ def cases(saves, mod, out, analyzer):
     that is the whole reason this file exists -- so a case that only appears
     in one of them is a case only half tested.
 
+    Most carry `--rebuild`. Without it the stamp answers the second run
+    with the report the first one wrote, in a hundredth of a second, and
+    the case tests nothing at all -- which is what `--no-cache`, `--jobs 1`
+    and `--jobs 2` were quietly doing. The cases that are *about* the skip
+    say so in their names.
+
     `wants` is what the run has to say for itself. Exiting 0 is not enough
     for a diagnostic: `--inventions` and `--check-inventions` both exited 0
     while answering zero of everything, because the trim had taken the
@@ -53,13 +59,13 @@ def cases(saves, mod, out, analyzer):
     unchanged = "Nothing has changed"
     got = [
         ("plain, quiet", base + ["-q"], []),
-        ("plain, verbose", base, ["nation-rows across"]),
+        ("plain, verbose", base + ["--rebuild"], ["nation-rows across"]),
         ("rebuild", base + ["--rebuild", "-q"], []),
         ("unchanged (the skip)", base + ["-q"], []),
         ("unchanged, verbose", base, [unchanged]),
-        ("no cache", base + ["--no-cache", "-q"], []),
-        ("one worker", base + ["--jobs", "1", "-q"], []),
-        ("two workers", base + ["--jobs", "2", "-q"], []),
+        ("no cache", base + ["--no-cache", "--rebuild", "-q"], []),
+        ("one worker", base + ["--jobs", "1", "--rebuild", "-q"], []),
+        ("two workers", base + ["--jobs", "2", "--rebuild", "-q"], []),
         ("no html", base + ["--no-html", "-q"], []),
         ("split payload", base + ["--split", "--rebuild", "-q"], []),
         ("tag filter", base + ["--tags", "ENG", "FRA", "--rebuild", "-q"], []),
@@ -112,7 +118,7 @@ def cases(saves, mod, out, analyzer):
             ("mod, map", base + ["--mod-path", mod, "--map-scale", "2",
                                  "--rebuild", "-q"], []),
             ("mod, one worker", base + ["--mod-path", mod, "--jobs", "1",
-                                        "-q"], []),
+                                        "--rebuild", "-q"], []),
         ]
     return got
 
