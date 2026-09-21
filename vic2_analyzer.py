@@ -33,6 +33,7 @@ import os
 import pickle
 import re
 import tempfile
+import threading
 import zlib
 import sys
 from collections import Counter, defaultdict
@@ -3479,15 +3480,30 @@ def main():
     price_rows = merge_prices(parsed)
     snapshot_rows = market_snapshot_rows(parsed)
 
-    # The report is built and written before the tables are. Nothing in it is
-    # read back out of them, they take about a third of a second to write,
-    # and the report is the one thing anybody is waiting for -- so waiting
-    # for them first was a third of a second of the report already being
-    # finished and nobody being able to open it.
+    # The tables are written beside the report rather than before it.
+    # Nothing in the report is read back out of them, they take about a third
+    # of a second, and the report is the one thing anybody is waiting for --
+    # so writing them first was a third of a second of the report already
+    # being finished and nobody being able to open it.
+    #
+    # They are started at the moment the payload begins compressing, which
+    # `build_report` says by calling this. That is the only stretch of the
+    # run with the interpreter lock free -- gzip spends a quarter of a
+    # second without it -- so it is the only stretch where a second thread
+    # is worth anything. Started any earlier it merely takes turns with the
+    # payload assembly, and the report lands later instead of sooner:
+    # measured, 1.80 s to 1.98 s, which is the wrong direction.
+    def write_tables():
+        return write_outputs(rows, ship_rows, pop_rows, culture_rows,
+                             price_rows, snapshot_rows, brigade_rows,
+                             tech_rows, args.out, pop_columns)
+
+    tables = []
+
     html_path = None
     if not args.no_html:
-        from report import (build_map, build_report, build_succession,
-                            build_wars)
+        from report import (Aside, build_map, build_report,
+                            build_succession, build_wars)
         # Country names come from the mod's own localisation, which is where the
         # game gets them: a bare TAG, overridden by TAG_<government> when one
         # exists -- IGoR's PBC is "Peru-Bolivia" but "Andine Federation" while
@@ -3582,12 +3598,11 @@ def main():
             world_pop={m["date"]: m.get("world_pop", 0)
                        for m, _n in parsed if m.get("date")},
             split=args.split,
+            alongside=lambda: tables.append(Aside(write_tables)),
         )
     if html_path:
         _tell_report_ready(html_path)
-    paths = write_outputs(rows, ship_rows, pop_rows, culture_rows,
-                          price_rows, snapshot_rows, brigade_rows, tech_rows,
-                          args.out, pop_columns)
+    paths = tables[0].result() if tables else write_tables()
     if html_path:
         paths.insert(0, html_path)
         # Last, so a run that died writing the tables is not recorded as one

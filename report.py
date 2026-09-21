@@ -22,6 +22,7 @@ import bisect
 import gzip
 import json
 import os
+import threading
 
 from tech_groups import ARMY_LINES, NAVY_LINES
 from template import TEMPLATE
@@ -897,6 +898,49 @@ def build_succession(parsed, formations=None):
 SUPPLY_NAMED = 14
 
 
+class Aside:
+    """
+    A job run on a thread, whose answer and whose failure both come back.
+
+    There is one thing in this program worth a thread, and it is only worth
+    it because of what it runs beside: gzipping the payload spends a quarter
+    of a second inside zlib, which releases the interpreter lock for all of
+    it, so something else can genuinely run at the same time. Writing the CSV
+    tables is that something else -- three tenths of a second, needed by
+    nothing the report contains -- and alongside the compression the two cost
+    the longer of the two rather than the sum.
+
+    Started at the compression and not a line earlier. Assembling the payload
+    is ordinary Python holding the lock the whole way, so a thread started
+    before it only takes turns with it, and the report lands later rather
+    than sooner -- which is the opposite of the point.
+
+    A thread rather than a process because the tables are forty megabytes of
+    tuples and sending them anywhere costs more than writing them.
+    """
+
+    __slots__ = ("_thread", "_value", "_error")
+
+    def __init__(self, fn):
+        self._value = self._error = None
+        self._thread = threading.Thread(target=self._run, args=(fn,),
+                                        daemon=True)
+        self._thread.start()
+
+    def _run(self, fn):
+        try:
+            self._value = fn()
+        except BaseException as exc:                     # noqa: BLE001
+            self._error = exc
+
+    def result(self):
+        """Wait for it, and raise whatever it raised."""
+        self._thread.join()
+        if self._error is not None:
+            raise self._error
+        return self._value
+
+
 def pack(payload):
     """
     The payload as the page carries it: JSON, gzipped, base64.
@@ -960,7 +1004,7 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
                  technology=None, wars=None, succession=None,
                  naval=None, supply=None, culture_names=None,
                  display_names=None, cross=None, world_pop=None,
-                 filename="report.html", split=False):
+                 filename="report.html", split=False, alongside=None):
     os.makedirs(outdir, exist_ok=True)
     tag_names = tag_names or {}
 
@@ -1208,6 +1252,14 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
     # campaign that came to 20 MB as one file comes to about 15, the page
     # itself opens in a moment, and both parts can be hosted. See `unpackFrom`
     # in the template for why that one needs a server behind it.
+    # Everything above this line holds the interpreter lock the whole way;
+    # everything below spends most of its time inside zlib, which does not.
+    # `alongside` is a nudge saying the compression is starting, for a caller
+    # with work of its own that can be done during it. It has to come back
+    # promptly -- starting a thread is the point, not doing the work here.
+    if alongside is not None:
+        alongside()
+
     if split:
         data_name = os.path.splitext(filename)[0] + ".data.gz"
         os.makedirs(outdir, exist_ok=True)
