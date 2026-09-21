@@ -32,6 +32,7 @@ python3 testkit/boots.py out/report.html
 python3 testkit/keeping.py                        # no saves needed
 python3 testkit/sharing.py                       # no saves needed
 python3 testkit/window.py "/path/to/saves"
+python3 testkit/spawned.py "/path/to/saves"
 python3 testkit/smoke.py "/path/to/saves" --mod "/path/to/mod"
 ```
 
@@ -130,6 +131,15 @@ to the buttons, and the other half in `work`. Anything driving `work`
 directly got a run with the early open and the progress bar missing, and
 nothing about the finished run looked different. A run owns its own wiring
 now.
+
+**`spawned.py`** reads a campaign the way Windows reads it. Linux forks its
+workers, so each one begins with the parent's memory already in it; Windows
+spawns a fresh interpreter that re-imports everything, which means anything
+passed to a worker has to survive pickling by name and anything set up
+after import has to be handed over rather than inherited. This is developed
+on Linux and shipped as a Windows executable, and nothing had ever run it
+the way it actually runs there. It builds the same campaign both ways and
+compares every file byte for byte.
 
 **`boots.py`** opens a built report in headless Firefox, with a handler on
 `window.onerror` and on unhandled rejections, and asks the page what it
