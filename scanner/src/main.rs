@@ -49,6 +49,49 @@ const POP_KNOWN: &[&str] = &[
 
 const STARVING_BELOW: f64 = 0.05;
 
+// Byte versions of the three conversions. A save's numbers are ASCII, so
+// nothing here needs the file decoded first -- which is the whole point:
+// decoding 31 MB to read a few thousand characters of it cost 23 ms a save
+// and a 31 MB allocation, and on a machine already bound by memory traffic
+// the allocation costs more than the milliseconds.
+fn trim_b(s: &[u8]) -> &[u8] {
+    let mut a = 0;
+    let mut b = s.len();
+    while a < b && (s[a] as char).is_ascii_whitespace() { a += 1; }
+    while b > a && (s[b - 1] as char).is_ascii_whitespace() { b -= 1; }
+    &s[a..b]
+}
+
+fn trim_end_b(s: &[u8]) -> &[u8] {
+    let mut b = s.len();
+    while b > 0 && (s[b - 1] as char).is_ascii_whitespace() { b -= 1; }
+    &s[..b]
+}
+
+fn to_float_b(s: &[u8]) -> f64 {
+    match std::str::from_utf8(trim_b(s)) {
+        Ok(t) => t.parse::<f64>().unwrap_or(0.0),
+        Err(_) => 0.0,
+    }
+}
+
+fn to_int_b(s: &[u8]) -> i64 {
+    let v = to_float_b(s);
+    if v.is_finite() { v.trunc() as i64 } else { 0 }
+}
+
+fn unquote_b(b: &[u8]) -> &[u8] {
+    if b.len() >= 2 && b[0] == b'"' && b[b.len() - 1] == b'"' {
+        &b[1..b.len() - 1]
+    } else {
+        b
+    }
+}
+
+fn is_number_b(s: &[u8]) -> bool {
+    std::str::from_utf8(s).ok().and_then(|t| t.parse::<f64>().ok()).is_some()
+}
+
 /// `float(s)` as Python reads it, with Python's fallback to a default.
 fn to_float(s: &str) -> f64 {
     s.trim().parse::<f64>().unwrap_or(0.0)
@@ -77,9 +120,8 @@ fn looks_like_country_tag(key: &str) -> bool {
 
 /// Windows-1252 bytes as a Rust string, the way Python's latin-1 decode
 /// reads them: byte value is code point, and nothing can fail.
-fn latin1(raw: &[u8]) -> (String, Vec<usize>) {
+fn latin1(raw: &[u8]) -> String {
     let mut out = String::with_capacity(raw.len() + 16);
-    let mut wide = Vec::new();
     let mut start = 0usize;
     let mut i = 0usize;
     while i < raw.len() {
@@ -89,11 +131,6 @@ fn latin1(raw: &[u8]) -> (String, Vec<usize>) {
                 let hit = i + off;
                 // Safe: everything from `start` to `hit` is ASCII.
                 out.push_str(unsafe { std::str::from_utf8_unchecked(&raw[start..hit]) });
-                // A byte above 127 is one byte in the file and two in a Rust
-                // string, so every offset after it is one further along here
-                // than it is there. The caller reports offsets the file's
-                // way, so remember where each one sat.
-                wide.push(out.len());
                 out.push(raw[hit] as char);
                 start = hit + 1;
                 i = hit + 1;
@@ -101,16 +138,18 @@ fn latin1(raw: &[u8]) -> (String, Vec<usize>) {
         }
     }
     out.push_str(unsafe { std::str::from_utf8_unchecked(&raw[start..]) });
-    (out, wide)
+    out
 }
 
 
-/// A string offset as an offset into the file it was decoded from.
-fn in_file(at: usize, wide: &[usize]) -> usize {
-    // How many two-byte characters start before this point: each one costs
-    // the string an extra byte the file does not have.
-    let before = wide.partition_point(|&w| w < at);
-    at - before
+/// Whether these bytes are a country tag, by the same rule as the Python:
+/// three characters, the first an uppercase letter, all alphanumeric.
+fn tag_bytes(key: &[u8]) -> bool {
+    key.len() == 3
+        && key[0].is_ascii_alphabetic()
+        && key[0].is_ascii_uppercase()
+        && key.iter().all(|c| c.is_ascii_alphanumeric())
+        && !key.iter().all(|c| c.is_ascii_digit())
 }
 
 
@@ -126,18 +165,18 @@ fn unquote(s: &str) -> &str {
 /// Names stored once, referred to by number.
 #[derive(Default)]
 struct Interner {
-    names: Vec<String>,
-    index: HashMap<String, u32>,
+    names: Vec<Vec<u8>>,
+    index: HashMap<Vec<u8>, u32>,
 }
 
 impl Interner {
-    fn id(&mut self, name: &str) -> u32 {
+    fn id(&mut self, name: &[u8]) -> u32 {
         if let Some(&i) = self.index.get(name) {
             return i;
         }
         let i = self.names.len() as u32;
-        self.names.push(name.to_string());
-        self.index.insert(name.to_string(), i);
+        self.names.push(name.to_vec());
+        self.index.insert(name.to_vec(), i);
         i
     }
 }
@@ -145,18 +184,18 @@ impl Interner {
 /// A count per name that remembers the order names first appeared.
 #[derive(Default)]
 struct Counter {
-    order: Vec<String>,
-    index: HashMap<String, usize>,
+    order: Vec<Vec<u8>>,
+    index: HashMap<Vec<u8>, usize>,
     total: Vec<i64>,
 }
 
 impl Counter {
-    fn add(&mut self, name: &str, by: i64) {
+    fn add(&mut self, name: &[u8], by: i64) {
         match self.index.get(name) {
             Some(&i) => self.total[i] += by,
             None => {
-                self.index.insert(name.to_string(), self.order.len());
-                self.order.push(name.to_string());
+                self.index.insert(name.to_vec(), self.order.len());
+                self.order.push(name.to_vec());
                 self.total.push(by);
             }
         }
@@ -202,15 +241,15 @@ struct Nation {
 /// One pop, as the scan fills it in: every field is text until it is wanted.
 #[derive(Default)]
 struct Pop<'a> {
-    kind: &'a str,
-    id: Option<&'a str>,
-    size: Option<&'a str>,
-    culture: Option<&'a str>,
-    money: Option<&'a str>,
-    con: Option<&'a str>,
-    mil: Option<&'a str>,
-    literacy: Option<&'a str>,
-    life: Option<&'a str>,
+    kind: &'a [u8],
+    id: Option<&'a [u8]>,
+    size: Option<&'a [u8]>,
+    culture: Option<&'a [u8]>,
+    money: Option<&'a [u8]>,
+    con: Option<&'a [u8]>,
+    mil: Option<&'a [u8]>,
+    literacy: Option<&'a [u8]>,
+    life: Option<&'a [u8]>,
 }
 
 /// Every top-level block, as (key, content start, stop).
@@ -220,21 +259,20 @@ struct Pop<'a> {
 /// line above. Returns None if any brace has something other than a bare
 /// `key=` above it -- a save reflowed by a text editor -- and then the caller
 /// falls back to Python, which has a slower reader that copes.
-fn top_level_blocks(text: &str) -> Option<Vec<(&str, usize, usize)>> {
-    let bytes = text.as_bytes();
-    let mut found: Vec<(&str, usize, usize)> = Vec::new();
+fn top_level_blocks(bytes: &[u8]) -> Option<Vec<(&[u8], usize, usize)>> {
+    let mut found: Vec<(&[u8], usize, usize)> = Vec::new();
     let mut pos = 0usize;
     while let Some(hit) = find_from(bytes, b"\n{", pos) {
         let line = bytes[..hit].iter().rposition(|&c| c == b'\n').map_or(0, |i| i + 1);
-        let mut key = &text[line..hit];
-        if key.ends_with('\r') {
+        let mut key = &bytes[line..hit];
+        if key.last() == Some(&b'\r') {
             key = &key[..key.len() - 1];
         }
-        if !key.ends_with('=') {
+        if key.last() != Some(&b'=') {
             return None;
         }
         let bare = &key[..key.len() - 1];
-        if bare.is_empty() || !bare.bytes().all(|c| {
+        if bare.is_empty() || !bare.iter().all(|&c| {
             c.is_ascii_alphanumeric() || c == b'_' || c == b'-' || c == b'.'
         }) {
             return None;
@@ -247,7 +285,7 @@ fn top_level_blocks(text: &str) -> Option<Vec<(&str, usize, usize)>> {
     }
     let mut out = Vec::with_capacity(found.len());
     for i in 0..found.len() {
-        let stop = if i + 1 < found.len() { found[i + 1].2 } else { text.len() };
+        let stop = if i + 1 < found.len() { found[i + 1].2 } else { bytes.len() };
         out.push((found[i].0, found[i].1, stop));
     }
     Some(out)
@@ -269,26 +307,26 @@ fn find_from(hay: &[u8], needle: &[u8], from: usize) -> Option<usize> {
 }
 
 /// A building's level, from either `{ 6.000 6.000 }` or `{ level=6 }`.
-fn building_level(text: &str, open: usize, stop: usize) -> f64 {
-    let bytes = text.as_bytes();
+fn building_level(bytes: &[u8], open: usize, stop: usize) -> f64 {
     let close = match find_from(bytes, b"}", open) {
         Some(i) if i <= stop => i,
         _ => return 0.0,
     };
-    let inner = &text[open + 1..close];
-    for line in inner.lines() {
-        let line = line.trim();
-        if let Some(eq) = line.find('=') {
-            let (k, v) = (line[..eq].trim(), line[eq + 1..].trim());
-            if k == "level" || k == "building_level" {
-                return to_float(v);
+    let inner = &bytes[open + 1..close];
+    for line in inner.split(|&c| c == b'\n') {
+        let line = trim_b(line);
+        if let Some(eq) = line.iter().position(|&c| c == b'=') {
+            let k = trim_b(&line[..eq]);
+            let v = trim_b(&line[eq + 1..]);
+            if k == b"level" || k == b"building_level" {
+                return to_float_b(v);
             }
         }
     }
     // A bare pair: the first number in the block is the level.
-    for word in inner.split_whitespace() {
-        if let Ok(v) = word.parse::<f64>() {
-            return v;
+    for word in inner.split(|&c| (c as char).is_ascii_whitespace()) {
+        if !word.is_empty() && is_number_b(word) {
+            return to_float_b(word);
         }
     }
     0.0
@@ -296,13 +334,13 @@ fn building_level(text: &str, open: usize, stop: usize) -> f64 {
 
 struct Scan {
     world_pop: i64,
-    owners: Vec<(i64, String, String)>,
-    nations: HashMap<String, Nation>,
+    owners: Vec<(i64, Vec<u8>, Vec<u8>)>,
+    nations: HashMap<Vec<u8>, Nation>,
     // The order nations were first seen, which is the order the file names
     // them. Python builds its dict that way and rows are written by walking
     // it, so emitting them alphabetically reordered every CSV in the run
     // while leaving the report -- which aggregates -- looking identical.
-    seen: Vec<String>,
+    seen: Vec<Vec<u8>>,
     pop_ids: Vec<i64>,
     pop_kinds: Vec<u32>,
     words: Interner,
@@ -317,19 +355,18 @@ struct Scan {
 /// that opens a pop, two tabs are that pop's numbers. A save written at any
 /// other depth is not one the game wrote.
 fn read_province(
-    text: &str,
+    bytes: &[u8],
     at: usize,
     stop: usize,
     pid: i64,
-    pop_types: &[String],
-    mob_types: &[String],
+    pop_types: &[Vec<u8>],
+    mob_types: &[Vec<u8>],
     scan: &mut Scan,
 ) {
-    let bytes = text.as_bytes();
-    let mut owner: Option<&str> = None;
-    let mut controller: Option<&str> = None;
+    let mut owner: Option<&[u8]> = None;
+    let mut controller: Option<&[u8]> = None;
     let mut colonial_flag: i64 = 0;
-    let mut cores: Vec<&str> = Vec::new();
+    let mut cores: Vec<&[u8]> = Vec::new();
     let mut pops: Vec<Pop> = Vec::new();
     let mut naval_base = 0.0f64;
     let mut fort = 0.0f64;
@@ -338,7 +375,6 @@ fn read_province(
 
     let mut i = at;
     while i < stop {
-        // Every line of interest starts at a newline followed by a tab.
         let nl = match find_from(bytes, b"\n\t", i) {
             Some(n) if n < stop => n,
             _ => break,
@@ -349,63 +385,70 @@ fn read_province(
             depth += 1;
             p += 1;
         }
-        let end = bytes[p..stop.min(bytes.len())]
-            .iter()
+        let end = match bytes[p..stop.min(bytes.len())].iter()
             .position(|&c| c == b'\n')
-            .map_or(stop, |k| p + k);
-        let line = &text[p..end];
+        {
+            Some(k) => p + k,
+            None => stop,
+        };
+        let line = &bytes[p..end];
         i = end;
-        let eq = match line.find('=') {
+        let eq = match line.iter().position(|&c| c == b'=') {
             Some(e) => e,
             None => continue,
         };
         let key = &line[..eq];
-        let value = line[eq + 1..].trim_end_matches('\r');
-        if key.is_empty() || key.contains(|c: char| c.is_whitespace() || c == '{' || c == '}' || c == '"') {
+        let mut value = &line[eq + 1..];
+        if value.last() == Some(&b'\r') {
+            value = &value[..value.len() - 1];
+        }
+        if key.is_empty() || key.iter().any(|&c| {
+            (c as char).is_ascii_whitespace() || c == b'{' || c == b'}' || c == b'"'
+        }) {
             continue;
         }
 
+        // Python's province pattern reaches exactly two levels: one tab for
+        // the province's own fields, two for a pop's. Deeper is not matched
+        // there and is not matched here.
         if depth > 2 {
-            // Python's province regex reaches exactly two levels: one tab for
-            // the province's own fields, two for a pop's. Anything deeper --
-            // a pop's ideology block where a mod indents it, a building's
-            // innards -- it does not match at all, and neither does this.
-            // Matching them would let `level=6` inside a fort be read as
-            // somebody's culture.
             continue;
         }
         if depth == 2 {
-            // A pop's own numbers, or the culture line.
             if let Some(idx) = current {
                 let slot = &mut pops[idx];
-                match key {
-                    "id" if slot.id.is_none() => slot.id = Some(value.trim_end()),
-                    "size" => slot.size = Some(value.trim_end()),
-                    "money" => slot.money = Some(value.trim_end()),
-                    "con" => slot.con = Some(value.trim_end()),
-                    "mil" => slot.mil = Some(value.trim_end()),
-                    "literacy" => slot.literacy = Some(value.trim_end()),
-                    "life_needs" => slot.life = Some(value.trim_end()),
-                    _ => {
-                        // Culture by elimination: not one of the game's own
-                        // fields, and its value is not a number. The value
-                        // must also start with something -- Python's pattern
-                        // wants a first character that is neither a digit nor
-                        // the end of the line, so `ideology=` opening a block
-                        // is not a culture called "ideology".
-                        let head = line.as_bytes().get(eq + 1).copied();
-                        let starts_right = match head {
-                            Some(c) => c != b'\r' && c != b'\n'
-                                && !c.is_ascii_digit(),
-                            None => false,
-                        };
-                        if starts_right
-                            && slot.culture.is_none()
-                            && !POP_KNOWN.contains(&key)
-                            && unquote(value.trim_end()).parse::<f64>().is_err()
-                        {
-                            slot.culture = Some(key);
-                        }
+                if key == b"id" {
+                    if slot.id.is_none() {
+                        slot.id = Some(trim_end_b(value));
+                    }
+                } else if key == b"size" {
+                    slot.size = Some(trim_end_b(value));
+                } else if key == b"money" {
+                    slot.money = Some(trim_end_b(value));
+                } else if key == b"con" {
+                    slot.con = Some(trim_end_b(value));
+                } else if key == b"mil" {
+                    slot.mil = Some(trim_end_b(value));
+                } else if key == b"literacy" {
+                    slot.literacy = Some(trim_end_b(value));
+                } else if key == b"life_needs" {
+                    slot.life = Some(trim_end_b(value));
+                } else {
+                    // Culture by elimination: a field the game does not name,
+                    // whose value is not a number. The value must also begin
+                    // with something that is neither a digit nor the end of
+                    // the line, which is what Python's pattern demands, so a
+                    // block opening like `ideology=` is not a culture.
+                    let starts_right = match value.first().copied() {
+                        Some(c) => c != b'\r' && c != b'\n' && !c.is_ascii_digit(),
+                        None => false,
+                    };
+                    if starts_right
+                        && slot.culture.is_none()
+                        && !POP_KNOWN.iter().any(|k| k.as_bytes() == key)
+                        && !is_number_b(unquote_b(trim_end_b(value)))
+                    {
+                        slot.culture = Some(key);
                     }
                 }
             }
@@ -413,29 +456,33 @@ fn read_province(
         }
 
         // A province-level field. Anything here closes the pop above it.
-        let trimmed = value.trim_start();
-        if !trimmed.is_empty() && !trimmed.starts_with('{') {
+        let trimmed = trim_b(value);
+        if !trimmed.is_empty() && trimmed[0] != b'{' {
             current = None;
-            match key {
-                "owner" => owner = Some(unquote(trimmed.trim_end())),
-                "controller" => controller = Some(unquote(trimmed.trim_end())),
-                "core" => cores.push(unquote(trimmed.trim_end())),
-                "colonial" => colonial_flag = to_int(trimmed),
-                _ => {}
+            if key == b"owner" {
+                owner = Some(unquote_b(trimmed));
+            } else if key == b"controller" {
+                controller = Some(unquote_b(trimmed));
+            } else if key == b"core" {
+                cores.push(unquote_b(trimmed));
+            } else if key == b"colonial" {
+                colonial_flag = to_int_b(trimmed);
             }
-        } else if pop_types.iter().any(|t| t == key) {
+        } else if pop_types.iter().any(|t| t.as_slice() == key) {
             pops.push(Pop { kind: key, ..Default::default() });
             current = Some(pops.len() - 1);
         } else {
             current = None;
-            if key == "naval_base" || key == "fort" || key == "railroad" {
+            if key == b"naval_base" || key == b"fort" || key == b"railroad" {
                 if let Some(brace) = find_from(bytes, b"{", end) {
                     if brace < stop {
-                        let level = building_level(text, brace, stop);
-                        match key {
-                            "naval_base" => naval_base = level,
-                            "fort" => fort = level,
-                            _ => railroad = level,
+                        let level = building_level(bytes, brace, stop);
+                        if key == b"naval_base" {
+                            naval_base = level;
+                        } else if key == b"fort" {
+                            fort = level;
+                        } else {
+                            railroad = level;
                         }
                     }
                 }
@@ -446,19 +493,19 @@ fn read_province(
     // Counted before the owner check: land nobody has colonised still holds
     // people, and they are still part of the world.
     for pop in &pops {
-        scan.world_pop += pop.size.map_or(0, to_int);
+        scan.world_pop += pop.size.map_or(0, to_int_b);
     }
     let owner = match owner {
         Some(o) if !o.is_empty() => o,
         _ => return,
     };
     let held = controller.filter(|c| !c.is_empty()).unwrap_or(owner);
-    scan.owners.push((pid, owner.to_string(), held.to_string()));
+    scan.owners.push((pid, owner.to_vec(), held.to_vec()));
 
     if !scan.nations.contains_key(owner) {
-        scan.seen.push(owner.to_string());
+        scan.seen.push(owner.to_vec());
     }
-    let nat = scan.nations.entry(owner.to_string()).or_default();
+    let nat = scan.nations.entry(owner.to_vec()).or_default();
     nat.provinces += 1;
     if cores.iter().any(|c| *c == owner) {
         nat.cores.push(pid);
@@ -481,18 +528,18 @@ fn read_province(
 
     for pop in &pops {
         if let Some(id) = pop.id {
-            scan.pop_ids.push(to_int(id));
+            scan.pop_ids.push(to_int_b(id));
             let k = scan.words.id(pop.kind);
             scan.pop_kinds.push(k);
         }
-        let size = pop.size.map_or(0, to_int);
+        let size = pop.size.map_or(0, to_int_b);
         if size <= 0 {
             continue;
         }
-        // Interned before the nation is borrowed, because both live on the
-        // same struct and the borrow checker is right to mind.
+        // Interned before the nation is borrowed: both live on the same
+        // struct and the borrow checker is right to mind.
         let mob = match pop.culture {
-            Some(culture) if mob_types.iter().any(|t| t == pop.kind) => {
+            Some(culture) if mob_types.iter().any(|t| t.as_slice() == pop.kind) => {
                 Some((scan.words.id(pop.kind), scan.words.id(culture)))
             }
             _ => None,
@@ -500,13 +547,13 @@ fn read_province(
         let nat = scan.nations.get_mut(owner).unwrap();
         nat.total_pop += size;
         nat.pop_by_type.add(pop.kind, size);
-        if pop.kind == "soldiers" {
+        if pop.kind == b"soldiers" {
             *nat.soldiers_at.entry(pid).or_insert(0) += size;
             nat.soldier_pops_at.entry(pid).or_default().push(size);
         }
         *nat.pop_at.entry(pid).or_insert(0) += size;
         if let Some(life) = pop.life {
-            let got = to_float(life);
+            let got = to_float_b(life);
             if got < 1.0 {
                 nat.life_unmet += size;
             }
@@ -520,20 +567,22 @@ fn read_province(
                 nat.mobilizable.push((k, c, size, pid));
             }
         }
-        let literate = pop.literacy.map_or(0.0, to_float) * size as f64;
+        let literate = pop.literacy.map_or(0.0, to_float_b) * size as f64;
         nat.literacy_weighted += literate;
         *nat.literacy_at.entry(pid).or_insert(0.0) += literate;
-        nat.con_weighted += pop.con.map_or(0.0, to_float) * size as f64;
-        nat.mil_weighted += pop.mil.map_or(0.0, to_float) * size as f64;
-        nat.money_total += pop.money.map_or(0.0, to_float);
+        nat.con_weighted += pop.con.map_or(0.0, to_float_b) * size as f64;
+        nat.mil_weighted += pop.mil.map_or(0.0, to_float_b) * size as f64;
+        nat.money_total += pop.money.map_or(0.0, to_float_b);
     }
 }
 
 // ---------------------------------------------------------------- output
 
-fn escape(out: &mut String, s: &str) {
+fn escape(out: &mut String, s: &[u8]) {
     out.push('"');
-    for c in s.chars() {
+    // Windows-1252 byte to code point, the way Python's latin-1 decode reads
+    // it -- done for the handful of names that leave here, not for the file.
+    for c in s.iter().map(|&b| b as char) {
         match c {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
@@ -570,8 +619,8 @@ fn main() {
         std::process::exit(2);
     }
     let path = &args[1];
-    let mut pop_types: Vec<String> = Vec::new();
-    let mut mob_types: Vec<String> = Vec::new();
+    let mut pop_types: Vec<Vec<u8>> = Vec::new();
+    let mut mob_types: Vec<Vec<u8>> = Vec::new();
     let mut army_techs: Vec<String> = Vec::new();
     let mut navy_techs: Vec<String> = Vec::new();
     let mut reform_keys: Vec<String> = Vec::new();
@@ -582,9 +631,11 @@ fn main() {
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .collect();
+        let as_bytes: Vec<Vec<u8>> =
+            list.iter().map(|s| s.as_bytes().to_vec()).collect();
         match args[k].as_str() {
-            "--pop-types" => pop_types = list,
-            "--mob-types" => mob_types = list,
+            "--pop-types" => pop_types = as_bytes,
+            "--mob-types" => mob_types = as_bytes,
             "--army-techs" => army_techs = list,
             "--navy-techs" => navy_techs = list,
             "--reform-keys" => reform_keys = list,
@@ -617,14 +668,12 @@ fn main() {
         eprintln!("{} is a zip archive, not a plaintext save", path);
         std::process::exit(3);
     }
-    // Saves are Windows-1252; latin-1 never fails and is what Python uses.
-    // Done in runs rather than a character at a time: a 31 MB save holds a
-    // couple of bytes above 127 in the whole file, so this is a handful of
-    // bulk copies and a scan, not thirty-one million pushes.
-    let (text, wide) = latin1(&raw);
+    // The file stays bytes from here. Decoding all 31 MB of it to read the
+    // 8 MB of country blocks cost 23 ms a save and, worse on a machine bound
+    // by memory traffic, a 31 MB allocation per worker.
+    let text: &[u8] = &raw;
 
-    mark("latin-1 decode", &mut last);
-    let blocks = match top_level_blocks(&text) {
+    let blocks = match top_level_blocks(text) {
         Some(b) => b,
         None => {
             // Not the layout the game writes; let Python's slower reader have it.
@@ -650,11 +699,15 @@ fn main() {
     };
     let mut countries: Vec<Country> = Vec::new();
     for (key, at, stop) in &blocks {
-        if !key.is_empty() && key.bytes().all(|c| c.is_ascii_digit()) {
-            let pid: i64 = key.parse().unwrap_or(0);
-            read_province(&text, *at, *stop, pid, &pop_types, &mob_types, &mut scan);
-        } else if looks_like_country_tag(key) {
-            countries.push(read_country(&text, *at, *stop, key, &tables));
+        if !key.is_empty() && key.iter().all(|c| c.is_ascii_digit()) {
+            let pid = to_int_b(key);
+            read_province(text, *at, *stop, pid, &pop_types, &mob_types,
+                          &mut scan);
+        } else if tag_bytes(key) {
+            // Decoded here and nowhere else: this block, and only this one.
+            let chunk = latin1(&text[*at..(*stop).min(text.len())]);
+            let tag = latin1(key);
+            countries.push(read_country(&chunk, 0, chunk.len(), &tag, &tables));
         }
     }
 
@@ -670,26 +723,27 @@ fn main() {
     // Python reads its head scalars from. Taking the whole first block
     // instead would let a `date=` nested inside it win.
     let head_end = blocks.first().map(|b| b.1).unwrap_or(0).min(text.len());
-    for line in text[..head_end].lines().take(40) {
-        if let Some(eq) = line.find('=') {
-            let (k, v) = (line[..eq].trim(), unquote(line[eq + 1..].trim()));
-            if k == "date" && date.is_empty() {
-                date = v.to_string();
-            } else if k == "player" && player.is_empty() {
-                player = v.to_string();
+    for line in text[..head_end].split(|&c| c == b'\n').take(40) {
+        if let Some(eq) = line.iter().position(|&c| c == b'=') {
+            let k = trim_b(&line[..eq]);
+            let v = unquote_b(trim_b(&line[eq + 1..]));
+            if k == b"date" && date.is_empty() {
+                date = latin1(v);
+            } else if k == b"player" && player.is_empty() {
+                player = latin1(v);
             }
         }
     }
 
     let mut out = String::with_capacity(4 << 20);
     out.push_str("{\"date\":");
-    escape(&mut out, &date);
+    escape(&mut out, date.as_bytes());
     out.push_str(",\"player\":");
-    escape(&mut out, &player);
+    escape(&mut out, player.as_bytes());
     out.push_str(",\"blocks\":[");
     let mut first_block = true;
     for (key, at, stop) in &blocks {
-        if !key.is_empty() && key.bytes().all(|c| c.is_ascii_digit()) {
+        if !key.is_empty() && key.iter().all(|c| c.is_ascii_digit()) {
             continue;                 // a province, already read above
         }
         if !first_block {
@@ -698,8 +752,7 @@ fn main() {
         first_block = false;
         out.push('[');
         escape(&mut out, key);
-        out.push_str(&format!(",{},{}]", in_file(*at, &wide),
-                                  in_file(*stop, &wide)));
+        out.push_str(&format!(",{},{}]", at, stop));
     }
     out.push_str("],\"world_pop\":");
     out.push_str(&scan.world_pop.to_string());
@@ -738,12 +791,12 @@ fn main() {
         escape(&mut out, n);
     }
     out.push_str("],\"nations\":{");
-    let tags: Vec<&String> = scan.seen.iter().collect();
+    let tags: Vec<&Vec<u8>> = scan.seen.iter().collect();
     for (n, tag) in tags.iter().enumerate() {
         if n > 0 {
             out.push(',');
         }
-        let nat = &scan.nations[*tag];
+        let nat = &scan.nations[tag.as_slice()];
         escape(&mut out, tag);
         out.push_str(":{");
         out.push_str(&format!("\"provinces\":{}", nat.provinces));
@@ -868,15 +921,15 @@ fn main() {
         }
         out.push('{');
         out.push_str("\"tag\":");
-        escape(&mut out, &c.tag);
+        escape(&mut out, c.tag.as_bytes());
         let pairs_s = |out: &mut String, name: &str, v: &Vec<(String, String)>| {
             out.push_str(&format!(",\"{}\":[", name));
             for (i, (k, val)) in v.iter().enumerate() {
                 if i > 0 { out.push(','); }
                 out.push('[');
-                escape(out, k);
+                escape(out, k.as_bytes());
                 out.push(',');
-                escape(out, val);
+                escape(out, val.as_bytes());
                 out.push(']');
             }
             out.push(']');
@@ -886,7 +939,7 @@ fn main() {
             for (i, (k, val)) in v.iter().enumerate() {
                 if i > 0 { out.push(','); }
                 out.push('[');
-                escape(out, k);
+                escape(out, k.as_bytes());
                 out.push_str(&format!(",{}]", num(*val)));
             }
             out.push(']');
@@ -896,7 +949,7 @@ fn main() {
             for (i, (k, val)) in v.iter().enumerate() {
                 if i > 0 { out.push(','); }
                 out.push('[');
-                escape(out, k);
+                escape(out, k.as_bytes());
                 out.push_str(&format!(",{}]", val));
             }
             out.push(']');
@@ -905,7 +958,7 @@ fn main() {
             out.push_str(&format!(",\"{}\":[", name));
             for (i, x) in v.iter().enumerate() {
                 if i > 0 { out.push(','); }
-                escape(out, x);
+                escape(out, x.as_bytes());
             }
             out.push(']');
         };
@@ -961,7 +1014,7 @@ fn main() {
             for (j, (k, v)) in t.iter().enumerate() {
                 if j > 0 { out.push(','); }
                 out.push('[');
-                escape(&mut out, k);
+                escape(&mut out, k.as_bytes());
                 out.push_str(&format!(",{}]", v));
             }
             out.push_str("]]");
@@ -973,7 +1026,7 @@ fn main() {
             for (j, (k, v)) in t.iter().enumerate() {
                 if j > 0 { out.push(','); }
                 out.push('[');
-                escape(&mut out, k);
+                escape(&mut out, k.as_bytes());
                 out.push_str(&format!(",{}]", v));
             }
             out.push_str("]]");
