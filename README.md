@@ -172,22 +172,25 @@ saving again returns it to normal size.
 
 ### How long it takes
 
-Measured on 103 monthly saves — 3.3 GB — on sixteen cores:
+Measured on 103 monthly saves — 3.3 GB:
 
-| | |
-|---|---|
-| first run, nothing remembered | 3.9 s |
-| again, every save already read | 2.3 s |
-| again, nothing changed at all | 0.06 s |
+| | 16 cores | 4 cores |
+|---|---|---|
+| first run, nothing remembered | 3.9 s | 5.3 s |
+| again, every save already read | 2.1 s | 2.1 s |
+| again, nothing changed at all | 0.06 s | 0.06 s |
 
 What a save was read as is remembered between runs, so only new or changed
 saves cost anything, and a run with nothing to do hands back the report
-already sitting there. Saves are read on every core the machine can spare —
-though not to much effect past eight of them, because reading a campaign runs
-out of memory bandwidth before it runs out of cores.
+already sitting there — which is the case that matters, because it is the one
+you hit every time you press the button twice.
+
+Saves are read on every core the machine can spare, though not to much effect
+past eight of them: reading a campaign runs out of memory bandwidth before it
+runs out of cores.
 
 The report is written before the CSV tables are and opens as soon as it
-exists, so it is on screen about a third of a second before the run ends.
+exists, so it is on screen before the run has finished.
 
 ---
 

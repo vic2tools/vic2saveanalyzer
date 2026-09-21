@@ -518,6 +518,24 @@ behind it. Interleaved best-of-four on 103 saves, 3.3 GB, 16 cores:
 | nothing changed at all | 0.06 s | 0.06 s |
 | nothing changed, under a mod | 0.74 s | **0.08 s** |
 
+Then three more, of which only the last shows up on a machine this wide:
+the tables moved onto a thread beside the compression, the scanner began
+answering in two parts so the worker could read the wars while it scanned,
+and `merge_prices` stopped carrying a second dictionary. The run as it
+stands, against where the same measurements started:
+
+| 103 saves, 3.3 GB | 16 cores | 8 cores | 4 cores | 2 cores |
+|---|---|---|---|---|
+| first run | **3.9 s** | 4.1 s | 5.3 s | 8.4 s |
+| first run, before any of this | 4.7 s | 4.5 s | 6.3 s | 10.5 s |
+| every run after | **2.1 s** | 2.1 s | 2.1 s | 2.1 s |
+| nothing changed at all | **0.06 s** | | | |
+
+The 16-core column barely moves, and the 2-core column is a fifth faster,
+because those last changes overlap work rather than remove it: where every
+core is already busy there is nothing to overlap it with. The machine most
+people have is in the middle of that table, not at the left of it.
+
 The memory is the important column. Held per save is what decides whether a
 campaign fits at all: at 5.8 MB a monthly century wants about 4 GB and falls
 over, and at 0.81 MB it wants about 600 MB and does not.
