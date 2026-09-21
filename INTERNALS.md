@@ -494,7 +494,57 @@ cores:
 | **first run** | 6.1 s &rarr; **4.1 s** | on as many cores as the machine has |
 | **every run after** | 3.0 s &rarr; **2.7 s** | the saves come back from the cache |
 
-Four things got it there.
+Measured again later on a different machine -- 16 cores, 103 real monthly
+saves of 33 MB, 3.5 GB in all -- with three more changes on top:
+
+| 103 saves, 3.5 GB | before | after |
+|---|---|---|
+| first run | 12.3 s | **10.7 s** |
+| every run after | 3.6 s | **2.9 s** |
+| peak memory | 703 MB | **269 MB** |
+| held per save | 5.8 MB | **0.81 MB** |
+
+The memory is the important column. Held per save is what decides whether a
+campaign fits at all: at 5.8 MB a monthly century wants about 4 GB and falls
+over, and at 0.81 MB it wants about 600 MB and does not.
+
+**The campaign is walked once, and each save is let go.** Saves used to be
+collected -- all of them, fully parsed -- and only then consumed. Nothing
+needed them all at once; nothing had been given the chance to say so. Now the
+parse hands them over one at a time in date order, taken from each save's own
+first line rather than by sorting afterwards, and each save spends its row,
+folds its wars into the book and is then cut down to the handful of fields the
+report still asks for. Which fields those are is written out in `KEEP_META`
+and `KEEP_NATION`; everything else -- the mobilizable pops, the per-province
+soldier and literacy tallies, the war histories -- is working material for one
+row and is dead the moment that row exists. The pool is fed as the caller
+consumes rather than racing ahead, so finished saves cannot stack up in the
+parent either.
+
+One thing had to move for that: the verbose summary used to finalize the last
+save a second time, which meant keeping one save whole. It reads the rows the
+run just wrote instead, which is quicker and settles a worry its own comments
+recorded -- that the summary might disagree with the table beside it. It
+cannot now; they are the same numbers.
+
+**Repeated strings are shared.** Almost everything `unquote` returns is a
+country tag, a culture, a religion or a unit type, and each occurrence used to
+be its own object. Interning them means a save holds one `"swedish"` rather
+than forty thousand, and shrinks the pickle each worker sends home for the
+same reason.
+
+**The province scan asks once.** It read up to six regex groups separately, a
+million times a save; it unpacks all six in one call now. A quarter off the
+parse of a single save.
+
+Worth knowing before reaching for a faster language: parsing stops scaling at
+about eight workers here -- 32 saves take 3.4 s on eight and 3.5 s on fifteen
+-- because it is bound by memory traffic rather than by the processor. A
+native parser would win twice over, doing less work per save and generating
+less traffic to saturate on. Capping workers is still a loss at full campaign
+size (11.7 s on fifteen against 13.3 s on eight), so nothing is capped.
+
+Four things got the first set of numbers there.
 
 **Saves are read in parallel.** They do not depend on each other, so the only
 thing in the way was that a worker needs the same two pieces of state the mod

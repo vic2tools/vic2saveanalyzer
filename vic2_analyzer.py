@@ -1418,6 +1418,137 @@ def parse_saves(files, verbose=True, use_cache=True, world="no-mod",
     return [item for item in out if item is not None]
 
 
+DATE_IN_HEAD = re.compile(rb'date\s*=\s*"([\d.]+)"')
+
+
+def date_of(path):
+    """A save's in-game date, off the front of the file, without parsing it."""
+    try:
+        with open(path, "rb") as fh:
+            found = DATE_IN_HEAD.search(fh.read(4096))
+    except OSError:
+        return ""
+    return found.group(1).decode("ascii") if found else ""
+
+
+def in_date_order(files):
+    """
+    The saves sorted by the date inside them, read from their first line.
+
+    Worth the 4 KB a save: the campaign has to be walked oldest first -- war
+    histories fold that way -- and knowing the order up front is what lets
+    saves be handed over one at a time instead of collected and sorted.
+    """
+    return sorted(files, key=lambda p: (save_sort_key(p, date_of(p)), p))
+
+
+# What survives a save once its own row has been built. Everything else in a
+# parsed save is working material for that row -- the mobilizable pops, the
+# per-province soldier, literacy and population tallies, the war histories
+# once they have been folded -- and nothing reads it again. Holding it for
+# the length of the campaign is what made a monthly century need gigabytes.
+KEEP_META = ("date", "player", "file", "province_owner", "great_nations",
+             "world_pop", "market")
+KEEP_NATION = ("units_at", "men_at", "primary_culture", "accepted_cultures",
+               "government", "total_pop", "is_player")
+
+
+def trim_save(meta, nations):
+    """One save reduced to what the rest of the run still asks for."""
+    thin = {tag: {k: nat[k] for k in KEEP_NATION if k in nat}
+            for tag, nat in nations.items()}
+    return {k: v for k, v in meta.items() if k in KEEP_META}, thin
+
+
+def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
+                       pop_types=(), mob_types=(), reform_keys=(), jobs=None,
+                       window=None):
+    """
+    Every save, handed over one at a time, in the order given.
+
+    `parse_saves` collects the whole campaign before the caller sees any of
+    it. On a century of monthly autosaves that is four gigabytes of parsed
+    saves alive at once, which is what has been running the analyzer out of
+    memory -- not because anything needs them all together, but because
+    nothing was given the chance to say it did not.
+
+    At most `window` saves are in flight. The pool is fed as the caller
+    consumes rather than racing ahead and stacking finished results in the
+    parent, so a campaign of seven hundred saves costs what one of twenty
+    does. Cached saves are read one at a time for the same reason.
+    """
+    from concurrent.futures import ProcessPoolExecutor
+    fingerprint = _parser_fingerprint() if use_cache else ""
+    slots = [_cache_slot(p, fingerprint, world) if fingerprint else None
+             for p in files]
+    ready = [bool(sl) and os.path.exists(sl) for sl in slots]
+    todo = [i for i, got in enumerate(ready) if not got]
+    total = len(files)
+    _tell_progress(0, total)
+
+    biggest = max((os.path.getsize(files[i]) for i in todo), default=0)
+    workers = worker_count(len(todo), biggest, jobs) if todo else 1
+    window = window or max(2, workers * 2)
+    if verbose and todo:
+        print(f"Reading {len(todo)} save(s) on {workers} cores.")
+
+    pool = None
+    if workers > 1:
+        try:
+            pool = ProcessPoolExecutor(
+                max_workers=workers, initializer=_worker_setup,
+                initargs=(tuple(pop_types), tuple(mob_types),
+                          tuple(reform_keys)))
+        except Exception as exc:
+            print(f"  reading one at a time ({exc})", file=sys.stderr)
+
+    futures = {}
+    waiting = list(todo)
+    done = 0
+    try:
+        for i, path in enumerate(files):
+            _stop_if_asked()
+            # Keep the workers fed, but never further ahead than the window:
+            # a finished result the caller has not asked for yet is memory
+            # held for nothing.
+            while pool is not None and waiting and len(futures) < window:
+                nxt = waiting.pop(0)
+                futures[nxt] = pool.submit(
+                    _worker_parse, (nxt, files[nxt], slots[nxt]))
+
+            got = None
+            if ready[i]:
+                got = _cache_read(slots[i])
+                if got is not None and verbose:
+                    print(f"  {os.path.basename(path)} ... cached, "
+                          f"{got[0].get('date', '?')}")
+            if got is None and i in futures:
+                _index, slot, meta, nations = futures.pop(i).result()
+                _cache_write(slot, meta, nations)
+                got = (meta, nations)
+                if verbose:
+                    print(f"  [{done + 1}/{total}] {os.path.basename(path)} "
+                          f"... {meta['date']}")
+            if got is None:
+                # No cache, no worker: either the pool never started or the
+                # cached copy turned out to be unreadable.
+                try:
+                    got = analyze_save(path, verbose=verbose)
+                except (ValueError, OSError) as exc:
+                    print(f"  skipped {os.path.basename(path)}: {exc}",
+                          file=sys.stderr)
+                    continue
+                _cache_write(slots[i], got[0], got[1])
+            done += 1
+            _tell_progress(done, total)
+            yield got
+    finally:
+        for future in futures.values():
+            future.cancel()
+        if pool is not None:
+            pool.shutdown(wait=False, cancel_futures=True)
+
+
 def _parse_parallel(files, out, todo, slots, workers, verbose, pop_types,
                     mob_types, reform_keys=(), already=0):
     """
@@ -2506,15 +2637,16 @@ def main():
     # declares: they are the same thing only when nothing has leaked in.
     world = mod_fingerprint(args.mod_path, v2parse.POP_TYPES, REFORM_KEYS)
 
-    parsed = parse_saves(files, verbose=verbose, use_cache=not args.no_cache,
-                         world=world, pop_types=sorted(v2parse.POP_TYPES),
-                         mob_types=args.mob_types,
-                         reform_keys=sorted(REFORM_KEYS), jobs=args.jobs)
-
-    if not parsed:
-        sys.exit("No saves could be read.")
-
-    parsed.sort(key=lambda item: save_sort_key(item[0]["file"], item[0]["date"]))
+    # Oldest first, decided from each save's own first line rather than by
+    # sorting them after the fact -- the campaign is now walked in one pass
+    # and a pass cannot be sorted halfway through. `stream` is a generator:
+    # nothing is read until the loop below asks for it.
+    files = in_date_order(files)
+    stream = parse_saves_stream(
+        files, verbose=verbose, use_cache=not args.no_cache,
+        world=world, pop_types=sorted(v2parse.POP_TYPES),
+        mob_types=args.mob_types,
+        reform_keys=sorted(REFORM_KEYS), jobs=args.jobs)
 
     wanted = set(args.tags) if args.tags else None
     live = None
@@ -2605,7 +2737,15 @@ def main():
     # good -> {date: {tag: what it put on the market}}, for the production view.
     supply_by = {}
 
-    for meta, nations in parsed:
+    # The campaign is walked once, oldest save first. Each save is read, spends
+    # its rows, gives up its wars and is then cut down to the few fields the
+    # report still wants -- so what is alive at any moment is one save, not the
+    # campaign. `parsed` below holds only those remains.
+    from report import fold_wars
+    parsed = []
+    war_book = {"wars": {}, "order": []}
+
+    for meta, nations in stream:
         _stop_if_asked()
         date = meta["date"]
         year = date.split(".")[0] if date else ""
@@ -2697,6 +2837,19 @@ def main():
                                         key=lambda kv: -kv[1]):
                 culture_rows.append((date, year, tag, culture, size,
                                      int(culture in accepted_set)))
+
+        # This save's wars, folded in as it passes. The book wants them oldest
+        # first, which is the order the stream is in, so folding here costs
+        # nothing and means no save has to keep its own copy.
+        fold_wars(war_book, meta.get("wars", ()))
+        meta["wars"] = ()
+        # `--explain-mob-pool` prints a nation's raw pool back, so that one
+        # caller keeps the save whole.
+        parsed.append((meta, nations) if keep_pools
+                      else trim_save(meta, nations))
+
+    if not parsed:
+        sys.exit("No saves could be read.")
 
     if args.explain_mob_pool:
         tag = args.explain_mob_pool.upper()
@@ -2855,14 +3008,11 @@ def main():
               f"{mod['invention_count']} of which grant mobilisation size.")
         return
 
-    # Each save carries the whole war history up to its date, so a campaign
-    # holds one overlapping copy per save -- fifty megabytes over thirty-eight
-    # saves, and near two gigabytes over twelve hundred monthly ones. Folded
-    # into one book here, the saves can drop their lists straight away.
-    from report import merge_wars
-    war_book = merge_wars(parsed)
-    for _meta, _n in parsed:
-        _meta["wars"] = ()
+    # `war_book` was folded save by save on the way past, above: each save
+    # carries the whole war history up to its date, so collecting them first
+    # and merging afterwards meant holding one overlapping copy per save --
+    # fifty megabytes over thirty-eight saves, near two gigabytes over twelve
+    # hundred monthly ones.
 
     price_rows = merge_prices(parsed)
     snapshot_rows = market_snapshot_rows(parsed)
@@ -2977,42 +3127,26 @@ def main():
             print(f"{len(months)} dated price points, "
                   f"{months[0]} to {months[-1]}, "
                   f"{len({r['good'] for r in price_rows})} goods.")
-        latest_date, latest = parsed[-1]
-        keep = {
-            tag: nat for tag, nat in latest.items()
-            if (not wanted or tag in wanted) and nat["total_pop"] >= args.min_pop
-        }
-        top = sorted(keep.items(), key=lambda kv: -kv[1]["total_pop"])[:8]
-        print(f"\nLargest nations at {latest_date['date']}:")
+        # Read back out of the rows this run just wrote, rather than
+        # finalizing the last save a second time. It is quicker, it is what
+        # lets a save be let go the moment its row exists -- and it settles
+        # an old worry in this block's own comments, that the summary could
+        # disagree with the table printed beside it. It cannot now: they are
+        # the same numbers.
+        latest_date = parsed[-1][0]["date"]
+        latest_rows = sorted((r for r in rows if r["date"] == latest_date),
+                             key=lambda r: -r["total_pop"])
+        print(f"\nLargest nations at {latest_date}:")
         print(f"  {'tag':<5}{'pop':>12}{'accept%':>9}{'lit':>7}{'brig':>7}{'ships':>7}")
-        stage = save_world(latest_date, mod)
-        for tag, nat in top:
-            if mod is not None:
-                from mod_reader import rate_for
-                # Zero is an answer, not a gap: an uncivilized nation with no
-                # technology granting mobilisation size really does mobilize
-                # nobody, and falling back to --mobilisation-size here handed
-                # it 100% and disagreed with the table this same run wrote.
-                nation_rate = rate_for(nat, mod, live=live, world=stage)
-            else:
-                nation_rate = args.mob_rate
-            done = finalize(nat, nation_rate, args.pop_per_regiment,
-                            frozenset(args.mob_types), mod=mod, world=stage)
-            done["mobilisation_size"] = round(nation_rate, 5)
-            print(f"  {tag:<5}{done['total_pop']:>12,}{done['accepted_pct']:>9.1f}"
-                  f"{done['avg_literacy'] * 100:>6.1f}%{done['brigades']:>7}"
-                  f"{done['ships']:>7}")
+        for r in latest_rows[:8]:
+            print(f"  {r['tag']:<5}{r['total_pop']:>12,}{r['accepted_pct']:>9.1f}"
+                  f"{r['avg_literacy'] * 100:>6.1f}%{r['brigades']:>7}"
+                  f"{r['ships']:>7}")
         if mod is not None:
-            from mod_reader import rate_for
-            latest_meta, latest_nations = parsed[-1]
-            shown = sorted(latest_nations.items(),
-                           key=lambda kv: -kv[1]["total_pop"])[:10]
-            print(f"\nComputed mobilisation sizes at {latest_meta['date']} "
+            print(f"\nComputed mobilisation sizes at {latest_date} "
                   f"(check these against the in-game military panel):")
-            stage = save_world(latest_meta, mod)
-            for tag, nat in shown:
-                print(f"  {tag}: "
-                      f"{rate_for(nat, mod, live=live, world=stage) * 100:.2f}%")
+            for r in latest_rows[:10]:
+                print(f"  {r['tag']}: {r['mobilisation_size'] * 100:.2f}%")
         print("\nWrote:")
         for path in paths:
             print(f"  {path}")
