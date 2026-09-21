@@ -13,6 +13,7 @@ python3 testkit/awkward.py                        # no saves needed
 python3 testkit/countries.py                      # no saves needed
 python3 testkit/edges.py                          # no saves needed
 python3 testkit/facts.py out/report.html          # the report is optional
+python3 testkit/invariants.py out/nations_timeseries.csv
 python3 testkit/parity.py "/path/to/saves" 8
 python3 testkit/boots.py out/report.html
 python3 testkit/smoke.py "/path/to/saves" --mod "/path/to/mod"
@@ -31,6 +32,20 @@ loaded onto a transport, a province with no owner — and read them both ways.
 first-month save with nothing researched, a save with no pops, a truncated
 one, a zip, files that are not saves. A case passes if it works or refuses
 in a sentence a person could act on. A stack trace is a failure.
+
+**`invariants.py`** checks the arithmetic the report's own numbers have to
+satisfy — 58 rules over every nation in every save. Parity proves the two
+readers agree; it does not prove either is right. These are the identities
+that hold whatever the save says: the strata are a partition of the
+population, a percentage is its own numerator over its own denominator,
+brigades are the standing ones plus the mobilized ones, a count is never
+negative, a share is never above a hundred.
+
+Three of its first draft's rules were wrong rather than the code — a
+factory under construction really is one factory and no levels, and the
+soldier share really is taken against the whole nation including colonies,
+which the comment beside it says and means. That is the useful failure
+mode: a rule that breaks is either a bug or a thing worth understanding.
 
 **`smoke.py`** runs every way the analyzer can be asked to run — quiet and
 loud, with and without a mod, every diagnostic, `--cross` — and checks what
