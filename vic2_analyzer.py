@@ -1107,7 +1107,10 @@ def analyze_save(path, verbose=True, use_scanner=True):
         if scanned is None or "countries" not in scanned:
             # It started well and then did not finish, or it is an older
             # build that does not send the country blocks. Half a save is
-            # not worth keeping, so this one is read again the slow way.
+            # not worth keeping, so this one is read again the slow way --
+            # and said out loud, because a silent fallback to something
+            # four times slower is indistinguishable from working.
+            fastscan.note_unusable()
             return analyze_save(path, verbose=verbose, use_scanner=False)
         fastscan.apply(scanned, nations, province_owner, pop_registry,
                        world_pop, province_counts)

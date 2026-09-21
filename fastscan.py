@@ -223,6 +223,32 @@ def collect(running):
     return got
 
 
+_SAID = False
+
+
+def note_unusable():
+    """
+    Say once that the binary is there and its answer was not usable.
+
+    A missing scanner is ordinary and silent: the saves are read in Python
+    and nothing is lost but speed. A scanner that is *present* and does not
+    answer the way this version expects is a misconfiguration -- a stale
+    build left beside a newer analyzer, half of a protocol change -- and it
+    costs four times the runtime while looking exactly like a correct run,
+    because the fallback is correct. It went unnoticed here for six
+    commits. Once per process, so fifteen workers say it at most fifteen
+    times and not once a save.
+    """
+    global _SAID
+    if _SAID:
+        return
+    _SAID = True
+    print("  the scanner at %s did not answer in the form this version "
+          "expects, so saves are being read in Python instead -- several "
+          "times slower. Rebuild it: cargo build --release "
+          "--manifest-path scanner/Cargo.toml" % available(), file=sys.stderr)
+
+
 def scan(path, pop_types, mob_types, timeout=600, army_techs=(),
          navy_techs=(), reform_keys=()):
     """
