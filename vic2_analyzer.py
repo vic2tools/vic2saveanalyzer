@@ -937,14 +937,43 @@ def _walk_top(text, meta):
             meta["player"] = value
 
 
+class _Spans:
+    """
+    A save on disk, sliced like the bytes of one.
+
+    `raw[at:stop]` reads that span and nothing else, so the loop below does
+    not care which of the two it was handed. There is no other way to index
+    it, because there is no other way the loop indexes it.
+    """
+
+    __slots__ = ("_fh",)
+
+    def __init__(self, path):
+        self._fh = v2parse.open_save(path)
+
+    def __getitem__(self, span):
+        self._fh.seek(span.start)
+        return self._fh.read(span.stop - span.start)
+
+    def close(self):
+        self._fh.close()
+
+
 def analyze_save(path, verbose=True):
     """Parse one save. Returns (meta, {tag: nation_stats})."""
     if verbose:
         print(f"  reading {os.path.basename(path)} ...", end="", flush=True)
-    # Set the scanner going first, so it reads the provinces while this reads
-    # the file and finds its blocks. It is collected below, once there is
-    # something to do with it.
-    raw = v2parse.read_save_bytes(path)
+    # Set the scanner going first, so it reads the file while this sets up to
+    # fold in what it finds. This used to call `fastscan.scan`, which starts
+    # it and waits for it in one breath, after the whole save had already
+    # been read here -- so the two passes over the file were done one after
+    # the other when the split between `start` and `collect` exists precisely
+    # so they can be done at once. The comment here has claimed otherwise
+    # since the scanner landed.
+    import fastscan
+    running = fastscan.start(path, v2parse.POP_TYPES, MOB_CANDIDATES,
+                             army_techs=ARMY_TECHS, navy_techs=NAVY_TECHS,
+                             reform_keys=REFORM_KEYS)
 
     nations = defaultdict(blank_nation)
     province_counts = defaultdict(int)
@@ -961,14 +990,12 @@ def analyze_save(path, verbose=True):
     # brace and ignores whatever follows. Blocks nothing here reads -- most of
     # the file -- are never looked at at all, which is most of the win: the old
     # walk had to count braces through all 26 MB of them.
-    # The scanner reads the provinces and says where everything else is, so
-    # when it works this never turns the whole file into a string: only the
-    # country, war and market blocks are decoded, which is eight megabytes of
-    # thirty-one. When it does not, the file is decoded and read as before.
-    import fastscan
-    scanned = fastscan.scan(path, v2parse.POP_TYPES, MOB_CANDIDATES,
-                            army_techs=ARMY_TECHS, navy_techs=NAVY_TECHS,
-                            reform_keys=REFORM_KEYS)
+    # The scanner reads the provinces and the countries and says where
+    # everything else is, so when it works the file is never read here at
+    # all: the wars, the market and the great power list are lifted straight
+    # off the disk a span at a time. When it does not, the file is read and
+    # decoded whole and everything is done the way it always was.
+    scanned = fastscan.collect(running)
     text = None
     if scanned is not None:
         meta["date"] = scanned["date"]
@@ -979,7 +1006,9 @@ def analyze_save(path, verbose=True):
             fastscan.apply_countries(scanned, nations)
         blocks = scanned["blocks"]
         flat = True
+        raw = _Spans(path)
     else:
+        raw = v2parse.read_save_bytes(path)
         text = raw.decode("latin-1")
         blocks = top_level_blocks(text)
     if scanned is None:
@@ -1046,6 +1075,9 @@ def analyze_save(path, verbose=True):
             great_nations = [to_int(i, -1) for i in ids]
         else:
             market_block = parse_block(Tokens(body, first))
+
+    if scanned is not None:
+        raw.close()
 
     # Classified after the whole file is read, so it does not depend on
     # provinces being written before countries.

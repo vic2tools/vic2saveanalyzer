@@ -475,6 +475,38 @@ def read_save_bytes(path):
         return fh.read()
 
 
+def open_save(path):
+    """
+    A .v2 open for reading, with the same refusals `read_save_bytes` makes.
+
+    When the scanner has read the file it also says where every top-level
+    block is, and the blocks still read in Python are the wars, the market
+    and the great power list: a couple of megabytes of thirty. Seeking to
+    those costs one read each. Pulling the whole file in to slice them out
+    costs thirty megabytes of memory traffic per save, on every core at once,
+    and reading a campaign is bound by memory bandwidth long before it is
+    bound by cores -- so the part worth not doing is the reading.
+    """
+    fh = open(path, "rb")
+    try:
+        head = fh.read(4096)
+        if head[:2] == b"PK":
+            raise ValueError(
+                f"{path} is a zip archive. Extract it, or re-save the game in "
+                f"debug mode to get plaintext."
+            )
+        if b"date=" not in head and b'date =' not in head:
+            raise ValueError(
+                f"{path} does not look like a plaintext Vic2 save (no `date=` "
+                f"in the header). If it is binary, launch Victoria 2 in debug "
+                f"mode and re-save."
+            )
+        return fh
+    except BaseException:
+        fh.close()
+        raise
+
+
 def read_save_text(path):
     """
     Read a .v2 save as text, with a clear error if it isn't plaintext.
