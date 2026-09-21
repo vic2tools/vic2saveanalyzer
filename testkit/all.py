@@ -2,10 +2,11 @@
 """
 Run every check, fastest first, and say what held and what did not.
 
-There are fifteen of these now and they want running in an order: the ones
-that need nothing, then the ones that need saves, then the ones that need a
-built report, then the slow ones. Doing that by hand means doing it wrong
-or not at all.
+There are seventeen of these now and they want running in an order: the
+save-builder the tests themselves are written on, then the ones that need
+nothing, then the ones that need saves, then the ones that need a built
+report, then the slow ones. Doing that by hand means doing it wrong or not
+at all.
 
     python3 testkit/all.py "/path/to/saves" [--mod "/path/to/mod"] [--quick]
 
@@ -60,6 +61,10 @@ def main():
     table = os.path.join(out, "nations_timeseries.csv")
 
     checks = [
+        # First, because every check below that writes a save writes it
+        # with `savefmt`. If the builder is wrong their passes mean
+        # nothing, and one of them did pass for the wrong reason once.
+        ("the save-builder the tests use", [os.path.join(KIT, "savefmt.py")]),
         ("names read before they exist", [os.path.join(KIT, "tooearly.py")]),
         ("awkward save layouts", [os.path.join(KIT, "awkward.py")]),
         ("awkward country blocks", [os.path.join(KIT, "countries.py")]),

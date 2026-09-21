@@ -33,11 +33,29 @@ python3 testkit/boots.py out/report.html
 python3 testkit/looks.py out/report.html shot.png   # for eyes, not for CI
 python3 testkit/keeping.py                        # no saves needed
 python3 testkit/sharing.py                       # no saves needed
+python3 testkit/savefmt.py                       # no saves needed
 python3 testkit/packing.py                       # no saves needed
 python3 testkit/matching.py                      # no saves needed
 python3 testkit/window.py "/path/to/saves"
 python3 testkit/spawned.py "/path/to/saves"
 python3 testkit/smoke.py "/path/to/saves" --mod "/path/to/mod"
+```
+
+**`savefmt.py`** writes save-shaped text, and is the only place in here
+that knows the format. The tab depth *is* the format — both the reader and
+the mod sniffer find things by it — so a builder one tab out writes a file
+that parses without complaint and carries none of what it was supposed to.
+Four files here had each encoded that separately, and it had already gone
+wrong once: `matching.py` wrote its technology blocks flat, the sniffer
+found no technologies in them, and the check that was meant to prove a
+campaign is matched by its technologies passed for a different reason
+entirely. Running it on its own builds a save with every shape in it — a
+pop with a nested id and an ideology block, a country with a stockpile and
+an army — and reads it back through *both* readers, because the tolerant
+one alone catches nothing:
+
+```
+python3 testkit/savefmt.py
 ```
 
 **`parity.py`** holds the Rust scanner to the Python parser, save by save,
@@ -216,7 +234,7 @@ the write is a Windows call, so leave `--every` above the poll interval or it
 will look like it is missing saves when it is only asleep.
 
 **`fake_save.py`** writes one save-shaped file — the header scalars, a
-couple of thousand province blocks each holding a dozen pops, a couple of
+couple of thousand province blocks each holding a handful of pops, a couple of
 hundred country blocks — in roughly the proportions a real save has them.
 With `--campaign N` it also writes N monthly saves dated in order, which is
 how the analyzer gets measured against a campaign nobody here owns:

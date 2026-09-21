@@ -27,104 +27,39 @@ import traceback
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
-HEAD = 'date="%s"\nplayer="%s"\ngovernment=3\nstart_date="1836.1.1"\n'
-
-PROVINCE = """%d=
-\tname="P%d"
-\towner="%s"
-\tcontroller="%s"
-\tcore="%s"
-\tfarmers=
-\t{
-\t\tid=%d
-\t\tsize=%d
-\t\tbritish=protestant
-\t\tliteracy=0.40000
-\t\tlife_needs=0.80000
-\t}
-"""
-
-COUNTRY = """%s=
-\tprimary_culture="british"
-\tgovernment=democracy
-\tcivilized=yes
-\tcapital=%d
-\tprestige=10.000
-\tmoney=100.00000
-\ttechnology=
-\t{
-%s\t}
-\tactive_inventions=
-\t{
-%s\t}
-"""
+import savefmt                                             # noqa: E402
 
 
 def a_save(path, date, tags=("ENG",), provinces=2, techs=(), inventions=(),
            player="ENG", wars="", extra=""):
-    """One save with exactly the pieces a case is about, and nothing else."""
-    parts = [HEAD % (date, player)]
+    """
+    One save with exactly the pieces a case is about, and nothing else.
+
+    The layout comes from `savefmt`, which is checked against both readers
+    -- this file used to wrap its own braces with a loop that guessed
+    where a block ended from the indentation, which is the sort of thing
+    that works until the day it does not.
+    """
+    parts = [savefmt.head(date, player=player)]
     pid = 1
     for tag in tags:
         for _ in range(provinces):
-            parts.append(PROVINCE % (pid, pid, tag, tag, tag, pid,
-                                     1000 + pid * 10))
+            parts.append(savefmt.province(
+                pid, tag, [savefmt.pop("farmers", pid, 1000 + pid * 10)]))
             pid += 1
     first = 1
     for tag in tags:
-        tech = "".join("\t\t%s=\n\t\t{\n\t\t\t1 0.000\n\t\t}\n" % t
-                       for t in techs)
-        inv = ("\t\t%s\n" % " ".join(str(i) for i in inventions)
-               if inventions else "")
-        parts.append(COUNTRY % (tag, first, tech, inv))
+        parts.append(savefmt.country(tag, techs=techs, inventions=inventions,
+                                     capital=first))
         first += provinces
-    parts.append(wars)
-    parts.append(extra)
-    body = "".join(parts)
-    # The game writes a block's fields one tab in and closes on its own line.
-    body = body.replace("\n\t", "\n\t")
-    with open(path, "w", encoding="latin-1", newline="\r\n") as fh:
-        fh.write(_braces(body))
+    if wars:
+        parts.append(wars)
+    if extra:
+        parts.append(extra)
+    return savefmt.write(path, *parts)
 
 
-def _braces(body):
-    """Close every block that `a_save` opened, in the game's own layout."""
-    out = []
-    for line in body.split("\n"):
-        out.append(line)
-    text = "\n".join(out)
-    # Each `name=` line that is followed by an indented line needs its braces;
-    # the templates above already carry the inner ones, so only the outermost
-    # province and country blocks are left to wrap.
-    fixed, lines = [], text.split("\n")
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        fixed.append(line)
-        if line.endswith("=") and not line.startswith("\t"):
-            fixed.append("{")
-            i += 1
-            while i < len(lines) and (lines[i].startswith("\t")
-                                      or lines[i] == ""):
-                if lines[i] == "" and not any(
-                        l.startswith("\t") for l in lines[i + 1:i + 2]):
-                    break
-                fixed.append(lines[i])
-                i += 1
-            fixed.append("}")
-            continue
-        i += 1
-    return "\n".join(fixed) + "\n"
-
-
-WAR = """active_war=
-\tname="The Test War"
-\toriginal_attacker="ENG"
-\toriginal_defender="FRA"
-\tattacker="ENG"
-\tdefender="FRA"
-\taction="1870.5.1"
-"""
+WAR = savefmt.war("The Test War", "ENG", "FRA")
 
 
 def run(saves, out, extra_argv=()):

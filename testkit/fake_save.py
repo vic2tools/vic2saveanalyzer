@@ -17,6 +17,11 @@ import os
 import random
 import sys
 
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, HERE)
+
+import savefmt                                             # noqa: E402
+
 POPS = ["farmers", "labourers", "artisans", "clerks", "craftsmen", "clergymen",
         "officers", "soldiers", "aristocrats", "capitalists", "bureaucrats"]
 CULTURES = ["swedish", "north_german", "french", "british", "russian",
@@ -32,74 +37,79 @@ def tag_for(i):
     return TAGS[i % len(TAGS)] if i < len(TAGS) else "T%02d" % (i % 100)
 
 
-def a_pop(rng, kind):
-    """
-    One pop, at the depth the game writes it.
+def lines(part):
+    """One block as text, CRLF, the way the game writes one.
 
-    The depth is not decoration: the parser's province regex is anchored on
-    it -- one tab for a province's own fields and for a pop's opening line,
-    two for the pop's numbers. Written a level deeper, as this was at first,
-    every pop in the file is silently invisible and a profile of the parser
-    measures it doing half its work.
+    Written a block at a time rather than joined at the end: this file
+    makes twenty-five megabytes and there is no reason for all of it to
+    be in memory at once.
     """
-    return (
-        "\t%s=\n\t{\n"
-        "\t\tid=\n\t\t{\n\t\t\tid=%d\n\t\t\ttype=13\n\t\t}\n"
-        "\t\tsize=%d\n"
-        "\t\t%s=%s\n"
-        "\t\tmoney=%.5f\n"
-        "\t\tideology=\n\t\t{\n%s\t\t}\n"
-        "\t\tissues=\n\t\t{\n%s\t\t}\n"
-        "\t\tcon=%.5f\n\t\tmil=%.5f\n\t\tliteracy=%.5f\n"
-        "\t\tbank=%.5f\n\t\tlife_needs=%.5f\n"
-        "\t}\n"
-    ) % (kind, rng.randrange(1, 900000), rng.randrange(80, 90000),
-         rng.choice(CULTURES), rng.choice(RELIGIONS), rng.uniform(0, 9000),
-         "".join("\t\t\t%d=%.5f\n" % (i, rng.random()) for i in range(1, 7)),
-         "".join("\t\t\t%d=%.5f\n" % (i, rng.random()) for i in range(1, 9)),
-         rng.random() * 4, rng.random() * 6, rng.random(),
-         rng.uniform(0, 500), rng.random())
+    return "\r\n".join(part) + "\r\n"
+
+
+def a_pop(rng, kind, pid):
+    """
+    One pop with everything a real one carries.
+
+    The depth is not decoration: the parser's province regex is anchored
+    on it -- one tab for a province's own fields and for a pop's opening
+    line, two for the pop's numbers. Written a level deeper, as this was
+    at first, every pop in the file is silently invisible and a profile of
+    the parser measures it doing half its work.
+
+    That is why the shape comes from `savefmt` now and not from a format
+    string here. `savefmt.selfcheck` reads a pop of exactly this kind back
+    through both readers, so a depth that drifts fails a test instead of
+    quietly halving the benchmark.
+    """
+    return savefmt.pop(
+        kind, rng.randrange(1, 900000), rng.randrange(80, 90000),
+        culture=rng.choice(CULTURES), religion=rng.choice(RELIGIONS),
+        literacy=rng.random(), life=rng.random(), nested_id=True,
+        extra=["money=%.5f" % rng.uniform(0, 9000),
+               "con=%.5f" % (rng.random() * 4),
+               "mil=%.5f" % (rng.random() * 6),
+               "bank=%.5f" % rng.uniform(0, 500)],
+        blocks=[("ideology", ["\t\t\t%d=%.5f" % (i, rng.random())
+                              for i in range(1, 7)]),
+                ("issues", ["\t\t\t%d=%.5f" % (i, rng.random())
+                            for i in range(1, 9)])])
 
 
 def a_province(rng, pid):
-    out = ["%d=\n{\n" % pid,
-           '\tname="Province %d"\n' % pid,
-           '\towner="%s"\n' % tag_for(rng.randrange(40)),
-           '\tcontroller="%s"\n' % tag_for(rng.randrange(40)),
-           '\tcore="%s"\n' % tag_for(rng.randrange(40)),
-           "\tgarrison=%.3f\n" % (rng.random() * 100),
-           "\tlife_rating=%d\n" % rng.randrange(10, 40)]
-    for kind in rng.sample(POPS, rng.randrange(4, 10)):
-        out.append(a_pop(rng, kind))
-    out.append("\trailroad=\n\t{\n\t\tlevel=%d\n\t}\n" % rng.randrange(0, 6))
-    out.append("}\n")
-    return "".join(out)
+    pops = [a_pop(rng, kind, pid)
+            for kind in rng.sample(POPS, rng.randrange(4, 10))]
+    return lines(savefmt.province(
+        pid, owner=tag_for(rng.randrange(40)), pops=pops,
+        name="Province %d" % pid,
+        extra=['controller="%s"' % tag_for(rng.randrange(40)),
+               'core="%s"' % tag_for(rng.randrange(40)),
+               "garrison=%.3f" % (rng.random() * 100),
+               "life_rating=%d" % rng.randrange(10, 40),
+               "railroad=", "{", "\tlevel=%d" % rng.randrange(0, 6), "}"]))
 
 
 def a_country(rng, tag):
-    techs = "".join("\t\ttech_%d=\n\t\t{\n\t\t\t1 %.3f\n\t\t}\n" % (i, rng.random())
-                    for i in range(rng.randrange(20, 90)))
-    inventions = " ".join(str(rng.randrange(1, 2000))
-                          for _ in range(rng.randrange(20, 200)))
-    regiments = "".join(
-        '\t\tregiment=\n\t\t{\n\t\t\tname="%d Brigade"\n\t\t\ttype=%s\n'
-        "\t\t\tcount=%d\n\t\t\tstrength=%.3f\n\t\t}\n"
-        % (i, rng.choice(UNITS), rng.randrange(1000, 3000), rng.random())
-        for i in range(rng.randrange(3, 30)))
-    stock = "".join("\t\t%s=%.5f\n" % (g, rng.uniform(0, 5000)) for g in GOODS)
-    return (
-        "%s=\n{\n"
-        '\tprimary_culture="%s"\n\treligion="%s"\n\tgovernment=democracy\n'
-        "\tprestige=%.3f\n\tmoney=%.5f\n\tbadboy=%.3f\n"
-        "\tconscription=mandatory_service\n"
-        "\ttechnology=\n\t{\n%s\t}\n"
-        "\tactive_inventions=\n\t{\n\t\t%s\n\t}\n"
-        "\tstockpile=\n\t{\n%s\t}\n"
-        '\tarmy=\n\t{\n\t\tname="Army"\n%s\t}\n'
-        "}\n"
-    ) % (tag, rng.choice(CULTURES), rng.choice(RELIGIONS), rng.uniform(0, 300),
-         rng.uniform(0, 9e5), rng.random() * 25, techs, inventions, stock,
-         regiments)
+    regiments = []
+    for i in range(rng.randrange(3, 30)):
+        regiments += savefmt.nest(
+            "regiment", ['\t\t\tname="%d Brigade"' % i,
+                         "\t\t\ttype=%s" % rng.choice(UNITS),
+                         "\t\t\tcount=%d" % rng.randrange(1000, 3000),
+                         "\t\t\tstrength=%.3f" % rng.random()], 2)
+    return lines(savefmt.country(
+        tag, culture=rng.choice(CULTURES), religion=rng.choice(RELIGIONS),
+        techs=[("tech_%d" % i, rng.random())
+               for i in range(rng.randrange(20, 90))],
+        inventions=[rng.randrange(1, 2000)
+                    for _ in range(rng.randrange(20, 200))],
+        extra=["prestige=%.3f" % rng.uniform(0, 300),
+               "money=%.5f" % rng.uniform(0, 9e5),
+               "badboy=%.3f" % (rng.random() * 25),
+               "conscription=mandatory_service"],
+        blocks=[("stockpile", ["\t\t%s=%.5f" % (g, rng.uniform(0, 5000))
+                               for g in GOODS]),
+                ("army", ['\t\tname="Army"'] + regiments)]))
 
 
 def a_campaign(one, folder, months, tag="SWE"):
@@ -143,13 +153,13 @@ def main():
     rng = random.Random(args.seed)
     want = int(args.mb * 1024 * 1024)
 
-    with open(args.path, "w", encoding="latin-1") as fh:
-        fh.write('date="1881.3.24"\nplayer="SWE"\ngovernment=3\n')
-        fh.write("flags=\n{\n%s}\n" % "".join(
-            "\t%s=yes\n" % f for f in
-            ("the_great_trek", "crimean_war_has_begun", "MozartFest1838",
-             "sonderbund_crisis", "risorgimento_started", "opium_war_started")))
-        fh.write('start_date="1836.1.1"\nstart_pop_index=152437\n')
+    with open(args.path, "w", encoding="latin-1", newline="") as fh:
+        fh.write(lines(savefmt.head(
+            "1881.3.24", player="SWE",
+            flags=("the_great_trek", "crimean_war_has_begun", "MozartFest1838",
+                   "sonderbund_crisis", "risorgimento_started",
+                   "opium_war_started"))
+            + ["start_pop_index=152437"]))
 
         written, pid = 0, 0
         # Provinces first and in bulk, which is how a save is shaped: they are

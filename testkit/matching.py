@@ -26,6 +26,7 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
 import cross                                               # noqa: E402
+import savefmt                                             # noqa: E402
 
 TAGS = ["ENG", "FRA", "PRU", "RUS", "AUS", "TUR", "SPA", "USA"]
 POPS = ["farmers", "labourers", "craftsmen", "soldiers", "aristocrats"]
@@ -76,27 +77,14 @@ def a_save(path, tags=None, techs=None, provinces=None, top_invention=1):
     techs = TECHS if techs is None else techs
     provinces = range(1, 41) if provinces is None else provinces
 
-    out = ['date="1880.1.1"', 'player="%s"' % tags[0], "government=3",
-           'start_date="1836.1.1"']
+    parts = [savefmt.head("1880.1.1", player=tags[0])]
     for pid in provinces:
-        out += ["%d=" % pid, "{", '\tname="P%d"' % pid,
-                '\towner="%s"' % tags[0], '\tcontroller="%s"' % tags[0],
-                "\tfarmers=", "\t{", "\t\tid=%d" % pid, "\t\tsize=1000",
-                "\t\tbritish=protestant", "\t}", "}"]
+        parts.append(savefmt.province(
+            pid, tags[0], [savefmt.pop("farmers", pid, 1000)]))
     for tag in tags:
-        # The indentation is the format. `technology=` one tab in, each
-        # technology two, each opening brace on its own line -- which is
-        # how the sniffer finds them, and writing it any other way makes a
-        # save that looks fine and carries no technologies at all.
-        out += ["%s=" % tag, "{", '\tprimary_culture="british"',
-                "\ttechnology=", "\t{"]
-        for tech in techs:
-            out += ["\t\t%s=" % tech, "\t\t{", "\t\t\t1 0.000", "\t\t}"]
-        out += ["\t}", "\tactive_inventions=", "\t{",
-                "\t\t%d" % top_invention, "\t}", "}"]
-    with open(path, "w", encoding="latin-1", newline="\r\n") as fh:
-        fh.write("\n".join(out) + "\n")
-    return path
+        parts.append(savefmt.country(tag, techs=techs,
+                                     inventions=[top_invention]))
+    return savefmt.write(path, *parts)
 
 
 def try_one(name, holding, mine, theirs, save_kwargs):
