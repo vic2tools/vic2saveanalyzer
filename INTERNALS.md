@@ -650,8 +650,11 @@ almost always repeats the one to its left, which skips nine lookups in ten.
 
 The cache key is the save's path, size and timestamp, **a hash of the parsing
 code**, and **which mod it was read under**. The first expires every entry the
-moment `vic2_analyzer.py` or `v2parse.py` changes -- the one version counter
-nobody forgets to bump. The second matters because a save is not read the same
+moment `readsave.py`, `v2parse.py` or `vic2_analyzer.py` changes -- the one
+version counter nobody forgets to bump. Which files those are has to be kept
+honest: the reading moved into `readsave.py`, and a hash that had gone on
+covering only the file it used to be in would have stopped noticing changes
+to it, handing back stale entries as though they were current. The second matters because a save is not read the same
 way under every mod: the mod's own pop types are registered before parsing and
 decide which pop blocks the province reader keeps, so the same file under two
 mods is two different parses and must not share a slot. Output is byte-identical

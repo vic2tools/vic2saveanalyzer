@@ -787,8 +787,10 @@ runs it.
 | | |
 |---|---|
 | `gui.py` | The window: the folder pickers and the log box |
-| `vic2_analyzer.py` | Command line, aggregation, CSV output |
-| `v2parse.py` | The save-file parser |
+| `vic2_analyzer.py` | Command line, caching, workers, aggregation, CSV output |
+| `readsave.py` | One save into numbers: provinces, pops, countries, wars, the market |
+| `v2parse.py` | The tokenizer underneath it |
+| `scanner/` | The same province and country scan in Rust, used when it has been built |
 | `mod_reader.py` | Reads the mod: names, colours, map, tech, pop types, modifiers |
 | `cross.py` | Finds campaigns, works out which mod each was played on |
 | `report.py` | Prepares everything the report needs |
