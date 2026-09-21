@@ -24,6 +24,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -369,6 +370,13 @@ class App:
         self.stop_button = ttk.Button(buttons, text="Stop", command=self.cancel,
                                       state="disabled")
         self.stop_button.pack(side="left", padx=(8, 0))
+        # Shown only while there is something to be through: a bar that sits
+        # at nothing is furniture. Packed and unpacked rather than greyed, so
+        # the row is the same shape it always was when nothing is running.
+        self.progress = ttk.Progressbar(buttons, mode="determinate",
+                                        length=210)
+        self.seen = None              # (saves done, saves in all), from the
+        self.began = 0.0              # worker thread; drawn by `drain`
         self.status = ttk.Label(frame, text="Pick a saves folder to begin.")
         self.status.grid(row=8, column=2, sticky="e", pady=(10, 6))
 
@@ -558,7 +566,41 @@ class App:
         self.log.see("end")
         self.log.configure(state="disabled")
 
+    def on_progress(self, done, total):
+        """
+        Called from the worker thread, so it only leaves a note.
+
+        Every widget on this window belongs to the UI thread; `drain` is
+        already running there eighty times a second and can draw it.
+        """
+        self.seen = (done, total)
+
+    def show_progress(self):
+        """Draw whatever the worker last reported, with what it implies."""
+        if not self.seen:
+            return
+        done, total = self.seen
+        if total <= 0:
+            return
+        self.progress.configure(maximum=total, value=done)
+        spent = time.monotonic() - self.began
+        left = ""
+        # Only guess at the time left once enough saves have gone by for the
+        # guess to be worth reading: the first one carries the cost of
+        # starting the workers and would put the estimate minutes out.
+        if done >= 3 and spent > 2:
+            each = spent / done
+            remains = each * (total - done)
+            if remains > 90:
+                left = " \u00b7 about %d min left" % round(remains / 60.0)
+            elif remains > 5:
+                left = " \u00b7 about %d sec left" % (round(remains / 5) * 5)
+        self.status.configure(text="%s of %s saves%s"
+                                   % (format(done, ","), format(total, ","),
+                                      left))
+
     def drain(self):
+        self.show_progress()
         while True:
             try:
                 self.say(self.log_queue.get_nowait())
@@ -678,6 +720,10 @@ class App:
         self.button.configure(state="disabled")
         self.stop_button.configure(state="normal")
         self.status.configure(text="Working…")
+        self.seen, self.began = None, time.monotonic()
+        self.progress.configure(value=0, maximum=1)
+        self.progress.pack(side="left", padx=(12, 0))
+        vic2_analyzer.set_progress(self.on_progress)
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
@@ -742,6 +788,9 @@ class App:
         self.running = False
         self.button.configure(state="normal")
         self.stop_button.configure(state="disabled")
+        vic2_analyzer.set_progress(None)
+        self.seen = None
+        self.progress.pack_forget()
         self.refresh_cache()          # the run just added to it
         done = ok and os.path.isfile(self.report or "")
         self.status.configure(

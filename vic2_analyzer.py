@@ -126,6 +126,30 @@ def _stop_if_asked():
         raise Cancelled()
 
 
+_PROGRESS = None
+
+
+def set_progress(fn):
+    """
+    Give the analyzer somewhere to say how far through the saves it is.
+
+    Counted in saves rather than in bytes or in stages, because a save is the
+    unit the work actually comes in and the one a reader can see going by. A
+    campaign of a few dozen does not need this; one of seven hundred is four
+    minutes of a window that otherwise looks stuck.
+    """
+    global _PROGRESS
+    _PROGRESS = fn
+
+
+def _tell_progress(done, total):
+    if _PROGRESS is not None:
+        try:
+            _PROGRESS(done, total)
+        except Exception:             # a window that has gone away
+            pass
+
+
 # Victoria II defines. A mod can change these; --mod-path reads the real values
 # out of common/defines.lua, and the command line overrides both.
 POP_SIZE_PER_REGIMENT = 3000
@@ -1344,11 +1368,15 @@ def parse_saves(files, verbose=True, use_cache=True, world="no-mod",
 
     out = [None] * len(files)
     todo = []
+    done = 0
+    _tell_progress(0, len(files))
     for i, path in enumerate(files):
         _stop_if_asked()
         held = _cache_read(slots[i])
         if held is not None:
             out[i] = held
+            done += 1
+            _tell_progress(done, len(files))
             if verbose:
                 print(f"  {os.path.basename(path)} ... cached, "
                       f"{held[0].get('date', '?')}")
@@ -1363,7 +1391,8 @@ def parse_saves(files, verbose=True, use_cache=True, world="no-mod",
     if workers > 1:
         try:
             return _parse_parallel(files, out, todo, slots, workers, verbose,
-                                   pop_types, mob_types, reform_keys)
+                                   pop_types, mob_types, reform_keys,
+                                   already=done)
         except Cancelled:
             raise                     # asked to stop, not a machine that cannot
         except Exception as exc:
@@ -1380,11 +1409,13 @@ def parse_saves(files, verbose=True, use_cache=True, world="no-mod",
             continue
         _cache_write(slots[i], meta, nations)
         out[i] = (meta, nations)
+        done += 1
+        _tell_progress(done, len(files))
     return [item for item in out if item is not None]
 
 
 def _parse_parallel(files, out, todo, slots, workers, verbose, pop_types,
-                    mob_types, reform_keys=()):
+                    mob_types, reform_keys=(), already=0):
     """
     Read the outstanding saves across several processes.
 
@@ -1415,6 +1446,7 @@ def _parse_parallel(files, out, todo, slots, workers, verbose, pop_types,
                 out[index] = (meta, nations)
                 _cache_write(slot, meta, nations)
                 done += 1
+                _tell_progress(already + done, len(files))
                 if verbose:
                     print(f"  [{done}/{len(todo)}] "
                           f"{os.path.basename(files[index])} ... {meta['date']}")
