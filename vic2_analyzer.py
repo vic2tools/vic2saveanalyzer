@@ -2346,6 +2346,12 @@ def main():
     ap.add_argument("--min-pop", type=int, default=0,
                     help="drop nations below this population")
     ap.add_argument("--no-html", action="store_true", help="skip the HTML report")
+    ap.add_argument("--split", action="store_true",
+                    help="write the data beside the page instead of inside "
+                         "it: a small report.html and a report.data.gz, about "
+                         "a quarter smaller together and quick to open, but "
+                         "both files have to be served rather than opened "
+                         "from a disk")
     ap.add_argument("--peek", action="store_true",
                     help="print the structure of the first save and exit")
     ap.add_argument("--verify", action="store_true",
@@ -2924,6 +2930,7 @@ def main():
             # here from the metas rather than from the finalized rows.
             world_pop={m["date"]: m.get("world_pop", 0)
                        for m, _n in parsed if m.get("date")},
+            split=args.split,
         )
         paths.insert(0, html_path)
 

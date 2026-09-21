@@ -468,6 +468,35 @@ Nothing needs to be installed and it does not need a web server; open it off the
 disk. Everything is also on `window.campaign` if you would rather read it out of
 the console.
 
+### Sending someone a long campaign
+
+A campaign autosaved every month for a century is a different proposition: the
+same report comes to about 20 MB, which is past what most chat clients will
+take and an awkward thing to attach to anything. It is still one file and it
+still opens off a disk, but at that size it wants a link rather than a copy.
+
+`--split` writes the payload beside the page instead of inside it:
+
+```
+report.html        a few hundred KB -- the page itself
+report.data.gz     the campaign
+```
+
+Two files, together about a quarter smaller than the one, because the data no
+longer pays the third that base64 costs to sit inside HTML. The page loads
+first and inflates the data as it arrives, so a long campaign stops looking
+like a browser that has hung.
+
+The catch is that a browser will not fetch a file sitting next to a page opened
+from a plain disk path, so the two have to be served. Anything that serves
+static files will do, and the free one most people already have is GitHub
+Pages: put both files in a repository, turn Pages on in its settings, and the
+report is a URL you can give anybody. The page says so itself if it is opened
+the wrong way, rather than failing silently.
+
+Without `--split` nothing changes: one file, openable off a disk, which is
+still the right answer for a campaign of a few dozen saves.
+
 ---
 
 ## Running it from a terminal
@@ -497,6 +526,7 @@ Useful flags:
 | `--map-scale N` | Map resolution: 2 is the default, 1 is sharper and bigger, 5 is small and blocky |
 | `--peek` | Print the structure of a save and stop |
 | `--verify` | Cross-check unit counts against a raw scan of the file |
+| `--split` | Write the data beside the page rather than inside it, for hosting: see below |
 | `-q` | Quiet |
 
 There are a few more for interrogating the mobilization numbers —

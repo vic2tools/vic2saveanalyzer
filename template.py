@@ -814,6 +814,32 @@ is larger than any nation in it and flattens them against the axis.">World</butt
    than at the top level. Nothing else about the page changes. */
 const PACKED = "__DATA__";
 
+/* Empty in an ordinary report, which carries its own payload. `--split` puts
+   the payload in a file beside this one instead and names it here: the page
+   then weighs a few hundred kilobytes, the data is fetched as raw gzip with no
+   base64 third on top, and the browser inflates it as it arrives. The cost is
+   that two files have to travel together and be served, which is why it is not
+   the default -- a report is usually something somebody was sent. */
+const PACKED_URL = "__DATAURL__";
+
+async function unpackFrom(url) {
+  let res;
+  try {
+    res = await fetch(url);
+  } catch (err) {
+    throw new Error('this report keeps its data in ' + url + ' beside it, and '
+      + 'a browser will not read that from a plain file path. Put both files '
+      + 'on a web server -- GitHub Pages will do -- and open the page from '
+      + 'there');
+  }
+  if (!res.ok) throw new Error('could not read ' + url + ': ' + res.status);
+  if (typeof DecompressionStream !== 'function')
+    throw new Error('this browser has no DecompressionStream; Chrome 80, '
+      + 'Firefox 113, Safari 16.4 or newer will open this file');
+  const stream = res.body.pipeThrough(new DecompressionStream('gzip'));
+  return JSON.parse(await new Response(stream).text());
+}
+
 async function unpack(text) {
   if (typeof DecompressionStream !== 'function')
     throw new Error('this browser has no DecompressionStream; Chrome 80, '
@@ -853,7 +879,7 @@ function bootFailed(err) {
    enough that a page of empty tables needs explaining. Hence the delay: the
    notice only ever appears when there is something to wait for. */
 const slow = setTimeout(() => bootNote('Unpacking the campaign\u2026'), 200);
-const DATA = await unpack(PACKED);
+const DATA = PACKED_URL ? await unpackFrom(PACKED_URL) : await unpack(PACKED);
 clearTimeout(slow);
 const said = document.getElementById('bootnote');
 if (said) said.remove();

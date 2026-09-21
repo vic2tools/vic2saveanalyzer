@@ -18,6 +18,7 @@ linework.
 """
 
 import base64
+import bisect
 import gzip
 import json
 import os
@@ -185,6 +186,8 @@ def year_fraction(date):
     return got
 
 
+INFINITY = float("inf")
+
 _B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
 
 
@@ -319,8 +322,42 @@ def build_map(mod, parsed, scale=5):
 
 
 def _war_key(war):
-    return (war["name"], war["original_attacker"], war["original_defender"],
-            war["start"])
+    """
+    What makes two war records the same war, ignoring when they were read.
+
+    Not the start date, which is the trap this used to fall into. A war's start
+    is the earliest dated entry in its history, and that history shrinks as the
+    war ages: battles lose their dates, so a war caught while it was being
+    fought starts at its first battle, and the same war read from a later save
+    starts at whatever dated entry is left -- often the engine's own removal
+    events on the day it ended. Keying on that gave one war two identities, and
+    the copy taken while it was live was never told it had finished, so it sat
+    in the table marked ongoing for the rest of the campaign with the real
+    ended row beneath it.
+
+    A name and its two original belligerents do repeat across a long campaign,
+    though, so this is only half an identity; `fold_wars` separates two fights
+    that share one by the stretch of time each covers.
+    """
+    return (war["name"], war["original_attacker"], war["original_defender"])
+
+
+def _war_span(war):
+    """
+    The stretch of time a war record covers, in year fractions.
+
+    A record still being fought has no end, and runs to whenever the campaign
+    got to -- which is what lets a later reading of it, dated only by the
+    removals that closed it, be recognised as the same war. `None` where the
+    record carries no date at all and says nothing about when it was fought.
+    """
+    if not war.get("start"):
+        return None
+    first = year_fraction(war["start"])
+    if war.get("active"):
+        return (first, INFINITY)
+    last = year_fraction(war["end"]) if war.get("end") else first
+    return (first, last if last > first else first)
 
 
 def _participants(tags, join_dates, is_attacker, original_tag, start,
@@ -432,14 +469,22 @@ def _at_sea(battle, kinds):
     return False
 
 
-def _ledger_at(books, date, before):
-    """Province ownership at the save just before, or just after, a date."""
+def _ledger_at(books, when_each, date, before):
+    """
+    Province ownership at the save just before, or just after, a date.
+
+    `when_each` is the year fraction of each save, in the same order as
+    `books`, which is date order. Both are asked for twice per war, so this
+    bisects rather than walking the campaign each time.
+    """
+    if not books:
+        return {}
     when = year_fraction(date)
     if before:
-        fit = [b for d, b in books if year_fraction(d) <= when]
-        return fit[-1] if fit else (books[0][1] if books else {})
-    fit = [b for d, b in books if year_fraction(d) >= when]
-    return fit[0] if fit else (books[-1][1] if books else {})
+        at = bisect.bisect_right(when_each, when) - 1
+        return books[max(at, 0)][1]
+    at = bisect.bisect_left(when_each, when)
+    return books[min(at, len(books) - 1)][1]
 
 
 def _state_label(region, pid, state_names, province_names):
@@ -486,13 +531,46 @@ def merge_wars(parsed):
 def fold_wars(book, war_list):
     """Fold one save's war list into a running book. See `merge_wars`."""
     wars, order = book["wars"], book["order"]
+    # Every war each name-and-belligerents triple has produced so far, as
+    # [key, first, last] with the stretch it covers kept up to date as records
+    # are folded in. A save's record joins the war it overlaps; a war of the
+    # same name fought again years later overlaps nothing and starts a row of
+    # its own. Held here rather than recomputed from each war because this is
+    # the campaign's innermost loop -- a monthly century asks it a hundred
+    # thousand times.
+    index = book.setdefault("index", {})
     for war in war_list:
-        key = _war_key(war)
-        if key not in wars:
+        name = _war_key(war)
+        span = _war_span(war)
+        slot = index.get(name)
+        if slot is None:
+            slot = index[name] = []
+        found = None
+        for entry in slot:
+            # `entry[2]` is None until some save has seen this war finish: a
+            # record that was still being fought when its save was taken only
+            # says the war had not ended yet, so it stays open to anything
+            # after it. Once a save reports the end, the war stops swallowing
+            # later fights of the same name.
+            top = INFINITY if entry[2] is None else entry[2]
+            if span is None or entry[1] is None or (
+                    entry[1] <= span[1] and span[0] <= top):
+                found = entry
+                break
+        if found is None:
+            key = name + (len(slot),)
             wars[key] = {k: v for k, v in war.items() if k != "battles"}
             wars[key]["battles"] = {}
             order.append(key)
-        held = wars[key]
+            found = [key, span[0] if span else None,
+                     span[1] if span and span[1] != INFINITY else None]
+            slot.append(found)
+        elif span is not None:
+            if found[1] is None or span[0] < found[1]:
+                found[1] = span[0]
+            if span[1] != INFINITY and (found[2] is None or span[1] > found[2]):
+                found[2] = span[1]
+        held = wars[found[0]]
         # a war that was active in an earlier save has since ended
         if war.get("end") and not held.get("end"):
             held["end"] = war["end"]
@@ -564,21 +642,26 @@ def build_wars(parsed, province_names=None, province_regions=None,
         book = merge_wars(parsed)
     wars, order = book["wars"], book["order"]
 
-    # --- who took what, from the province ledger either side of each save
-    shifts = []
-    books = []
-    previous = None
-    for meta, _nations in parsed:
-        book = {pid: owner for pid, (owner, _c) in
-                meta.get("province_owner", {}).items()}
-        books.append((meta.get("date") or "", book))
-        if previous is not None:
-            moved = [(pid, previous[0].get(pid), owner)
-                     for pid, owner in book.items()
-                     if previous[0].get(pid) and previous[0].get(pid) != owner]
-            if moved:
-                shifts.append((previous[1], meta.get("date") or "", moved))
-        previous = (book, meta.get("date") or "")
+    # --- who took what, from the province ledger either side of each save.
+    # Only the ledgers themselves are wanted here: what changed hands between
+    # one save and the next used to be diffed alongside them, province by
+    # province, and then never read. On a monthly campaign that was a few
+    # million comparisons and a list of every province that ever moved, both
+    # thrown away at the end of the function.
+    books = [(meta.get("date") or "",
+              {pid: owner for pid, (owner, _c)
+               in meta.get("province_owner", {}).items()})
+             for meta, _nations in parsed]
+
+    # Which provinces each state holds, indexed once. The goal loop below asks
+    # this of every goal of every war, and scanning the whole province table
+    # each time is a few million comparisons to answer a lookup.
+    state_provinces = {}
+    for _pid, _state in (province_regions or {}).items():
+        state_provinces.setdefault(_state, []).append(_pid)
+    # Where each save sits on the year axis, so the ownership either side of a
+    # war is a bisect rather than a walk down every save in the campaign.
+    ledger_dates = [year_fraction(d) for d, _b in books]
 
     out = []
     for key in order:
@@ -586,6 +669,20 @@ def build_wars(parsed, province_names=None, province_regions=None,
         battles = sorted(war["battles"].values(),
                          key=lambda b: (year_fraction(b["date"]) if b["date"]
                                         else 9999.0, b["name"]))
+        # A war cannot have ended before its own last battle. The end is the
+        # latest dated entry of whichever save first caught the war finished,
+        # and that history is already being trimmed by then: the 3rd American
+        # War of Independence came out ending 1874.8.3, which is the day one
+        # defender dropped out, while three battles other saves had dated ran
+        # on to 1874.8.25. Where the two disagree the battle is the harder
+        # fact -- men died there -- so it sets the end, which also puts the
+        # ownership check below on the right side of the peace.
+        last_battle = max((b["date"] for b in battles if b["date"]),
+                          key=year_fraction, default="")
+        end = war["end"]
+        if (end and last_battle
+                and year_fraction(last_battle) > year_fraction(end)):
+            end = last_battle
         atk = sum((b["attacker"] or {}).get("losses", 0) for b in battles)
         dfd = sum((b["defender"] or {}).get("losses", 0) for b in battles)
         by_side = _side_losses(
@@ -605,13 +702,15 @@ def build_wars(parsed, province_names=None, province_regions=None,
         # goal that moved Georgia.
         recovered = list(war.get("goalbook", {}).values())
         listed = recovered or ([war["goal"]] if war["goal"]["actor"] else [])
-        before = _ledger_at(books, war["start"], True) if war.get("start") else {}
-        after = _ledger_at(books, war["end"] or war["start"], False)             if war.get("start") else {}
+        before = (_ledger_at(books, ledger_dates, war["start"], True)
+                  if war.get("start") else {})
+        after = (_ledger_at(books, ledger_dates, end or war["start"],
+                            False) if war.get("start") else {})
         goals, transfers = [], []
         for g in listed:
             actor, receiver, pid = g["actor"], g["receiver"], g["province"]
             state = (province_regions or {}).get(pid)
-            wanted = ([p for p, s in (province_regions or {}).items() if s == state]
+            wanted = (state_provinces.get(state, ())
                       if state else ([pid] if pid else []))
             took = [p for p in wanted
                     if before.get(p) == receiver and after.get(p) == actor]
@@ -649,7 +748,7 @@ def build_wars(parsed, province_names=None, province_regions=None,
         out.append({
             "name": war["name"],
             "start": war["start"],
-            "end": war["end"],
+            "end": end,
             "active": bool(war["active"]),
             "attackers": war["attackers"] or [war["original_attacker"]],
             "defenders": war["defenders"] or [war["original_defender"]],
@@ -657,12 +756,12 @@ def build_wars(parsed, province_names=None, province_regions=None,
                 war["attackers"] or [war["original_attacker"]],
                 war.get("join_dates", {}), True,
                 war["original_attacker"], war["start"],
-                war.get("leave_dates", {}), war["end"]),
+                war.get("leave_dates", {}), end),
             "defender_parties": _participants(
                 war["defenders"] or [war["original_defender"]],
                 war.get("join_dates", {}), False,
                 war["original_defender"], war["start"],
-                war.get("leave_dates", {}), war["end"]),
+                war.get("leave_dates", {}), end),
             "goal": war["goal"],
             "losses": [atk, dfd],
             # The same casualties counted by coalition rather than by the role
@@ -816,10 +915,15 @@ def pack(payload):
     and opens quicker than it did, because inflating a megabyte is faster than
     reading a hundred off a disk and parsing them.
     """
+    return base64.b64encode(pack_bytes(payload)).decode("ascii")
+
+
+def pack_bytes(payload):
+    """The payload gzipped, which is what both the page and `--split` carry."""
     raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     # Level 6 rather than 9: the last 5% of size costs three times the wall
     # clock, and this runs once per report over a hundred megabytes.
-    return base64.b64encode(gzip.compress(raw, 6)).decode("ascii")
+    return gzip.compress(raw, 6)
 
 
 def _trim_supply(supply, dates):
@@ -856,7 +960,7 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
                  technology=None, wars=None, succession=None,
                  naval=None, supply=None, culture_names=None,
                  display_names=None, cross=None, world_pop=None,
-                 filename="report.html"):
+                 filename="report.html", split=False):
     os.makedirs(outdir, exist_ok=True)
     tag_names = tag_names or {}
 
@@ -1098,7 +1202,22 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
     price_span = (f"{price_dates[0]} – {price_dates[-1]}"
                   if price_dates else "no price data")
 
-    html = TEMPLATE.replace("__DATA__", pack(payload))
+    # A report normally carries its payload inside it, because a report is a
+    # file somebody was sent and one file is what they can open. `--split`
+    # writes the payload beside the page instead: no base64 third on top, so a
+    # campaign that came to 20 MB as one file comes to about 15, the page
+    # itself opens in a moment, and both parts can be hosted. See `unpackFrom`
+    # in the template for why that one needs a server behind it.
+    if split:
+        data_name = os.path.splitext(filename)[0] + ".data.gz"
+        os.makedirs(outdir, exist_ok=True)
+        with open(os.path.join(outdir, data_name), "wb") as fh:
+            fh.write(pack_bytes(payload))
+        html = TEMPLATE.replace("__DATA__", "").replace("__DATAURL__",
+                                                        data_name)
+    else:
+        html = TEMPLATE.replace("__DATA__", pack(payload))
+        html = html.replace("__DATAURL__", "")
     html = html.replace("__SAVECOUNT__", str(len(dates)))
     html = html.replace("__NATIONCOUNT__", str(len(tags)))
     html = html.replace("__SPAN__", span)

@@ -437,6 +437,29 @@ dated events, so every battle inherits a date from the war above it in the file.
 Three battles of Dresden come out as 1836.8.25 against a true 1836.9.13,
 1836.9.18 and 1836.9.26; Gharyan lands eleven months out.
 
+**A war is identified by who fought it, not by when it started.** The start is
+the earliest dated entry in a war's history, and that history is trimmed as the
+war ages -- battles lose their dates first. A war caught while it was being
+fought therefore starts at its first battle, and the same war read from a later
+save starts at whatever dated entry survives, often the engine's own removal
+events on the day it ended. Keying the merge on the start date gave those two
+readings two identities, so the copy taken while the war was live was never
+told it had finished and sat in the table marked **ongoing** for the rest of
+the campaign, the real ended row beneath it. Wars are now folded on name and
+original belligerents, and two fights that share those -- a name does repeat
+across a century -- are separated by whether the stretches of time they cover
+overlap. A record still being fought covers everything after it until some save
+reports the war over; that is what lets a later, barely-dated reading rejoin
+it, and what stops it swallowing the next war of the same name.
+
+**A war cannot end before its own last battle.** The end date comes from the
+first save that caught the war finished, whose history is already being
+trimmed, and it can be earlier than battles other saves dated. The 3rd American
+War of Independence came out ending 1874.8.3 -- the day one defender dropped
+out -- with three battles running on to 1874.8.25. Where the two disagree the
+battle wins, which also puts the before-and-after ownership check on the right
+side of the peace.
+
 **War goals are read, not inferred.** A war carries more than one demand: the
 one it opened with plus any added while it ran, each naming a claimant, a target
 and a state. Added demands are dropped when the war ends, so like battle dates
