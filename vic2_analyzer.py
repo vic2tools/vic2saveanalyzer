@@ -3079,17 +3079,27 @@ def main():
         # the first one filled.
         #
         # What is kept from that first walk is three fields a nation, which
-        # is all `attainable_inventions` and `index_base_for` read. Keeping
-        # the nations themselves would put the whole campaign in memory
-        # again, which is the thing the streaming was for.
+        # is all `attainable_inventions`, `index_base_for`, `validate_indices`
+        # and `index_coverage` read. Keeping the nations themselves would put
+        # the whole campaign in memory again, which is the thing the
+        # streaming was for.
+        #
+        # `walked` groups the same projections by save, with a meta carrying
+        # the one field `index_coverage` wants, because that one reports per
+        # save rather than per nation. Nothing is copied twice: both lists
+        # hold the same dicts.
         all_techs = {}
         every_nation = []
+        walked = []
         for _meta, _nats in stream:
+            thin = {}
             for _tag, _nat in _nats.items():
                 all_techs.setdefault(_tag, set()).update(_nat["tech_list"])
-                every_nation.append({"tag": _nat.get("tag", _tag),
-                                     "tech_list": _nat["tech_list"],
-                                     "invention_ids": _nat["invention_ids"]})
+                thin[_tag] = {"tag": _nat.get("tag", _tag),
+                              "tech_list": _nat["tech_list"],
+                              "invention_ids": _nat["invention_ids"]}
+                every_nation.append(thin[_tag])
+            walked.append(({"file": _meta.get("file", "?")}, thin))
         stream = parse_saves_stream(
             files, verbose=False, use_cache=not args.no_cache,
             world=world, pop_types=sorted(v2parse.POP_TYPES),
@@ -3111,11 +3121,11 @@ def main():
                       f"{len(mod['invention_sequence'])} inventions "
                       f"(base {mod['index_base']}): {bad} of {total} nation-invention "
                       f"pairs are unreachable ({bad / total * 100:.1f}%).")
-                odd, seen = index_coverage(mod, parsed, mod["index_base"])
+                odd, seen = index_coverage(mod, walked, mod["index_base"])
                 if odd:
                     lost = sum(v[1] for v in odd.values())
                     print(
-                        f"  {len(odd)} of {len(parsed)} saves name inventions "
+                        f"  {len(odd)} of {len(walked)} saves name inventions "
                         f"past the end of that array, so {lost} of {seen} "
                         f"holdings ({lost / seen * 100:.1f}%) cannot be read:")
                     for name in sorted(odd):
