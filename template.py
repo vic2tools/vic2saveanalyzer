@@ -2992,12 +2992,12 @@ pindex.onclick = () => {
 };
 
 function priceSeries(good) {
-  const by = DATA.prices[good] || {};
+  const by = DATA.prices[good] || [];
   const pts = [];
   let base = null;
   for (let i = 0; i < PD.length; i++) {
-    let v = by[PD[i]];
-    if (v === undefined) continue;
+    let v = by[i];
+    if (v == null) continue;
     if (priceIndex) {
       if (base === null) { base = v; if (!base) continue; }
       v = v / base * 100;
@@ -3087,8 +3087,9 @@ function drawMarketTable() {
   document.getElementById('snapdate').textContent = date || '—';
   const snap = DATA.snapshot[date] || {};
   const rows = Object.keys(snap).map(good => {
-    const by = DATA.prices[good] || {};
-    const seen = PD.filter(d => by[d] !== undefined);
+    const by = DATA.prices[good] || [];
+    const seen = [];
+    for (let i = 0; i < PD.length; i++) if (by[i] != null) seen.push(i);
     const first = seen.length ? by[seen[0]] : 0;
     const last = seen.length ? by[seen[seen.length - 1]] : 0;
     const base = (DATA.basePrices || {})[good];

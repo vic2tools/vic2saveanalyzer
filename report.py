@@ -992,9 +992,14 @@ def as_columns(series, dates):
     A hole -- a nation not in that save -- is a null, where before it was
     a key that was not there. Both read as "no point here".
     """
-    return {tag: {key: [dated.get(d) for d in dates]
+    return {tag: {key: as_column(dated, dates)
                   for key, dated in metrics.items()}
             for tag, metrics in series.items()}
+
+
+def as_column(dated, dates):
+    """One {date: value} as one value per date, in order. See `as_columns`."""
+    return [dated.get(d) for d in dates]
 
 
 def rebuild_facts(facts, series, taken, dates):
@@ -1313,7 +1318,11 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
         "succession": succession or {},
         "priceDates": price_dates,
         "priceYears": [year_fraction(d) for d in price_dates],
-        "prices": prices,
+        # Columns against `priceDates`, for the reason `as_columns` gives:
+        # a good's price is one number a month, and writing the month out
+        # beside each of them is most of what it costs.
+        "prices": {good: as_column(by, price_dates)
+                   for good, by in prices.items()},
         "goods": sorted(prices),
         "goodCategory": goods_meta,
         "categoryLabels": CATEGORY_LABELS,
