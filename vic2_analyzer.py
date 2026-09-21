@@ -1805,9 +1805,18 @@ KEEP_NATION = ("units_at", "men_at", "primary_culture", "accepted_cultures",
                "government", "total_pop", "is_player")
 
 
-def trim_save(meta, nations):
+# What `--inventions` and `--check-inventions` read back off the saves after
+# the run, on top of the above. Both used to answer zero of everything --
+# `--check-inventions` blaming the campaign for being too short to judge --
+# because the trim had taken the two fields out from under them. Added to
+# what is kept rather than keeping saves whole: two fields a nation against
+# half a megabyte of them.
+KEEP_FOR_INVENTIONS = ("tech_list", "invention_ids")
+
+
+def trim_save(meta, nations, keep=KEEP_NATION):
     """One save reduced to what the rest of the run still asks for."""
-    thin = {tag: {k: nat[k] for k in KEEP_NATION if k in nat}
+    thin = {tag: {k: nat[k] for k in keep if k in nat}
             for tag, nat in nations.items()}
     return {k: v for k, v in meta.items() if k in KEEP_META}, thin
 
@@ -1878,7 +1887,18 @@ def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
 
             got = None
             if i in futures:
-                _index, _slot, meta, nations = futures.pop(i).result()
+                # A file the reader refuses -- a zip, a binary save, half a
+                # file, something that is not a save at all with a .v2 on the
+                # end -- raises here, in the worker, and used to take the
+                # whole run down with a stack trace. One stray file in the
+                # saves folder is an ordinary thing to have; the serial path
+                # below has always skipped it by name, and so does this.
+                try:
+                    _index, _slot, meta, nations = futures.pop(i).result()
+                except (ValueError, OSError) as exc:
+                    print(f"  skipped {os.path.basename(path)}: {exc}",
+                          file=sys.stderr)
+                    continue
                 got = (meta, nations)      # cached and finished in the worker
                 if verbose:
                     print(f"  [{done + 1}/{total}] {os.path.basename(path)} "
@@ -1945,7 +1965,15 @@ def _parse_parallel(files, out, todo, slots, workers, verbose, pop_types,
             ready, pending = wait(pending, timeout=0.25,
                                   return_when=FIRST_COMPLETED)
             for future in ready:
-                index, _slot, meta, nations = future.result()
+                # Same refusal, same answer as the streaming path: a file
+                # the reader will not take is named and left out, not raised
+                # over the whole campaign.
+                try:
+                    index, _slot, meta, nations = future.result()
+                except (ValueError, OSError) as exc:
+                    print(f"  skipped a save: {exc}", file=sys.stderr)
+                    done += 1
+                    continue
                 out[index] = (meta, nations)   # cached in the worker
                 done += 1
                 _tell_progress(already + done, len(files))
@@ -2982,7 +3010,15 @@ def main():
     # to do never pays the second it takes to read one.
     stamp = report_stamp(files, args, mod_signature(args.mod_path))
     ready = os.path.join(args.out, "report.html")
-    if not args.rebuild and not args.no_html and stamp_matches(args.out, stamp):
+    # Only a run whose whole job is the report can be answered with the
+    # report that is already there. These four print something about a
+    # nation instead, and are not in the stamp because they change nothing
+    # the report says -- so `--explain-mob ENG` on an unchanged campaign
+    # used to answer "nothing has changed" and explain nothing at all.
+    asking = (args.explain_mob or args.explain_mob_pool or args.inventions
+              or args.check_inventions)
+    if (not args.rebuild and not args.no_html and not asking
+            and stamp_matches(args.out, stamp)):
         if verbose:
             print(f"Nothing has changed since this was built. "
                   f"Opening it as it is.\n\nWrote:\n  {ready}")
@@ -3039,6 +3075,10 @@ def main():
     # kept whole. They are single-campaign diagnostics run on purpose, so the
     # memory that costs is memory somebody chose to spend.
     keep_whole = keep_pools or bool(args.explain_mob)
+    # And two that want one field each rather than the whole nation.
+    keep_fields = KEEP_NATION
+    if args.inventions or args.check_inventions:
+        keep_fields = KEEP_NATION + KEEP_FOR_INVENTIONS
 
     # Where `finalize` runs. With no mod every argument it takes is either the
     # nation itself or a setting, so it can run in the worker that parsed the
@@ -3268,7 +3308,7 @@ def main():
         # `--explain-mob-pool` prints a nation's raw pool back, so that one
         # caller keeps the save whole.
         parsed.append((meta, nations) if keep_whole
-                      else trim_save(meta, nations))
+                      else trim_save(meta, nations, keep_fields))
 
     if not parsed:
         sys.exit("No saves could be read.")
