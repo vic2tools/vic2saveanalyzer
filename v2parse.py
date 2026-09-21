@@ -18,6 +18,7 @@ skipped by brace counting.
 """
 
 import re
+import sys
 
 TOKEN_RE = re.compile(r'"[^"]*"|[{}=]|[^\s{}=]+')
 
@@ -280,10 +281,20 @@ def walk_entries(tok, top=False):
             yield unquote(t), unquote(val), -1
 
 
-def unquote(tok):
+def unquote(tok, _intern=sys.intern):
+    """
+    A quoted token without its quotes, and shared with every other copy.
+
+    Almost everything that comes through here is a country tag, a culture, a
+    religion or a unit type -- a handful of distinct values repeated hundreds
+    of thousands of times in one save. Interning them means a save holds one
+    copy of "swedish" instead of forty thousand, which is most of what a
+    parsed save weighs, and it makes the pickle that goes back to the parent
+    smaller for the same reason.
+    """
     if len(tok) >= 2 and tok[0] == '"' and tok[-1] == '"':
-        return tok[1:-1]
-    return tok
+        return _intern(tok[1:-1])
+    return _intern(tok)
 
 
 def skip_block(tok):
