@@ -810,10 +810,44 @@ has no synchronous gzip, so the whole page script runs inside one async function
 And a failure has to say so on the page, since a report is a file somebody was
 sent and the console is not somewhere they will look.
 
-Rearranging the payload was tried and dropped. Turning every date key into an
-index into `DATA.dates`, and printing whole floats as integers, takes 7% off the
-raw JSON and **2%** off the compressed size, because gzip was already doing that
-work. The compression is the whole of the win.
+Rearranging the payload was tried and dropped once, on a measurement that
+turned out to be of the wrong thing. Replacing each date *key* with an index
+into `DATA.dates`, and printing whole floats as integers, took 7% off the raw
+JSON and 2% off the compressed size -- because a short key is still a key, and
+gzip had already noticed that the same few hundred date strings repeat.
+
+Taking the keys out altogether is a different measurement. A measure is one
+number per save, and the page already walks it against `DATA.dates` to plot
+it, so the dates were never carrying anything: as a bare column it is 1.15 MB
+where it was 2.95. And `facts` turned out to be `series` transposed -- the
+same numbers a second time, by date instead of by nation -- of which only
+seven fields were not already in `series`, so the page rebuilds the rest at
+boot from what it has.
+
+| 103 saves | payload | report |
+|---|---|---|
+| both shipped whole, dates as keys | 11.92 MB | 2.53 MB |
+| `facts` stripped to what `series` lacks | 9.95 MB | 2.21 MB |
+| measures as columns | 8.15 MB | 1.86 MB |
+| prices as columns | 7.10 MB | **1.59 MB** |
+
+Roughly a seventh of every megabyte taken out of the JSON shows up in the
+file, which is what the earlier note was right about: gzip is doing most of
+the work, and no encoding trick beats it. What it misses is that a seventh of
+five megabytes is still most of a megabyte, and the report is a file somebody
+has to send.
+
+Where it stops paying is interning. The culture list repeats 209 names
+across four thousand nation-saves, and replacing them with indices into a
+table takes `cultures` from 1.17 MB to 0.78 MB of JSON and **2%** off the
+file -- the same 2% the first attempt found, for the same reason. Removing a
+*key* that the reader never needed is worth doing; shortening a *string* that
+gzip has already seen a thousand times is not. The remaining payload is
+mostly the second kind.
+
+None of it is faster to build -- the compression was already overlapping the
+CSV writing, so the report lands at the same moment either way. The win is
+entirely in what comes out.
 
 ## What was removed
 

@@ -917,25 +917,43 @@ class Aside:
 
     A thread rather than a process because the tables are forty megabytes of
     tuples and sending them anywhere costs more than writing them.
+
+    It is made ready and started separately, because the caller knows what
+    the job is long before it knows when to run it -- `build_report` says
+    when by calling `start`. One that is never started is not a special
+    case: `result` simply does the work where it stands, which is what the
+    runs that build no report want anyway.
     """
 
-    __slots__ = ("_thread", "_value", "_error")
+    __slots__ = ("_fn", "_thread", "_value", "_error")
 
     def __init__(self, fn):
+        self._fn = fn
         self._value = self._error = None
-        self._thread = threading.Thread(target=self._run, args=(fn,),
-                                        daemon=True)
-        self._thread.start()
+        self._thread = threading.Thread(target=self._run, daemon=True)
 
-    def _run(self, fn):
+    def _run(self):
         try:
-            self._value = fn()
+            self._value = self._fn()
         except BaseException as exc:                     # noqa: BLE001
             self._error = exc
 
+    def start(self):
+        """Begin, if it has not begun. Safe to call more than once."""
+        if self._thread.ident is None:
+            self._thread.start()
+
     def result(self):
-        """Wait for it, and raise whatever it raised."""
-        self._thread.join()
+        """
+        Its answer, raising whatever it raised.
+
+        Does the work here and now if nobody ever started it, so a caller
+        can always ask for the answer without first asking whether it ran.
+        """
+        if self._thread.ident is None:
+            self._run()
+        else:
+            self._thread.join()
         if self._error is not None:
             raise self._error
         return self._value
@@ -1271,7 +1289,7 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
         }
 
 
-    thin_facts_out = thin_facts(facts, series)
+    slim_facts, fact_keys = thin_facts(facts, series)
     payload = {
         "dates": dates,
         "years": [year_fraction(d) for d in dates],
@@ -1293,8 +1311,8 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
         "series": as_columns(series, dates),
         # Only what `series` does not already carry; the page transposes
         # the rest back, and `factKeys` says which. See `thin_facts`.
-        "facts": thin_facts_out[0],
-        "factKeys": thin_facts_out[1],
+        "facts": slim_facts,
+        "factKeys": fact_keys,
         "ships": ships,
         "crews": crews,
         "shipTypes": sorted(ship_types),

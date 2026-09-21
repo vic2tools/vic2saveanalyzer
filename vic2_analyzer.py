@@ -34,7 +34,7 @@ import re
 import tempfile
 import zlib
 import sys
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, namedtuple
 
 import v2parse
 from v2parse import (
@@ -1539,6 +1539,14 @@ def clear_cache():
 SPENT_ON_FINALIZE = ("mobilizable_pops", "literacy_at", "pop_at",
                      "soldiers_at", "soldier_pops_at", "province_state")
 
+# What a worker needs to finish a save where it read it. A named shape
+# rather than a dict of strings because it crosses a process boundary and
+# is read in a loop: `spec.rate` says what it is, `spec["rate"]` says only
+# that somebody hoped it would be there.
+Finish = namedtuple(
+    "Finish", "rate pop_per_regiment mob_types include_occupied "
+              "player_nations wanted min_pop")
+
 # Set in a worker by `_worker_setup`. None in the parent, and None in the
 # worker whenever the finishing has to stay in the parent -- see `finish` in
 # `main` for when that is.
@@ -1568,7 +1576,7 @@ def _finish_save(meta, nations, spec):
     the nations that are kept and on no others, and the trim keeps that key
     only where it exists.
     """
-    players = spec["player_nations"]
+    players = spec.player_nations
     if players is None:
         # Every country a person is playing carries `human=yes` in its own
         # block, so a multiplayer save names all of its players and not just
@@ -1578,15 +1586,14 @@ def _finish_save(meta, nations, spec):
         if not players:
             players = {meta["player"]} if meta.get("player") else set()
 
-    wanted, min_pop = spec["wanted"], spec["min_pop"]
-    rate = spec["rate"]
+    wanted, min_pop, rate = spec.wanted, spec.min_pop, spec.rate
     out = {}
     for tag, nat in nations.items():
         if (not wanted or tag in wanted) and nat["total_pop"] >= min_pop:
             nat["is_player"] = (tag in players)
-            done = finalize(nat, rate, spec["pop_per_regiment"],
-                            mob_types=spec["mob_types"],
-                            include_occupied=spec["include_occupied"])
+            done = finalize(nat, rate, spec.pop_per_regiment,
+                            mob_types=spec.mob_types,
+                            include_occupied=spec.include_occupied)
             done["mobilisation_size"] = round(rate, 5)
         else:
             done = nat
@@ -2882,6 +2889,153 @@ def run_cross(parent, game_root, args, verbose=True):
     return payload, primary["files"], primary["mod_path"]
 
 
+# What one walk of a campaign produces, and what it was allowed to keep.
+# Named shapes because `main` carried all of this as loose locals, and every
+# one had to be handed by name to the things downstream that read it.
+Campaign = namedtuple(
+    "Campaign", "rows ship_rows pop_rows culture_rows brigade_rows "
+                "tech_rows naval_profiles naval_of supply parsed war_book "
+                "pop_columns")
+
+# Which of a save's fields survive it. `pools` keeps the raw mobilizable
+# pops, `whole` keeps the save entire, `fields` is what the trim keeps when
+# it does not. See `keep_pools` and `keep_whole` in `main` for who asks.
+Keep = namedtuple("Keep", "pools whole fields")
+
+
+def walk_campaign(stream, args, mod, live, finish, keep, wanted):
+    """
+    Read the campaign once, oldest save first, spending each save as it
+    passes.
+
+    Every save gives up its rows, folds its wars into the book and is then
+    cut down to the handful of fields the rest of the run still asks for,
+    so what is alive at any moment is one save rather than the campaign.
+    `parsed` holds only those remains.
+
+    Lifted out of `main` unchanged: it was a hundred and ten lines in the
+    middle of an eight-hundred-line function, holding a dozen accumulators
+    that nothing above it touched and everything below it read.
+    """
+    rows, ship_rows, pop_rows, culture_rows = [], [], [], []
+    brigade_rows, tech_rows = [], []
+    # Ship stats as each nation's own inventions leave them. Nations that
+    # researched the same things have the same ships, so the profiles are kept
+    # once each and referred to by number rather than repeated per save.
+    # The pop types a row has a column for. Frozen at import it was the
+    # vanilla twelve, so a mod's own type -- IGoR's bankers, GFM's serfs --
+    # was read out of the save, counted into the totals and then dropped on
+    # the way to the table.
+    pop_columns = sorted(v2parse.POP_TYPES)
+    naval_profiles, naval_index, naval_of = [], {}, {}
+    # good -> {date: {tag: what it put on the market}}, for the production view.
+    supply_by = {}
+
+    # The campaign is walked once, oldest save first. Each save is read, spends
+    # its rows, gives up its wars and is then cut down to the few fields the
+    # report still wants -- so what is alive at any moment is one save, not the
+    # campaign. `parsed` below holds only those remains.
+    from report import fold_wars
+    parsed = []
+    war_book = {"wars": {}, "order": []}
+
+    for meta, nations in stream:
+        _stop_if_asked()
+        date = meta["date"]
+        year = date.split(".")[0] if date else ""
+        # What this save says about everyone, which is what the triggered
+        # modifiers ask about: the year, the great powers, who is at war and
+        # who owns what.
+        stage = save_world(meta, mod) if mod is not None else None
+        # Who was human. Every country a person is playing carries `human=yes`
+        # in its own block, so a multiplayer game names all of its players and
+        # not just whoever pressed save. Older saves and some mods write no
+        # such marker at all, hence the fall back to the save's own player;
+        # --player-nations still overrides both. Already decided per save by
+        # `_finish_save` when the finishing went to the workers.
+        humans = ()
+        if finish is None:
+            played = {tag for tag, nat in nations.items() if nat.get("human")}
+            humans = (set(args.player_nations)
+                      if args.player_nations is not None
+                      else played if played
+                      else {meta["player"]} if meta.get("player") else set())
+        for tag, nat in nations.items():
+            if wanted and tag not in wanted:
+                continue
+            if nat["total_pop"] < args.min_pop:
+                continue
+            if finish is not None:
+                # Finalized in the worker, under this same filter, so `nat`
+                # is already what `finalize` would have returned here.
+                done = nat
+            else:
+                nat["is_player"] = (tag in humans)
+                done = _finalize_here(nat, mod, live, stage, args,
+                                      keep.pools)
+            accepted_set = set(done["accepted_cultures"]) | {done["primary_culture"]}
+
+            row = {
+                "date": date,
+                "year": year,
+                "tag": tag,
+                "is_player": int(nat["is_player"]),
+                "accepted_cultures": ";".join(sorted(done["accepted_cultures"])),
+            }
+            for col in BASE_COLUMNS:
+                if col in done:
+                    row[col] = done[col]
+            for ptype in pop_columns:
+                row[f"pop_{ptype}"] = done["pop_by_type"].get(ptype, 0)
+            rows.append(row)
+
+            # These four tables are the ones a campaign has millions of rows
+            # of -- a hundred technologies per nation per save on its own -- so
+            # they are tuples in the column order declared in `write_outputs`
+            # rather than dicts. A dict per row costs about twice the memory
+            # and names the same six columns over and over.
+            for stype, count in sorted(done["ships_by_type"].items()):
+                ship_rows.append((date, year, tag, stype, count,
+                                  round(done["ship_crew"].get(stype, count), 3)))
+            if mod is not None and done["ships"]:
+                from mod_reader import naval_profile
+                profile = naval_profile(done, mod)
+                key = json.dumps(profile, sort_keys=True)
+                if key not in naval_index:
+                    naval_index[key] = len(naval_profiles)
+                    naval_profiles.append(profile)
+                naval_of.setdefault(tag, {})[date] = naval_index[key]
+            for good, amount in done["goods_supply"].items():
+                supply_by.setdefault(good, {}).setdefault(date, {})[tag] = amount
+            for rtype, count in sorted(done["regiments_by_type"].items()):
+                brigade_rows.append((date, year, tag, rtype, count))
+            for tech in sorted(done["tech_list"]):
+                branch, line, _pos = TECH_GROUP.get(tech, ("other", "Other", 0))
+                tech_rows.append((date, year, tag, tech, branch, line))
+            for ptype, size in sorted(done["pop_by_type"].items()):
+                pop_rows.append((date, year, tag, ptype, size))
+            for culture, size in sorted(done["pop_by_culture"].items(),
+                                        key=lambda kv: -kv[1]):
+                culture_rows.append((date, year, tag, culture, size,
+                                     int(culture in accepted_set)))
+
+        # This save's wars, folded in as it passes. The book wants them oldest
+        # first, which is the order the stream is in, so folding here costs
+        # nothing and means no save has to keep its own copy.
+        fold_wars(war_book, meta.get("wars", ()))
+        meta["wars"] = ()
+        # `--explain-mob-pool` prints a nation's raw pool back, so that one
+        # caller keeps the save whole.
+        parsed.append((meta, nations) if keep.whole
+                      else trim_save(meta, nations, keep.fields))
+
+    return Campaign(rows=rows, ship_rows=ship_rows, pop_rows=pop_rows,
+                    culture_rows=culture_rows, brigade_rows=brigade_rows,
+                    tech_rows=tech_rows, naval_profiles=naval_profiles,
+                    naval_of=naval_of, supply=supply_by, parsed=parsed,
+                    war_book=war_book, pop_columns=pop_columns)
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Aggregate Victoria 2 saves from one campaign into per-nation time series.",
@@ -3162,15 +3316,15 @@ def main():
     # tables kept, so they stay in the parent too.
     finish = None
     if mod is None and not keep_whole:
-        finish = {"rate": args.mob_rate,
-                  "pop_per_regiment": args.pop_per_regiment,
-                  "mob_types": frozenset(args.mob_types),
-                  "include_occupied": args.mob_include_occupied,
-                  "player_nations": (set(args.player_nations)
-                                     if args.player_nations is not None
-                                     else None),
-                  "wanted": wanted,
-                  "min_pop": args.min_pop}
+        finish = Finish(
+            rate=args.mob_rate,
+            pop_per_regiment=args.pop_per_regiment,
+            mob_types=frozenset(args.mob_types),
+            include_occupied=args.mob_include_occupied,
+            player_nations=(set(args.player_nations)
+                            if args.player_nations is not None else None),
+            wanted=wanted,
+            min_pop=args.min_pop)
 
     stream = parse_saves_stream(
         files, verbose=verbose, use_cache=not args.no_cache,
@@ -3271,116 +3425,15 @@ def main():
                 print(f"  invention  {n:<44} +{rules[n]['size']:.3f}{mark}")
 
 
-    rows, ship_rows, pop_rows, culture_rows = [], [], [], []
-    brigade_rows, tech_rows = [], []
-    # Ship stats as each nation's own inventions leave them. Nations that
-    # researched the same things have the same ships, so the profiles are kept
-    # once each and referred to by number rather than repeated per save.
-    # The pop types a row has a column for. Frozen at import it was the
-    # vanilla twelve, so a mod's own type -- IGoR's bankers, GFM's serfs --
-    # was read out of the save, counted into the totals and then dropped on
-    # the way to the table.
-    pop_columns = sorted(v2parse.POP_TYPES)
-    naval_profiles, naval_index, naval_of = [], {}, {}
-    # good -> {date: {tag: what it put on the market}}, for the production view.
-    supply_by = {}
-
-    # The campaign is walked once, oldest save first. Each save is read, spends
-    # its rows, gives up its wars and is then cut down to the few fields the
-    # report still wants -- so what is alive at any moment is one save, not the
-    # campaign. `parsed` below holds only those remains.
-    from report import fold_wars
-    parsed = []
-    war_book = {"wars": {}, "order": []}
-
-    for meta, nations in stream:
-        _stop_if_asked()
-        date = meta["date"]
-        year = date.split(".")[0] if date else ""
-        # What this save says about everyone, which is what the triggered
-        # modifiers ask about: the year, the great powers, who is at war and
-        # who owns what.
-        stage = save_world(meta, mod) if mod is not None else None
-        # Who was human. Every country a person is playing carries `human=yes`
-        # in its own block, so a multiplayer game names all of its players and
-        # not just whoever pressed save. Older saves and some mods write no
-        # such marker at all, hence the fall back to the save's own player;
-        # --player-nations still overrides both. Already decided per save by
-        # `_finish_save` when the finishing went to the workers.
-        humans = ()
-        if finish is None:
-            played = {tag for tag, nat in nations.items() if nat.get("human")}
-            humans = (set(args.player_nations)
-                      if args.player_nations is not None
-                      else played if played
-                      else {meta["player"]} if meta.get("player") else set())
-        for tag, nat in nations.items():
-            if wanted and tag not in wanted:
-                continue
-            if nat["total_pop"] < args.min_pop:
-                continue
-            if finish is not None:
-                # Finalized in the worker, under this same filter, so `nat`
-                # is already what `finalize` would have returned here.
-                done = nat
-            else:
-                nat["is_player"] = (tag in humans)
-                done = _finalize_here(nat, mod, live, stage, args, keep_pools)
-            accepted_set = set(done["accepted_cultures"]) | {done["primary_culture"]}
-
-            row = {
-                "date": date,
-                "year": year,
-                "tag": tag,
-                "is_player": int(nat["is_player"]),
-                "accepted_cultures": ";".join(sorted(done["accepted_cultures"])),
-            }
-            for col in BASE_COLUMNS:
-                if col in done:
-                    row[col] = done[col]
-            for ptype in pop_columns:
-                row[f"pop_{ptype}"] = done["pop_by_type"].get(ptype, 0)
-            rows.append(row)
-
-            # These four tables are the ones a campaign has millions of rows
-            # of -- a hundred technologies per nation per save on its own -- so
-            # they are tuples in the column order declared in `write_outputs`
-            # rather than dicts. A dict per row costs about twice the memory
-            # and names the same six columns over and over.
-            for stype, count in sorted(done["ships_by_type"].items()):
-                ship_rows.append((date, year, tag, stype, count,
-                                  round(done["ship_crew"].get(stype, count), 3)))
-            if mod is not None and done["ships"]:
-                from mod_reader import naval_profile
-                profile = naval_profile(done, mod)
-                key = json.dumps(profile, sort_keys=True)
-                if key not in naval_index:
-                    naval_index[key] = len(naval_profiles)
-                    naval_profiles.append(profile)
-                naval_of.setdefault(tag, {})[date] = naval_index[key]
-            for good, amount in done["goods_supply"].items():
-                supply_by.setdefault(good, {}).setdefault(date, {})[tag] = amount
-            for rtype, count in sorted(done["regiments_by_type"].items()):
-                brigade_rows.append((date, year, tag, rtype, count))
-            for tech in sorted(done["tech_list"]):
-                branch, line, _pos = TECH_GROUP.get(tech, ("other", "Other", 0))
-                tech_rows.append((date, year, tag, tech, branch, line))
-            for ptype, size in sorted(done["pop_by_type"].items()):
-                pop_rows.append((date, year, tag, ptype, size))
-            for culture, size in sorted(done["pop_by_culture"].items(),
-                                        key=lambda kv: -kv[1]):
-                culture_rows.append((date, year, tag, culture, size,
-                                     int(culture in accepted_set)))
-
-        # This save's wars, folded in as it passes. The book wants them oldest
-        # first, which is the order the stream is in, so folding here costs
-        # nothing and means no save has to keep its own copy.
-        fold_wars(war_book, meta.get("wars", ()))
-        meta["wars"] = ()
-        # `--explain-mob-pool` prints a nation's raw pool back, so that one
-        # caller keeps the save whole.
-        parsed.append((meta, nations) if keep_whole
-                      else trim_save(meta, nations, keep_fields))
+    keep = Keep(pools=keep_pools, whole=keep_whole, fields=keep_fields)
+    campaign = walk_campaign(stream, args, mod, live, finish, keep, wanted)
+    rows = campaign.rows
+    ship_rows, pop_rows = campaign.ship_rows, campaign.pop_rows
+    culture_rows, brigade_rows = campaign.culture_rows, campaign.brigade_rows
+    tech_rows, pop_columns = campaign.tech_rows, campaign.pop_columns
+    naval_profiles, naval_of = campaign.naval_profiles, campaign.naval_of
+    supply_by, parsed = campaign.supply, campaign.parsed
+    war_book = campaign.war_book
 
     if not parsed:
         sys.exit("No saves could be read.")
@@ -3564,17 +3617,15 @@ def main():
     # is worth anything. Started any earlier it merely takes turns with the
     # payload assembly, and the report lands later instead of sooner:
     # measured, 1.80 s to 1.98 s, which is the wrong direction.
-    def write_tables():
-        return write_outputs(rows, ship_rows, pop_rows, culture_rows,
-                             price_rows, snapshot_rows, brigade_rows,
-                             tech_rows, args.out, pop_columns)
-
-    tables = []
+    from report import Aside
+    tables = Aside(lambda: write_outputs(
+        rows, ship_rows, pop_rows, culture_rows, price_rows, snapshot_rows,
+        brigade_rows, tech_rows, args.out, pop_columns))
 
     html_path = None
     if not args.no_html:
-        from report import (Aside, build_map, build_report,
-                            build_succession, build_wars)
+        from report import (build_map, build_report, build_succession,
+                            build_wars)
         # Country names come from the mod's own localisation, which is where the
         # game gets them: a bare TAG, overridden by TAG_<government> when one
         # exists -- IGoR's PBC is "Peru-Bolivia" but "Andine Federation" while
@@ -3670,21 +3721,22 @@ def main():
                 world_pop={m["date"]: m.get("world_pop", 0)
                            for m, _n in parsed if m.get("date")},
                 split=args.split,
-                alongside=lambda: tables.append(Aside(write_tables)),
+                alongside=tables.start,
             )
         except BaseException:
-            # The tables may already be being written on a thread nobody is
-            # now going to wait for. Let it finish before the failure goes
-            # up, so a half-written CSV is not left behind a stack trace.
-            if tables:
-                try:
-                    tables[0].result()
-                except BaseException:                    # noqa: BLE001
-                    pass
+            # They may already be being written on a thread nobody is now
+            # going to wait for. Let it finish before the failure goes up,
+            # so a half-written CSV is not left behind a stack trace.
+            try:
+                tables.result()
+            except BaseException:                        # noqa: BLE001
+                pass
             raise
     if html_path:
         _tell_report_ready(html_path)
-    paths = tables[0].result() if tables else write_tables()
+    # Started at the compression if a report was built, and simply done
+    # here if one was not.
+    paths = tables.result()
     if html_path:
         paths.insert(0, html_path)
         # Last, so a run that died writing the tables is not recorded as one

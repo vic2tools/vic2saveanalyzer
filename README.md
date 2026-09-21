@@ -535,8 +535,8 @@ there for when you want to do your own arithmetic.
 | `technologies.csv` | One row per nation per technology per save. |
 
 The report is one file with everything in it -- the map, the flags, every
-number -- and it is small enough to send: a thirty-eight-save campaign comes to
-about 2 MB. The data inside it is compressed, so any browser from 2023 onwards
+number -- and it is small enough to send: a hundred monthly saves come to
+about 1.6 MB. The data inside it is compressed, so any browser from 2023 onwards
 will open it and older ones will say so rather than showing you an empty page.
 Nothing needs to be installed and it does not need a web server; open it off the
 disk. Everything is also on `window.campaign` if you would rather read it out of
@@ -545,7 +545,7 @@ the console.
 ### Sending someone a long campaign
 
 A campaign autosaved every month for a century is a different proposition: the
-same report comes to about 20 MB, which is past what most chat clients will
+same report comes to about 13 MB, which is past what most chat clients will
 take and an awkward thing to attach to anything. It is still one file and it
 still opens off a disk, but at that size it wants a link rather than a copy.
 
