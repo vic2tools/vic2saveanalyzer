@@ -86,8 +86,25 @@ WATCHER = """<script>
   // The report unpacks asynchronously and then draws. Long enough for a
   // campaign far bigger than any test uses, and it closes as soon as it has
   // looked, so the wait costs nothing when nothing is wrong.
+  // The tab the reader lands on, looked at before anything is clicked --
+  // afterwards the selected tab is whichever this tour left it on. A
+  // report built without a mod used to open on the map tab with no map in
+  // it: every section hidden, the page blank, and nothing about it
+  // visible in the element counts, because the panel still had children.
+  function landing() {
+    var on = document.querySelector('.tab[aria-selected="true"]');
+    if (!on) { say('landed', 'nothing:0:0:none'); return; }
+    var p = document.getElementById(on.getAttribute('aria-controls'));
+    var secs = p ? p.querySelectorAll(':scope > section') : [];
+    var shown = 0;
+    for (var j = 0; j < secs.length; j++) if (!secs[j].hidden) shown++;
+    say('landed', on.id + ':' + secs.length + ':' + shown + ':'
+        + (on.hidden ? 'hidden' : 'shown'));
+  }
+
   window.addEventListener('load', function () {
     setTimeout(function () {
+      landing();
       visit(document.querySelectorAll('button.tab'), 0, verdict);
     }, %(wait)d);
   });
@@ -173,6 +190,16 @@ def main():
         problems.append("no tabs, so the page shell did not render either")
     for which in said["badtab"]:
         problems.append("the %s tab threw when it was opened" % which)
+    landed = said.get("landed")
+    if landed:
+        which, total, shown, state = landed.split(":")
+        if state == "hidden":
+            problems.append("the report opens on %s, which is hidden" % which)
+        elif int(total) and not int(shown):
+            problems.append("the report opens on %s and every section of it "
+                            "is hidden -- a blank page" % which)
+        print("  opens on %s (%s of %s sections showing)"
+              % (which.replace("tab-", ""), shown, total))
     for entry in said["oktab"]:
         which, _, rest = entry.partition(":")
         kids = (rest.split(":") + ["0"])[0]

@@ -30,6 +30,7 @@ python3 testkit/invariants.py out/nations_timeseries.csv out/report.html
 python3 testkit/mangled.py "/path/to/one/save.v2"
 python3 testkit/parity.py "/path/to/saves" 8
 python3 testkit/boots.py out/report.html
+python3 testkit/looks.py out/report.html shot.png   # for eyes, not for CI
 python3 testkit/keeping.py                        # no saves needed
 python3 testkit/sharing.py                       # no saves needed
 python3 testkit/packing.py                       # no saves needed
@@ -176,9 +177,22 @@ bytes of another one, which catches a changed number and misses the only
 failure a reader would notice: a page that does not run. A helper called
 from outside the function that defined it is a `ReferenceError` at boot and
 a blank page, and the file is byte-for-byte what it was supposed to be.
+It also checks the tab the reader lands on has something on it. That one
+is there because counting missed it: a report built without a mod opened on
+the map tab with no map in it, every section inside hidden, the page blank
+— and the counts all looked fine, because the panel still had its children.
+
 Needs Firefox; says so and passes if there is none. A `--split` report will
 fail it, and should: its payload is a separate file, and a browser will not
 fetch that over `file://`.
+
+**`looks.py`** takes a picture of a report so somebody can look at it.
+Nothing here can pass or fail on a picture, and it earned its place anyway:
+counting found eight tabs, eight tables and 352 rows in a report whose first
+page was blank, and one glance at it found the same thing. The report draws
+after the page loads and Firefox screenshots at load, so it holds the load
+event open with an image served slowly from the loopback address while the
+page gets on with its work.
 
 ## The stand-ins
 
