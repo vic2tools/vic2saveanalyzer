@@ -16,6 +16,7 @@ python3 testkit/facts.py out/report.html          # the report is optional
 python3 testkit/invariants.py out/nations_timeseries.csv out/report.html
 python3 testkit/parity.py "/path/to/saves" 8
 python3 testkit/boots.py out/report.html
+python3 testkit/keeping.py                        # no saves needed
 python3 testkit/window.py "/path/to/saves"
 python3 testkit/smoke.py "/path/to/saves" --mod "/path/to/mod"
 ```
@@ -72,6 +73,23 @@ because if the two drift every table on the page is empty or wrong.
 **`tooearly.py`** looks for a local read on a line above every line that
 binds it. That is an `UnboundLocalError` waiting for whichever path reaches
 it first, and it has shipped twice.
+
+**`keeping.py`** drives the keeper through a campaign, without the game and
+without waiting. The keeper is the part that loses data when it is wrong:
+Victoria 2 keeps three autosaves and drops the fourth, so a month it misses
+is a month nobody has any more, and nothing later can notice. It had no test
+at all.
+
+It plays eighteen months a month at a time — synchronously, so the answer
+never depends on a sleep being long enough — and checks that every month
+comes out the other side, once, in one folder named for both the nation that
+started and the one it became. Then it writes three months with the keeper
+switched off and runs it once: all three have to arrive, because two months
+behind is still inside the game's three-deep rotation.
+
+Both halves were made to fail. A keeper reading only `autosave.v2` loses two
+of the three. A keeper that cannot match a campaign across a formation turns
+eighteen months into fifty-one folders.
 
 **`window.py`** runs a real campaign through the window's own code path,
 with the window withdrawn. Everything else drives the analyzer through its
