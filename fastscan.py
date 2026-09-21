@@ -136,6 +136,19 @@ class Running:
         except BaseException:                            # noqa: BLE001
             pass                                         # shutting down
 
+    def refused(self):
+        """
+        Whether the scanner turned the file down, rather than mis-answering.
+
+        It exits non-zero for a save it will not read -- a zip, a layout
+        the game does not write, a file cut in half -- and that is an
+        ordinary thing to meet in a folder of saves. It exits zero and
+        answers with something unusable only when it is a different
+        version from the analyzer beside it. The two want different words
+        said about them, and only the second is worth warning about.
+        """
+        return bool(self.proc.returncode)
+
     def abandon(self):
         """Stop the scanner and stop waiting for it."""
         self._guard.cancel()

@@ -27,6 +27,7 @@ python3 testkit/countries.py                      # no saves needed
 python3 testkit/edges.py                          # no saves needed
 python3 testkit/facts.py out/report.html          # the report is optional
 python3 testkit/invariants.py out/nations_timeseries.csv out/report.html
+python3 testkit/mangled.py "/path/to/one/save.v2"
 python3 testkit/parity.py "/path/to/saves" 8
 python3 testkit/boots.py out/report.html
 python3 testkit/keeping.py                        # no saves needed
@@ -49,6 +50,15 @@ loaded onto a transport, a province with no owner — and read them both ways.
 first-month save with nothing researched, a save with no pops, a truncated
 one, a zip, files that are not saves. A case passes if it works or refuses
 in a sentence a person could act on. A stack trace is a failure.
+
+**`mangled.py`** feeds the reader damaged saves — cut in half, bytes
+flipped, a piece missing from the middle, braces rubbed out, digits turned
+into letters, the header gone, a run of nulls. A save folder collects these
+in real life: a crash while the game was writing, a bad sector, a sync
+client copying a file mid-write. The right answer is to read what is there
+or refuse it in a sentence; a stack trace is never right, and it would take
+the whole campaign down with it. The mutations are seeded, so a failure is
+reproducible.
 
 **`invariants.py`** checks the arithmetic the report's own numbers have to
 satisfy — 58 rules over every nation in every save, and, given the report

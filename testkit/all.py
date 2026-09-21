@@ -2,7 +2,7 @@
 """
 Run every check, fastest first, and say what held and what did not.
 
-There are twelve of these now and they want running in an order: the ones
+There are thirteen of these now and they want running in an order: the ones
 that need nothing, then the ones that need saves, then the ones that need a
 built report, then the slow ones. Doing that by hand means doing it wrong
 or not at all.
@@ -80,7 +80,11 @@ def main():
                 print("could not build a report to check:\n%s"
                       % (built.stdout + built.stderr)[-2000:])
                 return 1
+            one = next((os.path.join(args.saves, f)
+                        for f in sorted(os.listdir(args.saves))
+                        if f.endswith(".v2")), "")
             checks += [
+                ("damaged saves", [os.path.join(KIT, "mangled.py"), one, "4"]),
                 ("the scanner against the parser",
                  [os.path.join(KIT, "parity.py"), args.saves, "8"]),
                 ("the numbers against each other",
