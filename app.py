@@ -113,8 +113,8 @@ class Tools:
             self.analyzer.saves.get().strip() or "..")
         self.adopt_button.state(["disabled" if (same or not kept) else
                                  "!disabled"])
-        report = self.analyzer.report
-        ready = bool(report) and os.path.isfile(report or "")
+        report = self.current_report()
+        ready = bool(report)
         self.share_button.state(["!disabled" if ready else "disabled"])
         if self.keeper.worker:
             self.hint.configure(text="Keeping every autosave. %s"
@@ -128,6 +128,22 @@ class Tools:
         self.tick = self.root.after(300, self.watch)
 
     # ------------------------------------------------------------- the link
+    def current_report(self):
+        """
+        The report to share: the one just built, or the one already there.
+
+        Sharing used to wait on a run in this sitting, which meant closing the
+        window lost the ability to send a report that was sitting on the disk
+        the whole time. A report in the output folder is as good as one this
+        window made.
+        """
+        made = self.analyzer.report
+        if made and os.path.isfile(made):
+            return made
+        out = self.analyzer.out.get().strip()
+        there = os.path.join(out, "report.html") if out else ""
+        return there if there and os.path.isfile(there) else None
+
     def reveal(self):
         """
         The answer that needs nobody: here is the file, send it yourself.
@@ -137,8 +153,8 @@ class Tools:
         a century outgrows that, and saying so plainly beats letting somebody
         find out when a chat client refuses the attachment.
         """
-        report = self.analyzer.report
-        if not report or not os.path.isfile(report):
+        report = self.current_report()
+        if not report:
             return
         size = os.path.getsize(report)
         note = ""
@@ -192,8 +208,8 @@ class Tools:
         return got
 
     def to_host(self):
-        report = self.analyzer.report
-        if not report or not os.path.isfile(report):
+        report = self.current_report()
+        if not report:
             return
         endpoint = gui.load_settings().get("report_host", "") or self.host()
         if not endpoint:
@@ -246,8 +262,8 @@ class Tools:
         return got
 
     def share(self):
-        report = self.analyzer.report
-        if not report or not os.path.isfile(report):
+        report = self.current_report()
+        if not report:
             return
         token = self.token()
         if not token:

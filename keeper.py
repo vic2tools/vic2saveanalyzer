@@ -70,6 +70,12 @@ FLAG_NAME = re.compile(rb'^\s*([A-Za-z_]\w*)\s*=', re.M)
 WIDTH = 6
 FLOOR = 3
 
+# What `FLOOR` costs, said plainly: in the opening year or two of a campaign
+# there are barely any flags, so a nation formed that early cannot be shown to
+# be the same campaign and starts a folder of its own. Nothing in the game
+# forms in 1836, so this has never come up in play -- it turned up against a
+# fake campaign written to test the keeper, whose saves carried two flags.
+
 # Our own naming, read back: `SAR1847_01_01.v2`, and `GFM SAR-ITA 1836`.
 SAVE_NAME = re.compile(r"^([A-Za-z0-9]{2,4})(\d{4})_(\d{2})_(\d{2})\.v2$")
 GENERATED = re.compile(r"^(?:.+ )?[A-Za-z0-9]{2,4}(?:-[A-Za-z0-9]{2,4})*"
