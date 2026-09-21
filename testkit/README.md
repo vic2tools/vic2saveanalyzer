@@ -30,6 +30,7 @@ python3 testkit/invariants.py out/nations_timeseries.csv out/report.html
 python3 testkit/parity.py "/path/to/saves" 8
 python3 testkit/boots.py out/report.html
 python3 testkit/keeping.py                        # no saves needed
+python3 testkit/sharing.py                       # no saves needed
 python3 testkit/window.py "/path/to/saves"
 python3 testkit/smoke.py "/path/to/saves" --mod "/path/to/mod"
 ```
@@ -86,6 +87,16 @@ because if the two drift every table on the page is empty or wrong.
 **`tooearly.py`** looks for a local read on a line above every line that
 binds it. That is an `UnboundLocalError` waiting for whichever path reaches
 it first, and it has shipped twice.
+
+**`sharing.py`** runs every way uploading a report can fail. The share
+button is aimed at somebody who wants to show a friend their campaign and
+would not know what to do with a stack trace, so nearly all of
+`publish.upload` is error messages — seven of them — and none had been run.
+Answers come from little servers started on the loopback address, one per
+behaviour: nothing listening, an answer that is not JSON, a host that takes
+the file and forgets to say where it put it, one that says it is too large,
+one that refuses it, and one that works. Nothing leaves the machine and no
+real report is used.
 
 **`keeping.py`** drives the keeper through a campaign, without the game and
 without waiting. The keeper is the part that loses data when it is wrong:
