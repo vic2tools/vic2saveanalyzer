@@ -1443,11 +1443,21 @@ def _worker_setup(pop_types, mob_types, reform_keys=()):
 
 
 def _worker_parse(job):
-    """One save, in a worker. Returns the slot so the parent can do the writing
-    only once, and plain dicts because a defaultdict of lambdas will not pickle."""
+    """
+    One save, in a worker.
+
+    The cache entry is written here rather than handed back for the parent to
+    write. Pickling and compressing half a megabyte is real work, and done in
+    the parent it is done one save at a time while fifteen workers wait --
+    which on a hundred saves is most of a second of nothing happening.
+
+    Plain dicts, because a defaultdict of lambdas will not pickle.
+    """
     index, path, slot = job
     meta, nations = analyze_save(path, verbose=False)
-    return index, slot, meta, dict(nations)
+    nations = dict(nations)
+    _cache_write(slot, meta, nations)
+    return index, slot, meta, nations
 
 
 def _spare_memory():
@@ -1674,9 +1684,8 @@ def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
                     print(f"  {os.path.basename(path)} ... cached, "
                           f"{got[0].get('date', '?')}")
             if got is None and i in futures:
-                _index, slot, meta, nations = futures.pop(i).result()
-                _cache_write(slot, meta, nations)
-                got = (meta, nations)
+                _index, _slot, meta, nations = futures.pop(i).result()
+                got = (meta, nations)      # the worker has cached it already
                 if verbose:
                     print(f"  [{done + 1}/{total}] {os.path.basename(path)} "
                           f"... {meta['date']}")
@@ -1728,9 +1737,8 @@ def _parse_parallel(files, out, todo, slots, workers, verbose, pop_types,
             ready, pending = wait(pending, timeout=0.25,
                                   return_when=FIRST_COMPLETED)
             for future in ready:
-                index, slot, meta, nations = future.result()
-                out[index] = (meta, nations)
-                _cache_write(slot, meta, nations)
+                index, _slot, meta, nations = future.result()
+                out[index] = (meta, nations)   # cached in the worker
                 done += 1
                 _tell_progress(already + done, len(files))
                 if verbose:

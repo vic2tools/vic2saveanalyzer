@@ -658,7 +658,7 @@ fn main() {
         }
     }
 
-    mark("scan provinces", &mut last);
+    mark("scan provinces+countries", &mut last);
     // The date and the player, so the caller does not have to scan the head
     // of the file for them, and every block that is not a province, as byte
     // ranges. Those are what the analyzer still reads itself -- the
