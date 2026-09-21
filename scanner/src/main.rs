@@ -25,6 +25,7 @@
 
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
+use std::time::Instant;
 
 // The fields a pop can hold other than its culture line. A field not in here,
 // whose value does not parse as a number, is the culture -- which is how the
@@ -63,8 +64,9 @@ fn to_int(s: &str) -> i64 {
 
 /// Windows-1252 bytes as a Rust string, the way Python's latin-1 decode
 /// reads them: byte value is code point, and nothing can fail.
-fn latin1(raw: &[u8]) -> String {
+fn latin1(raw: &[u8]) -> (String, Vec<usize>) {
     let mut out = String::with_capacity(raw.len() + 16);
+    let mut wide = Vec::new();
     let mut start = 0usize;
     let mut i = 0usize;
     while i < raw.len() {
@@ -74,6 +76,11 @@ fn latin1(raw: &[u8]) -> String {
                 let hit = i + off;
                 // Safe: everything from `start` to `hit` is ASCII.
                 out.push_str(unsafe { std::str::from_utf8_unchecked(&raw[start..hit]) });
+                // A byte above 127 is one byte in the file and two in a Rust
+                // string, so every offset after it is one further along here
+                // than it is there. The caller reports offsets the file's
+                // way, so remember where each one sat.
+                wide.push(out.len());
                 out.push(raw[hit] as char);
                 start = hit + 1;
                 i = hit + 1;
@@ -81,7 +88,16 @@ fn latin1(raw: &[u8]) -> String {
         }
     }
     out.push_str(unsafe { std::str::from_utf8_unchecked(&raw[start..]) });
-    out
+    (out, wide)
+}
+
+
+/// A string offset as an offset into the file it was decoded from.
+fn in_file(at: usize, wide: &[usize]) -> usize {
+    // How many two-byte characters start before this point: each one costs
+    // the string an extra byte the file does not have.
+    let before = wide.partition_point(|&w| w < at);
+    at - before
 }
 
 
@@ -91,6 +107,25 @@ fn unquote(s: &str) -> &str {
         &s[1..s.len() - 1]
     } else {
         s
+    }
+}
+
+/// Names stored once, referred to by number.
+#[derive(Default)]
+struct Interner {
+    names: Vec<String>,
+    index: HashMap<String, u32>,
+}
+
+impl Interner {
+    fn id(&mut self, name: &str) -> u32 {
+        if let Some(&i) = self.index.get(name) {
+            return i;
+        }
+        let i = self.names.len() as u32;
+        self.names.push(name.to_string());
+        self.index.insert(name.to_string(), i);
+        i
     }
 }
 
@@ -144,8 +179,11 @@ struct Nation {
     soldiers_at: HashMap<i64, i64>,
     soldier_pops_at: HashMap<i64, Vec<i64>>,
     literacy_at: HashMap<i64, f64>,
-    // (pop type, culture, size, province)
-    mobilizable: Vec<(String, String, i64, i64)>,
+    // (pop type, culture, size, province), the first two as interned ids:
+    // a campaign has a dozen pop types and a few hundred cultures, and this
+    // list holds tens of thousands of entries per save. Two fresh strings
+    // apiece was the scanner's largest single cost.
+    mobilizable: Vec<(u32, u32, i64, i64)>,
 }
 
 /// One pop, as the scan fills it in: every field is text until it is wanted.
@@ -206,6 +244,11 @@ fn find_from(hay: &[u8], needle: &[u8], from: usize) -> Option<usize> {
     if from >= hay.len() {
         return None;
     }
+    // A sliding window, which reads oddly for a two-byte needle and is the
+    // fastest of the three things tried here: scanning for the first byte and
+    // checking the second measured 0.10s -> 0.15s on a 31 MB save, because
+    // the compiler vectorises this and cannot vectorise a loop that restarts
+    // at every newline.
     hay[from..]
         .windows(needle.len())
         .position(|w| w == needle)
@@ -249,21 +292,10 @@ struct Scan {
     seen: Vec<String>,
     pop_ids: Vec<i64>,
     pop_kinds: Vec<u32>,
-    kind_names: Vec<String>,
-    kind_index: HashMap<String, u32>,
+    words: Interner,
 }
 
-impl Scan {
-    fn kind_id(&mut self, kind: &str) -> u32 {
-        if let Some(&i) = self.kind_index.get(kind) {
-            return i;
-        }
-        let i = self.kind_names.len() as u32;
-        self.kind_names.push(kind.to_string());
-        self.kind_index.insert(kind.to_string(), i);
-        i
-    }
-}
+
 
 /// One province block, attributing its pops to the owner.
 ///
@@ -437,13 +469,21 @@ fn read_province(
     for pop in &pops {
         if let Some(id) = pop.id {
             scan.pop_ids.push(to_int(id));
-            let k = scan.kind_id(pop.kind);
+            let k = scan.words.id(pop.kind);
             scan.pop_kinds.push(k);
         }
         let size = pop.size.map_or(0, to_int);
         if size <= 0 {
             continue;
         }
+        // Interned before the nation is borrowed, because both live on the
+        // same struct and the borrow checker is right to mind.
+        let mob = match pop.culture {
+            Some(culture) if mob_types.iter().any(|t| t == pop.kind) => {
+                Some((scan.words.id(pop.kind), scan.words.id(culture)))
+            }
+            _ => None,
+        };
         let nat = scan.nations.get_mut(owner).unwrap();
         nat.total_pop += size;
         nat.pop_by_type.add(pop.kind, size);
@@ -463,13 +503,8 @@ fn read_province(
         }
         if let Some(culture) = pop.culture {
             nat.pop_by_culture.add(culture, size);
-            if mob_types.iter().any(|t| t == pop.kind) {
-                nat.mobilizable.push((
-                    pop.kind.to_string(),
-                    culture.to_string(),
-                    size,
-                    pid,
-                ));
+            if let Some((k, c)) = mob {
+                nat.mobilizable.push((k, c, size, pid));
             }
         }
         let literate = pop.literacy.map_or(0.0, to_float) * size as f64;
@@ -539,6 +574,17 @@ fn main() {
         k += 2;
     }
 
+    let bench = args.iter().any(|a| a == "--bench");
+    let clock = Instant::now();
+    let mut mark = |what: &str, since: &mut Instant| {
+        if bench {
+            eprintln!("  {:<22} {:>6.1} ms", what,
+                      since.elapsed().as_secs_f64() * 1000.0);
+            *since = Instant::now();
+        }
+    };
+    let mut last = clock;
+
     let mut raw = Vec::new();
     match std::fs::File::open(path).and_then(|mut f| f.read_to_end(&mut raw)) {
         Ok(_) => {}
@@ -547,6 +593,7 @@ fn main() {
             std::process::exit(1);
         }
     }
+    mark("read the file", &mut last);
     if raw.starts_with(b"PK") {
         eprintln!("{} is a zip archive, not a plaintext save", path);
         std::process::exit(3);
@@ -555,8 +602,9 @@ fn main() {
     // Done in runs rather than a character at a time: a 31 MB save holds a
     // couple of bytes above 127 in the whole file, so this is a handful of
     // bulk copies and a scan, not thirty-one million pushes.
-    let text = latin1(&raw);
+    let (text, wide) = latin1(&raw);
 
+    mark("latin-1 decode", &mut last);
     let blocks = match top_level_blocks(&text) {
         Some(b) => b,
         None => {
@@ -566,14 +614,14 @@ fn main() {
         }
     };
 
+    mark("find top blocks", &mut last);
     let mut scan = Scan {
         world_pop: 0,
         owners: Vec::new(),
         nations: HashMap::new(),
         pop_ids: Vec::new(),
         pop_kinds: Vec::new(),
-        kind_names: Vec::new(),
-        kind_index: HashMap::new(),
+        words: Interner::default(),
         seen: Vec::new(),
     };
     for (key, at, stop) in &blocks {
@@ -583,8 +631,50 @@ fn main() {
         }
     }
 
+    mark("scan provinces", &mut last);
+    // The date and the player, so the caller does not have to scan the head
+    // of the file for them, and every block that is not a province, as byte
+    // ranges. Those are what the analyzer still reads itself -- the
+    // countries, the wars, the market -- and knowing where they are means it
+    // can decode those few megabytes instead of all thirty.
+    let mut date = String::new();
+    let mut player = String::new();
+    // Up to just after the first block's opening brace, which is the window
+    // Python reads its head scalars from. Taking the whole first block
+    // instead would let a `date=` nested inside it win.
+    let head_end = blocks.first().map(|b| b.1).unwrap_or(0).min(text.len());
+    for line in text[..head_end].lines().take(40) {
+        if let Some(eq) = line.find('=') {
+            let (k, v) = (line[..eq].trim(), unquote(line[eq + 1..].trim()));
+            if k == "date" && date.is_empty() {
+                date = v.to_string();
+            } else if k == "player" && player.is_empty() {
+                player = v.to_string();
+            }
+        }
+    }
+
     let mut out = String::with_capacity(4 << 20);
-    out.push_str("{\"world_pop\":");
+    out.push_str("{\"date\":");
+    escape(&mut out, &date);
+    out.push_str(",\"player\":");
+    escape(&mut out, &player);
+    out.push_str(",\"blocks\":[");
+    let mut first_block = true;
+    for (key, at, stop) in &blocks {
+        if !key.is_empty() && key.bytes().all(|c| c.is_ascii_digit()) {
+            continue;                 // a province, already read above
+        }
+        if !first_block {
+            out.push(',');
+        }
+        first_block = false;
+        out.push('[');
+        escape(&mut out, key);
+        out.push_str(&format!(",{},{}]", in_file(*at, &wide),
+                                  in_file(*stop, &wide)));
+    }
+    out.push_str("],\"world_pop\":");
     out.push_str(&scan.world_pop.to_string());
     out.push_str(",\"owners\":[");
     for (i, (pid, owner, held)) in scan.owners.iter().enumerate() {
@@ -614,7 +704,7 @@ fn main() {
         out.push_str(&k.to_string());
     }
     out.push_str("],\"kind_names\":[");
-    for (i, n) in scan.kind_names.iter().enumerate() {
+    for (i, n) in scan.words.names.iter().enumerate() {
         if i > 0 {
             out.push(',');
         }
@@ -733,17 +823,15 @@ fn main() {
             if i > 0 {
                 out.push(',');
             }
-            out.push('[');
-            escape(&mut out, kind);
-            out.push(',');
-            escape(&mut out, culture);
-            out.push_str(&format!(",{},{}]", size, pid));
+            // Ids into `kind_names`, resolved on the other side.
+            out.push_str(&format!("[{},{},{},{}]", kind, culture, size, pid));
         }
         out.push(']');
         out.push('}');
     }
     out.push_str("}}");
 
+    mark("build the output", &mut last);
     let stdout = io::stdout();
     let mut lock = stdout.lock();
     let _ = lock.write_all(out.as_bytes());

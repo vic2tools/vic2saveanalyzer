@@ -449,6 +449,32 @@ def looks_like_country_tag(key):
     )
 
 
+def read_save_bytes(path):
+    """
+    A .v2 as bytes, with the same refusals `read_save_text` makes.
+
+    Separate from the decode because most of a save need not become a Python
+    string at all: when the scanner has read the provinces, only the country,
+    war and market blocks are still read here, and those are a quarter of the
+    file.
+    """
+    with open(path, "rb") as fh:
+        head = fh.read(4096)
+        if head[:2] == b"PK":
+            raise ValueError(
+                f"{path} is a zip archive. Extract it, or re-save the game in "
+                f"debug mode to get plaintext."
+            )
+        if b"date=" not in head and b'date =' not in head:
+            raise ValueError(
+                f"{path} does not look like a plaintext Vic2 save (no `date=` "
+                f"in the header). If it is binary, launch Victoria 2 in debug "
+                f"mode and re-save."
+            )
+        fh.seek(0)
+        return fh.read()
+
+
 def read_save_text(path):
     """
     Read a .v2 save as text, with a clear error if it isn't plaintext.

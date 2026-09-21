@@ -944,7 +944,7 @@ def analyze_save(path, verbose=True):
     # Set the scanner going first, so it reads the provinces while this reads
     # the file and finds its blocks. It is collected below, once there is
     # something to do with it.
-    text = read_save_text(path)
+    raw = v2parse.read_save_bytes(path)
 
     nations = defaultdict(blank_nation)
     province_counts = defaultdict(int)
@@ -961,9 +961,26 @@ def analyze_save(path, verbose=True):
     # brace and ignores whatever follows. Blocks nothing here reads -- most of
     # the file -- are never looked at at all, which is most of the win: the old
     # walk had to count braces through all 26 MB of them.
-    blocks = top_level_blocks(text)
-    flat = blocks is not None
-    if flat:
+    # The scanner reads the provinces and says where everything else is, so
+    # when it works this never turns the whole file into a string: only the
+    # country, war and market blocks are decoded, which is eight megabytes of
+    # thirty-one. When it does not, the file is decoded and read as before.
+    import fastscan
+    scanned = fastscan.scan(path, v2parse.POP_TYPES, MOB_CANDIDATES)
+    text = None
+    if scanned is not None:
+        meta["date"] = scanned["date"]
+        meta["player"] = scanned["player"]
+        fastscan.apply(scanned, nations, province_owner, pop_registry,
+                       world_pop, province_counts)
+        blocks = scanned["blocks"]
+        flat = True
+    else:
+        text = raw.decode("latin-1")
+        blocks = top_level_blocks(text)
+    if scanned is None:
+      flat = blocks is not None
+      if flat:
         # `date` and `player` are top-level scalars, and every top-level scalar
         # is written above the first block.
         for m in HEAD_SCALAR.finditer(text, 0, blocks[0][1]):
@@ -972,7 +989,7 @@ def analyze_save(path, verbose=True):
                 meta["date"] = unquote(m.group(2).strip())
             elif key == "player" and not meta["player"]:
                 meta["player"] = unquote(m.group(2).strip())
-    else:
+      else:
         blocks = _walk_top(text, meta)
 
     # The province blocks -- most of the file, and every pop in the game --
@@ -980,47 +997,47 @@ def analyze_save(path, verbose=True):
     # the time this does, and what it hands back is folded into exactly the
     # structures the loop below would have filled. When it is not there, or
     # will not take this file, `scanned` is None and nothing changes.
-    scanned = None
-    if flat:
-        # Started here and waited for, rather than set going before the file
-        # is read. Overlapping the two is a real gain on one save -- 0.420s
-        # to 0.357s -- and disappeared into the noise across a campaign,
-        # where every core is already carrying a save of its own and a second
-        # process per worker only takes turns with it. Measured on a busy
-        # desktop, so "no difference" is the honest reading rather than "no
-        # difference on an idle machine". The simpler arrangement wins by
-        # default; `fastscan.start` and `collect` are still there if a run
-        # with cores to spare ever wants them.
-        import fastscan
-        scanned = fastscan.scan(path, v2parse.POP_TYPES, MOB_CANDIDATES)
-        if scanned is not None:
-            fastscan.apply(scanned, nations, province_owner, pop_registry,
-                           world_pop, province_counts)
-
     for key, at, stop in blocks:
         if key.isdigit():
             if scanned is not None:
-                continue
+                continue              # the scanner has already read it
             read_province(text, at, stop, nations, province_counts,
                           pop_registry, province_id=int(key),
                           owner_map=province_owner, flat=flat,
                           world_sink=world_pop)
-        elif looks_like_country_tag(key):
-            read_country(text, at, stop, key, nations, flat=flat)
+            continue
+
+        country = looks_like_country_tag(key)
+        if not (country or key in ("active_war", "previous_war",
+                                   "great_nations")
+                or (key == "worldmarket" and market_block is None)):
+            continue                  # nothing here reads this one
+
+        if scanned is None:
+            body, first, last = text, at, stop
+        else:
+            # Decoded now, and only this block: most of the file is provinces
+            # and never becomes a string at all.
+            body = raw[at:stop].decode("latin-1")
+            first, last = 0, len(body)
+
+        if country:
+            read_country(body, first, last, key, nations, flat=flat)
         elif key in ("active_war", "previous_war"):
-            war = read_war(parse_block(Tokens(text, at)), key == "active_war")
+            war = read_war(parse_block(Tokens(body, first)),
+                           key == "active_war")
             if war:
                 wars.append(war)
         elif key == "great_nations":
             # The engine's own great power list, in rank order, as 1-based
             # indices into the country array that common/countries.txt
             # defines. Nothing else in the save ranks nations.
-            block = parse_block(Tokens(text, at))
+            block = parse_block(Tokens(body, first))
             ids = (block if isinstance(block, list)
                    else block.get("_items", []) if isinstance(block, dict) else [])
             great_nations = [to_int(i, -1) for i in ids]
-        elif key == "worldmarket" and market_block is None:
-            market_block = parse_block(Tokens(text, at))
+        else:
+            market_block = parse_block(Tokens(body, first))
 
     # Classified after the whole file is read, so it does not depend on
     # provinces being written before countries.

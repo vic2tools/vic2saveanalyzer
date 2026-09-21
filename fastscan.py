@@ -30,6 +30,11 @@ import subprocess
 import sys
 
 BINARY = "vic2scan.exe" if sys.platform == "win32" else "vic2scan"
+
+# Everything the caller reads out of a scan. A binary that does not send all
+# of it is a binary from a different version of this program.
+NEEDED = frozenset(("date", "player", "blocks", "world_pop", "owners",
+                    "pop_ids", "pop_kinds", "kind_names", "nations"))
 _FOUND = None
 
 
@@ -96,9 +101,15 @@ def collect(running, timeout=600):
     if running.returncode != 0 or not out:
         return None
     try:
-        return json.loads(out)
+        got = json.loads(out)
     except ValueError:
         return None
+    # An older binary left beside a newer analyzer answers with less than is
+    # asked of it. Reading saves in Python is always allowed; guessing what a
+    # missing field meant is not.
+    if not isinstance(got, dict) or not NEEDED <= set(got):
+        return None
+    return got
 
 
 def scan(path, pop_types, mob_types, timeout=600):
@@ -176,6 +187,9 @@ def apply(got, nations, province_owner, pop_registry, world_sink,
         for pid, sizes in block["soldier_pops_at"]:
             soldier_pops_at[pid].extend(sizes)
 
+        # Pop type and culture arrive as ids into `kind_names`: a campaign has
+        # a dozen types and a few hundred cultures against tens of thousands
+        # of entries, so sending numbers is cheaper on both sides.
         pool = nat["mobilizable_pops"]
         for kind, culture, size, pid in block["mobilizable"]:
-            pool.append((sys.intern(kind), sys.intern(culture), size, pid))
+            pool.append((kinds[kind], kinds[culture], size, pid))
