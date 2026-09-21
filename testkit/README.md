@@ -5,7 +5,20 @@ supposed to do, and stand-ins for the parts of the world it talks to.
 
 ## The checks
 
-Run in this order. The first four are seconds; the last two are minutes.
+All of them, in the right order, with one command:
+
+```
+python3 testkit/all.py "/path/to/saves" --mod "/path/to/mod"
+python3 testkit/all.py "/path/to/saves" --quick     # skip the slow ones
+```
+
+Ten checks, about twenty seconds without the smoke matrix and a few
+minutes with it. A check that cannot run here — no Firefox, no display, no
+mod, no saves — says so and does not count against the total. One that
+fails prints its own output in full, because the point of a suite is the
+one that broke.
+
+Or one at a time:
 
 ```
 python3 testkit/tooearly.py                       # no saves needed
