@@ -727,12 +727,7 @@ class App:
         self.seen, self.began = None, time.monotonic()
         self.progress.configure(value=0, maximum=1)
         self.progress.pack(side="left", padx=(12, 0))
-        vic2_analyzer.set_progress(self.on_progress)
-        # The report is written before the CSV tables are, so it can be
-        # opened while they are still being written rather than a third of a
-        # second after they have been.
         self.opened = False
-        vic2_analyzer.set_report_ready(self.on_report_ready)
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
@@ -767,7 +762,18 @@ class App:
         old_argv, old_out, old_err = sys.argv, sys.stdout, sys.stderr
         sys.argv = argv
         sys.stdout = sys.stderr = Pipe(self.log_queue)
+        # Everything the analyzer calls back into, wired here rather than in
+        # `start` beside the buttons. A run owns its own wiring: put half of
+        # it in the window's setup and anything that drives `work` directly
+        # -- another caller, a test -- gets a run with the other half
+        # missing, which for the report is the difference between opening
+        # the moment it lands and opening a third of a second later, and
+        # nothing about the finished run looks any different.
         vic2_analyzer.set_cancel_check(self.stop.is_set)
+        vic2_analyzer.set_progress(self.on_progress)
+        # The report is written before the CSV tables are, so it can be
+        # opened while they are still being written.
+        vic2_analyzer.set_report_ready(self.on_report_ready)
         ok = True
         stopped = False
         try:
@@ -787,6 +793,8 @@ class App:
             self.log_queue.put("\n" + traceback.format_exc())
         finally:
             vic2_analyzer.set_cancel_check(None)
+            vic2_analyzer.set_progress(None)
+            vic2_analyzer.set_report_ready(None)
             sys.argv, sys.stdout, sys.stderr = old_argv, old_out, old_err
         self.report = os.path.join(out, "report.html")
         if ok and os.path.isfile(self.report):
@@ -825,8 +833,7 @@ class App:
         self.running = False
         self.button.configure(state="normal")
         self.stop_button.configure(state="disabled")
-        vic2_analyzer.set_progress(None)
-        vic2_analyzer.set_report_ready(None)
+        # `work` unhooks itself on the way out, including when it fails.
         self.seen = None
         self.progress.pack_forget()
         self.refresh_cache()          # the run just added to it

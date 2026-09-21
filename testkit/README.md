@@ -16,6 +16,7 @@ python3 testkit/facts.py out/report.html          # the report is optional
 python3 testkit/invariants.py out/nations_timeseries.csv out/report.html
 python3 testkit/parity.py "/path/to/saves" 8
 python3 testkit/boots.py out/report.html
+python3 testkit/window.py "/path/to/saves"
 python3 testkit/smoke.py "/path/to/saves" --mod "/path/to/mod"
 ```
 
@@ -71,6 +72,22 @@ because if the two drift every table on the page is empty or wrong.
 **`tooearly.py`** looks for a local read on a line above every line that
 binds it. That is an `UnboundLocalError` waiting for whichever path reaches
 it first, and it has shipped twice.
+
+**`window.py`** runs a real campaign through the window's own code path,
+with the window withdrawn. Everything else drives the analyzer through its
+command line, and the window is not that path: it builds its own argument
+list, replaces stdout with a queue, and hands over a cancel check, a
+progress callback and a report-ready callback. It checks that the report is
+written and announced, that the progress bar counts up to the total and
+stops there, that the report is opened *when it is written* rather than
+only when the run ends, that something real gets launched to open it on
+this platform, and that pressing Stop gives up quietly.
+
+Writing it found that the window wired half its callbacks in `start`, next
+to the buttons, and the other half in `work`. Anything driving `work`
+directly got a run with the early open and the progress bar missing, and
+nothing about the finished run looked different. A run owns its own wiring
+now.
 
 **`boots.py`** opens a built report in headless Firefox, with a handler on
 `window.onerror` and on unhandled rejections, and asks the page what it
