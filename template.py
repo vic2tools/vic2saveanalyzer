@@ -4722,6 +4722,37 @@ if (TECH) {
 /* =============== WARS =============== */
 const WARS = DATA.wars || [];
 let warPick = null;
+/* What to write in a war's "to" column.
+
+   Victoria 2 wars do not always end. Two AIs that cannot reach each other
+   never agree a peace, and the war sits in the save as an active_war until
+   the campaign stops -- the German-French War in one campaign had its last
+   battle in 1872 and was still open in 1881, nine years without a shot
+   fired. The save is not wrong and neither was this column, but "ongoing"
+   for a war nobody has fought since the last decade reads as a mistake in
+   the report rather than a fact about the game. So a war still open at the
+   last save says so, and one that has been open and quiet for over a year
+   says that instead, with the date it went quiet. */
+function warEnd(w) {
+  if (!w.active) return w.end || '—';
+  /* Years as a number, because these are `1872.9.1` strings and sorting them
+     as text puts October before September. */
+  const when = d => {
+    const p = String(d).split('.');
+    return (+p[0]) + ((+(p[1] || 1)) - 1) / 12;
+  };
+  let last = 0, shown = w.start;
+  for (const b of w.battles) {
+    if (b.date && when(b.date) > last) { last = when(b.date); shown = b.date; }
+  }
+  if (!last && w.start) last = when(w.start);
+  let finish = 0;
+  for (const d of (DATA.dates || [])) finish = Math.max(finish, when(d));
+  if (last && finish && finish - last > 1)
+    return `<b>unresolved</b> <span class="rk">quiet since ${shown}</span>`;
+  return '<b>ongoing</b>';
+}
+
 let warSort = {key: 'losses', dir: -1};
 
 function warLosses(w) { return w.losses[0] + w.losses[1]; }
@@ -4772,7 +4803,7 @@ function drawWarTable() {
       + `<div class="rk sides">${warSide(w.attackers)} <span class="rk">v</span> `
       + `${warSide(w.defenders)}</div></td>`
       + `<td class="num">${w.start || '—'}</td>`
-      + `<td class="num">${w.active ? '<b>ongoing</b>' : (w.end || '—')}</td>`
+      + `<td class="num">${warEnd(w)}</td>`
       + `<td class="num">${warLosses(w).toLocaleString()}</td>`
       + `<td class="num">${w.battles.length}${w.battles.length && w.dated < w.battles.length
             ? ` <span class="rk">(${w.dated} dated)</span>` : ''}</td>`
@@ -4983,7 +5014,7 @@ function drawWarDetail() {
     `<div class="warhead">${w.name}</div>`
     + `<div class="readout" style="border:0;padding:0 0 8px">`
     +   `<span><span class="rk">from</span> <b>${w.start || '—'}</b></span>`
-    +   `<span><span class="rk">to</span> <b>${w.active ? 'ongoing' : (w.end || '—')}</b></span>`
+    +   `<span><span class="rk">to</span> ${warEnd(w)}</span>`
     +   `<span><span class="rk">casualties</span> <b>${warLosses(w).toLocaleString()}</b></span>`
     +   warSideLosses(w)
     + `</div>`
