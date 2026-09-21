@@ -2517,9 +2517,9 @@ def verify_save(path):
 
     _meta, nations = analyze_save(path, verbose=False)
 
-    print(f"\n=== {os.path.basename(path)} ===")
-    print(f"{'tag':<6}{'brigades':>10}{'scan':>8}{'diff':>7}"
-          f"{'ships':>10}{'scan':>8}{'diff':>7}")
+    say = ["\n=== %s ===" % os.path.basename(path),
+           f"{'tag':<6}{'brigades':>10}{'scan':>8}{'diff':>7}"
+           f"{'ships':>10}{'scan':>8}{'diff':>7}"]
     mismatches = 0
     for tag in sorted(set(truth_reg) | set(truth_ship) | set(nations)):
         nat = nations.get(tag)
@@ -2529,15 +2529,50 @@ def verify_save(path):
         got_s, want_s = nat["ships"], truth_ship.get(tag, 0)
         if got_r != want_r or got_s != want_s:
             mismatches += 1
-            print(f"{tag:<6}{got_r:>10}{want_r:>8}{got_r - want_r:>7}"
-                  f"{got_s:>10}{want_s:>8}{got_s - want_s:>7}")
+            say.append(f"{tag:<6}{got_r:>10}{want_r:>8}{got_r - want_r:>7}"
+                       f"{got_s:>10}{want_s:>8}{got_s - want_s:>7}")
     if mismatches:
-        print(f"\n{mismatches} nations disagree. Please report this with the save.")
+        say.append("\n%d nations disagree. Please report this with the save."
+                   % mismatches)
     else:
         total_r = sum(truth_reg.values())
         total_s = sum(truth_ship.values())
-        print(f"All nations agree: {total_r:,} regiments, {total_s:,} ships.")
-    print()
+        say.append(f"All nations agree: {total_r:,} regiments, "
+                   f"{total_s:,} ships.")
+    say.append("")
+    return "\n".join(say), mismatches
+
+
+def verify_all(files, jobs=None):
+    """
+    Every save checked, on every core, printed in the order given.
+
+    Each save is checked twice over -- once by the structured reader and
+    once by a brace count over the whole file -- so this is the slowest
+    thing here by a wide margin: 167 s for 103 saves on one core. They do
+    not depend on each other, and the answers are collected rather than
+    printed as they arrive, so the output is the same whichever finishes
+    first.
+    """
+    from concurrent.futures import ProcessPoolExecutor
+    workers = worker_count(len(files),
+                           max((os.path.getsize(f) for f in files), default=0),
+                           jobs)
+    if workers <= 1 or len(files) < 2:
+        for path in files:
+            text, _bad = verify_save(path)
+            print(text)
+        return
+    print("Checking %d save(s) on %d cores." % (len(files), workers))
+    pool = ProcessPoolExecutor(
+        max_workers=workers, initializer=_worker_setup,
+        initargs=(tuple(v2parse.POP_TYPES), tuple(MOB_CANDIDATES),
+                  tuple(REFORM_KEYS)))
+    try:
+        for text, _bad in pool.map(verify_save, files):
+            print(text)
+    finally:
+        pool.shutdown()
 
 
 def peek_save(path):
@@ -3003,8 +3038,7 @@ def main():
             sys.exit("--cross found no campaigns under %s" % saves_path)
 
     if args.verify:
-        for path in files:
-            verify_save(path)
+        verify_all(files, args.jobs)
         return
 
     verbose = not args.quiet
