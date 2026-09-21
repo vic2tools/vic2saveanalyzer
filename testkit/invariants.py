@@ -14,9 +14,18 @@ Runs over every nation in every save. Says which rule broke, on which
 nation and date, and by how much.
 """
 
+import base64
 import csv
+import gzip
+import json
 import os
+import re
 import sys
+
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, HERE)
+
+from report import year_fraction                            # noqa: E402
 
 # Floating point: literacy and money are accumulated in a different order
 # from the totals they are checked against, so an identity can miss by a few
@@ -139,6 +148,127 @@ ORDERED = [
 ]
 
 
+def payload_of(path):
+    """The report's own data, or None if it carries none."""
+    with open(path, encoding="utf-8") as fh:
+        html = fh.read()
+    found = re.search(r'const PACKED = "([^"]*)"', html)
+    if not found or not found.group(1):
+        return None                      # --split keeps it in another file
+    return json.loads(gzip.decompress(base64.b64decode(found.group(1))))
+
+
+def check_payload(data):
+    """
+    [(rule, what)] for everything in the report's data that does not hold.
+
+    The table checks a nation against itself. These check the report
+    against its own shape: that every column is as long as the list of
+    dates it is read against, that every index points at something, that a
+    war ends after it starts and its battles happen while it is being
+    fought. A break here is a report that draws wrong, not one that adds
+    up wrong.
+    """
+    bad = []
+
+    def note(rule, what):
+        bad.append((rule, what))
+
+    dates, tags = data.get("dates", []), set(data.get("tags", []))
+    if dates != sorted(dates, key=year_fraction):
+        note("the dates are in order", "they are not")
+    price_dates = data.get("priceDates", [])
+    if price_dates != sorted(price_dates, key=year_fraction):
+        note("the price dates are in order", "they are not")
+    if len(data.get("years", [])) != len(dates):
+        note("there is one year per date",
+             "%d years, %d dates" % (len(data.get("years", [])), len(dates)))
+
+    for tag in sorted(tags):
+        if tag not in data.get("series", {}):
+            note("every nation has a series", tag)
+        if tag not in data.get("tagNames", {}):
+            note("every nation has a name", tag)
+
+    # The columns are read by index against these two lists, so a column of
+    # the wrong length is silently the wrong data from the wrong date on.
+    for tag, measures in data.get("series", {}).items():
+        for key, column in measures.items():
+            if len(column) != len(dates):
+                note("a measure has one value per save",
+                     "%s %s has %d for %d saves"
+                     % (tag, key, len(column), len(dates)))
+    for good, column in data.get("prices", {}).items():
+        if len(column) != len(price_dates):
+            note("a price has one value per priced month",
+                 "%s has %d for %d months"
+                 % (good, len(column), len(price_dates)))
+
+    for date, by_tag in data.get("facts", {}).items():
+        if date not in dates:
+            note("a fact is about a save that happened", date)
+        for tag in by_tag:
+            if tag not in tags:
+                note("a fact is about a nation the report lists", tag)
+
+    depth = len(data.get("techOrder", []))
+    for tag, by_date in data.get("techsBy", {}).items():
+        for date, held in by_date.items():
+            for i in held:
+                if not 0 <= i < depth:
+                    note("a technology index points at a technology",
+                         "%s %s: %d of %d" % (tag, date, i, depth))
+
+    kinds = set(data.get("popTypes", []))
+    for tag, by_date in data.get("pops", {}).items():
+        for date, counted in by_date.items():
+            for kind in counted:
+                if kind not in kinds:
+                    note("a pop is of a type the report lists",
+                         "%s %s %s" % (tag, date, kind))
+
+    for tag, by_date in data.get("cultures", {}).items():
+        for date, rows in by_date.items():
+            for culture, size, accepted in rows:
+                if size <= 0:
+                    note("a culture in the list has people in it",
+                         "%s %s %s" % (tag, date, culture))
+                if accepted not in (0, 1):
+                    note("accepted is a yes or a no", repr(accepted))
+
+    for war in data.get("wars", []):
+        name = war.get("name", "?")
+        start, end = war.get("start"), war.get("end")
+        if start and end and year_fraction(end) < year_fraction(start):
+            note("a war ends after it starts",
+                 "%s: %s to %s" % (name, start, end))
+        if end and war.get("active"):
+            note("a war that ended is not still being fought", name)
+        if not war.get("attackers"):
+            note("a war has somebody attacking", name)
+        if not war.get("defenders"):
+            note("a war has somebody defending", name)
+        battles = war.get("battles") or []
+        losses = [sum(b["a"][2] for b in battles),
+                  sum(b["d"][2] for b in battles)]
+        if list(war.get("losses") or [0, 0]) != losses:
+            note("a war's losses are its battles' losses",
+                 "%s: %s against %s" % (name, war.get("losses"), losses))
+        if war.get("dated") != sum(1 for b in battles if b.get("date")):
+            note("the dated-battle count is the number with a date", name)
+        for b in battles:
+            when = b.get("date")
+            if not when:
+                continue
+            if start and year_fraction(when) < year_fraction(start):
+                note("a battle happens after its war starts",
+                     "%s: %s before %s" % (name, when, start))
+            if end and year_fraction(when) > year_fraction(end):
+                note("a battle happens before its war ends",
+                     "%s: %s after %s" % (name, when, end))
+    return bad
+
+
 def check_rows(path):
     """[(rule, tag, date, left, right)] for everything that does not hold."""
     broken = []
@@ -188,9 +318,35 @@ def main():
     print("%d nation-saves, %d rules each"
           % (count, len(RULES) + len(ORDERED) + len(FLAGS) + len(RANGES)
              + len(NEVER_NEGATIVE)))
-    if not broken:
+
+    shape = []
+    if len(sys.argv) > 2:
+        data = payload_of(sys.argv[2])
+        if data is None:
+            print("  %s carries no payload to check"
+                  % os.path.basename(sys.argv[2]))
+        else:
+            shape = check_payload(data)
+            print("  and the report's own shape: %d nations, %d saves, "
+                  "%d wars" % (len(data.get("tags", [])),
+                               len(data.get("dates", [])),
+                               len(data.get("wars", []))))
+
+    if not broken and not shape:
         print("\nevery number agrees with every other number")
         return 0
+
+    if shape:
+        print("\nBROKEN, in the report's shape:")
+        by_rule = {}
+        for rule, what in shape:
+            by_rule.setdefault(rule, []).append(what)
+        for rule in sorted(by_rule, key=lambda r: -len(by_rule[r])):
+            print("  %s" % rule)
+            print("      %d times; e.g. %s"
+                  % (len(by_rule[rule]), by_rule[rule][0]))
+        if not broken:
+            return 1
 
     # One line per rule, with an example, rather than thousands of lines.
     by_rule = {}

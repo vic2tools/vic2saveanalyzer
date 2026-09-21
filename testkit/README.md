@@ -13,7 +13,7 @@ python3 testkit/awkward.py                        # no saves needed
 python3 testkit/countries.py                      # no saves needed
 python3 testkit/edges.py                          # no saves needed
 python3 testkit/facts.py out/report.html          # the report is optional
-python3 testkit/invariants.py out/nations_timeseries.csv
+python3 testkit/invariants.py out/nations_timeseries.csv out/report.html
 python3 testkit/parity.py "/path/to/saves" 8
 python3 testkit/boots.py out/report.html
 python3 testkit/smoke.py "/path/to/saves" --mod "/path/to/mod"
@@ -34,7 +34,11 @@ one, a zip, files that are not saves. A case passes if it works or refuses
 in a sentence a person could act on. A stack trace is a failure.
 
 **`invariants.py`** checks the arithmetic the report's own numbers have to
-satisfy — 58 rules over every nation in every save. Parity proves the two
+satisfy — 58 rules over every nation in every save, and, given the report
+as well, the shape of the data inside it: that every column is as long as
+the list of dates it is read against, that every technology index points at
+a technology, that a war ends after it starts and its battles happen while
+it is being fought, that a war's losses are its battles' losses. Parity proves the two
 readers agree; it does not prove either is right. These are the identities
 that hold whatever the save says: the strata are a partition of the
 population, a percentage is its own numerator over its own denominator,
