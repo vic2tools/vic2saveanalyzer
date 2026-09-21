@@ -150,6 +150,30 @@ def _tell_progress(done, total):
             pass
 
 
+_REPORT_READY = None
+
+
+def set_report_ready(fn):
+    """
+    Give the analyzer somewhere to say the report is on disk.
+
+    It is written before the CSV tables are, and nothing in it comes out of
+    them, so it can be opened while they are still being written. That is
+    about a third of a second of a warm run -- the whole point of which is
+    that pressing the button and reading the report are the same moment.
+    """
+    global _REPORT_READY
+    _REPORT_READY = fn
+
+
+def _tell_report_ready(path):
+    if _REPORT_READY is not None:
+        try:
+            _REPORT_READY(path)
+        except Exception:             # a window that has gone away
+            pass
+
+
 # Victoria II defines. A mod can change these; --mod-path reads the real values
 # out of common/defines.lua, and the command line overrides both.
 POP_SIZE_PER_REGIMENT = 3000
@@ -3404,10 +3428,13 @@ def main():
 
     price_rows = merge_prices(parsed)
     snapshot_rows = market_snapshot_rows(parsed)
-    paths = write_outputs(rows, ship_rows, pop_rows, culture_rows,
-                          price_rows, snapshot_rows, brigade_rows, tech_rows,
-                          args.out, pop_columns)
 
+    # The report is built and written before the tables are. Nothing in it is
+    # read back out of them, they take about a third of a second to write,
+    # and the report is the one thing anybody is waiting for -- so waiting
+    # for them first was a third of a second of the report already being
+    # finished and nobody being able to open it.
+    html_path = None
     if not args.no_html:
         from report import (build_map, build_report, build_succession,
                             build_wars)
@@ -3506,7 +3533,15 @@ def main():
                        for m, _n in parsed if m.get("date")},
             split=args.split,
         )
+    if html_path:
+        _tell_report_ready(html_path)
+    paths = write_outputs(rows, ship_rows, pop_rows, culture_rows,
+                          price_rows, snapshot_rows, brigade_rows, tech_rows,
+                          args.out, pop_columns)
+    if html_path:
         paths.insert(0, html_path)
+        # Last, so a run that died writing the tables is not recorded as one
+        # with nothing left to do.
         write_stamp(args.out, stamp)
 
     if verbose:

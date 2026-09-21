@@ -277,6 +277,10 @@ class App:
         # a flag because the worker thread and the window both touch it.
         self.stop = threading.Event()
         self.report = None
+        # Whether this run's report has been opened already. It is opened the
+        # moment it is written rather than when the run ends, and `finished`
+        # must not open a second copy of it.
+        self.opened = False
         self.mod_paths = {}
         saved = load_settings()
 
@@ -724,6 +728,11 @@ class App:
         self.progress.configure(value=0, maximum=1)
         self.progress.pack(side="left", padx=(12, 0))
         vic2_analyzer.set_progress(self.on_progress)
+        # The report is written before the CSV tables are, so it can be
+        # opened while they are still being written rather than a third of a
+        # second after they have been.
+        self.opened = False
+        vic2_analyzer.set_report_ready(self.on_report_ready)
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
@@ -784,11 +793,40 @@ class App:
             self.log_queue.put(f"\nReport written to {self.report}\n")
         self.root.after(0, self.finished, ok, stopped)
 
+    def on_report_ready(self, path):
+        """The report is on disk. Called from the worker thread."""
+        self.report = path
+        if self.open_after.get():
+            self.root.after(0, self.show_report, path)
+
+    def show_report(self, path):
+        """
+        Hand the report to whatever opens .html here. Once.
+
+        `os.startfile` exists only on Windows, and the fallback behind it was
+        `cmd /c start`, which is Windows too -- so on Linux and macOS the
+        report was built, announced in the log, and never opened. The same
+        three-way choice `open_folder` makes in app.py.
+        """
+        if self.opened or not os.path.isfile(path):
+            return
+        self.opened = True
+        try:
+            if sys.platform == "win32":
+                os.startfile(path)              # noqa: S606  (Windows only)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except Exception:
+            self.log_queue.put(f"\nCould not open {path} — open it yourself.\n")
+
     def finished(self, ok, stopped=False):
         self.running = False
         self.button.configure(state="normal")
         self.stop_button.configure(state="disabled")
         vic2_analyzer.set_progress(None)
+        vic2_analyzer.set_report_ready(None)
         self.seen = None
         self.progress.pack_forget()
         self.refresh_cache()          # the run just added to it
@@ -797,11 +835,10 @@ class App:
             text="Done." if done else "Stopped." if stopped
             else "Failed — see the log.")
         if done and self.open_after.get():
-            try:
-                os.startfile(self.report)       # noqa: S606  (Windows only)
-            except Exception:
-                subprocess.Popen(["cmd", "/c", "start", "", self.report],
-                                 shell=False)
+            # Usually already open: `on_report_ready` got there while the
+            # tables were still being written. This is the run that had no
+            # report to announce, or a window that was not listening.
+            self.show_report(self.report)
         elif not done and not stopped:
             messagebox.showerror(APP, "The analysis did not finish. The log "
                                       "has the details.")
