@@ -38,3 +38,8 @@ vic2.ico
 # Working notes and superseded files from before the first release. They stay
 # on disk and in git history; they are not part of what ships.
 legacybackup/
+
+# Settings the program writes. On Windows these live under APPDATA; on a
+# machine without it the old fallback put them here, inside the checkout.
+settings.json
+keeper.json

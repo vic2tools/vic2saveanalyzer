@@ -1,0 +1,15 @@
+# A place to put Victoria 2 campaign reports. See README.md; nothing here runs
+# until somebody deploys it, and the analyzer works without it.
+name = "vic2-reports"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# The bucket the reports live in. Make it with:
+#   wrangler r2 bucket create vic2-reports
+[[r2_buckets]]
+binding = "REPORTS"
+bucket_name = "vic2-reports"
+
+# Reports are served straight off this Worker, so no public bucket and no
+# second domain is needed. Point a route at it once a domain is attached:
+# routes = [{ pattern = "reports.example.com", custom_domain = true }]

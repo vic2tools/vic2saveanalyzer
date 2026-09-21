@@ -116,9 +116,25 @@ def search_root(path):
     return None
 
 
-SETTINGS = os.path.join(
-    os.environ.get("APPDATA") or os.path.expanduser("~"),
-    "vic2saveanalyzer", "settings.json")
+def _settings_path(app):
+    """
+    Where this machine keeps a program's settings.
+
+    Windows has APPDATA and that is the end of it. Everywhere else, falling
+    back to the home directory put the file at `~/<app>/settings.json`, which
+    on this machine is the checkout itself -- a test run wrote its settings
+    into the working tree and they were very nearly committed. The XDG
+    directory is where settings belong on those systems anyway.
+    """
+    roaming = os.environ.get("APPDATA")
+    if roaming:
+        return os.path.join(roaming, app, "settings.json")
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
+        os.path.expanduser("~"), ".config")
+    return os.path.join(base, app, "settings.json")
+
+
+SETTINGS = _settings_path("vic2saveanalyzer")
 
 
 def _documents():

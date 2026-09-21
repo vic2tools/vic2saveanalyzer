@@ -537,18 +537,22 @@ longer pays the third that base64 costs to sit inside HTML. The page loads
 first and inflates the data as it arrives, so a long campaign stops looking
 like a browser that has hung.
 
-**Share a link** in the bottom bar does the hosting for you. It puts the
-report in a repository of your own on GitHub, turns GitHub Pages on, and
-copies the URL to your clipboard. The link is yours: it keeps working, you can
-delete it, and nobody else's server holds your campaign. It asks once for a
-GitHub token with permission to create repositories and write to them, and
-keeps it in the settings file on your own machine.
+**Share** in the bottom bar offers three ways, and the first one needs
+nothing from anybody:
 
-That is a deliberate choice of host rather than the easy one. The free file
-hosts that take a 20 MB upload without an account nearly all serve an HTML
-file as plain text or as a download — a host that renders strangers' HTML is a
-phishing site with extra steps — so a link that actually opens as a page has
-to point somewhere the reader owns.
+| | |
+|---|---|
+| **Show me the file to send** | Opens the folder, puts the path on your clipboard and tells you the size, with a word about whether it will fit through Discord or mail. For a report of a few dozen saves this is the whole answer. |
+| **Upload to a report host** | One click, no account, a link back — if there is a host to send it to. There is no host set when you install this, because a host is somebody's server and nobody should be signed up to running one by a default. `host/` holds one ready to deploy. |
+| **Publish to GitHub Pages** | Puts the report in a repository of your own and turns Pages on, so the link is yours: it keeps working, you can delete it, and nobody else's server holds your campaign. Wants a GitHub token once. |
+
+The reason there is no single obvious answer is worth stating, because it
+looks like an oversight and is not. The free file hosts that take a 20 MB
+upload without an account nearly all serve an HTML file as plain text or as a
+download, deliberately — a host that renders strangers' HTML is a phishing
+site with extra steps. So a link that really opens as a page has to point
+either somewhere the reader owns, or somewhere somebody chose to run. Both are
+here, and neither is imposed.
 
 The catch with the split pair is that a browser will not fetch a file sitting
 next to a page opened from a plain disk path, so the two have to be served. Anything that serves

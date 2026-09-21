@@ -28,12 +28,14 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import keeper
+from gui import SETTINGS as _ANALYZER_SETTINGS
 
 APP = "Victoria 2 Autosave Keeper"
 
-SETTINGS = os.path.join(
-    os.environ.get("APPDATA") or os.path.expanduser("~"),
-    "vic2autosavekeeper", "settings.json")
+# One window now, so one settings file: the keeper's half of it lives beside
+# the analyzer's rather than in a directory of its own.
+SETTINGS = os.path.join(os.path.dirname(_ANALYZER_SETTINGS),
+                        "keeper.json")
 
 
 def _documents():
@@ -69,12 +71,23 @@ def default_out():
     return keeper.EXPORT
 
 
+# Where the keeper kept its settings when it was a program of its own. Read
+# once, if there is nothing in the new place yet, so folders somebody picked
+# before these became one window are still there afterwards.
+FORMERLY = os.path.join(
+    os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"),
+                                              ".config"),
+    "vic2autosavekeeper", "settings.json")
+
+
 def load_settings():
-    try:
-        with open(SETTINGS, encoding="utf-8") as fh:
-            return json.load(fh)
-    except Exception:
-        return {}
+    for path in (SETTINGS, FORMERLY):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh)
+        except Exception:
+            continue
+    return {}
 
 
 def save_settings(data):

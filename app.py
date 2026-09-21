@@ -27,6 +27,7 @@ Packaged as vic2saveanalyzer.exe by build_exe.py.
 """
 
 import os
+import subprocess
 import sys
 import threading
 import tkinter as tk
@@ -67,8 +68,17 @@ class Tools:
         bar.pack(side="bottom", fill="x")
         self.hint = ttk.Label(bar, text="", foreground="#666")
         self.hint.pack(side="left")
-        self.share_button = ttk.Button(bar, text="Share a link…",
-                                       command=self.share)
+        # A menu rather than a button, because there is no one right way to
+        # share a report and pretending otherwise picks wrong for somebody.
+        # The first item needs no account, no network and nobody's server,
+        # which is why it is first and why it is what most people will use.
+        self.share_button = ttk.Menubutton(bar, text="Share…")
+        menu = tk.Menu(self.share_button, tearoff=False)
+        menu.add_command(label="Show me the file to send", command=self.reveal)
+        menu.add_separator()
+        menu.add_command(label="Upload to a report host…", command=self.to_host)
+        menu.add_command(label="Publish to GitHub Pages…", command=self.share)
+        self.share_button["menu"] = menu
         self.share_button.pack(side="right")
         self.adopt_button = ttk.Button(bar, text="Read the kept saves",
                                        command=self.adopt)
@@ -118,6 +128,95 @@ class Tools:
         self.tick = self.root.after(300, self.watch)
 
     # ------------------------------------------------------------- the link
+    def reveal(self):
+        """
+        The answer that needs nobody: here is the file, send it yourself.
+
+        A report of a few dozen saves is a couple of megabytes and goes
+        straight into a chat window. Only a campaign autosaved every month for
+        a century outgrows that, and saying so plainly beats letting somebody
+        find out when a chat client refuses the attachment.
+        """
+        report = self.analyzer.report
+        if not report or not os.path.isfile(report):
+            return
+        size = os.path.getsize(report)
+        note = ""
+        if size > 25 * 1048576:
+            note = ("\n\nAt this size it is past what most chat clients and "
+                    "mail will take. Building the report from fewer saves is "
+                    "the cure, or put it on a host.")
+        elif size > 10 * 1048576:
+            note = ("\n\nThat will go by mail but not through Discord, "
+                    "which stops at 10 MB.")
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(report)
+        except tk.TclError:
+            pass
+        self.open_folder(os.path.dirname(report))
+        messagebox.showinfo(
+            APP, "%s\n\n%s %s the path is on your clipboard, and the folder "
+                 "is open.%s" % (report, gui.human_size(size), "\u2014", note))
+
+    def open_folder(self, where):
+        """Show a folder in whatever this machine uses to look at folders."""
+        try:
+            if sys.platform == "win32":
+                os.startfile(where)               # noqa: S606  (Windows only)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", where])
+            else:
+                subprocess.Popen(["xdg-open", where])
+        except OSError:
+            pass                                  # the dialog still says where
+
+    def host(self):
+        """The address of a report host, asked for once and remembered."""
+        saved = gui.load_settings()
+        held = saved.get("report_host", "")
+        got = simpledialog.askstring(
+            APP,
+            "Address of a report host.\n\n"
+            "This program ships without one: a host is somebody's server, and "
+            "nobody should be signed up to that by a default. If you run one "
+            "-- there is a server in host/ ready to deploy -- put its address "
+            "here and sharing becomes one click, with no account for anybody."
+            "\n\nLeave it empty to forget the one held here.",
+            initialvalue=held, parent=self.root)
+        if got is None:
+            return held                # cancelled: keep whatever was there
+        got = got.strip().rstrip("/")
+        saved["report_host"] = got
+        gui.save_settings(saved)
+        return got
+
+    def to_host(self):
+        report = self.analyzer.report
+        if not report or not os.path.isfile(report):
+            return
+        endpoint = gui.load_settings().get("report_host", "") or self.host()
+        if not endpoint:
+            return
+        name = os.path.basename(os.path.dirname(os.path.abspath(report)))
+        self.share_button.state(["disabled"])
+        self.analyzer.say("\nUploading the report%s\n" % "\u2026")
+        threading.Thread(target=self._upload, daemon=True,
+                         args=(report, endpoint, name)).start()
+
+    def _upload(self, report, endpoint, name):
+        """Off the UI thread, reporting through the queue like the rest."""
+        tell = self.analyzer.log_queue.put
+        try:
+            url = publish.upload(report, endpoint, name=name,
+                                 say=lambda line: tell("  " + line + "\n"))
+        except Exception as err:                     # noqa: BLE001
+            tell("Could not upload it: %s\n" % err)
+            self.root.after(0, self.publish_failed, str(err))
+            return
+        tell("\nUploaded: %s\n" % url)
+        self.root.after(0, self.published, url)
+
     def token(self):
         """The GitHub token, asked for once and remembered after that."""
         saved = gui.load_settings()

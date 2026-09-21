@@ -18,13 +18,19 @@ download, deliberately -- a host that renders strangers' HTML is a phishing
 site with extra steps. What is left is somewhere the reader owns, and the one
 almost everybody can have for nothing is GitHub Pages.
 
-So this puts the report in a repository of the user's own and turns Pages on:
-the link is theirs, it keeps working, they can delete it, and nobody else's
-server holds their campaign. The cost is a token, pasted once.
+There are two answers here and neither is free of cost. `publish` puts the
+report in a repository of the user's own and turns Pages on: the link is
+theirs, it keeps working, they can delete it, and nobody else's server holds
+their campaign -- but it wants a GitHub account and a token, which is a great
+deal to ask of somebody who only wants to show a friend their campaign.
+`upload` asks nothing at all, and needs somewhere to send it: a host that
+takes a report and answers with a URL. The program ships without one, because
+running a host is a commitment nobody should be signed up to by a default.
 
-Everything here speaks the GitHub REST API over `urllib`, and `base` exists so
-the whole path can be run against a mock rather than only ever being tried for
-the first time against the real thing.
+Both speak over `urllib` and nothing else, and both can be pointed at a local
+stand-in -- `base` for one, `endpoint` for the other -- so the whole path can
+be run against a mock rather than only ever being tried for the first time
+against the real thing.
 """
 
 import base64
@@ -36,6 +42,10 @@ import urllib.request
 
 API = "https://api.github.com"
 TIMEOUT = 300
+
+# What a report host answers with. Kept small on purpose: a URL to open, and
+# a word to say if it refused.
+UPLOAD_PATH = "/upload"
 
 
 class PublishError(Exception):
@@ -164,3 +174,72 @@ def _put(base, token, login, repo, where, source, say):
                 "separately." % os.path.basename(source))
         raise PublishError("could not upload %s: %s"
                            % (where, message or status))
+
+
+def upload(path, endpoint, name=None, say=None):
+    """
+    Send a report to a host that keeps reports, and give back its link.
+
+    The other half of the choice in this module's docstring. GitHub Pages
+    needs an account and a token, which is a lot to ask of somebody who just
+    wants to show a friend their campaign; a host that takes the report and
+    answers with a URL asks nothing at all. The catch is that somebody has to
+    run it, so the program ships without one and this does nothing until an
+    address is filled in -- see `host/` for a server that answers this.
+
+    The protocol is one POST and one JSON answer, so that anything can answer
+    it: a Cloudflare Worker, a script on a box in a cupboard, whatever exists
+    in five years.
+    """
+    say = say or (lambda line: None)
+    if not endpoint:
+        raise PublishError("no report host set")
+    if not os.path.isfile(path):
+        raise PublishError("there is no report at %s" % path)
+    beside = os.path.splitext(path)[0] + ".data.gz"
+    if os.path.isfile(beside):
+        raise PublishError(
+            "this report keeps its data in a separate file, and a host takes "
+            "one file. Build it without --split to upload it.")
+
+    with open(path, "rb") as fh:
+        body = fh.read()
+    say("Uploading %s (%.1f MB) to %s."
+        % (os.path.basename(path), len(body) / 1048576.0, endpoint))
+
+    request = urllib.request.Request(
+        endpoint.rstrip("/") + UPLOAD_PATH, data=body, method="POST")
+    request.add_header("Content-Type", "text/html; charset=utf-8")
+    request.add_header("User-Agent", "vic2saveanalyzer")
+    if name:
+        # Only a label for the page it lands on; the host names the file.
+        request.add_header("X-Report-Name", re.sub(r"[^\x20-\x7e]", "",
+                                                   name)[:120])
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as answer:
+            got = json.loads(answer.read() or b"{}")
+    except urllib.error.HTTPError as err:
+        raw = err.read()
+        try:
+            said = json.loads(raw).get("error", "")
+        except ValueError:
+            said = raw[:200].decode("utf-8", "replace")
+        if err.code == 413:
+            raise PublishError(
+                "the host says the report is too large%s. Build it from fewer "
+                "saves." % (": " + said if said else ""))
+        raise PublishError("the host refused it (%s)%s"
+                           % (err.code, ": " + said if said else ""))
+    except urllib.error.URLError as err:
+        raise PublishError("could not reach %s: %s" % (endpoint, err.reason))
+    except ValueError:
+        raise PublishError("%s answered with something that was not JSON, so "
+                           "it is probably not a report host." % endpoint)
+
+    url = got.get("url")
+    if not url:
+        raise PublishError("%s took the report but did not say where it put "
+                           "it." % endpoint)
+    if got.get("delete"):
+        say("To take it down again: %s" % got["delete"])
+    return url
