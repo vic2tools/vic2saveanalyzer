@@ -504,6 +504,20 @@ saves of 33 MB, 3.5 GB in all -- with three more changes on top:
 | peak memory | 703 MB | **269 MB** |
 | held per save | 5.8 MB | **0.81 MB** |
 
+Then the provinces and the country blocks moved to `scanner/`, and after that
+three changes that were all the same discovery: the parent process had become
+the whole bottleneck. Cold, it used 3.92 s of CPU out of 4.68 s of wall
+clock; warm, 2.79 s out of 2.58 s -- saturated, with fifteen workers idle
+behind it. Interleaved best-of-four on 103 saves, 3.3 GB, 16 cores:
+
+| 103 saves, 3.3 GB | before | after |
+|---|---|---|
+| first run | 4.68 s | **3.93 s** |
+| every run after | 2.58 s | **2.32 s** |
+| report on disk, warm | 2.17 s | **1.85 s** |
+| nothing changed at all | 0.06 s | 0.06 s |
+| nothing changed, under a mod | 0.74 s | **0.08 s** |
+
 The memory is the important column. Held per save is what decides whether a
 campaign fits at all: at 5.8 MB a monthly century wants about 4 GB and falls
 over, and at 0.81 MB it wants about 600 MB and does not.
@@ -526,6 +540,39 @@ save a second time, which meant keeping one save whole. It reads the rows the
 run just wrote instead, which is quicker and settles a worry its own comments
 recorded -- that the summary might disagree with the table beside it. It
 cannot now; they are the same numbers.
+
+**Each save is finished where it was read.** `finalize` turns a nation's
+per-province tables -- the mobilizable pops, the literacy, pop, soldier and
+soldier-pop counts per province, the state index -- into a few dozen numbers.
+Those tables are about a third of what a parsed save weighs and nothing reads
+them afterwards, so they were being pickled, piped and unpickled into the one
+process that had everything else left to do, and thrown away a millisecond
+later. With no mod, every argument `finalize` takes is either the nation
+itself or a setting, so it runs in the worker and they never leave it. With a
+mod it cannot: the rate comes from `breakdown`, which wants the mod, the
+state of the world in that save, and the set of reachable inventions, which
+is not known until the campaign has been walked once. The filter in
+`_finish_save` is the row loop's own repeated exactly, because a nation the
+report leaves out has to come back untouched.
+
+**A save is read once, not twice.** `analyze_save` had a comment saying the
+scanner is set going first so that it reads the file while Python reads it
+too. It did not: it read the whole save into memory and then called
+`fastscan.scan`, which starts the scanner and waits for it in one breath, so
+the two passes happened one after the other and the `start`/`collect` split
+that exists for this went unused. Worse, with the scanner working Python does
+not need the file at all -- the provinces and the countries come back from
+Rust, and what is still read here is the wars, the market and the great power
+list, a couple of megabytes of thirty. `_Spans` answers `raw[at:stop]` with
+that span and nothing else, so the loop slicing it cannot tell which of the
+two it was handed. Worth more than the CPU it accounts for, because what is
+scarce here is memory bandwidth: four workers 7.10 s &rarr; 6.27 s, eight
+4.89 s &rarr; 4.39 s, fifteen 4.56 s &rarr; 3.78 s.
+
+**The report is written before the tables.** Eight CSVs were written first,
+and nothing in the report is read back out of them. `set_report_ready` tells
+the window the moment the report lands, so it opens while the tables are
+still being written.
 
 **Repeated strings are shared.** Almost everything `unquote` returns is a
 country tag, a culture, a religion or a unit type, and each occurrence used to
@@ -553,11 +600,15 @@ Windows starts workers with a fresh interpreter. Both are handed over before a
 worker touches a save. How many workers is the machine's business: one per core
 bar one, no more than there are saves left to read, and bounded by free memory,
 because a worker peaks at about two and a half times its save (114 MB for a
-46 MB file). `-j N` overrides it; `-j 1` reads them one at a time. Anything
-already cached is loaded in the parent, since a process started to do that would
-cost more than it saves. On this machine: 63s on one core, 13s on eight, 8.5s on
-sixteen, 7.3s on twenty-four -- it keeps paying past the physical core count,
-just less.
+46 MB file). `-j N` overrides it; `-j 1` reads them one at a time. A cached
+save used to be loaded in the parent, on the grounds that a process started
+to do that would cost more than it saves; that stopped being true once the
+worker had a job to do on it as well, because it now comes back a third
+smaller with `finalize` already run, so a warm run reads a hundred cache
+entries on every core rather than one. Under a mod, where the finishing has
+to stay in the parent, cached saves stay there too. On this machine: 63s on
+one core, 13s on eight, 8.5s on sixteen, 7.3s on twenty-four -- it keeps
+paying past the physical core count, just less.
 
 **Pops skip what nothing reads.** Every pop carries an `ideology` and an
 `issues` sub-block -- six ideology numbers and sixteen party-support numbers --
