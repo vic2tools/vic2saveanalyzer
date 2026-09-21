@@ -104,6 +104,23 @@ On anything but Windows the keeper falls back to polling, because waking on
 the write is a Windows call, so leave `--every` above the poll interval or it
 will look like it is missing saves when it is only asleep.
 
+**`fake_save.py`** writes one save-shaped file — the header scalars, a
+couple of thousand province blocks each holding a dozen pops, a couple of
+hundred country blocks — in roughly the proportions a real save has them.
+With `--campaign N` it also writes N monthly saves dated in order, which is
+how the analyzer gets measured against a campaign nobody here owns:
+
+```
+python3 testkit/fake_save.py /tmp/base.v2 --mb 2 --campaign 1000
+python3 vic2_analyzer.py /tmp/base-campaign --out /tmp/out
+```
+
+A thousand saves, 2.4 GB: 12.0 s cold, 9.9 s again, 0.06 s when nothing
+changed, 1.1 GB at its peak, and the report opens. The cost is linear in
+the number of saves — 9.7 times the saves for 9.6 times the runtime — which
+is the thing worth knowing, because a century of monthly autosaves is the
+case this was built for and is not a case anybody has lying around.
+
 **`mock_host.py`** pretends to be the report host in `host/`, speaking the
 same two endpoints and applying the same checks — including reading the
 Content-Security-Policy straight out of `worker.js`, so the two cannot drift

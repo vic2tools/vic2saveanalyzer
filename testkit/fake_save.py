@@ -13,6 +13,7 @@ to mean anything.
 """
 
 import argparse
+import os
 import random
 import sys
 
@@ -101,12 +102,43 @@ def a_country(rng, tag):
          regiments)
 
 
+def a_campaign(one, folder, months, tag="SWE"):
+    """
+    One save turned into a campaign of monthly ones, dated in order.
+
+    The header is the only thing that has to differ, and it is the first
+    line, so this rewrites that and copies the rest -- which is the point:
+    what a long campaign costs the analyzer is the *number* of saves, not
+    what is in them. A thousand of these is what a century of monthly
+    autosaves looks like from the outside, and it is how the scaling gets
+    checked without owning a century of them.
+    """
+    raw = open(one, "rb").read()
+    rest = raw[raw.index(b"\n", raw.index(b'date="')):]
+    os.makedirs(folder, exist_ok=True)
+    made = 0
+    for year in range(1836, 1836 + months // 12 + 2):
+        for month in range(1, 13):
+            if made >= months:
+                return made
+            name = "%s%04d_%02d_01.v2" % (tag, year, month)
+            with open(os.path.join(folder, name), "wb") as fh:
+                fh.write(('date="%d.%d.1"' % (year, month)).encode("latin-1"))
+                fh.write(rest)
+            made += 1
+    return made
+
+
 def main():
     ap = argparse.ArgumentParser(description="Write a save-shaped file.")
     ap.add_argument("path")
     ap.add_argument("--mb", type=float, default=25.0,
                     help="how big to make it (default: %(default)s)")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--campaign", type=int, metavar="MONTHS",
+                    help="also write this many monthly saves, dated in "
+                         "order, into a folder beside `path` -- a long "
+                         "campaign to measure the analyzer against")
     args = ap.parse_args()
     rng = random.Random(args.seed)
     want = int(args.mb * 1024 * 1024)
@@ -133,6 +165,12 @@ def main():
             written += len(block)
         print("wrote %s: %.1f MB, %d provinces, 200 countries"
               % (args.path, written / 1048576.0, pid))
+
+    if args.campaign:
+        folder = os.path.splitext(args.path)[0] + "-campaign"
+        made = a_campaign(args.path, folder, args.campaign)
+        print("wrote %d monthly saves into %s (%.1f GB)"
+              % (made, folder, made * written / 1073741824.0))
     return 0
 
 
