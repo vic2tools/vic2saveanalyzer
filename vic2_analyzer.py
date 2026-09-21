@@ -1463,10 +1463,105 @@ def clear_cache():
 # mobilized. Windows starts workers with a fresh interpreter, so both are passed
 # in and applied before the worker touches a save.
 
-def _worker_setup(pop_types, mob_types, reform_keys=()):
+# Everything a nation carries that exists only to be folded into its totals.
+# Each one is a table with an entry per province -- eleven thousand of them
+# for a large nation -- they are about a third of what a parsed save weighs,
+# and `finalize` is the last thing that ever reads any of them.
+SPENT_ON_FINALIZE = ("mobilizable_pops", "literacy_at", "pop_at",
+                     "soldiers_at", "soldier_pops_at", "province_state")
+
+# Set in a worker by `_worker_setup`. None in the parent, and None in the
+# worker whenever the finishing has to stay in the parent -- see `finish` in
+# `main` for when that is.
+_FINISH = None
+
+
+def _worker_setup(pop_types, mob_types, reform_keys=(), finish=None):
+    global _FINISH
     v2parse.register_pop_types(pop_types)
     set_mob_candidates(mob_types)
     set_reform_keys(reform_keys)
+    _FINISH = finish
+
+
+def _finish_save(meta, nations, spec):
+    """
+    Run `finalize` over a save's nations and drop what it has spent.
+
+    This is the last step that reads a save whole, and it turns two megabytes
+    of per-province tables into a few dozen numbers a nation. Done where the
+    save was parsed it happens on every core at once and only the numbers are
+    sent back; done in the parent it happens one save at a time, after the
+    tables have already been pickled, piped and unpickled to get there.
+
+    The filter is the row loop's own, repeated exactly, because a nation the
+    report leaves out must come out of here untouched: `is_player` is set on
+    the nations that are kept and on no others, and the trim keeps that key
+    only where it exists.
+    """
+    players = spec["player_nations"]
+    if players is None:
+        # Every country a person is playing carries `human=yes` in its own
+        # block, so a multiplayer save names all of its players and not just
+        # whoever pressed save. Older saves and some mods write no such
+        # marker, hence the fall back to the save's own player.
+        players = {tag for tag, nat in nations.items() if nat.get("human")}
+        if not players:
+            players = {meta["player"]} if meta.get("player") else set()
+
+    wanted, min_pop = spec["wanted"], spec["min_pop"]
+    rate = spec["rate"]
+    out = {}
+    for tag, nat in nations.items():
+        if (not wanted or tag in wanted) and nat["total_pop"] >= min_pop:
+            nat["is_player"] = (tag in players)
+            done = finalize(nat, rate, spec["pop_per_regiment"],
+                            mob_types=spec["mob_types"],
+                            include_occupied=spec["include_occupied"])
+            done["mobilisation_size"] = round(rate, 5)
+        else:
+            done = nat
+        for name in SPENT_ON_FINALIZE:
+            done.pop(name, None)
+        out[tag] = done
+    return meta, out
+
+
+def _finalize_here(nat, mod, live, stage, args, keep_pools):
+    """
+    One nation finalized in the parent, for the runs that cannot delegate it.
+
+    The same call `_finish_save` makes in a worker, with the one thing a
+    worker cannot supply: a rate that came from the mod. `breakdown` reads
+    the mod's tables, the state of the world in this save, and the set of
+    inventions anyone in this campaign could reach -- which is not known
+    until the campaign has been walked once.
+    """
+    if mod is not None:
+        from mod_reader import breakdown
+        parts = breakdown(nat, mod, live=live, world=stage)
+        # A nation can be modified *below* zero -- IGoR's
+        # china_mobilization_nerf is -100 -- and the engine floors
+        # mobilisation size at zero.
+        #
+        # An empty contribution list means zero, not "unknown": an
+        # uncivilized nation has no technology or invention granting
+        # mobilisation size, and in IGoR no national value grants it either,
+        # so its rate really is zero. Falling back to the command-line rate
+        # here used to hand every uncivilized nation 100%, which the old
+        # "uncivilized cannot mobilize" shortcut happened to hide. The
+        # fallback belongs to the no-mod path.
+        rate = max(0.0, sum(v for _k, _n, v in parts))
+    else:
+        rate = args.mob_rate
+    done = finalize(nat, rate, args.pop_per_regiment,
+                    mob_types=frozenset(args.mob_types),
+                    include_occupied=args.mob_include_occupied,
+                    mod=mod, world=stage)
+    if not keep_pools:
+        nat["mobilizable_pops"] = ()
+    done["mobilisation_size"] = round(rate, 5)
+    return done
 
 
 def _worker_parse(job):
@@ -1478,12 +1573,25 @@ def _worker_parse(job):
     the parent it is done one save at a time while fifteen workers wait --
     which on a hundred saves is most of a second of nothing happening.
 
+    A save that is already cached is read here for the same reason. Nothing
+    is reparsed -- the entry is decompressed and unpickled, which is the
+    whole cost of a warm run -- and it happens on a spare core rather than in
+    the one process that has everything else left to do.
+
     Plain dicts, because a defaultdict of lambdas will not pickle.
     """
-    index, path, slot = job
-    meta, nations = analyze_save(path, verbose=False)
-    nations = dict(nations)
-    _cache_write(slot, meta, nations)
+    index, path, slot, cached = job
+    meta = nations = None
+    if cached:
+        got = _cache_read(slot)
+        if got is not None:
+            meta, nations = got
+    if nations is None:
+        meta, nations = analyze_save(path, verbose=False)
+        nations = dict(nations)
+        _cache_write(slot, meta, nations)
+    if _FINISH is not None:
+        meta, nations = _finish_save(meta, nations, _FINISH)
     return index, slot, meta, nations
 
 
@@ -1650,7 +1758,7 @@ def trim_save(meta, nations):
 
 def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
                        pop_types=(), mob_types=(), reform_keys=(), jobs=None,
-                       window=None):
+                       window=None, finish=None):
     """
     Every save, handed over one at a time, in the order given.
 
@@ -1674,8 +1782,15 @@ def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
     total = len(files)
     _tell_progress(0, total)
 
-    biggest = max((os.path.getsize(files[i]) for i in todo), default=0)
-    workers = worker_count(len(todo), biggest, jobs) if todo else 1
+    # Which saves are worth handing to a worker. Normally only the ones that
+    # have to be parsed: sending a cached save away and back is two extra
+    # pickles for nothing. With `finish` set it is every save, because the
+    # worker then hands back a third less than it read and the caller has one
+    # less job per save to do -- and on a warm run that is the difference
+    # between one core reading a hundred cache entries and all of them.
+    pooled = list(range(len(files))) if finish is not None else todo
+    biggest = max((os.path.getsize(files[i]) for i in pooled), default=0)
+    workers = worker_count(len(pooled), biggest, jobs) if pooled else 1
     window = window or max(2, workers * 2)
     if verbose and todo:
         print(f"Reading {len(todo)} save(s) on {workers} cores.")
@@ -1686,12 +1801,12 @@ def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
             pool = ProcessPoolExecutor(
                 max_workers=workers, initializer=_worker_setup,
                 initargs=(tuple(pop_types), tuple(mob_types),
-                          tuple(reform_keys)))
+                          tuple(reform_keys), finish))
         except Exception as exc:
             print(f"  reading one at a time ({exc})", file=sys.stderr)
 
     futures = {}
-    waiting = list(todo)
+    waiting = list(pooled)
     done = 0
     try:
         for i, path in enumerate(files):
@@ -1702,23 +1817,29 @@ def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
             while pool is not None and waiting and len(futures) < window:
                 nxt = waiting.pop(0)
                 futures[nxt] = pool.submit(
-                    _worker_parse, (nxt, files[nxt], slots[nxt]))
+                    _worker_parse,
+                    (nxt, files[nxt], slots[nxt], ready[nxt]))
 
             got = None
-            if ready[i]:
-                got = _cache_read(slots[i])
-                if got is not None and verbose:
-                    print(f"  {os.path.basename(path)} ... cached, "
-                          f"{got[0].get('date', '?')}")
-            if got is None and i in futures:
+            if i in futures:
                 _index, _slot, meta, nations = futures.pop(i).result()
-                got = (meta, nations)      # the worker has cached it already
+                got = (meta, nations)      # cached and finished in the worker
                 if verbose:
                     print(f"  [{done + 1}/{total}] {os.path.basename(path)} "
                           f"... {meta['date']}")
+            elif ready[i]:
+                got = _cache_read(slots[i])
+                if got is not None:
+                    if finish is not None:
+                        got = _finish_save(got[0], got[1], finish)
+                    if verbose:
+                        print(f"  {os.path.basename(path)} ... cached, "
+                              f"{got[0].get('date', '?')}")
             if got is None:
                 # No cache, no worker: either the pool never started or the
-                # cached copy turned out to be unreadable.
+                # cached copy turned out to be unreadable. Whatever route a
+                # save came by, it leaves here in the same state, so the
+                # caller never has to ask which one it was.
                 try:
                     got = analyze_save(path, verbose=verbose)
                 except (ValueError, OSError) as exc:
@@ -1726,6 +1847,8 @@ def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
                           file=sys.stderr)
                     continue
                 _cache_write(slots[i], got[0], got[1])
+                if finish is not None:
+                    got = _finish_save(got[0], dict(got[1]), finish)
             done += 1
             _tell_progress(done, total)
             yield got
@@ -1755,7 +1878,9 @@ def _parse_parallel(files, out, todo, slots, workers, verbose, pop_types,
                                initargs=(tuple(pop_types), tuple(mob_types),
                                          tuple(reform_keys)))
     try:
-        pending = {pool.submit(_worker_parse, (i, files[i], slots[i]))
+        # `todo` is the saves with no cache entry, so none of these is
+        # cached, and no finishing was asked of this pool.
+        pending = {pool.submit(_worker_parse, (i, files[i], slots[i], False))
                    for i in todo}
         while pending:
             _stop_if_asked()
@@ -2842,13 +2967,49 @@ def main():
     # and a pass cannot be sorted halfway through. `stream` is a generator:
     # nothing is read until the loop below asks for it.
     files = in_date_order(files)
+    wanted = set(args.tags) if args.tags else None
+    # A nation's mobilizable pops are one entry per pop per province -- eleven
+    # thousand of them for a large nation, two megabytes a save -- and the only
+    # thing that reads them is `finalize`, which turns them into a handful of
+    # numbers. Letting each save drop its own once it has been read is the
+    # difference between a campaign of monthly autosaves needing a couple of
+    # gigabytes and needing nothing much at all. `--explain-mob-pool` prints the
+    # raw list back, so it is the one caller that keeps them.
+    keep_pools = bool(args.explain_mob_pool)
+    # Two diagnostics read a whole nation back out of the last save after the
+    # run: --explain-mob-pool wants its raw pool, --explain-mob wants its
+    # techs and inventions to explain where a mobilisation size came from.
+    # Neither survives trimming, so with either of them asked for, saves are
+    # kept whole. They are single-campaign diagnostics run on purpose, so the
+    # memory that costs is memory somebody chose to spend.
+    keep_whole = keep_pools or bool(args.explain_mob)
+
+    # Where `finalize` runs. With no mod every argument it takes is either the
+    # nation itself or a setting, so it can run in the worker that parsed the
+    # save -- on every core at once, before the per-province tables it reads
+    # are ever sent anywhere. With a mod it cannot: the rate comes from
+    # `breakdown`, which wants the mod, the save's own state and a list of
+    # reachable inventions that is only known after the whole campaign has
+    # been walked once. The diagnostics that print a nation back raw want the
+    # tables kept, so they stay in the parent too.
+    finish = None
+    if mod is None and not keep_whole:
+        finish = {"rate": args.mob_rate,
+                  "pop_per_regiment": args.pop_per_regiment,
+                  "mob_types": frozenset(args.mob_types),
+                  "include_occupied": args.mob_include_occupied,
+                  "player_nations": (set(args.player_nations)
+                                     if args.player_nations is not None
+                                     else None),
+                  "wanted": wanted,
+                  "min_pop": args.min_pop}
+
     stream = parse_saves_stream(
         files, verbose=verbose, use_cache=not args.no_cache,
         world=world, pop_types=sorted(v2parse.POP_TYPES),
         mob_types=args.mob_types,
-        reform_keys=sorted(REFORM_KEYS), jobs=args.jobs)
+        reform_keys=sorted(REFORM_KEYS), jobs=args.jobs, finish=finish)
 
-    wanted = set(args.tags) if args.tags else None
     live = None
     if mod is not None:
         from mod_reader import (attainable_inventions, index_base_for,
@@ -2932,22 +3093,6 @@ def main():
                 print(f"  invention  {n:<44} +{rules[n]['size']:.3f}{mark}")
 
 
-    # A nation's mobilizable pops are one entry per pop per province -- eleven
-    # thousand of them for a large nation, two megabytes a save -- and the only
-    # thing that reads them is `finalize`, which turns them into a handful of
-    # numbers. Letting each save drop its own once it has been read is the
-    # difference between a campaign of monthly autosaves needing a couple of
-    # gigabytes and needing nothing much at all. `--explain-mob-pool` prints the
-    # raw list back, so it is the one caller that keeps them.
-    keep_pools = bool(args.explain_mob_pool)
-    # Two diagnostics read a whole nation back out of the last save after the
-    # run: --explain-mob-pool wants its raw pool, --explain-mob wants its
-    # techs and inventions to explain where a mobilisation size came from.
-    # Neither survives trimming, so with either of them asked for, saves are
-    # kept whole. They are single-campaign diagnostics run on purpose, so the
-    # memory that costs is memory somebody chose to spend.
-    keep_whole = keep_pools or bool(args.explain_mob)
-
     rows, ship_rows, pop_rows, culture_rows = [], [], [], []
     brigade_rows, tech_rows = [], []
     # Ship stats as each nation's own inventions leave them. Nations that
@@ -2977,46 +3122,32 @@ def main():
         # What this save says about everyone, which is what the triggered
         # modifiers ask about: the year, the great powers, who is at war and
         # who owns what.
-        stage = save_world(meta, mod)
+        stage = save_world(meta, mod) if mod is not None else None
         # Who was human. Every country a person is playing carries `human=yes`
         # in its own block, so a multiplayer game names all of its players and
         # not just whoever pressed save. Older saves and some mods write no
         # such marker at all, hence the fall back to the save's own player;
-        # --player-nations still overrides both.
-        played = {tag for tag, nat in nations.items() if nat.get("human")}
-        humans = (set(args.player_nations) if args.player_nations is not None
-                  else played if played
-                  else {meta["player"]} if meta.get("player") else set())
+        # --player-nations still overrides both. Already decided per save by
+        # `_finish_save` when the finishing went to the workers.
+        humans = ()
+        if finish is None:
+            played = {tag for tag, nat in nations.items() if nat.get("human")}
+            humans = (set(args.player_nations)
+                      if args.player_nations is not None
+                      else played if played
+                      else {meta["player"]} if meta.get("player") else set())
         for tag, nat in nations.items():
             if wanted and tag not in wanted:
                 continue
             if nat["total_pop"] < args.min_pop:
                 continue
-            nat["is_player"] = (tag in humans)
-            if mod is not None:
-                from mod_reader import breakdown
-                parts = breakdown(nat, mod, live=live, world=stage)
-                # A nation can be modified *below* zero -- IGoR's
-                # china_mobilization_nerf is -100 -- and the engine floors
-                # mobilisation size at zero.
-                #
-                # An empty contribution list means zero, not "unknown": an
-                # uncivilized nation has no technology or invention granting
-                # mobilisation size, and in IGoR no national value grants it
-                # either, so its rate really is zero. Falling back to the
-                # command-line rate here used to hand every uncivilized nation
-                # 100%, which the old "uncivilized cannot mobilize" shortcut
-                # happened to hide. The fallback belongs to the no-mod path.
-                nation_rate = max(0.0, sum(v for _k, _n, v in parts))
+            if finish is not None:
+                # Finalized in the worker, under this same filter, so `nat`
+                # is already what `finalize` would have returned here.
+                done = nat
             else:
-                nation_rate = args.mob_rate
-            done = finalize(nat, nation_rate, args.pop_per_regiment,
-                            mob_types=frozenset(args.mob_types),
-                            include_occupied=args.mob_include_occupied,
-                            mod=mod, world=stage)
-            if not keep_pools:
-                nat["mobilizable_pops"] = ()
-            done["mobilisation_size"] = round(nation_rate, 5)
+                nat["is_player"] = (tag in humans)
+                done = _finalize_here(nat, mod, live, stage, args, keep_pools)
             accepted_set = set(done["accepted_cultures"]) | {done["primary_culture"]}
 
             row = {
