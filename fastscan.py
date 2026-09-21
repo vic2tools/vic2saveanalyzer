@@ -28,13 +28,17 @@ import json
 import os
 import subprocess
 import sys
+import threading
 
 BINARY = "vic2scan.exe" if sys.platform == "win32" else "vic2scan"
 
-# Everything the caller reads out of a scan. A binary that does not send all
-# of it is a binary from a different version of this program.
-NEEDED = frozenset(("date", "player", "blocks", "world_pop", "owners",
-                    "pop_ids", "pop_kinds", "kind_names", "nations"))
+# What the first line has to carry, and what the rest has to. A binary that
+# does not send all of it is a binary from a different version of this
+# program, and reading saves in Python is always allowed where guessing what
+# a missing field meant is not.
+HEAD_NEEDED = frozenset(("date", "player", "blocks"))
+NEEDED = frozenset(("world_pop", "owners", "pop_ids", "pop_kinds",
+                    "kind_names", "nations"))
 _FOUND = None
 
 
@@ -60,36 +64,129 @@ def available():
     return _FOUND or None
 
 
+class Running:
+    """
+    A scanner at work, and whatever has been read off it so far.
+
+    The scanner answers in two parts, and this owns the boundary. Both
+    halves are read through the buffered reader `Popen` already provides,
+    never through `communicate`: that one reads the descriptor directly, so
+    anything a buffered read had pulled in past the first newline would sit
+    in a buffer it never looks at and simply be lost.
+
+    The watchdog is what `communicate(timeout=...)` used to provide. A
+    blocking read is the only thing that works the same way on Windows,
+    where `select` does not take a pipe, so the limit is enforced from the
+    outside: if the timer fires the scanner is killed, the read ends, and
+    the save is read in Python instead. It is cancelled the moment the
+    output ends, which is every time but the one this is here for.
+    """
+
+    __slots__ = ("proc", "_guard")
+
+    def __init__(self, proc, timeout):
+        self.proc = proc
+        self._guard = threading.Timer(timeout, self._giveup)
+        self._guard.daemon = True
+        self._guard.start()
+
+    def _giveup(self):
+        try:
+            self.proc.kill()
+        except OSError:
+            pass
+
+    def line(self):
+        """The first line, without its newline, or b"" if there was none."""
+        try:
+            return self.proc.stdout.readline().rstrip(b"\n")
+        except (OSError, ValueError):
+            return b""
+
+    def remainder(self):
+        """Everything after the first line, or None if it could not be read."""
+        try:
+            out = self.proc.stdout.read()
+            # Read after the output rather than alongside it, which cannot
+            # deadlock here: the scanner writes one line to stderr and
+            # exits, or writes its timings and exits, and neither fills a
+            # pipe.
+            self.proc.stderr.read()
+            self.proc.wait()
+        except (OSError, ValueError):
+            return None
+        finally:
+            self._guard.cancel()
+        return out
+
+    def abandon(self):
+        """Stop the scanner and stop waiting for it."""
+        self._guard.cancel()
+        try:
+            self.proc.kill()
+            self.proc.wait()
+        except OSError:
+            pass
+
+
 def start(path, pop_types, mob_types, army_techs=(), navy_techs=(),
-          reform_keys=()):
+          reform_keys=(), timeout=600):
     """
     Set the scanner going and come straight back.
 
-    Started before the file is read rather than after, so it works through
-    the provinces while this process reads the same file and finds its
-    blocks. On a machine with a core to spare that is the scanner for free;
-    on one already using every core it changes nothing, which is why it is
-    worth doing and not worth much.
+    Started before anything is read, because the caller has a share of the
+    same save to do and the two are meant to happen at once. See `head`.
     """
     binary = available()
     if binary is None:
         return None
     try:
-        return subprocess.Popen(
+        return Running(subprocess.Popen(
             [binary, path,
              "--pop-types", ",".join(sorted(pop_types)),
              "--mob-types", ",".join(sorted(mob_types)),
              "--army-techs", ",".join(sorted(army_techs)),
              "--navy-techs", ",".join(sorted(navy_techs)),
              "--reform-keys", ",".join(sorted(reform_keys))],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE), timeout)
     except OSError:
         return None
 
 
-def collect(running, timeout=600):
+def head(running):
     """
-    What the scanner found, or None.
+    The date, the player and where every non-province block is. Or None.
+
+    This is the point of answering in two parts. The scanner knows all of it
+    a fifth of the way through its run -- it has read the file and found the
+    top-level blocks, and has the whole province and country scan still to
+    do -- and it is everything the caller needs to start on its own share of
+    the save: the wars, the market, the great power list, which it reads out
+    of the file itself.
+
+    Sent at the end with everything else, the caller waited through the
+    province scan doing nothing and then read the wars while the scanner
+    sat finished and idle, so a save cost the two added together: 127 ms and
+    147 ms of it. Sent here they run at the same time and a save costs the
+    longer of the two.
+    """
+    if running is None:
+        return None
+    line = running.line()
+    if not line:
+        return None
+    try:
+        got = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(got, dict) or not HEAD_NEEDED <= set(got):
+        return None
+    return got
+
+
+def collect(running):
+    """
+    The rest of what the scanner found -- the provinces and the countries.
 
     None always means "read it in Python instead", never "give up": the
     binary is missing, or it refused the file -- a zip, a save some editor
@@ -97,20 +194,13 @@ def collect(running, timeout=600):
     """
     if running is None:
         return None
-    try:
-        out, _err = running.communicate(timeout=timeout)
-    except (OSError, subprocess.SubprocessError):
-        running.kill()
-        return None
-    if running.returncode != 0 or not out:
+    out = running.remainder()
+    if out is None or running.proc.returncode != 0 or not out:
         return None
     try:
         got = json.loads(out)
     except ValueError:
         return None
-    # An older binary left beside a newer analyzer answers with less than is
-    # asked of it. Reading saves in Python is always allowed; guessing what a
-    # missing field meant is not.
     if not isinstance(got, dict) or not NEEDED <= set(got):
         return None
     return got
@@ -118,9 +208,24 @@ def collect(running, timeout=600):
 
 def scan(path, pop_types, mob_types, timeout=600, army_techs=(),
          navy_techs=(), reform_keys=()):
-    """Start the scanner and wait for it. Kept for callers that want both."""
-    return collect(start(path, pop_types, mob_types, army_techs, navy_techs,
-                         reform_keys), timeout=timeout)
+    """
+    Start the scanner and wait for all of it. Both halves, as one dict.
+
+    For callers with nothing to do in between -- the tests, mostly. The
+    analyzer takes the two halves separately and works between them.
+    """
+    running = start(path, pop_types, mob_types, army_techs, navy_techs,
+                    reform_keys, timeout=timeout)
+    first = head(running)
+    if first is None:
+        if running is not None:
+            running.abandon()
+        return None
+    rest = collect(running)
+    if rest is None:
+        return None
+    rest.update(first)
+    return rest
 
 
 def apply(got, nations, province_owner, pop_registry, world_sink,

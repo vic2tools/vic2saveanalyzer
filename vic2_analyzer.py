@@ -984,21 +984,26 @@ class _Spans:
         self._fh.close()
 
 
-def analyze_save(path, verbose=True):
-    """Parse one save. Returns (meta, {tag: nation_stats})."""
+def analyze_save(path, verbose=True, use_scanner=True):
+    """
+    Parse one save. Returns (meta, {tag: nation_stats}).
+
+    `use_scanner=False` reads it entirely in Python. That is the fallback
+    for a save the scanner half-read: see the retry at the end.
+    """
     if verbose:
         print(f"  reading {os.path.basename(path)} ...", end="", flush=True)
-    # Set the scanner going first, so it reads the file while this sets up to
-    # fold in what it finds. This used to call `fastscan.scan`, which starts
-    # it and waits for it in one breath, after the whole save had already
-    # been read here -- so the two passes over the file were done one after
-    # the other when the split between `start` and `collect` exists precisely
-    # so they can be done at once. The comment here has claimed otherwise
-    # since the scanner landed.
+    # Set the scanner going first. It answers in two parts: the block table
+    # a fifth of the way in, and the provinces and countries at the end. The
+    # wars, the market and the great power list are read here, out of the
+    # file, and they need only the first part -- so they are read while the
+    # scanner is still working rather than after it has finished.
     import fastscan
-    running = fastscan.start(path, v2parse.POP_TYPES, MOB_CANDIDATES,
-                             army_techs=ARMY_TECHS, navy_techs=NAVY_TECHS,
-                             reform_keys=REFORM_KEYS)
+    running = (fastscan.start(path, v2parse.POP_TYPES, MOB_CANDIDATES,
+                              army_techs=ARMY_TECHS, navy_techs=NAVY_TECHS,
+                              reform_keys=REFORM_KEYS)
+               if use_scanner else None)
+    head = fastscan.head(running)
 
     nations = defaultdict(blank_nation)
     province_counts = defaultdict(int)
@@ -1020,23 +1025,21 @@ def analyze_save(path, verbose=True):
     # all: the wars, the market and the great power list are lifted straight
     # off the disk a span at a time. When it does not, the file is read and
     # decoded whole and everything is done the way it always was.
-    scanned = fastscan.collect(running)
     text = None
-    if scanned is not None:
-        meta["date"] = scanned["date"]
-        meta["player"] = scanned["player"]
-        fastscan.apply(scanned, nations, province_owner, pop_registry,
-                       world_pop, province_counts)
-        if "countries" in scanned:
-            fastscan.apply_countries(scanned, nations)
-        blocks = scanned["blocks"]
+    scanned = None
+    if head is not None:
+        meta["date"] = head["date"]
+        meta["player"] = head["player"]
+        blocks = head["blocks"]
         flat = True
         raw = _Spans(path)
     else:
+        if running is not None:
+            running.abandon()
         raw = v2parse.read_save_bytes(path)
         text = raw.decode("latin-1")
         blocks = top_level_blocks(text)
-    if scanned is None:
+    if head is None:
       flat = blocks is not None
       if flat:
         # `date` and `player` are top-level scalars, and every top-level scalar
@@ -1057,8 +1060,8 @@ def analyze_save(path, verbose=True):
     # will not take this file, `scanned` is None and nothing changes.
     for key, at, stop in blocks:
         if key.isdigit():
-            if scanned is not None:
-                continue              # the scanner has already read it
+            if head is not None:
+                continue              # the scanner is reading it right now
             read_province(text, at, stop, nations, province_counts,
                           pop_registry, province_id=int(key),
                           owner_map=province_owner, flat=flat,
@@ -1066,14 +1069,14 @@ def analyze_save(path, verbose=True):
             continue
 
         country = looks_like_country_tag(key)
-        if country and scanned is not None and "countries" in scanned:
+        if country and head is not None:
             continue                  # read by the scanner, never decoded here
         if not (country or key in ("active_war", "previous_war",
                                    "great_nations")
                 or (key == "worldmarket" and market_block is None)):
             continue                  # nothing here reads this one
 
-        if scanned is None:
+        if head is None:
             body, first, last = text, at, stop
         else:
             # Decoded now, and only this block: most of the file is provinces
@@ -1082,8 +1085,6 @@ def analyze_save(path, verbose=True):
             first, last = 0, len(body)
 
         if country:
-            if scanned is not None and "countries" in scanned:
-                continue              # the scanner has already read it
             read_country(body, first, last, key, nations, flat=flat)
         elif key in ("active_war", "previous_war"):
             war = read_war(parse_block(Tokens(body, first)),
@@ -1101,8 +1102,19 @@ def analyze_save(path, verbose=True):
         else:
             market_block = parse_block(Tokens(body, first))
 
-    if scanned is not None:
+    # Everything above happened while the scanner was still working. This
+    # is where the two meet.
+    if head is not None:
         raw.close()
+        scanned = fastscan.collect(running)
+        if scanned is None or "countries" not in scanned:
+            # It started well and then did not finish, or it is an older
+            # build that does not send the country blocks. Half a save is
+            # not worth keeping, so this one is read again the slow way.
+            return analyze_save(path, verbose=verbose, use_scanner=False)
+        fastscan.apply(scanned, nations, province_owner, pop_registry,
+                       world_pop, province_counts)
+        fastscan.apply_countries(scanned, nations)
 
     # Classified after the whole file is read, so it does not depend on
     # provinces being written before countries.
