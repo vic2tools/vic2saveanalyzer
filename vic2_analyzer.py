@@ -1242,6 +1242,33 @@ def _scanner_fingerprint():
 STAMP_FILE = "report.stamp"
 
 
+def mod_signature(mod_path):
+    """
+    What state the mod folder is in, without reading a line of it.
+
+    Loading a mod takes nearly a second -- thousands of files of
+    localisation, inventions and triggers -- and the run that has nothing to
+    do should not pay it. Every file's name, size and timestamp answers the
+    only question the skip needs to ask, and answers it in thirty
+    milliseconds for three and a half thousand files.
+    """
+    if not mod_path:
+        return "no-mod"
+    digest = hashlib.md5()
+    for root, dirs, files in os.walk(mod_path):
+        dirs.sort()
+        for name in sorted(files):
+            path = os.path.join(root, name)
+            try:
+                stat = os.stat(path)
+            except OSError:
+                continue
+            digest.update(("%s|%d|%d\n" % (os.path.relpath(path, mod_path),
+                                           stat.st_size, stat.st_mtime_ns))
+                          .encode("utf-8", "replace"))
+    return digest.hexdigest()
+
+
 def report_stamp(files, args, world):
     """
     A signature of everything that decides what the report says.
@@ -2769,6 +2796,17 @@ def main():
     # one campaign after another in the same process: a set that only grew
     # carried the last mod's pop types and reform names into the next
     # campaign, which then read them out of saves that have none.
+    # Asked before the mod is loaded, not after. The mod's own state is read
+    # from its files rather than from the loaded mod, so a run with nothing
+    # to do never pays the second it takes to read one.
+    stamp = report_stamp(files, args, mod_signature(args.mod_path))
+    ready = os.path.join(args.out, "report.html")
+    if not args.rebuild and not args.no_html and stamp_matches(args.out, stamp):
+        if verbose:
+            print(f"Nothing has changed since this was built. "
+                  f"Opening it as it is.\n\nWrote:\n  {ready}")
+        return 0
+
     mod = None
     from v2parse import VANILLA_POP_TYPES, register_pop_types
     register_pop_types(())
@@ -2803,20 +2841,6 @@ def main():
     # sorting them after the fact -- the campaign is now walked in one pass
     # and a pass cannot be sorted halfway through. `stream` is a generator:
     # nothing is read until the loop below asks for it.
-    # Nothing to do if nothing has changed. Pressing Analyze twice on the
-    # same folder used to read every save back out of the cache, rebuild
-    # every table and write a byte-identical file over the top of the old
-    # one; now it hands back the report already sitting there. This is the
-    # difference between a few seconds and none, and a few seconds is what
-    # "instant" is measured against.
-    stamp = report_stamp(files, args, world)
-    ready = os.path.join(args.out, "report.html")
-    if not args.rebuild and not args.no_html and stamp_matches(args.out, stamp):
-        if verbose:
-            print(f"Nothing has changed since this was built. "
-                  f"Opening it as it is.\n\nWrote:\n  {ready}")
-        return 0
-
     files = in_date_order(files)
     stream = parse_saves_stream(
         files, verbose=verbose, use_cache=not args.no_cache,
@@ -2830,12 +2854,30 @@ def main():
         from mod_reader import (attainable_inventions, index_base_for,
                                 index_coverage, unjudged_triggers,
                                 validate_indices)
+        # A mod has to be told two things before a single row can be built:
+        # which inventions anyone could reach, and how the save's invention
+        # indices are numbered. Both are answered from every nation of every
+        # save, so the campaign is walked once for them before it is walked
+        # again for the rows -- the second walk comes back out of the cache
+        # the first one filled.
+        #
+        # What is kept from that first walk is three fields a nation, which
+        # is all `attainable_inventions` and `index_base_for` read. Keeping
+        # the nations themselves would put the whole campaign in memory
+        # again, which is the thing the streaming was for.
         all_techs = {}
         every_nation = []
-        for _meta, _nats in parsed:
+        for _meta, _nats in stream:
             for _tag, _nat in _nats.items():
                 all_techs.setdefault(_tag, set()).update(_nat["tech_list"])
-                every_nation.append(_nat)
+                every_nation.append({"tag": _nat.get("tag", _tag),
+                                     "tech_list": _nat["tech_list"],
+                                     "invention_ids": _nat["invention_ids"]})
+        stream = parse_saves_stream(
+            files, verbose=False, use_cache=not args.no_cache,
+            world=world, pop_types=sorted(v2parse.POP_TYPES),
+            mob_types=args.mob_types,
+            reform_keys=sorted(REFORM_KEYS), jobs=args.jobs)
         live = attainable_inventions(mod, all_techs)
         # Saves name each nation's inventions by index. Decoding them is what
         # turns the mobilisation size from "every invention this nation could
