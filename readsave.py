@@ -893,15 +893,28 @@ class _Spans:
         self._fh.close()
 
 
-def analyze_save(path, verbose=True, use_scanner=True):
+def analyze_save(path, verbose=True, use_scanner=True, again=False):
     """
     Parse one save. Returns (meta, {tag: nation_stats}).
 
-    `use_scanner=False` reads it entirely in Python. That is the fallback
-    for a save the scanner half-read: see the retry at the end.
+    `use_scanner=False` reads it entirely in Python, which is the fallback
+    for a save the scanner half-read. `again=True` marks the one retry
+    allowed when the file changed underneath the read; both are set by
+    this function calling itself and by nothing else.
     """
     if verbose:
         print(f"  reading {os.path.basename(path)} ...", end="", flush=True)
+    # What the file looked like before anything touched it, checked again
+    # at the end. A save is read in two passes now -- the scanner reads it
+    # whole, and the wars and the market are lifted out of it afterwards,
+    # a span at a time -- so one rewritten in between would be read half
+    # from each version and the halves would not agree. The keeper guards
+    # its copies the same way, for the same reason: pointing this at the
+    # folder the game is still writing to is a thing people do.
+    try:
+        before = os.stat(path)
+    except OSError:
+        before = None
     # Set the scanner going first. It answers in two parts: the block table
     # a fifth of the way in, and the provinces and countries at the end. The
     # wars, the market and the great power list are read here, out of the
@@ -1028,7 +1041,8 @@ def analyze_save(path, verbose=True, use_scanner=True):
             # to rebuild a binary that was working perfectly.
             if not running.refused():
                 fastscan.note_unusable()
-            return analyze_save(path, verbose=verbose, use_scanner=False)
+            return analyze_save(path, verbose=verbose, use_scanner=False,
+                                again=again)
         fastscan.apply(scanned, nations, province_owner, pop_registry,
                        world_pop, province_counts)
         fastscan.apply_countries(scanned, nations)
@@ -1085,6 +1099,24 @@ def analyze_save(path, verbose=True, use_scanner=True):
         for tag, nat in nations.items()
         if nat["provinces"] > 0 or nat["total_pop"] > 0
     }
+    if before is not None:
+        try:
+            after = os.stat(path)
+        except OSError:
+            after = None
+        if after is None or ((before.st_size, before.st_mtime_ns)
+                             != (after.st_size, after.st_mtime_ns)):
+            if again:
+                # Once is bad luck. Twice means the game is writing to it
+                # about as fast as this can read it, and a save half from
+                # each of two months is worse than no save.
+                raise ValueError(
+                    "%s changed while it was being read. It is probably the "
+                    "file the game is writing to right now; read the copies "
+                    "the keeper makes instead." % path)
+            return analyze_save(path, verbose=verbose,
+                                use_scanner=use_scanner, again=True)
+
     if verbose:
         months = len({d for d, _, _ in meta["market"]["history"]}) if meta["market"] else 0
         extra = f", {months} months of prices" if months else ""

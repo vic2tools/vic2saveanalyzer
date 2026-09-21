@@ -23,6 +23,8 @@ import random
 import shutil
 import sys
 import tempfile
+import threading
+import time
 import traceback
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -65,6 +67,52 @@ HOW = ["cut in half", "bytes flipped", "a piece missing", "braces rubbed out",
        "nothing but nulls in the middle"]
 
 
+def while_being_written(raw, path):
+    """
+    [what went wrong] when the file changes all the way through the read.
+
+    A save is read in two passes -- the scanner reads it whole, and the
+    wars and the market are lifted out of it afterwards a span at a time
+    -- so one rewritten in between is read half from each version, and the
+    halves do not agree. Pointing the analyzer at the folder the game is
+    still writing to is a thing people do, and half of one month and half
+    of the next is worse than no answer at all.
+
+    Rewritten continuously rather than once, because once is a race: the
+    touch has to land inside the read. Continuously, it always does.
+    """
+    import readsave
+
+    with open(path, "wb") as fh:
+        fh.write(raw)
+    stop = threading.Event()
+
+    def keep_touching():
+        while not stop.is_set():
+            try:
+                st = os.stat(path)
+                os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10 ** 9))
+            except OSError:
+                pass
+            time.sleep(0.02)
+
+    threading.Thread(target=keep_touching, daemon=True).start()
+    try:
+        readsave.analyze_save(path, verbose=False)
+        return ["a save rewritten all through the read was read anyway"]
+    except ValueError as said:
+        if "changed while it was being read" not in str(said):
+            return ["refused, but for the wrong reason: %s" % str(said)[:70]]
+        print("  a save rewritten while it is read: refused")
+        return []
+    except BaseException as boom:                        # noqa: BLE001
+        return ["rewritten mid-read raised %s, not a refusal"
+                % type(boom).__name__]
+    finally:
+        stop.set()
+        time.sleep(0.08)
+
+
 def main():
     source = sys.argv[1] if len(sys.argv) > 1 else ""
     rounds = int(sys.argv[2]) if len(sys.argv) > 2 else 5
@@ -94,6 +142,8 @@ def main():
                 except BaseException:       # noqa: BLE001
                     crashes.append(
                         (how, traceback.format_exc().strip().splitlines()[-1]))
+        crashes += [("rewritten while read", w)
+                    for w in while_being_written(raw, path)]
     finally:
         shutil.rmtree(holding, ignore_errors=True)
 
