@@ -263,6 +263,28 @@ def _(folder, out):
     return run(path, out), "the positional argument takes a file too"
 
 
+@case("numbers the program cannot use")
+def _(folder, out):
+    """
+    A regiment of nought people is a division by zero deep inside a
+    worker; a mobilisation size of minus one is not an error at all, and
+    writes a report saying every nation can mobilize minus a hundred
+    percent of itself. Each of these has to be refused by name.
+    """
+    a_save(os.path.join(folder, "a.v2"), "1840.1.1")
+    bad = [["--pop-per-regiment", "0"], ["--map-scale", "0"],
+           ["--mobilisation-size", "-1"], ["--mobilisation-size", "2"],
+           ["--jobs", "0"], ["--min-pop", "-5"]]
+    for extra in bad:
+        code, said = run(folder, out, extra)
+        # argparse exits 2 and prints to stderr; anything else means it
+        # went through.
+        if code != 2 or "not allowed here" not in said:
+            return (("crash", "%s was accepted: %r\n%s"
+                     % (" ".join(extra), code, said)), "must be refused")
+    return (0, ""), "all six refused by name"
+
+
 @case("--mod-path at a folder that is not there")
 def _(folder, out):
     a_save(os.path.join(folder, "a.v2"), "1840.1.1")
