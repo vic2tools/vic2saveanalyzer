@@ -33,6 +33,7 @@ python3 testkit/boots.py out/report.html
 python3 testkit/keeping.py                        # no saves needed
 python3 testkit/sharing.py                       # no saves needed
 python3 testkit/packing.py                       # no saves needed
+python3 testkit/matching.py                      # no saves needed
 python3 testkit/window.py "/path/to/saves"
 python3 testkit/spawned.py "/path/to/saves"
 python3 testkit/smoke.py "/path/to/saves" --mod "/path/to/mod"
@@ -109,6 +110,14 @@ behaviour: nothing listening, an answer that is not JSON, a host that takes
 the file and forgets to say where it put it, one that says it is too large,
 one that refuses it, and one that works. Nothing leaves the machine and no
 real report is used.
+
+**`matching.py`** builds two nearly identical mods and the save that
+belongs to one of them. Reading a campaign under the wrong mod is the worst
+answer this program can give, because it is not a wrong label — two mods on
+a shared base rate the same cruiser differently, so the same save read under
+the other reports guns it never had. Four discriminators, each tried in both
+orderings, and the decoy is named so that a tie goes to it: switch any one
+discriminator off and exactly its own case fails.
 
 **`packing.py`** checks the executable would carry every module the program
 needs. `build_exe.py` names them explicitly, because most are imported
