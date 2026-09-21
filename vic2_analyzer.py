@@ -1187,7 +1187,106 @@ def _parser_fingerprint():
                 digest.update(fh.read())
         except OSError:
             return ""
+    digest.update(_scanner_fingerprint().encode("utf-8"))
     return digest.hexdigest()[:10]
+
+
+def _scanner_fingerprint():
+    """
+    The Rust scanner, as a version.
+
+    It reads the provinces, so it decides what a cached save says just as
+    much as the Python does -- and a rebuilt scanner that behaves differently
+    would otherwise be handed the old scanner's answers out of the cache, and
+    the old scanner's report off the disk. Its size and timestamp are enough:
+    every build writes both.
+    """
+    try:
+        import fastscan
+        binary = fastscan.available()
+        if not binary:
+            return "no-scanner"
+        stat = os.stat(binary)
+        return "scanner|%d|%d" % (stat.st_size, stat.st_mtime_ns)
+    except Exception:
+        return "no-scanner"
+
+
+# What a finished report was made from. If all of it is the same, the report
+# on disk is the report this run would write, byte for byte.
+STAMP_FILE = "report.stamp"
+
+
+def report_stamp(files, args, world):
+    """
+    A signature of everything that decides what the report says.
+
+    Every save it was built from and the state of each of them, the code that
+    reads saves, the code that writes reports, the mod, and the settings that
+    change any number in it. Anything here changing means the report has to be
+    built again; nothing here changing means it does not, and that is the
+    difference between pressing Analyze and waiting, and pressing Analyze and
+    reading.
+    """
+    digest = hashlib.md5()
+    for path in sorted(files):
+        try:
+            stat = os.stat(path)
+        except OSError:
+            return ""
+        digest.update(f"{os.path.abspath(path)}|{stat.st_size}|"
+                      f"{stat.st_mtime_ns}\n".encode("utf-8"))
+    digest.update(("parser=" + _parser_fingerprint()).encode("utf-8"))
+    digest.update(("world=" + str(world)).encode("utf-8"))
+    # The report's own code, for the same reason the parse cache hashes the
+    # parser: a change to the template is a change to the report.
+    if getattr(sys, "frozen", False):
+        digest.update(("frozen=" + _parser_fingerprint()).encode("utf-8"))
+    else:
+        here = os.path.dirname(os.path.abspath(__file__))
+        for name in ("report.py", "template.py", "cross.py", "fastscan.py"):
+            try:
+                with open(os.path.join(here, name), "rb") as fh:
+                    digest.update(fh.read())
+            except OSError:
+                return ""
+    # Every setting that reaches a number in the report. Not --jobs, not
+    # --quiet, not where it is written: those change how it is made, not what
+    # it says.
+    for name in ("tags", "min_pop", "mob_rate", "mob_types", "pop_per_regiment",
+                 "mob_include_occupied", "player_nations", "map_scale",
+                 "split", "no_html", "mod_path", "game_root", "cross",
+                 "primary", "campaign_mod"):
+        digest.update(("%s=%r\n" % (name, getattr(args, name, None)))
+                      .encode("utf-8"))
+    return digest.hexdigest()
+
+
+def stamp_matches(outdir, stamp, filename="report.html"):
+    """Whether the report already sitting there was made from exactly this."""
+    if not stamp:
+        return False
+    report = os.path.join(outdir, filename)
+    if not os.path.isfile(report) or os.path.getsize(report) == 0:
+        return False
+    try:
+        with open(os.path.join(outdir, STAMP_FILE), encoding="utf-8") as fh:
+            return fh.read().strip() == stamp
+    except OSError:
+        return False
+
+
+def write_stamp(outdir, stamp):
+    """Record what this report was made from, for the next run to compare."""
+    if not stamp:
+        return
+    try:
+        os.makedirs(outdir, exist_ok=True)
+        with open(os.path.join(outdir, STAMP_FILE), "w",
+                  encoding="utf-8") as fh:
+            fh.write(stamp)
+    except OSError:
+        pass                          # a report that cannot be skipped later
 
 
 def mod_fingerprint(mod_path, pop_types, reform_keys=()):
@@ -2540,6 +2639,9 @@ def main():
     ap.add_argument("--min-pop", type=int, default=0,
                     help="drop nations below this population")
     ap.add_argument("--no-html", action="store_true", help="skip the HTML report")
+    ap.add_argument("--rebuild", action="store_true",
+                    help="build the report again even when nothing has "
+                         "changed since the last one")
     ap.add_argument("--split", action="store_true",
                     help="write the data beside the page instead of inside "
                          "it: a small report.html and a report.data.gz, about "
@@ -2668,6 +2770,20 @@ def main():
     # sorting them after the fact -- the campaign is now walked in one pass
     # and a pass cannot be sorted halfway through. `stream` is a generator:
     # nothing is read until the loop below asks for it.
+    # Nothing to do if nothing has changed. Pressing Analyze twice on the
+    # same folder used to read every save back out of the cache, rebuild
+    # every table and write a byte-identical file over the top of the old
+    # one; now it hands back the report already sitting there. This is the
+    # difference between a few seconds and none, and a few seconds is what
+    # "instant" is measured against.
+    stamp = report_stamp(files, args, world)
+    ready = os.path.join(args.out, "report.html")
+    if not args.rebuild and not args.no_html and stamp_matches(args.out, stamp):
+        if verbose:
+            print(f"Nothing has changed since this was built. "
+                  f"Opening it as it is.\n\nWrote:\n  {ready}")
+        return 0
+
     files = in_date_order(files)
     stream = parse_saves_stream(
         files, verbose=verbose, use_cache=not args.no_cache,
@@ -3153,6 +3269,7 @@ def main():
             split=args.split,
         )
         paths.insert(0, html_path)
+        write_stamp(args.out, stamp)
 
     if verbose:
         print(f"\n{len(rows)} nation-rows across {len(parsed)} saves.")

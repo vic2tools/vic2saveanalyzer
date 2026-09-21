@@ -42,7 +42,15 @@ A third box says where the report goes. It defaults to
 `Documents/Victoria 2 Save Analyzer`, deliberately *not* inside your saves
 folder — that folder belongs to the game.
 
-Then press **Analyze**. A minute later the report opens in your browser.
+Then press **Analyze**. The report opens in your browser.
+
+Pressing it again when nothing has changed does not build anything: the run
+records what each report was made from -- every save and its timestamp, the
+mod, the settings, the code that reads saves and the code that writes
+reports -- and if all of that is the same, the report already on disk is the
+one this run would write. That takes about a hundredth of a second instead of
+a few seconds. `--rebuild` forces it anyway, and any real change -- a save
+added, a save touched, a setting moved -- rebuilds on its own.
 
 On a first run the saves box is already filled in with
 `Documents/Paradox Interactive/Victoria II/save games` if that folder exists,
@@ -594,6 +602,7 @@ Useful flags:
 | `--peek` | Print the structure of a save and stop |
 | `--verify` | Cross-check unit counts against a raw scan of the file |
 | `--split` | Write the data beside the page rather than inside it, for hosting: see below |
+| `--rebuild` | Build the report again even when nothing has changed |
 | `-q` | Quiet |
 
 There are a few more for interrogating the mobilization numbers —
