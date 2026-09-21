@@ -683,6 +683,62 @@ fn main() {
     };
 
     mark("find top blocks", &mut last);
+
+    // The date, the player and where every non-province block is, sent now
+    // rather than with everything else.
+    //
+    // This is known a fifth of the way through the run, and it is all the
+    // caller needs to start on its own share -- the wars, the market, the
+    // great power list, which it reads out of the file itself. Sent at the
+    // end, as it used to be, the caller sat idle through the province scan
+    // and then worked alone through the wars while this process sat idle in
+    // turn: a save cost the two added together. Sent here they overlap, and
+    // a save costs the longer of them.
+    let mut date = String::new();
+    let mut player = String::new();
+    // Up to just after the first block's opening brace, which is the window
+    // Python reads its head scalars from. Taking the whole first block
+    // instead would let a `date=` nested inside it win.
+    let head_end = blocks.first().map(|b| b.1).unwrap_or(0).min(text.len());
+    for line in text[..head_end].split(|&c| c == b'\n').take(40) {
+        if let Some(eq) = line.iter().position(|&c| c == b'=') {
+            let k = trim_b(&line[..eq]);
+            let v = unquote_b(trim_b(&line[eq + 1..]));
+            if k == b"date" && date.is_empty() {
+                date = latin1(v);
+            } else if k == b"player" && player.is_empty() {
+                player = latin1(v);
+            }
+        }
+    }
+    {
+        let mut head = String::with_capacity(1 << 16);
+        head.push_str("{\"date\":");
+        escape(&mut head, date.as_bytes());
+        head.push_str(",\"player\":");
+        escape(&mut head, player.as_bytes());
+        head.push_str(",\"blocks\":[");
+        let mut first_block = true;
+        for (key, at, stop) in &blocks {
+            if !key.is_empty() && key.iter().all(|c| c.is_ascii_digit()) {
+                continue;             // a province, read below and not here
+            }
+            if !first_block {
+                head.push(',');
+            }
+            first_block = false;
+            head.push('[');
+            escape(&mut head, key);
+            head.push_str(&format!(",{},{}]", at, stop));
+        }
+        head.push_str("]}\n");
+        let stdout = io::stdout();
+        let mut lock = stdout.lock();
+        if lock.write_all(head.as_bytes()).is_err() || lock.flush().is_err() {
+            std::process::exit(5);    // nobody listening
+        }
+    }
+    mark("send the block table", &mut last);
     let mut scan = Scan {
         world_pop: 0,
         owners: Vec::new(),
@@ -712,49 +768,10 @@ fn main() {
     }
 
     mark("scan provinces+countries", &mut last);
-    // The date and the player, so the caller does not have to scan the head
-    // of the file for them, and every block that is not a province, as byte
-    // ranges. Those are what the analyzer still reads itself -- the
-    // countries, the wars, the market -- and knowing where they are means it
-    // can decode those few megabytes instead of all thirty.
-    let mut date = String::new();
-    let mut player = String::new();
-    // Up to just after the first block's opening brace, which is the window
-    // Python reads its head scalars from. Taking the whole first block
-    // instead would let a `date=` nested inside it win.
-    let head_end = blocks.first().map(|b| b.1).unwrap_or(0).min(text.len());
-    for line in text[..head_end].split(|&c| c == b'\n').take(40) {
-        if let Some(eq) = line.iter().position(|&c| c == b'=') {
-            let k = trim_b(&line[..eq]);
-            let v = unquote_b(trim_b(&line[eq + 1..]));
-            if k == b"date" && date.is_empty() {
-                date = latin1(v);
-            } else if k == b"player" && player.is_empty() {
-                player = latin1(v);
-            }
-        }
-    }
-
+    // The date, the player and the block table went out above, before the
+    // scan, and are not repeated here.
     let mut out = String::with_capacity(4 << 20);
-    out.push_str("{\"date\":");
-    escape(&mut out, date.as_bytes());
-    out.push_str(",\"player\":");
-    escape(&mut out, player.as_bytes());
-    out.push_str(",\"blocks\":[");
-    let mut first_block = true;
-    for (key, at, stop) in &blocks {
-        if !key.is_empty() && key.iter().all(|c| c.is_ascii_digit()) {
-            continue;                 // a province, already read above
-        }
-        if !first_block {
-            out.push(',');
-        }
-        first_block = false;
-        out.push('[');
-        escape(&mut out, key);
-        out.push_str(&format!(",{},{}]", at, stop));
-    }
-    out.push_str("],\"world_pop\":");
+    out.push_str("{\"world_pop\":");
     out.push_str(&scan.world_pop.to_string());
     out.push_str(",\"owners\":[");
     for (i, (pid, owner, held)) in scan.owners.iter().enumerate() {

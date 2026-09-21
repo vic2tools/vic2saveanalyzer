@@ -45,6 +45,36 @@ def normalise(o):
     return o
 
 
+def really_used(path):
+    """
+    Whether `analyze_save` got a usable answer out of the binary.
+
+    A scanner that is present but not understood is invisible to every
+    other check here: the analyzer falls back to Python, the numbers come
+    out identical -- that is the whole point of the fallback -- and the
+    only sign is that a cold build takes four times as long. It has
+    happened: the Rust half of a protocol change was reverted by accident
+    and the Python half shipped without it, so every save was read twice,
+    the second time entirely in Python, and every test passed.
+
+    So the fallback is a thing to be told about, not just relied on.
+    """
+    seen = []
+    real = fastscan.collect
+
+    def watched(running):
+        got = real(running)
+        seen.append(got is not None)
+        return got
+
+    fastscan.collect = watched
+    try:
+        va.analyze_save(path, verbose=False)
+    finally:
+        fastscan.collect = real
+    return bool(seen) and seen[0]
+
+
 def both_ways(path):
     """One save, parsed with the scanner and without it."""
     v2parse.register_pop_types([])
@@ -85,6 +115,14 @@ def main():
     if not files:
         print("no saves in %s" % where)
         return 2
+    v2parse.register_pop_types([])
+    if not really_used(files[0]):
+        print("the scanner at %s is built, and the analyzer could not use\n"
+              "its answer -- so every save below was read in Python twice\n"
+              "over and the comparison is of Python against itself. Rebuild\n"
+              "it: cargo build --release --manifest-path scanner/Cargo.toml"
+              % fastscan.available())
+        return 1
     worst = 0
     for path in files:
         bad, tags = compare(path)
