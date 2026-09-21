@@ -174,11 +174,16 @@ saving again returns it to normal size.
 
 Measured on 103 monthly saves — 3.3 GB:
 
-| | 16 cores | 4 cores |
-|---|---|---|
-| first run, nothing remembered | 3.9 s | 5.3 s |
-| again, every save already read | 2.1 s | 2.1 s |
-| again, nothing changed at all | 0.06 s | 0.06 s |
+| | 16 cores | 4 cores | 2 cores |
+|---|---|---|---|
+| first run, nothing remembered | 3.9 s | 5.3 s | 8.4 s |
+| again, every save already read | 2.0 s | 2.0 s | 2.0 s |
+| again, nothing changed at all | 0.06 s | 0.06 s | 0.06 s |
+
+A thousand monthly saves — 2.4 GB, which is what a century of autosaves
+looks like — take 12 s the first time, 10 s after that, and 0.06 s when
+nothing has changed. The cost grows with the number of saves and not faster
+than that.
 
 What a save was read as is remembered between runs, so only new or changed
 saves cost anything, and a run with nothing to do hands back the report

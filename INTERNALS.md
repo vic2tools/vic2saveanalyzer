@@ -527,9 +527,12 @@ stands, against where the same measurements started:
 | 103 saves, 3.3 GB | 16 cores | 8 cores | 4 cores | 2 cores |
 |---|---|---|---|---|
 | first run | **3.9 s** | 4.1 s | 5.3 s | 8.4 s |
-| first run, before any of this | 4.7 s | 4.5 s | 6.3 s | 10.5 s |
-| every run after | **2.1 s** | 2.1 s | 2.1 s | 2.1 s |
+| first run, before any of this | 4.1 s | 4.4 s | 6.2 s | 10.5 s |
+| every run after | **2.0 s** | 2.0 s | 2.0 s | 2.0 s |
+| every run after, before | 2.3 s | | | |
 | nothing changed at all | **0.06 s** | | | |
+| the report it writes | **1.59 MB** | | | |
+| the report it used to write | 2.53 MB | | | |
 
 The 16-core column barely moves, and the 2-core column is a fifth faster,
 because those last changes overlap work rather than remove it: where every
