@@ -320,7 +320,16 @@ fn read_province(
             continue;
         }
 
-        if depth >= 2 {
+        if depth > 2 {
+            // Python's province regex reaches exactly two levels: one tab for
+            // the province's own fields, two for a pop's. Anything deeper --
+            // a pop's ideology block where a mod indents it, a building's
+            // innards -- it does not match at all, and neither does this.
+            // Matching them would let `level=6` inside a fort be read as
+            // somebody's culture.
+            continue;
+        }
+        if depth == 2 {
             // A pop's own numbers, or the culture line.
             if let Some(idx) = current {
                 let slot = &mut pops[idx];
@@ -334,8 +343,19 @@ fn read_province(
                     "life_needs" => slot.life = Some(value.trim_end()),
                     _ => {
                         // Culture by elimination: not one of the game's own
-                        // fields, and its value is not a number.
-                        if slot.culture.is_none()
+                        // fields, and its value is not a number. The value
+                        // must also start with something -- Python's pattern
+                        // wants a first character that is neither a digit nor
+                        // the end of the line, so `ideology=` opening a block
+                        // is not a culture called "ideology".
+                        let head = line.as_bytes().get(eq + 1).copied();
+                        let starts_right = match head {
+                            Some(c) => c != b'\r' && c != b'\n'
+                                && !c.is_ascii_digit(),
+                            None => false,
+                        };
+                        if starts_right
+                            && slot.culture.is_none()
                             && !POP_KNOWN.contains(&key)
                             && unquote(value.trim_end()).parse::<f64>().is_err()
                         {

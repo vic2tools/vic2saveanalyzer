@@ -941,6 +941,9 @@ def analyze_save(path, verbose=True):
     """Parse one save. Returns (meta, {tag: nation_stats})."""
     if verbose:
         print(f"  reading {os.path.basename(path)} ...", end="", flush=True)
+    # Set the scanner going first, so it reads the provinces while this reads
+    # the file and finds its blocks. It is collected below, once there is
+    # something to do with it.
     text = read_save_text(path)
 
     nations = defaultdict(blank_nation)
@@ -979,6 +982,15 @@ def analyze_save(path, verbose=True):
     # will not take this file, `scanned` is None and nothing changes.
     scanned = None
     if flat:
+        # Started here and waited for, rather than set going before the file
+        # is read. Overlapping the two is a real gain on one save -- 0.420s
+        # to 0.357s -- and disappeared into the noise across a campaign,
+        # where every core is already carrying a save of its own and a second
+        # process per worker only takes turns with it. Measured on a busy
+        # desktop, so "no difference" is the honest reading rather than "no
+        # difference on an idle machine". The simpler arrangement wins by
+        # default; `fastscan.start` and `collect` are still there if a run
+        # with cores to spare ever wants them.
         import fastscan
         scanned = fastscan.scan(path, v2parse.POP_TYPES, MOB_CANDIDATES)
         if scanned is not None:
@@ -2737,6 +2749,13 @@ def main():
     # gigabytes and needing nothing much at all. `--explain-mob-pool` prints the
     # raw list back, so it is the one caller that keeps them.
     keep_pools = bool(args.explain_mob_pool)
+    # Two diagnostics read a whole nation back out of the last save after the
+    # run: --explain-mob-pool wants its raw pool, --explain-mob wants its
+    # techs and inventions to explain where a mobilisation size came from.
+    # Neither survives trimming, so with either of them asked for, saves are
+    # kept whole. They are single-campaign diagnostics run on purpose, so the
+    # memory that costs is memory somebody chose to spend.
+    keep_whole = keep_pools or bool(args.explain_mob)
 
     rows, ship_rows, pop_rows, culture_rows = [], [], [], []
     brigade_rows, tech_rows = [], []
@@ -2860,7 +2879,7 @@ def main():
         meta["wars"] = ()
         # `--explain-mob-pool` prints a nation's raw pool back, so that one
         # caller keeps the save whole.
-        parsed.append((meta, nations) if keep_pools
+        parsed.append((meta, nations) if keep_whole
                       else trim_save(meta, nations))
 
     if not parsed:

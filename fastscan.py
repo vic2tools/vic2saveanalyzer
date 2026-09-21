@@ -55,31 +55,55 @@ def available():
     return _FOUND or None
 
 
-def scan(path, pop_types, mob_types, timeout=600):
+def start(path, pop_types, mob_types):
     """
-    One save's provinces, read by the scanner.
+    Set the scanner going and come straight back.
 
-    Returns the decoded result, or None if the scanner is missing, refuses
-    the file -- a zip, or a save some editor has reflowed -- or fails in any
-    other way. None always means "read it in Python instead", never "give up".
+    Started before the file is read rather than after, so it works through
+    the provinces while this process reads the same file and finds its
+    blocks. On a machine with a core to spare that is the scanner for free;
+    on one already using every core it changes nothing, which is why it is
+    worth doing and not worth much.
     """
     binary = available()
     if binary is None:
         return None
     try:
-        done = subprocess.run(
+        return subprocess.Popen(
             [binary, path,
              "--pop-types", ",".join(sorted(pop_types)),
              "--mob-types", ",".join(sorted(mob_types))],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
-    except (OSError, subprocess.SubprocessError):
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError:
         return None
-    if done.returncode != 0 or not done.stdout:
+
+
+def collect(running, timeout=600):
+    """
+    What the scanner found, or None.
+
+    None always means "read it in Python instead", never "give up": the
+    binary is missing, or it refused the file -- a zip, a save some editor
+    has reflowed -- or it failed in a way nobody has thought of yet.
+    """
+    if running is None:
         return None
     try:
-        return json.loads(done.stdout)
+        out, _err = running.communicate(timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        running.kill()
+        return None
+    if running.returncode != 0 or not out:
+        return None
+    try:
+        return json.loads(out)
     except ValueError:
         return None
+
+
+def scan(path, pop_types, mob_types, timeout=600):
+    """Start the scanner and wait for it. Kept for callers that want both."""
+    return collect(start(path, pop_types, mob_types), timeout=timeout)
 
 
 def apply(got, nations, province_owner, pop_registry, world_sink,
