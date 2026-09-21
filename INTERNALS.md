@@ -651,7 +651,11 @@ almost always repeats the one to its left, which skips nine lookups in ten.
 The cache key is the save's path, size and timestamp, **a hash of the parsing
 code**, and **which mod it was read under**. The first expires every entry the
 moment `readsave.py`, `v2parse.py` or `vic2_analyzer.py` changes -- the one
-version counter nobody forgets to bump. Which files those are has to be kept
+version counter nobody forgets to bump. `explain.py` is deliberately not in
+it: it prints things about a nation and parses nothing, so rewording one of
+its readouts should not throw away everybody's cached saves. That is the
+other half of keeping the list honest -- too many files in it is a slower
+mistake than too few, but it is still a mistake. Which files those are has to be kept
 honest: the reading moved into `readsave.py`, and a hash that had gone on
 covering only the file it used to be in would have stopped noticing changes
 to it, handing back stale entries as though they were current. The second matters because a save is not read the same

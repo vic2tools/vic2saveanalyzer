@@ -54,6 +54,7 @@ from tech_groups import TECH_GROUP
 # Reading a save is its own thing and lives in its own file: a path in, and
 # what the save says out. Nothing in it knows about caches, workers, reports
 # or the command line, which is why it could be lifted out whole.
+from explain import asked, explain, save_world
 from readsave import (
     MOBILIZABLE_TYPES,
     MOB_CANDIDATES,
@@ -1010,111 +1011,6 @@ def _parse_parallel(files, out, todo, slots, workers, verbose, pop_types,
         raise
     pool.shutdown()
     return [item for item in out if item is not None]
-
-
-def explain_mob_pool(tag, nat, meta, rate, args):
-    """
-    Show where a nation's mobilization pool comes from and what it is worth.
-
-    The interesting number is not the ceiling but the gap between the two
-    grouping models: they agree exactly when every province holds one pop per
-    poor type, and diverge in proportion to how many cultures those pops are
-    split across. That gap is the cost of truncating each pop separately.
-    """
-    mob_types = frozenset(args.mob_types)
-    accepted = accepted_cultures_of(nat)
-    occ = args.mob_include_occupied
-    per_pop, pool, entries = mobilization_clusters(nat, mob_types, occ)
-    # The other grouping the engine might have used: one bucket per province
-    # and pop type rather than one per pop. It is not an option any anymore --
-    # the engine groups per pop -- but the gap between the two is the whole
-    # point of this readout, so it is rebuilt here from the same buckets.
-    merged, first = defaultdict(int), {}
-    for province, state, poptype, size in per_pop:
-        key = (province, poptype)
-        first.setdefault(key, (province, state, poptype))
-        merged[key] += size
-    per_pt = [first[k] + (v,) for k, v in merged.items()]
-
-    dropped = defaultdict(int)
-    # Pops of a culture the nation does not accept are dropped as the save is
-    # read, so what they came to is carried as a total rather than recounted.
-    if nat.get("mob_excluded_culture"):
-        dropped["non-accepted culture"] += nat["mob_excluded_culture"]
-    for poptype, culture, size, province_id in nat["mobilizable_pops"]:
-        if poptype not in mob_types:
-            continue
-        if culture not in accepted:
-            dropped["non-accepted culture"] += size
-        elif not occ and province_id in nat["occupied_provinces"]:
-            dropped["occupied province"] += size
-        elif province_id in nat["colonial_provinces"]:
-            dropped["colonial province"] += size
-
-    print(f"\nMobilization pool for {tag} at {meta['date']} "
-          f"({os.path.basename(meta['file'])})")
-    print(f"  primary culture   {nat['primary_culture']}")
-    print(f"  accepted cultures {' '.join(sorted(nat['accepted_cultures'])) or '(none)'}")
-    print(f"  pop types counted {' '.join(sorted(mob_types))}")
-    print(f"  mobilisation size {rate * 100:.2f}%   "
-          f"POP_SIZE_PER_REGIMENT {args.pop_per_regiment}")
-    print(f"\n  eligible population   {pool:>12,} in {entries} pop entries, "
-          f"{len(per_pt)} province/type slots")
-    if entries:
-        print(f"  cultural split        {entries / max(1, len(per_pt)):.2f} pop "
-              f"entries per province/type slot")
-    for reason, size in sorted(dropped.items(), key=lambda kv: -kv[1]):
-        print(f"  excluded: {reason:<20} {size:>12,}")
-
-    per_pop_n = brigades_from_clusters(per_pop, rate, args.pop_per_regiment)
-    per_pt_n = brigades_from_clusters(per_pt, rate, args.pop_per_regiment)
-    untruncated = pool * rate / args.pop_per_regiment
-    print(f"\n  ceiling, grouped per pop               {per_pop_n:>6}")
-    print(f"  ceiling, grouped per province and type {per_pt_n:>6}"
-          f"   ({'+' if per_pt_n >= per_pop_n else ''}{per_pt_n - per_pop_n})")
-    print(f"  no truncation at all                   {untruncated:>6.0f}")
-    print(f"  standing brigades                      {nat['brigades']:>6}"
-          f"  ({nat['mobilized_brigades']} of them mobilized, "
-          f"{nat['mobilizing']} queued)")
-    print("\n  Compare the two ceilings against the in-game military panel.")
-
-    biggest = sorted(per_pt, key=lambda b: -b[3])[:10]
-    if biggest:
-        print("\n  largest province/type slots")
-        print(f"    {'prov':>6} {'manpower':>10} {'brigades':>8}")
-        for province_id, _state, _type, size in biggest:
-            print(f"    {province_id:>6} {size * rate:>10,.0f} "
-                  f"{int(size * rate // args.pop_per_regiment):>8}")
-
-
-def save_world(meta, mod):
-    """
-    What one save says about everybody, for the triggers that ask.
-
-    A triggered modifier can turn on the year, on whether a country is a great
-    power, on whether it is at war, or on who owns a particular province --
-    none of which is a property of the country block itself. This gathers the
-    four of them once per save rather than once per nation.
-    """
-    order = (mod or {}).get("country_order") or []
-    powers = {order[i - 1] for i in meta.get("great_nations", ())
-              if 0 < i <= len(order)}
-    at_war = set()
-    for war in meta.get("wars", ()):
-        if not war.get("active"):
-            continue
-        at_war.update(war.get("attackers", ()))
-        at_war.update(war.get("defenders", ()))
-    year = 0
-    date = meta.get("date") or ""
-    if date.split(".")[0].isdigit():
-        year = int(date.split(".")[0])
-    return {
-        "year": year,
-        "great_powers": frozenset(powers),
-        "at_war": frozenset(at_war),
-        "owner": meta.get("province_owner") or {},
-    }
 
 
 def save_sort_key(path, meta_date):
@@ -2085,7 +1981,152 @@ def _number(read, least, most=None):
     return take
 
 
-def main():
+def build_html(args, mod, campaign, price_rows, snapshot_rows,
+               cross_payload, tables):
+    """
+    The report page, or None when `--no-html` said not to build one.
+
+    Everything here is the page and only the page: the names the mod
+    gives nations, the province bitmap behind the map tab, the flags the
+    great-power and battle tables fly. None of it is needed by a run that
+    is writing tables alone, which is why it is no longer a hundred lines
+    in the middle of `main`.
+
+    `tables` is the CSV writer already waiting on a thread. It is handed
+    over so `build_report` can start it at the one moment in the run when
+    the interpreter lock is free, and it is drained here if the report
+    throws, so a half-written CSV is not left behind a stack trace.
+    """
+    rows, ship_rows, pop_rows = (campaign.rows, campaign.ship_rows,
+                                 campaign.pop_rows)
+    culture_rows, brigade_rows = campaign.culture_rows, campaign.brigade_rows
+    tech_rows, parsed = campaign.tech_rows, campaign.parsed
+    naval_profiles, naval_of = campaign.naval_profiles, campaign.naval_of
+    supply_by, war_book = campaign.supply, campaign.war_book
+
+    html_path = None
+    if not args.no_html:
+        from report import (build_map, build_report, build_succession,
+                            build_wars)
+        # Country names come from the mod's own localisation, which is where the
+        # game gets them: a bare TAG, overridden by TAG_<government> when one
+        # exists -- IGoR's PBC is "Peru-Bolivia" but "Andine Federation" while
+        # it is a democracy. Saves are walked in order so the name reflects the
+        # government the nation ended the series with. Without --mod-path there
+        # is nothing to read and tags stand in for names.
+        report_names = {}
+        if mod is not None and mod.get("localisation"):
+            from mod_reader import name_for
+            loc = mod["localisation"]
+            for _meta, _nations in parsed:
+                for _tag, _nat in _nations.items():
+                    report_names[_tag] = name_for(
+                        _tag, str(_nat.get("government") or ""), loc)
+        # The map needs the mod's province bitmap; without --mod-path the tab
+        # is dropped rather than shown empty.
+        map_data = build_map(mod, parsed, args.map_scale) if mod else None
+        if map_data and map_data.get("derived") and not args.quiet:
+            print(f"map/positions.txt anchors no army counter for "
+                  f"{map_data['derived']} of the provinces holding troops; "
+                  f"those markers sit at the middle of the province instead.")
+        # The save ranks the great powers itself, as 1-based indices into the
+        # country array common/countries.txt defines, so the mod is needed to
+        # turn them back into tags.
+        order = (mod or {}).get("country_order") or []
+        great_powers = {}
+        flags = {}
+        if order:
+            from mod_reader import (flag_images, flag_suffixes,
+                                    government_flag_types)
+            styles = government_flag_types(mod["path"])
+            for meta_i, nations_i in parsed:
+                picks = [order[i - 1] for i in meta_i.get("great_nations", ())
+                         if 0 < i <= len(order)]
+                if not picks:
+                    continue
+                row = []
+                for tag in picks:
+                    gov = str((nations_i.get(tag) or {}).get("government") or "")
+                    # One flag per tag and flag variant, so a nation that turns
+                    # communist mid-campaign flies both in turn without the
+                    # image being stored twice. The suffix that will actually be
+                    # used is the discriminator, since two governments can share
+                    # a flagType and still fly different flags.
+                    key = tag + "|" + (flag_suffixes(gov, styles)[0] or "base")
+                    if key not in flags:
+                        got = flag_images(mod["path"], [tag], {tag: gov})
+                        if tag in got:
+                            flags[key] = got[tag]
+                    row.append([tag, key])
+                great_powers[meta_i.get("date") or ""] = row
+            # Battle tables name a lot of nations that never made great power,
+            # and a flag beside the tag reads faster than a tag alone. These
+            # take the plain national flag rather than a government variant.
+            fighters = set()
+            for war in war_book["wars"].values():
+                fighters.update(war["attackers"])
+                fighters.update(war["defenders"])
+                for b in war["battles"].values():
+                    for who in (b.get("attacker"), b.get("defender")):
+                        if who and who.get("country"):
+                            fighters.add(who["country"])
+            for tag in sorted(t for t in fighters if t and t != "---"):
+                if tag + "|" not in flags:
+                    got = flag_images(mod["path"], [tag], {})
+                    if tag in got:
+                        flags[tag + "|"] = got[tag]
+        try:
+            html_path = build_report(
+                rows, ship_rows, pop_rows, culture_rows, price_rows,
+                snapshot_rows, brigade_rows, tech_rows, args.out,
+                tag_names=report_names,
+                map_data=map_data,
+                base_prices=(mod or {}).get("base_prices"),
+                great_powers=great_powers,
+                flags=flags,
+                cross=cross_payload,
+                technology=(mod or {}).get("technology"),
+                wars=build_wars(parsed, (mod or {}).get("province_names"),
+                                (mod or {}).get("province_regions"),
+                                (mod or {}).get("state_names"),
+                                (mod or {}).get("unit_kinds"), book=war_book),
+                succession=build_succession(parsed,
+                                            (mod or {}).get("formations")),
+                culture_names=(mod or {}).get("culture_names"),
+                display_names=(mod or {}).get("display_names"),
+                naval={"profiles": naval_profiles, "of": naval_of,
+                       "exact": (mod or {}).get("index_base") is not None}
+                      if naval_profiles else None,
+                supply=supply_by,
+                # One number a save rather than one a nation, so it is
+                # gathered here from the metas rather than from the rows.
+                world_pop={m["date"]: m.get("world_pop", 0)
+                           for m, _n in parsed if m.get("date")},
+                split=args.split,
+                alongside=tables.start,
+            )
+        except BaseException:
+            # They may already be being written on a thread nobody is now
+            # going to wait for. Let it finish before the failure goes up,
+            # so a half-written CSV is not left behind a stack trace.
+            try:
+                tables.result()
+            except BaseException:                        # noqa: BLE001
+                pass
+            raise
+    return html_path
+
+
+def command_line():
+    """
+    Every flag the program takes, and what each one is allowed to be.
+
+    A hundred and twenty lines of it, which is a hundred and twenty
+    lines a reader of `main` had to scroll past to reach the first
+    thing that happens. The numeric flags carry their own bounds
+    through `_number`, so a regiment of nought people is refused here
+    by name rather than dividing by zero inside a worker.
+    """
     ap = argparse.ArgumentParser(
         description="Aggregate Victoria 2 saves from one campaign into per-nation time series.",
     )
@@ -2207,7 +2248,11 @@ def main():
                     help="the Victoria 2 install folder, the one with mod/ "
                          "inside. Only used by --cross, to find candidates.")
     ap.add_argument("-q", "--quiet", action="store_true")
-    args = ap.parse_args()
+    return ap.parse_args()
+
+
+def main():
+    args = command_line()
 
     saves_path = os.path.expanduser(os.path.expandvars(args.saves))
     if not os.path.exists(saves_path):
@@ -2283,13 +2328,10 @@ def main():
     stamp = report_stamp(files, args, mod_signature(args.mod_path))
     ready = os.path.join(args.out, "report.html")
     # Only a run whose whole job is the report can be answered with the
-    # report that is already there. These four print something about a
-    # nation instead, and are not in the stamp because they change nothing
-    # the report says -- so `--explain-mob ENG` on an unchanged campaign
-    # used to answer "nothing has changed" and explain nothing at all.
-    asking = (args.explain_mob or args.explain_mob_pool or args.inventions
-              or args.check_inventions)
-    if (not args.rebuild and not args.no_html and not asking
+    # report that is already there. The four `explain` answers print
+    # something about a nation instead, and are not in the stamp because
+    # they change nothing the report says.
+    if (not args.rebuild and not args.no_html and not asked(args)
             and stamp_matches(args.out, stamp)):
         if verbose:
             print(f"Nothing has changed since this was built. "
@@ -2480,172 +2522,18 @@ def main():
 
     keep = Keep(pools=keep_pools, whole=keep_whole, fields=keep_fields)
     campaign = walk_campaign(stream, args, mod, live, finish, keep, wanted)
-    rows = campaign.rows
+    # What is left in `main` is what `main` still uses: the tables it
+    # starts, the two counts it prints and the saves it checks are there
+    # at all. Everything the page needs travels as `campaign`.
+    rows, parsed = campaign.rows, campaign.parsed
     ship_rows, pop_rows = campaign.ship_rows, campaign.pop_rows
     culture_rows, brigade_rows = campaign.culture_rows, campaign.brigade_rows
     tech_rows, pop_columns = campaign.tech_rows, campaign.pop_columns
-    naval_profiles, naval_of = campaign.naval_profiles, campaign.naval_of
-    supply_by, parsed = campaign.supply, campaign.parsed
-    war_book = campaign.war_book
 
     if not parsed:
         sys.exit("No saves could be read.")
 
-    if args.explain_mob_pool:
-        tag = args.explain_mob_pool.upper()
-        meta, nations = parsed[-1]
-        nat = nations.get(tag)
-        if nat is None:
-            sys.exit(f"{tag} is not in {meta['file']}.")
-        if mod is not None:
-            from mod_reader import rate_for
-            rate = rate_for(nat, mod, live=live,
-                            world=save_world(meta, mod)) or args.mob_rate
-        else:
-            rate = args.mob_rate
-        explain_mob_pool(tag, nat, meta, rate, args)
-        return
-
-    if args.check_inventions:
-        if mod is None:
-            sys.exit("--check-inventions needs --mod-path.")
-        from mod_reader import (alignment_score, index_holdings,
-                                invention_files, ungated_inventions)
-        holdings = index_holdings(parsed)
-        base = mod["index_base"]
-        seq = mod["invention_sequence"]
-        print(f"\nChecking {len(seq)} inventions against {len(parsed)} saves.")
-        if base is None:
-            sys.exit("  the indices did not decode at all, so there is "
-                     "nothing to check.")
-        if len(holdings) < 40:
-            print(f"  only {len(holdings)} indices are held often enough to "
-                  f"say anything about. Run this on a whole campaign.")
-        print(f"  {len(holdings)} indices held often enough to judge\n")
-        print(f"  {'offset':<10}{'confirmed':>11}{'granted':>10}"
-              f"{'suspect':>10}{'unjudged':>10}")
-        table = {}
-        for shift in (-2, -1, 0, 1, 2):
-            good, granted, bad, unjudged, ungated, detail = alignment_score(
-                mod, holdings, base + shift)
-            table[shift] = (good, granted, bad, detail)
-            print(f"  {('as used' if not shift else '%+d' % shift):<10}"
-                  f"{good:>11}{granted:>10}{bad:>10}{unjudged + ungated:>10}"
-                  f"{'   <-- the decode in use' if not shift else ''}")
-        loose = ungated_inventions(mod)
-        if loose:
-            print(f"\n  {len(loose)} invention(s) in this mod are gated on a "
-                  f"technology it never defines, so the gate never closes and "
-                  f"every nation has them from the start. They are left out of "
-                  f"the count above:")
-            for name in sorted(loose):
-                print(f"    {name:<40} asks for {' '.join(loose[name])}")
-        good, granted, bad, detail = table[0]
-        judged = good + granted + bad
-        best = max(table, key=lambda k: table[k][0])
-        print()
-        if best != 0:
-            print(f"  Offset {best:+d} confirms more indices than the one in use. "
-                  f"The base is probably wrong.")
-        elif bad == 0:
-            one = granted == 1
-            tail = ("" if not granted else
-                    f" {granted} of them {'is' if one else 'are'} held by a few "
-                    f"nations that could not have researched "
-                    f"{'it' if one else 'them'}, which is the engine granting "
-                    f"inventions outside the tech tree.")
-            print(f"  Every index the saves can judge sits where the array says "
-                  f"it does.{tail}\n"
-                  f"  The decode is right: who holds which invention is exact.")
-        else:
-            print(f"  {bad} of {judged} indices are held mostly by nations that "
-                  f"could not have researched them. That is what a misaligned "
-                  f"stretch of the array looks like, and it is worth reading the "
-                  f"list below before trusting anything taken off an invention.")
-        if detail:
-            where = invention_files(args.mod_path)
-            print(f"\n  {'index':>6}  {'invention':<38} {'holders':>16}  needs")
-            for idx, have, lack in detail[:26]:
-                entry = seq[idx - base]
-                flag = "" if have >= lack else "  <-- suspect"
-                print(f"  {idx:>6}  {entry['name']:<38} "
-                      f"{have:>6} with {lack:>4} without  "
-                      f"{' '.join(sorted(entry['techs']))}{flag}")
-            if len(detail) > 26:
-                print(f"  ... and {len(detail) - 26} more")
-        return
-
-    if args.inventions:
-        if mod is None:
-            sys.exit("--inventions needs --mod-path.")
-        from mod_reader import invention_files
-        tag = args.inventions.upper()
-        meta, nations = parsed[-1]
-        nat = nations.get(tag)
-        if nat is None:
-            sys.exit(f"{tag} is not in {meta['file']}.")
-        seq = mod["invention_sequence"]
-        base = mod["index_base"]
-        where = invention_files(args.mod_path)
-        held = sorted(nat.get("invention_ids", ()))
-        print(f"\n{tag} at {meta['date']} in {meta['file']}")
-        print(f"the mod rebuilds {len(seq)} inventions; this save names "
-              f"{len(held)} of them, indices {min(held, default=0)}"
-              f"..{max(held, default=0)}")
-        if base is None:
-            sys.exit("  indices could not be decoded for this install, so "
-                     "there is nothing to print.")
-        print(f"decoded with base {base}\n")
-        shown = 0
-        last_file = None
-        for idx in held:
-            j = idx - base
-            if not (0 <= j < len(seq)):
-                print(f"  {idx:>4}  *** past the end of the array -- this save "
-                      f"is from a different build ***")
-                continue
-            entry = seq[j]
-            fname = where.get(entry["name"], "?")
-            if fname != last_file:
-                print(f"  -- {fname}")
-                last_file = fname
-            gates = " ".join(sorted(entry["techs"])) or "(no technology)"
-            has = "" if entry["techs"] <= set(nat["tech_list"]) else "   <-- the nation does not have that technology"
-            print(f"  {idx:>4}  {entry['name']:<42} {gates}{has}")
-            shown += 1
-        print(f"\n{shown} decoded. Compare against the technology screen: every "
-              f"invention shown as discovered there should appear here, and "
-              f"nothing else should.")
-        return
-
-    if args.explain_mob:
-        if mod is None:
-            sys.exit("--explain-mob needs --mod-path.")
-        from mod_reader import breakdown
-        tag = args.explain_mob.upper()
-        meta, nations = parsed[-1]
-        nat = nations.get(tag)
-        if nat is None:
-            sys.exit(f"{tag} is not in {meta['file']}.")
-        parts = breakdown(nat, mod, live=live, world=save_world(meta, mod))
-        print(f"\nMobilisation size for {tag} at {meta['date']}:")
-        total = 0.0
-        for kind, name, value in sorted(parts, key=lambda p: (p[0], -p[2])):
-            total += value
-            print(f"  {kind:<19}{name:<46} {value * 100:+.2f}%")
-        print(f"  {'':<19}{'TOTAL':<46} {total * 100:>6.2f}%")
-        print(f"\n{tag} has {len(nat['tech_list'])} techs and "
-              f"{len(nat['invention_ids'])} active inventions; "
-              f"{len(parts)} sources grant it mobilisation size.")
-        from mod_reader import unjudged_triggers
-        skipped = unjudged_triggers(mod)
-        if skipped:
-            print(f"Left out, because their trigger asks something this "
-                  f"cannot answer: {', '.join(skipped)}.")
-        print(f"Invention indices in save run "
-              f"{min(nat['invention_ids'], default=0)}..{max(nat['invention_ids'], default=0)}; "
-              f"the mod defines {len(mod['invention_sequence'])} inventions, "
-              f"{mod['invention_count']} of which grant mobilisation size.")
+    if explain(args, mod, live, parsed):
         return
 
     # `war_book` was folded save by save on the way past, above: each save
@@ -2675,116 +2563,8 @@ def main():
         rows, ship_rows, pop_rows, culture_rows, price_rows, snapshot_rows,
         brigade_rows, tech_rows, args.out, pop_columns))
 
-    html_path = None
-    if not args.no_html:
-        from report import (build_map, build_report, build_succession,
-                            build_wars)
-        # Country names come from the mod's own localisation, which is where the
-        # game gets them: a bare TAG, overridden by TAG_<government> when one
-        # exists -- IGoR's PBC is "Peru-Bolivia" but "Andine Federation" while
-        # it is a democracy. Saves are walked in order so the name reflects the
-        # government the nation ended the series with. Without --mod-path there
-        # is nothing to read and tags stand in for names.
-        report_names = {}
-        if mod is not None and mod.get("localisation"):
-            from mod_reader import name_for
-            loc = mod["localisation"]
-            for _meta, _nations in parsed:
-                for _tag, _nat in _nations.items():
-                    report_names[_tag] = name_for(
-                        _tag, str(_nat.get("government") or ""), loc)
-        # The map needs the mod's province bitmap; without --mod-path the tab
-        # is dropped rather than shown empty.
-        map_data = build_map(mod, parsed, args.map_scale) if mod else None
-        if map_data and map_data.get("derived") and not args.quiet:
-            print(f"map/positions.txt anchors no army counter for "
-                  f"{map_data['derived']} of the provinces holding troops; "
-                  f"those markers sit at the middle of the province instead.")
-        # The save ranks the great powers itself, as 1-based indices into the
-        # country array common/countries.txt defines, so the mod is needed to
-        # turn them back into tags.
-        order = (mod or {}).get("country_order") or []
-        great_powers = {}
-        flags = {}
-        if order:
-            from mod_reader import (flag_images, flag_suffixes,
-                                    government_flag_types)
-            styles = government_flag_types(mod["path"])
-            for meta_i, nations_i in parsed:
-                picks = [order[i - 1] for i in meta_i.get("great_nations", ())
-                         if 0 < i <= len(order)]
-                if not picks:
-                    continue
-                row = []
-                for tag in picks:
-                    gov = str((nations_i.get(tag) or {}).get("government") or "")
-                    # One flag per tag and flag variant, so a nation that turns
-                    # communist mid-campaign flies both in turn without the
-                    # image being stored twice. The suffix that will actually be
-                    # used is the discriminator, since two governments can share
-                    # a flagType and still fly different flags.
-                    key = tag + "|" + (flag_suffixes(gov, styles)[0] or "base")
-                    if key not in flags:
-                        got = flag_images(mod["path"], [tag], {tag: gov})
-                        if tag in got:
-                            flags[key] = got[tag]
-                    row.append([tag, key])
-                great_powers[meta_i.get("date") or ""] = row
-            # Battle tables name a lot of nations that never made great power,
-            # and a flag beside the tag reads faster than a tag alone. These
-            # take the plain national flag rather than a government variant.
-            fighters = set()
-            for war in war_book["wars"].values():
-                fighters.update(war["attackers"])
-                fighters.update(war["defenders"])
-                for b in war["battles"].values():
-                    for who in (b.get("attacker"), b.get("defender")):
-                        if who and who.get("country"):
-                            fighters.add(who["country"])
-            for tag in sorted(t for t in fighters if t and t != "---"):
-                if tag + "|" not in flags:
-                    got = flag_images(mod["path"], [tag], {})
-                    if tag in got:
-                        flags[tag + "|"] = got[tag]
-        try:
-            html_path = build_report(
-                rows, ship_rows, pop_rows, culture_rows, price_rows,
-                snapshot_rows, brigade_rows, tech_rows, args.out,
-                tag_names=report_names,
-                map_data=map_data,
-                base_prices=(mod or {}).get("base_prices"),
-                great_powers=great_powers,
-                flags=flags,
-                cross=cross_payload,
-                technology=(mod or {}).get("technology"),
-                wars=build_wars(parsed, (mod or {}).get("province_names"),
-                                (mod or {}).get("province_regions"),
-                                (mod or {}).get("state_names"),
-                                (mod or {}).get("unit_kinds"), book=war_book),
-                succession=build_succession(parsed,
-                                            (mod or {}).get("formations")),
-                culture_names=(mod or {}).get("culture_names"),
-                display_names=(mod or {}).get("display_names"),
-                naval={"profiles": naval_profiles, "of": naval_of,
-                       "exact": (mod or {}).get("index_base") is not None}
-                      if naval_profiles else None,
-                supply=supply_by,
-                # One number a save rather than one a nation, so it is
-                # gathered here from the metas rather than from the rows.
-                world_pop={m["date"]: m.get("world_pop", 0)
-                           for m, _n in parsed if m.get("date")},
-                split=args.split,
-                alongside=tables.start,
-            )
-        except BaseException:
-            # They may already be being written on a thread nobody is now
-            # going to wait for. Let it finish before the failure goes up,
-            # so a half-written CSV is not left behind a stack trace.
-            try:
-                tables.result()
-            except BaseException:                        # noqa: BLE001
-                pass
-            raise
+    html_path = build_html(args, mod, campaign, price_rows,
+                           snapshot_rows, cross_payload, tables)
     if html_path:
         _tell_report_ready(html_path)
     # Started at the compression if a report was built, and simply done
