@@ -23,6 +23,9 @@
 // strange in both places, and `testkit/parity.py` holds them to it save by
 // save against real campaigns.
 
+mod country;
+
+use country::{read_country, Country, Tables};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::time::Instant;
@@ -60,6 +63,16 @@ fn to_int(s: &str) -> i64 {
     } else {
         0
     }
+}
+
+/// Vic2 tags are three characters: ENG, FRA, and dynamic ones like D01.
+fn looks_like_country_tag(key: &str) -> bool {
+    let b = key.as_bytes();
+    b.len() == 3
+        && b[0].is_ascii_alphabetic()
+        && b[0].is_ascii_uppercase()
+        && b.iter().all(|c| c.is_ascii_alphanumeric())
+        && !b.iter().all(|c| c.is_ascii_digit())
 }
 
 /// Windows-1252 bytes as a Rust string, the way Python's latin-1 decode
@@ -559,6 +572,9 @@ fn main() {
     let path = &args[1];
     let mut pop_types: Vec<String> = Vec::new();
     let mut mob_types: Vec<String> = Vec::new();
+    let mut army_techs: Vec<String> = Vec::new();
+    let mut navy_techs: Vec<String> = Vec::new();
+    let mut reform_keys: Vec<String> = Vec::new();
     let mut k = 2;
     while k + 1 < args.len() {
         let list: Vec<String> = args[k + 1]
@@ -569,6 +585,9 @@ fn main() {
         match args[k].as_str() {
             "--pop-types" => pop_types = list,
             "--mob-types" => mob_types = list,
+            "--army-techs" => army_techs = list,
+            "--navy-techs" => navy_techs = list,
+            "--reform-keys" => reform_keys = list,
             _ => {}
         }
         k += 2;
@@ -624,10 +643,18 @@ fn main() {
         words: Interner::default(),
         seen: Vec::new(),
     };
+    let tables = Tables {
+        army_techs: &army_techs,
+        navy_techs: &navy_techs,
+        reform_keys: &reform_keys,
+    };
+    let mut countries: Vec<Country> = Vec::new();
     for (key, at, stop) in &blocks {
         if !key.is_empty() && key.bytes().all(|c| c.is_ascii_digit()) {
             let pid: i64 = key.parse().unwrap_or(0);
             read_province(&text, *at, *stop, pid, &pop_types, &mob_types, &mut scan);
+        } else if looks_like_country_tag(key) {
+            countries.push(read_country(&text, *at, *stop, key, &tables));
         }
     }
 
@@ -829,7 +856,131 @@ fn main() {
         out.push(']');
         out.push('}');
     }
-    out.push_str("}}");
+    out.push('}');
+
+    // The countries, as their own table. The caller merges them into the
+    // same nations the provinces filled, so the shapes here are the ones it
+    // wants back: pairs in file order wherever order can be seen downstream.
+    out.push_str(",\"countries\":[");
+    for (n, c) in countries.iter().enumerate() {
+        if n > 0 {
+            out.push(',');
+        }
+        out.push('{');
+        out.push_str("\"tag\":");
+        escape(&mut out, &c.tag);
+        let pairs_s = |out: &mut String, name: &str, v: &Vec<(String, String)>| {
+            out.push_str(&format!(",\"{}\":[", name));
+            for (i, (k, val)) in v.iter().enumerate() {
+                if i > 0 { out.push(','); }
+                out.push('[');
+                escape(out, k);
+                out.push(',');
+                escape(out, val);
+                out.push(']');
+            }
+            out.push(']');
+        };
+        let pairs_f = |out: &mut String, name: &str, v: &Vec<(String, f64)>| {
+            out.push_str(&format!(",\"{}\":[", name));
+            for (i, (k, val)) in v.iter().enumerate() {
+                if i > 0 { out.push(','); }
+                out.push('[');
+                escape(out, k);
+                out.push_str(&format!(",{}]", num(*val)));
+            }
+            out.push(']');
+        };
+        let pairs_i = |out: &mut String, name: &str, v: &Vec<(String, i64)>| {
+            out.push_str(&format!(",\"{}\":[", name));
+            for (i, (k, val)) in v.iter().enumerate() {
+                if i > 0 { out.push(','); }
+                out.push('[');
+                escape(out, k);
+                out.push_str(&format!(",{}]", val));
+            }
+            out.push(']');
+        };
+        let strings = |out: &mut String, name: &str, v: &Vec<String>| {
+            out.push_str(&format!(",\"{}\":[", name));
+            for (i, x) in v.iter().enumerate() {
+                if i > 0 { out.push(','); }
+                escape(out, x);
+            }
+            out.push(']');
+        };
+        let ints = |out: &mut String, name: &str, v: &Vec<i64>| {
+            out.push_str(&format!(",\"{}\":[", name));
+            for (i, x) in v.iter().enumerate() {
+                if i > 0 { out.push(','); }
+                out.push_str(&x.to_string());
+            }
+            out.push(']');
+        };
+        let intpairs = |out: &mut String, name: &str, v: &Vec<(i64, i64)>| {
+            out.push_str(&format!(",\"{}\":[", name));
+            for (i, (a, b)) in v.iter().enumerate() {
+                if i > 0 { out.push(','); }
+                out.push_str(&format!("[{},{}]", a, b));
+            }
+            out.push(']');
+        };
+        pairs_s(&mut out, "scalars", &c.scalars);
+        pairs_f(&mut out, "numerics", &c.numerics);
+        out.push_str(&format!(",\"is_mobilized\":{}", c.is_mobilized));
+        out.push_str(&format!(",\"human\":{}", if c.human { "true" } else { "false" }));
+        pairs_s(&mut out, "reforms", &c.reforms);
+        strings(&mut out, "accepted_cultures", &c.accepted_cultures);
+        strings(&mut out, "country_flags", &c.country_flags);
+        strings(&mut out, "modifiers", &c.modifiers);
+        pairs_f(&mut out, "goods_supply", &c.goods_supply);
+        ints(&mut out, "invention_ids", &c.invention_ids);
+        out.push_str(&format!(",\"mobilizing\":{}", c.mobilizing));
+        out.push_str(&format!(",\"states\":{}", c.states));
+        intpairs(&mut out, "province_state", &c.province_state);
+        ints(&mut out, "colonial_provinces", &c.colonial_provinces);
+        intpairs(&mut out, "colonial_level", &c.colonial_level);
+        out.push_str(&format!(",\"factory_count\":{}", c.factory_count));
+        out.push_str(&format!(",\"factory_levels\":{}", c.factory_levels));
+        out.push_str(&format!(",\"techs\":{}", c.techs));
+        strings(&mut out, "tech_list", &c.tech_list);
+        out.push_str(&format!(",\"army_techs\":{}", c.army_techs));
+        out.push_str(&format!(",\"navy_techs\":{}", c.navy_techs));
+        out.push_str(&format!(",\"brigades\":{}", c.brigades));
+        out.push_str(&format!(",\"armies\":{}", c.armies));
+        out.push_str(&format!(",\"navies\":{}", c.navies));
+        out.push_str(&format!(",\"ships\":{}", c.ships));
+        ints(&mut out, "regiment_pops", &c.regiment_pops);
+        pairs_i(&mut out, "regiments_by_type", &c.regiments_by_type);
+        pairs_i(&mut out, "ships_by_type", &c.ships_by_type);
+        pairs_f(&mut out, "ship_crew", &c.ship_crew);
+        out.push_str(",\"units_at\":[");
+        for (i, (pid, t)) in c.units_at.iter().enumerate() {
+            if i > 0 { out.push(','); }
+            out.push_str(&format!("[{},[", pid));
+            for (j, (k, v)) in t.iter().enumerate() {
+                if j > 0 { out.push(','); }
+                out.push('[');
+                escape(&mut out, k);
+                out.push_str(&format!(",{}]", v));
+            }
+            out.push_str("]]");
+        }
+        out.push_str("],\"men_at\":[");
+        for (i, (pid, t)) in c.men_at.iter().enumerate() {
+            if i > 0 { out.push(','); }
+            out.push_str(&format!("[{},[", pid));
+            for (j, (k, v)) in t.iter().enumerate() {
+                if j > 0 { out.push(','); }
+                out.push('[');
+                escape(&mut out, k);
+                out.push_str(&format!(",{}]", v));
+            }
+            out.push_str("]]");
+        }
+        out.push_str("]}");
+    }
+    out.push_str("]}");
 
     mark("build the output", &mut last);
     let stdout = io::stdout();

@@ -966,13 +966,17 @@ def analyze_save(path, verbose=True):
     # country, war and market blocks are decoded, which is eight megabytes of
     # thirty-one. When it does not, the file is decoded and read as before.
     import fastscan
-    scanned = fastscan.scan(path, v2parse.POP_TYPES, MOB_CANDIDATES)
+    scanned = fastscan.scan(path, v2parse.POP_TYPES, MOB_CANDIDATES,
+                            army_techs=ARMY_TECHS, navy_techs=NAVY_TECHS,
+                            reform_keys=REFORM_KEYS)
     text = None
     if scanned is not None:
         meta["date"] = scanned["date"]
         meta["player"] = scanned["player"]
         fastscan.apply(scanned, nations, province_owner, pop_registry,
                        world_pop, province_counts)
+        if "countries" in scanned:
+            fastscan.apply_countries(scanned, nations)
         blocks = scanned["blocks"]
         flat = True
     else:
@@ -1008,6 +1012,8 @@ def analyze_save(path, verbose=True):
             continue
 
         country = looks_like_country_tag(key)
+        if country and scanned is not None and "countries" in scanned:
+            continue                  # read by the scanner, never decoded here
         if not (country or key in ("active_war", "previous_war",
                                    "great_nations")
                 or (key == "worldmarket" and market_block is None)):
@@ -1022,6 +1028,8 @@ def analyze_save(path, verbose=True):
             first, last = 0, len(body)
 
         if country:
+            if scanned is not None and "countries" in scanned:
+                continue              # the scanner has already read it
             read_country(body, first, last, key, nations, flat=flat)
         elif key in ("active_war", "previous_war"):
             war = read_war(parse_block(Tokens(body, first)),

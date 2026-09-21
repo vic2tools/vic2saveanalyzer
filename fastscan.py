@@ -60,7 +60,8 @@ def available():
     return _FOUND or None
 
 
-def start(path, pop_types, mob_types):
+def start(path, pop_types, mob_types, army_techs=(), navy_techs=(),
+          reform_keys=()):
     """
     Set the scanner going and come straight back.
 
@@ -77,7 +78,10 @@ def start(path, pop_types, mob_types):
         return subprocess.Popen(
             [binary, path,
              "--pop-types", ",".join(sorted(pop_types)),
-             "--mob-types", ",".join(sorted(mob_types))],
+             "--mob-types", ",".join(sorted(mob_types)),
+             "--army-techs", ",".join(sorted(army_techs)),
+             "--navy-techs", ",".join(sorted(navy_techs)),
+             "--reform-keys", ",".join(sorted(reform_keys))],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except OSError:
         return None
@@ -112,9 +116,11 @@ def collect(running, timeout=600):
     return got
 
 
-def scan(path, pop_types, mob_types, timeout=600):
+def scan(path, pop_types, mob_types, timeout=600, army_techs=(),
+         navy_techs=(), reform_keys=()):
     """Start the scanner and wait for it. Kept for callers that want both."""
-    return collect(start(path, pop_types, mob_types), timeout=timeout)
+    return collect(start(path, pop_types, mob_types, army_techs, navy_techs,
+                         reform_keys), timeout=timeout)
 
 
 def apply(got, nations, province_owner, pop_registry, world_sink,
@@ -193,3 +199,70 @@ def apply(got, nations, province_owner, pop_registry, world_sink,
         pool = nat["mobilizable_pops"]
         for kind, culture, size, pid in block["mobilizable"]:
             pool.append((kinds[kind], kinds[culture], size, pid))
+
+
+def apply_countries(got, nations):
+    """
+    Fold the scanner's country blocks into the nations being built.
+
+    The shapes are the scanner's -- pairs in the order the file gave them --
+    and the containers here are the ones `blank_nation` made, filled rather
+    than replaced, so a Counter stays a Counter and a defaultdict stays a
+    defaultdict for everything downstream that leans on it.
+    """
+    for block in got.get("countries", ()):
+        tag = sys.intern(block["tag"])
+        nat = nations[tag]
+        nat["tag"] = tag
+        for name, value in block["scalars"]:
+            nat[name] = sys.intern(value)
+        for name, value in block["numerics"]:
+            nat[name] = value
+        nat["is_mobilized"] = block["is_mobilized"]
+        nat["human"] = block["human"]
+        for key, value in block["reforms"]:
+            nat["reforms"][sys.intern(key)] = sys.intern(value)
+        if block["accepted_cultures"]:
+            nat["accepted_cultures"] = [sys.intern(c)
+                                        for c in block["accepted_cultures"]]
+        if block["country_flags"]:
+            nat["country_flags"] = {sys.intern(f)
+                                    for f in block["country_flags"]}
+        nat["modifiers"].extend(block["modifiers"])
+        if block["goods_supply"]:
+            nat["goods_supply"] = {sys.intern(g): v
+                                   for g, v in block["goods_supply"]}
+        if block["invention_ids"]:
+            nat["invention_ids"] = block["invention_ids"]
+        nat["mobilizing"] += block["mobilizing"]
+        nat["states"] += block["states"]
+        for pid, ordinal in block["province_state"]:
+            nat["province_state"][pid] = ordinal
+        nat["colonial_provinces"].update(block["colonial_provinces"])
+        for pid, level in block["colonial_level"]:
+            nat["colonial_level"][pid] = level
+        nat["factory_count"] += block["factory_count"]
+        nat["factory_levels"] += block["factory_levels"]
+        nat["techs"] += block["techs"]
+        nat["tech_list"].extend(sys.intern(t) for t in block["tech_list"])
+        nat["army_techs"] += block["army_techs"]
+        nat["navy_techs"] += block["navy_techs"]
+        nat["brigades"] += block["brigades"]
+        nat["armies"] += block["armies"]
+        nat["navies"] += block["navies"]
+        nat["ships"] += block["ships"]
+        nat["regiment_pops"].extend(block["regiment_pops"])
+        for kind, n in block["regiments_by_type"]:
+            nat["regiments_by_type"][sys.intern(kind)] += n
+        for kind, n in block["ships_by_type"]:
+            nat["ships_by_type"][sys.intern(kind)] += n
+        for kind, v in block["ship_crew"]:
+            nat["ship_crew"][sys.intern(kind)] += v
+        for pid, types in block["units_at"]:
+            counter = nat["units_at"][pid]
+            for kind, n in types:
+                counter[sys.intern(kind)] += n
+        for pid, types in block["men_at"]:
+            counter = nat["men_at"][pid]
+            for kind, n in types:
+                counter[sys.intern(kind)] += n
