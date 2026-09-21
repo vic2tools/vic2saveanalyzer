@@ -977,21 +977,48 @@ def thin_facts(facts, series):
             taken)
 
 
-def rebuild_facts(facts, series, taken):
+def as_columns(series, dates):
+    """
+    `series` with each measure as one value per date, in date order.
+
+    It is built as {date: value} because that is how the rows arrive, and
+    it was shipped that way -- which writes the date out again for every
+    nation and every measure. A campaign of a hundred saves with forty
+    nations and thirty-five measures says "1872.9.1" a hundred and fifty
+    thousand times. The page already walks these against `DATA.dates` to
+    plot them, so the dates were never carrying anything: as columns the
+    same numbers are 2.95 MB instead of 1.15.
+
+    A hole -- a nation not in that save -- is a null, where before it was
+    a key that was not there. Both read as "no point here".
+    """
+    return {tag: {key: [dated.get(d) for d in dates]
+                  for key, dated in metrics.items()}
+            for tag, metrics in series.items()}
+
+
+def rebuild_facts(facts, series, taken, dates):
     """
     Put the two back together, the way the page does at boot.
 
-    Here so that it can be checked. This and the loop in the template are
-    the same operation written twice, and if they drift the report shows
-    numbers nothing here can reproduce -- so `testkit/facts.py` holds them
-    to `rebuild_facts(*thin_facts(f, s), series=s) == f`.
+    `series` here is the shipped shape -- columns against `dates` -- because
+    that is what the page has. Here so that it can be checked: this and the
+    loop in the template are the same operation written twice, and if they
+    drift the report shows numbers nothing here can reproduce.
+    `testkit/facts.py` holds them to each other, and to
+    `rebuild_facts(...) == facts`.
     """
     out = {date: {tag: dict(vals) for tag, vals in by_tag.items()}
            for date, by_tag in facts.items()}
     for tag, metrics in series.items():
         for key in taken:
-            for date, value in (metrics.get(key) or {}).items():
-                out.setdefault(date, {}).setdefault(tag, {})[key] = value
+            column = metrics.get(key)
+            if not column:
+                continue
+            for i, value in enumerate(column):
+                if value is None:
+                    continue
+                out.setdefault(dates[i], {}).setdefault(tag, {})[key] = value
     return out
 
 
@@ -1257,7 +1284,8 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
             {"key": key, "label": label, "fmt": "count", "delta": 1}
             for key, _source, label in GAIN_METRICS if key in growth_keys
         ],
-        "series": series,
+        # Columns against `dates`, not {date: value}. See `as_columns`.
+        "series": as_columns(series, dates),
         # Only what `series` does not already carry; the page transposes
         # the rest back, and `factKeys` says which. See `thin_facts`.
         "facts": thin_facts_out[0],

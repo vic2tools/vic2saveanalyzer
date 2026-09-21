@@ -33,11 +33,17 @@ import sys
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
-from report import rebuild_facts, thin_facts                # noqa: E402
+from report import as_columns, rebuild_facts, thin_facts    # noqa: E402
 
 
 def made_up():
-    """(name, facts, series) for the shapes a real campaign gets to rarely."""
+    """
+    (name, dates, facts, series) for shapes a real campaign gets to rarely.
+
+    `series` is written here the way it is built -- {measure: {date: value}}
+    -- and turned into the shipped column form by `check`, so these read as
+    the data rather than as its encoding.
+    """
     out = []
 
     # The ordinary shape: two nations, three dates, measures in both.
@@ -47,7 +53,8 @@ def made_up():
                           "FRA": {"total_pop": 4, "is_player": 0}}}
     series = {"ENG": {"total_pop": {"1836.1.1": 1.0, "1836.2.1": 3.0}},
               "FRA": {"total_pop": {"1836.1.1": 2.0, "1836.2.1": 4.0}}}
-    out.append(("the ordinary shape", facts, series))
+    out.append(("the ordinary shape", ["1836.1.1", "1836.2.1"],
+                facts, series))
 
     # A nation that only exists from the second save -- formed, released,
     # or first crossing --min-pop.
@@ -55,21 +62,24 @@ def made_up():
              "1836.2.1": {"ENG": {"total_pop": 2}, "GER": {"total_pop": 9}}}
     series = {"ENG": {"total_pop": {"1836.1.1": 1.0, "1836.2.1": 2.0}},
               "GER": {"total_pop": {"1836.2.1": 9.0}}}
-    out.append(("a nation that appears late", facts, series))
+    out.append(("a nation that appears late", ["1836.1.1", "1836.2.1"],
+                facts, series))
 
     # A measure only one nation ever has, and one nobody has.
     facts = {"1836.1.1": {"ENG": {"infamy": 5}, "FRA": {}}}
     series = {"ENG": {"infamy": {"1836.1.1": 5.0}, "ports": {}},
               "FRA": {"infamy": {}, "ports": {}}}
-    out.append(("a measure only one nation has", facts, series))
+    out.append(("a measure only one nation has", ["1836.1.1"],
+                facts, series))
 
     # Nothing at all, which a run filtered down to nobody produces.
-    out.append(("an empty campaign", {}, {}))
+    out.append(("an empty campaign", [], {}, {}))
 
     # A nation in `facts` with nothing but the fields no series carries.
     facts = {"1836.1.1": {"ENG": {"primary_culture": "british"}}}
     series = {"ENG": {"total_pop": {}}}
-    out.append(("only the fields no series holds", facts, series))
+    out.append(("only the fields no series holds", ["1836.1.1"],
+                facts, series))
     return out
 
 
@@ -82,7 +92,7 @@ def from_report(path):
         return None                      # --split, or no payload inside
     payload = json.loads(gzip.decompress(base64.b64decode(found.group(1))))
     return (payload.get("facts"), payload.get("series"),
-            payload.get("factKeys") or [])
+            payload.get("factKeys") or [], payload.get("dates") or [])
 
 
 def the_template_loop():
@@ -98,7 +108,7 @@ def the_template_loop():
     return found.group(0) if found else None
 
 
-def same_in_javascript(facts, series, taken):
+def same_in_javascript(facts, series, taken, dates):
     """
     Run the template's own loop and see whether it agrees with Python's.
 
@@ -114,17 +124,18 @@ def same_in_javascript(facts, series, taken):
     loop = the_template_loop()
     if loop is None:
         return None
-    data = {"facts": facts, "series": series, "factKeys": taken}
+    data = {"facts": facts, "series": series, "factKeys": taken,
+            "dates": dates}
     ctx = quickjs.Context()
     ctx.eval("var DATA = " + json.dumps(data, separators=(",", ":")) + ";")
     ctx.eval(loop)
     return json.loads(ctx.eval("JSON.stringify(DATA.facts)"))
 
 
-def check(name, facts, series):
+def check(name, dates, facts, series):
     """True if thinning and rebuilding gives back exactly what went in."""
     thin, taken = thin_facts(facts, series)
-    back = rebuild_facts(thin, series, taken)
+    back = rebuild_facts(thin, as_columns(series, dates), taken, dates)
     if back == facts:
         return True
     print("  %s: does NOT come back the same" % name)
@@ -140,8 +151,8 @@ def check(name, facts, series):
 
 def main():
     bad = 0
-    for name, facts, series in made_up():
-        if check(name, facts, series):
+    for name, dates, facts, series in made_up():
+        if check(name, dates, facts, series):
             print("  %-34s comes back the same" % name)
         else:
             bad += 1
@@ -152,14 +163,15 @@ def main():
         if got is None:
             print("  %s carries no payload to check" % os.path.basename(path))
         else:
-            facts, series, keys = got
+            facts, series, keys, dates = got
             # The report on disk already has the thin `facts`, so rebuilding
             # is the whole of the page's job: what it must produce is every
             # measure, for every nation, in every save it was in.
-            back = rebuild_facts(facts, series, keys)
+            back = rebuild_facts(facts, series, keys, dates)
             pairs = {(d, t) for d, by in back.items() for t in by}
-            want = {(d, t) for t, ms in series.items()
-                    for m in keys for d in (ms.get(m) or {})}
+            want = {(dates[i], t) for t, ms in series.items()
+                    for m in keys
+                    for i, v in enumerate(ms.get(m) or []) if v is not None}
             thin_pairs = {(d, t) for d, by in facts.items() for t in by}
             print("  %s: %d nation-saves rebuilt, %d in the file, %d in series"
                   % (os.path.basename(path), len(pairs), len(thin_pairs),
@@ -177,7 +189,7 @@ def main():
             else:
                 print("  %-34s %d measures across %d saves"
                       % ("rebuilt from the report", len(measures), len(back)))
-            in_js = same_in_javascript(facts, series, keys)
+            in_js = same_in_javascript(facts, series, keys, dates)
             if in_js is None:
                 print("  %-34s no quickjs here, so the template's own loop "
                       "was not run" % "")

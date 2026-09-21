@@ -904,11 +904,14 @@ if (said) said.remove();
 for (const tag in DATA.series) {
   const metrics = DATA.series[tag];
   for (const key of (DATA.factKeys || [])) {
-    const dated = metrics[key];
-    if (!dated) continue;
-    for (const date in dated) {
+    const column = metrics[key];
+    if (!column) continue;
+    for (let i = 0; i < column.length; i++) {
+      const value = column[i];
+      if (value === null) continue;
+      const date = DATA.dates[i];
       const at = DATA.facts[date] || (DATA.facts[date] = {});
-      (at[tag] || (at[tag] = {}))[key] = dated[date];
+      (at[tag] || (at[tag] = {}))[key] = value;
     }
   }
 }
@@ -1679,8 +1682,8 @@ function tagPickerCfg(selected, onChange, dateOf) {
       ['Great powers', () => greatPowersNear(dateOf ? dateOf() : DATA.lastDate)],
       ['Top 8 by pop', () => dateOf ? biggestAt(dateOf(), 'total_pop', 8)
         : [...DATA.tags].sort((a, b) =>
-            (DATA.series[b].total_pop[DATA.lastDate] || 0) -
-            (DATA.series[a].total_pop[DATA.lastDate] || 0)).slice(0, 8)],
+            (DATA.series[b].total_pop[DATA.dates.length - 1] || 0) -
+            (DATA.series[a].total_pop[DATA.dates.length - 1] || 0)).slice(0, 8)],
       ['All', () => dateOf ? tagsAt(dateOf()) : DATA.tags],
       ['None', () => []],
     ],
@@ -1870,8 +1873,10 @@ function drawChart() {
   plot(document.getElementById('chart'), {
     series: shown.map(tag => ({
       name: tag, colour: colourFor(tag),
-      pts: DATA.dates.map((d, i) => [years[i], DATA.series[tag][key][d]])
-                     .filter(p => p[1] !== undefined),
+      // `!= null` rather than `!== undefined`: a measure a nation has no
+      // reading for in a save is a null in its column, not a gap.
+      pts: DATA.dates.map((d, i) => [years[i], DATA.series[tag][key][i]])
+                     .filter(p => p[1] != null),
     })).concat(worldSeries(key)),
     xOf: xOfSave, xTicks: saveTicks, hoverXs: saveHovers,
     fmt: fmtFor(key), log: logScale, markers: true,

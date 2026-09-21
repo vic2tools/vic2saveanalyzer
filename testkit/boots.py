@@ -55,9 +55,17 @@ WATCHER = """<script>
     catch (e) { bad.push('clicking ' + tabs[i].id + ': ' + e.message); }
     setTimeout(function () {
       if (bad.length > before) say('badtab', tabs[i].id);
-      else say('oktab', tabs[i].id + ':'
-               + (document.getElementById(
-                    tabs[i].getAttribute('aria-controls')) || {}).childElementCount);
+      else {
+        var panel = document.getElementById(
+          tabs[i].getAttribute('aria-controls')) || {};
+        // Chart geometry as well as element count: a plot that drew no
+        // lines still fills its panel, and looks fine from out here.
+        var drawn = panel.querySelectorAll
+          ? panel.querySelectorAll('svg path, svg polyline, svg circle, svg rect').length
+          : 0;
+        say('oktab', tabs[i].id + ':' + (panel.childElementCount || 0)
+            + ':' + drawn);
+      }
       visit(tabs, i + 1, then);
     }, %(settle)d);
   }
@@ -165,18 +173,23 @@ def main():
         problems.append("no tabs, so the page shell did not render either")
     for which in said["badtab"]:
         problems.append("the %s tab threw when it was opened" % which)
-    empty = [t.split(":")[0] for t in said["oktab"] if t.endswith(":0")]
-    for which in empty:
-        problems.append("the %s tab opened but put nothing in its panel"
-                        % which)
+    for entry in said["oktab"]:
+        which, _, rest = entry.partition(":")
+        kids = (rest.split(":") + ["0"])[0]
+        if kids == "0":
+            problems.append("the %s tab opened but put nothing in its panel"
+                            % which)
 
     print("%s, %.1f MB" % (os.path.basename(path), size))
     print("  title   %s" % said.get("title", ""))
     print("  drew    %s tables, %s charts, %s rows, %s tabs"
           % (said.get("tables"), said.get("svgs"), said.get("rows"),
              said.get("tabs")))
-    print("  opened  %s" % ", ".join(t.replace("tab-", "").split(":")[0]
-                                     for t in said["oktab"]) or "nothing")
+    print("  opened  %s" % ", ".join(
+        "%s(%s)" % (t.replace("tab-", "").split(":")[0],
+                    t.split(":")[2] if t.count(":") > 1 else "?")
+        for t in said["oktab"]))
+    print("          the bracket is how many shapes that tab's charts drew")
     if problems:
         print("\nPROBLEMS:")
         for one in problems:
