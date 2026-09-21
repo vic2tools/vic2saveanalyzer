@@ -12,6 +12,7 @@ python3 testkit/tooearly.py                       # no saves needed
 python3 testkit/awkward.py                        # no saves needed
 python3 testkit/countries.py                      # no saves needed
 python3 testkit/edges.py                          # no saves needed
+python3 testkit/facts.py out/report.html          # the report is optional
 python3 testkit/parity.py "/path/to/saves" 8
 python3 testkit/boots.py out/report.html
 python3 testkit/smoke.py "/path/to/saves" --mod "/path/to/mod"
@@ -38,6 +39,15 @@ answering zero of 387, and `--explain-mob` exited 0 after replying "nothing
 has changed" and explaining nothing. `--analyzer` points it at another
 tree's code, which is how a new case is shown to fail on the version it was
 written for.
+
+**`facts.py`** holds the two halves of the `facts` split to being inverses.
+The report ships `series` whole and `facts` stripped of everything `series`
+already carries — the same numbers in two orientations, and a seventh of the
+file when both travelled — and the page transposes them back at boot. So the
+report shows numbers that are not in the file it came in, and the loop that
+reconstructs them is in the template while the pair it has to agree with is
+in `report.py`. This checks the pair; `boots.py` checks the template's copy,
+because if the two drift every table on the page is empty or wrong.
 
 **`tooearly.py`** looks for a local read on a line above every line that
 binds it. That is an `UnboundLocalError` waiting for whichever path reaches

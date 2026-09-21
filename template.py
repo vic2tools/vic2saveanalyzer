@@ -883,6 +883,36 @@ const DATA = PACKED_URL ? await unpackFrom(PACKED_URL) : await unpack(PACKED);
 clearTimeout(slow);
 const said = document.getElementById('bootnote');
 if (said) said.remove();
+
+/* `facts` and `series` are the same numbers in two orientations: series is
+   by nation then measure then date, facts is by date then nation then
+   measure. Charts want the first, tables want the second, and shipping both
+   whole meant saying everything twice -- two megabytes of an eleven megabyte
+   payload, a seventh of the finished file. Only what series cannot supply
+   travels now, and the rest is put back here, which takes a few milliseconds
+   on a century of monthly saves.
+
+   Only the measures `factKeys` names, which are the ones that were taken
+   out. `series` holds a dozen more that facts never carried, and putting
+   those in too would hand the tables values they have never had -- harmless
+   today, because nothing reads them off a fact, and a silent change in what
+   the page shows the first time something does.
+
+   `thin_facts` and `rebuild_facts` in report.py are this same operation,
+   kept there so a test can hold the two to being inverses. Change one and
+   change the other. */
+for (const tag in DATA.series) {
+  const metrics = DATA.series[tag];
+  for (const key of (DATA.factKeys || [])) {
+    const dated = metrics[key];
+    if (!dated) continue;
+    for (const date in dated) {
+      const at = DATA.facts[date] || (DATA.facts[date] = {});
+      (at[tag] || (at[tag] = {}))[key] = dated[date];
+    }
+  }
+}
+
 const C = DATA.colours;
 /**
  * A stable colour for the nth series in a set.

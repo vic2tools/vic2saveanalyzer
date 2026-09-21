@@ -941,6 +941,60 @@ class Aside:
         return self._value
 
 
+def thin_facts(facts, series):
+    """
+    `facts` with everything `series` already carries taken out of it.
+
+    The two are the same numbers in two orientations -- `series` is
+    {tag: {measure: {date: value}}} and `facts` is {date: {tag: {measure:
+    value}}} -- and they were both shipped whole. On a campaign of a
+    hundred saves that is two megabytes of an eleven megabyte payload, and
+    a seventh of the finished report, spent saying everything twice.
+
+    What is left is the handful of fields no chart plots and so no series
+    holds: the primary culture, whether the nation was mobilized, whether a
+    person was playing it. The page transposes the rest back at boot, which
+    costs it a few milliseconds and no accuracy, because these are the same
+    values rather than a rounding of them.
+
+    Returns (what is left, the measures taken out). The second is shipped
+    with the first and is what the page transposes back -- and only that,
+    not everything `series` happens to hold. `series` carries a dozen
+    measures `facts` never did, and putting those in as well would hand the
+    tables values they have never had: harmless today, because nothing
+    reads them off a fact, and a silent change in what the page shows the
+    first time something does.
+    """
+    held = set()
+    for metrics in series.values():
+        held.update(metrics)
+    taken = sorted({k for by_tag in facts.values() for vals in by_tag.values()
+                    for k in vals} & held)
+    drop = set(taken)
+    return ({date: {tag: {k: v for k, v in vals.items() if k not in drop}
+                    for tag, vals in by_tag.items()}
+             for date, by_tag in facts.items()},
+            taken)
+
+
+def rebuild_facts(facts, series, taken):
+    """
+    Put the two back together, the way the page does at boot.
+
+    Here so that it can be checked. This and the loop in the template are
+    the same operation written twice, and if they drift the report shows
+    numbers nothing here can reproduce -- so `testkit/facts.py` holds them
+    to `rebuild_facts(*thin_facts(f, s), series=s) == f`.
+    """
+    out = {date: {tag: dict(vals) for tag, vals in by_tag.items()}
+           for date, by_tag in facts.items()}
+    for tag, metrics in series.items():
+        for key in taken:
+            for date, value in (metrics.get(key) or {}).items():
+                out.setdefault(date, {}).setdefault(tag, {})[key] = value
+    return out
+
+
 def pack(payload):
     """
     The payload as the page carries it: JSON, gzipped, base64.
@@ -1185,6 +1239,7 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
         }
 
 
+    thin_facts_out = thin_facts(facts, series)
     payload = {
         "dates": dates,
         "years": [year_fraction(d) for d in dates],
@@ -1203,7 +1258,10 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
             for key, _source, label in GAIN_METRICS if key in growth_keys
         ],
         "series": series,
-        "facts": facts,
+        # Only what `series` does not already carry; the page transposes
+        # the rest back, and `factKeys` says which. See `thin_facts`.
+        "facts": thin_facts_out[0],
+        "factKeys": thin_facts_out[1],
         "ships": ships,
         "crews": crews,
         "shipTypes": sorted(ship_types),
