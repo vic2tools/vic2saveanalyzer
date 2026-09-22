@@ -37,6 +37,7 @@ python3 testkit/savefmt.py                       # no saves needed
 python3 testkit/packing.py                       # no saves needed
 python3 testkit/matching.py                      # no saves needed
 python3 testkit/modcache.py                      # no saves needed
+python3 testkit/noworkers.py                     # no saves needed
 python3 testkit/caching.py                       # no saves needed
 python3 testkit/window.py "/path/to/saves"
 python3 testkit/spawned.py "/path/to/saves"
@@ -149,6 +150,19 @@ and the shared tokenizer's block skip.
 saves, survive corruption, and expire after same-size edits within one second.
 It compares cached and uncached runs after changing mobilizable pop types,
 and checks scanner cleanup on completion, abandonment and timeout.
+
+**`noworkers.py`** takes the workers away and checks the campaign is still
+read. A machine that cannot start worker processes is not exotic — a
+locked-down laptop, a container with a tight process limit, a sandbox that
+refuses `fork`, or a temp folder with a long path, which is the one that
+actually happened: Python 3.14 starts workers through a forkserver whose
+socket lives in `TMPDIR`, an `AF_UNIX` path cannot exceed 108 bytes, and a
+deep enough temp folder took every run down with a stack trace out of the
+depths of `multiprocessing`. None of it has to be fatal — every save can be
+read one at a time and the answer is the same answer. What made it fatal was
+where the guard sat: `ProcessPoolExecutor(...)` succeeds even when no worker
+can start, because it starts them on the first `submit`, and the guard was
+around the constructor.
 
 **`packing.py`** checks the executable would carry every module the program
 needs. `build_exe.py` names them explicitly, because most are imported

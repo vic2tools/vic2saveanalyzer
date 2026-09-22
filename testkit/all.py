@@ -75,6 +75,7 @@ def main():
         ("matching a campaign to its mod", [os.path.join(KIT, "matching.py")]),
         ("mod reading and caching", [os.path.join(KIT, "modcache.py")]),
         ("save caching and projections", [os.path.join(KIT, "caching.py")]),
+        ("a machine with no workers", [os.path.join(KIT, "noworkers.py")]),
     ]
 
     try:
