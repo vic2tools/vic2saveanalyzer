@@ -29,12 +29,14 @@ import csv
 import json
 import hashlib
 import os
-import pickle
 import re
 import tempfile
-import zlib
 import sys
 from collections import defaultdict, namedtuple
+from functools import partial
+
+import cacheio
+from cacheio import load as _cache_read
 
 import v2parse
 from v2parse import (
@@ -178,24 +180,16 @@ def mobilization_clusters(nat, mob_types=MOBILIZABLE_TYPES,
     colonial = nat["colonial_provinces"]
     occupied = set() if include_occupied else nat["occupied_provinces"]
     states = nat["province_state"]
-    grouped = defaultdict(int)
-    where = {}
+    buckets = []
     pool = 0
-    entries = 0
-    for index, entry in enumerate(nat["mobilizable_pops"]):
-        poptype, culture, size, province_id = entry
+    for poptype, culture, size, province_id in nat["mobilizable_pops"]:
         if poptype not in mob_types or culture not in accepted:
             continue
         if province_id in colonial or province_id in occupied:
             continue
         pool += size
-        entries += 1
-        # One bucket per pop, in save order. The engine walks pops, not
-        # provinces, and the order is what decides when the pool is flushed.
-        grouped[index] += size
-        where[index] = (province_id, states.get(province_id, -1), poptype)
-    buckets = [where[k] + (v,) for k, v in grouped.items()]
-    return buckets, pool, entries
+        buckets.append((province_id, states.get(province_id, -1), poptype, size))
+    return buckets, pool, len(buckets)
 
 
 # Where a bucket's unused manpower goes, in order. Each rung pools what the one
@@ -233,41 +227,20 @@ def brigades_from_clusters(buckets, rate, pop_per_regiment=POP_SIZE_PER_REGIMENT
 
 
 def _parser_fingerprint():
-    """
-    A hash of the code that does the parsing.
-
-    The cache stores what a save was turned into, not the save, so it has to
-    expire the moment that translation changes. Hashing the modules that do
-    it means editing any of them invalidates every entry automatically,
-    which is the only version counter nobody forgets to bump.
-
-    Which modules those are has to be kept honest. `readsave` holds the
-    reading now; before it was split out, this hashed `vic2_analyzer`
-    instead and would have gone on hashing a file that no longer contains a
-    line of parser -- so every change to the reading would have been
-    invisible to the cache, and a stale entry would be handed back as
-    though it were current. That is the one way this can fail quietly.
-    """
+    """Invalidate cached parses when any parser or scanner dependency changes."""
+    import fastscan
     import readsave
-    digest = hashlib.md5()
+    import tech_groups
+    source = cacheio.source_fingerprint(
+        __file__, readsave.__file__, v2parse.__file__, fastscan.__file__,
+        tech_groups.__file__, cacheio.__file__)
+    if not source:
+        return ""
     if getattr(sys, "frozen", False):
-        # In the packaged exe the modules live inside the archive rather than on
-        # disk, so the build itself is the version: one executable, one parser.
-        try:
-            stat = os.stat(sys.executable)
-        except OSError:
-            return ""
-        digest.update(f"{sys.executable}|{stat.st_size}|{int(stat.st_mtime)}"
-                      .encode("utf-8"))
-        return digest.hexdigest()[:10]
-    for module in (readsave.__file__, v2parse.__file__, __file__):
-        try:
-            with open(module, "rb") as fh:
-                digest.update(fh.read())
-        except OSError:
-            return ""
-    digest.update(_scanner_fingerprint().encode("utf-8"))
-    return digest.hexdigest()[:10]
+        # The bundled scanner is covered by the executable fingerprint. Its
+        # temporary extraction timestamp changes on every launch.
+        return source[:10]
+    return hashlib.md5((source + _scanner_fingerprint()).encode()).hexdigest()[:10]
 
 
 def _scanner_fingerprint():
@@ -294,33 +267,6 @@ def _scanner_fingerprint():
 # What a finished report was made from. If all of it is the same, the report
 # on disk is the report this run would write, byte for byte.
 STAMP_FILE = "report.stamp"
-
-
-def mod_signature(mod_path):
-    """
-    What state the mod folder is in, without reading a line of it.
-
-    Loading a mod takes nearly a second -- thousands of files of
-    localisation, inventions and triggers -- and the run that has nothing to
-    do should not pay it. Every file's name, size and timestamp answers the
-    only question the skip needs to ask, and answers it in thirty
-    milliseconds for three and a half thousand files.
-    """
-    if not mod_path:
-        return "no-mod"
-    digest = hashlib.md5()
-    for root, dirs, files in os.walk(mod_path):
-        dirs.sort()
-        for name in sorted(files):
-            path = os.path.join(root, name)
-            try:
-                stat = os.stat(path)
-            except OSError:
-                continue
-            digest.update(("%s|%d|%d\n" % (os.path.relpath(path, mod_path),
-                                           stat.st_size, stat.st_mtime_ns))
-                          .encode("utf-8", "replace"))
-    return digest.hexdigest()
 
 
 def report_stamp(files, args, world):
@@ -350,7 +296,8 @@ def report_stamp(files, args, world):
         digest.update(("frozen=" + _parser_fingerprint()).encode("utf-8"))
     else:
         here = os.path.dirname(os.path.abspath(__file__))
-        for name in ("report.py", "template.py", "cross.py", "fastscan.py"):
+        for name in ("report.py", "template.py", "cross.py", "mod_reader.py",
+                     "explain.py"):
             try:
                 with open(os.path.join(here, name), "rb") as fh:
                     digest.update(fh.read())
@@ -395,7 +342,7 @@ def write_stamp(outdir, stamp):
         pass                          # a report that cannot be skipped later
 
 
-def mod_fingerprint(mod_path, pop_types, reform_keys=()):
+def mod_fingerprint(mod_path, pop_types, reform_keys=(), mob_types=()):
     """
     What the mod changes about parsing, as a short string.
 
@@ -405,11 +352,11 @@ def mod_fingerprint(mod_path, pop_types, reform_keys=()):
     keyed only by the file, would hand the second run the first one's answer.
     Naming the mod and the pop types it registered keeps those apart.
     """
-    if not mod_path:
-        return "no-mod"
     return hashlib.md5(
-        (os.path.abspath(mod_path) + "|" + ",".join(sorted(pop_types))
-         + "|" + ",".join(sorted(reform_keys)))
+        ((os.path.abspath(mod_path) if mod_path else "no-mod")
+         + "|" + ",".join(sorted(pop_types))
+         + "|" + ",".join(sorted(reform_keys))
+         + "|" + ",".join(sorted(mob_types)))
         .encode("utf-8")).hexdigest()[:10]
 
 
@@ -426,32 +373,48 @@ def _cache_slot(path, fingerprint, world="no-mod"):
     except OSError:
         return None
     key = hashlib.md5(
-        f"{os.path.abspath(path)}|{stat.st_size}|{int(stat.st_mtime)}"
+        f"{os.path.abspath(path)}|{stat.st_size}|{stat.st_mtime_ns}"
         f"|{fingerprint}|{world}".encode("utf-8")).hexdigest()
     return os.path.join(cache_dir(), key + ".pkl")
 
 
-def _cache_read(slot):
-    """What is in that cache slot, or None if there is nothing usable."""
-    if not (slot and os.path.isfile(slot)):
-        return None
-    try:
-        with open(slot, "rb") as fh:
-            return pickle.loads(zlib.decompress(fh.read()))
-    except Exception:
-        return None                   # a bad entry is just a slow read
-
-
 def _cache_write(slot, meta, nations):
-    if not slot:
-        return
+    cacheio.store(slot, (meta, dict(nations)))
+
+
+def invention_summary(meta, nations):
+    """The country fields needed to decode invention IDs across a campaign."""
+    return ({"file": meta.get("file", "?"), "date": meta.get("date", "")},
+            {tag: {"tag": nat.get("tag", tag),
+                   "tech_list": nat["tech_list"],
+                   "invention_ids": nat["invention_ids"]}
+             for tag, nat in nations.items()})
+
+
+def campaign_inventions(files, **options):
+    """Cache the campaign-wide input to invention decoding as one small list.
+
+    Raw parses remain cached for the report pass. On a miss only the fields
+    needed for decoding cross the worker boundary, preserving input order.
+    """
+    fingerprint = _parser_fingerprint() if options.get("use_cache", True) else ""
+    slots = [_cache_slot(path, fingerprint, options.get("world", "no-mod"))
+             for path in files] if fingerprint else []
+    slot = None
+    if slots and all(slots):
+        key = hashlib.sha256("\n".join(slots).encode()).hexdigest()
+        slot = os.path.join(cache_dir(), "inventions_" + key + ".pkl")
+    held = _cache_read(slot)
+    if held is not None:
+        _tell_progress(len(files), len(files))
+        return held
+    stream = parse_saves_stream(files, transform=invention_summary, **options)
     try:
-        os.makedirs(os.path.dirname(slot), exist_ok=True)
-        with open(slot, "wb") as fh:
-            fh.write(zlib.compress(
-                pickle.dumps((meta, dict(nations)), protocol=5), 1))
-    except Exception:
-        pass                          # caching is an optimisation, not a duty
+        made = list(stream)
+    finally:
+        stream.close()
+    cacheio.store(slot, made)
+    return made
 
 
 def cache_stats():
@@ -544,18 +507,17 @@ Finish = namedtuple(
     "Finish", "rate pop_per_regiment mob_types include_occupied "
               "player_nations wanted min_pop")
 
-# Set in a worker by `_worker_setup`. None in the parent, and None in the
-# worker whenever the finishing has to stay in the parent -- see `finish` in
-# `main` for when that is.
-_FINISH = None
+# A picklable callable applied after reading and caching a save. The parent
+# can request either invention summaries or finalized nations.
+_TRANSFORM = None
 
 
-def _worker_setup(pop_types, mob_types, reform_keys=(), finish=None):
-    global _FINISH
+def _worker_setup(pop_types, mob_types, reform_keys=(), transform=None):
+    global _TRANSFORM
     v2parse.register_pop_types(pop_types)
     set_mob_candidates(mob_types)
     set_reform_keys(reform_keys)
-    _FINISH = finish
+    _TRANSFORM = transform
 
 
 def _finish_save(meta, nations, spec):
@@ -672,8 +634,8 @@ def _worker_parse(job):
         meta, nations = analyze_save(path, verbose=False)
         nations = dict(nations)
         _cache_write(slot, meta, nations)
-    if _FINISH is not None:
-        meta, nations = _finish_save(meta, nations, _FINISH)
+    if _TRANSFORM is not None:
+        meta, nations = _TRANSFORM(meta, nations)
     return index, slot, meta, nations
 
 
@@ -849,7 +811,7 @@ def trim_save(meta, nations, keep=KEEP_NATION):
 
 def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
                        pop_types=(), mob_types=(), reform_keys=(), jobs=None,
-                       window=None, finish=None):
+                       window=None, transform=None):
     """
     Every save, handed over one at a time, in the order given.
 
@@ -875,11 +837,11 @@ def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
 
     # Which saves are worth handing to a worker. Normally only the ones that
     # have to be parsed: sending a cached save away and back is two extra
-    # pickles for nothing. With `finish` set it is every save, because the
+    # pickles for nothing. With `transform` set it is every save, because the
     # worker then hands back a third less than it read and the caller has one
     # less job per save to do -- and on a warm run that is the difference
     # between one core reading a hundred cache entries and all of them.
-    pooled = list(range(len(files))) if finish is not None else todo
+    pooled = list(range(len(files))) if transform is not None else todo
     biggest = max((os.path.getsize(files[i]) for i in pooled), default=0)
     workers = worker_count(len(pooled), biggest, jobs) if pooled else 1
     window = window or max(2, workers * 2)
@@ -892,7 +854,7 @@ def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
             pool = ProcessPoolExecutor(
                 max_workers=workers, initializer=_worker_setup,
                 initargs=(tuple(pop_types), tuple(mob_types),
-                          tuple(reform_keys), finish))
+                          tuple(reform_keys), transform))
         except Exception as exc:
             print(f"  reading one at a time ({exc})", file=sys.stderr)
 
@@ -932,8 +894,8 @@ def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
             elif ready[i]:
                 got = _cache_read(slots[i])
                 if got is not None:
-                    if finish is not None:
-                        got = _finish_save(got[0], got[1], finish)
+                    if transform is not None:
+                        got = transform(got[0], got[1])
                     if verbose:
                         print(f"  {os.path.basename(path)} ... cached, "
                               f"{got[0].get('date', '?')}")
@@ -949,8 +911,8 @@ def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
                           file=sys.stderr)
                     continue
                 _cache_write(slots[i], got[0], got[1])
-                if finish is not None:
-                    got = _finish_save(got[0], dict(got[1]), finish)
+                if transform is not None:
+                    got = transform(got[0], dict(got[1]))
             done += 1
             _tell_progress(done, total)
             yield got
@@ -1756,7 +1718,8 @@ def run_cross(parent, game_root, args, verbose=True):
         mob_types = sorted(mod["mob_types"]) or args.mob_types
         set_mob_candidates(mob_types)
         set_reform_keys(mod["reform_names"])
-        world = mod_fingerprint(entry["mod_path"], v2parse.POP_TYPES, REFORM_KEYS)
+        world = mod_fingerprint(entry["mod_path"], v2parse.POP_TYPES,
+                                REFORM_KEYS, mob_types)
         if verbose:
             print("Reading %s (%d saves) under %s"
                   % (entry["name"], len(entry["files"]), entry["mod_label"]))
@@ -2325,6 +2288,10 @@ def main():
     # Asked before the mod is loaded, not after. The mod's own state is read
     # from its files rather than from the loaded mod, so a run with nothing
     # to do never pays the second it takes to read one.
+    # Imported here rather than at the top: a run with nothing to do is
+    # answered in seventy milliseconds, and loading this module costs ten of
+    # them whether or not there is a mod to read.
+    from mod_reader import mod_signature
     stamp = report_stamp(files, args, mod_signature(args.mod_path))
     ready = os.path.join(args.out, "report.html")
     # Only a run whose whole job is the report can be answered with the
@@ -2373,7 +2340,8 @@ def main():
     # of the cache key. Two campaigns on two mods no longer share entries.
     # Keyed on what the parse will actually use rather than on what the mod
     # declares: they are the same thing only when nothing has leaked in.
-    world = mod_fingerprint(args.mod_path, v2parse.POP_TYPES, REFORM_KEYS)
+    world = mod_fingerprint(args.mod_path, v2parse.POP_TYPES,
+                            REFORM_KEYS, args.mob_types)
 
     # Oldest first, decided from each save's own first line rather than by
     # sorting them after the fact -- the campaign is now walked in one pass
@@ -2421,51 +2389,25 @@ def main():
             wanted=wanted,
             min_pop=args.min_pop)
 
-    stream = parse_saves_stream(
-        files, verbose=verbose, use_cache=not args.no_cache,
-        world=world, pop_types=sorted(v2parse.POP_TYPES),
-        mob_types=args.mob_types,
-        reform_keys=sorted(REFORM_KEYS), jobs=args.jobs, finish=finish)
+    parse_options = dict(
+        use_cache=not args.no_cache, world=world,
+        pop_types=sorted(v2parse.POP_TYPES), mob_types=args.mob_types,
+        reform_keys=sorted(REFORM_KEYS), jobs=args.jobs)
 
     live = None
     if mod is not None:
         from mod_reader import (attainable_inventions, index_base_for,
                                 index_coverage, unjudged_triggers,
                                 validate_indices)
-        # A mod has to be told two things before a single row can be built:
-        # which inventions anyone could reach, and how the save's invention
-        # indices are numbered. Both are answered from every nation of every
-        # save, so the campaign is walked once for them before it is walked
-        # again for the rows -- the second walk comes back out of the cache
-        # the first one filled.
-        #
-        # What is kept from that first walk is three fields a nation, which
-        # is all `attainable_inventions`, `index_base_for`, `validate_indices`
-        # and `index_coverage` read. Keeping the nations themselves would put
-        # the whole campaign in memory again, which is the thing the
-        # streaming was for.
-        #
-        # `walked` groups the same projections by save, with a meta carrying
-        # the one field `index_coverage` wants, because that one reports per
-        # save rather than per nation. Nothing is copied twice: both lists
-        # hold the same dicts.
-        all_techs = {}
+        # Decode invention indices from compact summaries. Population and
+        # province data stay in the raw cache until the report needs them.
+        walked = campaign_inventions(files, verbose=verbose, **parse_options)
         every_nation = []
-        walked = []
-        for _meta, _nats in stream:
-            thin = {}
-            for _tag, _nat in _nats.items():
-                all_techs.setdefault(_tag, set()).update(_nat["tech_list"])
-                thin[_tag] = {"tag": _nat.get("tag", _tag),
-                              "tech_list": _nat["tech_list"],
-                              "invention_ids": _nat["invention_ids"]}
-                every_nation.append(thin[_tag])
-            walked.append(({"file": _meta.get("file", "?")}, thin))
-        stream = parse_saves_stream(
-            files, verbose=False, use_cache=not args.no_cache,
-            world=world, pop_types=sorted(v2parse.POP_TYPES),
-            mob_types=args.mob_types,
-            reform_keys=sorted(REFORM_KEYS), jobs=args.jobs)
+        all_techs = {}
+        for _meta, nations in walked:
+            for tag, nat in nations.items():
+                every_nation.append(nat)
+                all_techs.setdefault(tag, set()).update(nat["tech_list"])
         live = attainable_inventions(mod, all_techs)
         # Saves name each nation's inventions by index. Decoding them is what
         # turns the mobilisation size from "every invention this nation could
@@ -2520,6 +2462,10 @@ def main():
                 print(f"  invention  {n:<44} +{rules[n]['size']:.3f}{mark}")
 
 
+    stream = parse_saves_stream(
+        files, verbose=verbose and mod is None,
+        transform=partial(_finish_save, spec=finish) if finish else None,
+        **parse_options)
     keep = Keep(pools=keep_pools, whole=keep_whole, fields=keep_fields)
     campaign = walk_campaign(stream, args, mod, live, finish, keep, wanted)
     # What is left in `main` is what `main` still uses: the tables it

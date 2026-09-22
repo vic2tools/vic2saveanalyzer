@@ -64,6 +64,13 @@ def available():
     return _FOUND or None
 
 
+def _kill(proc):
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+
 class Running:
     """
     A scanner at work, and whatever has been read off it so far.
@@ -86,15 +93,9 @@ class Running:
 
     def __init__(self, proc, timeout):
         self.proc = proc
-        self._guard = threading.Timer(timeout, self._giveup)
+        self._guard = threading.Timer(timeout, _kill, args=(proc,))
         self._guard.daemon = True
         self._guard.start()
-
-    def _giveup(self):
-        try:
-            self.proc.kill()
-        except OSError:
-            pass
 
     def line(self):
         """The first line, without its newline, or b"" if there was none."""
@@ -116,25 +117,16 @@ class Running:
         except (OSError, ValueError):
             return None
         finally:
-            self._guard.cancel()
+            self.abandon()
         return out
 
     def __del__(self):
-        """
-        Stop a scanner nobody is going to collect.
-
-        A save that fails to read between the two halves -- the wars are
-        read there, and a file that is not the shape it claims can raise --
-        drops this on the floor with the scanner still running and its
-        watchdog thread still armed. In a worker that goes on to read
-        another hundred saves, that accumulates.
-        """
+        # The timer holds the process, not this owner, so exceptions between
+        # protocol halves can release the scanner immediately.
         try:
-            self._guard.cancel()
-            if self.proc.poll() is None:
-                self.proc.kill()
-        except BaseException:                            # noqa: BLE001
-            pass                                         # shutting down
+            self.abandon()
+        except Exception:
+            pass
 
     def refused(self):
         """
@@ -150,13 +142,15 @@ class Running:
         return bool(self.proc.returncode)
 
     def abandon(self):
-        """Stop the scanner and stop waiting for it."""
+        """Reap the scanner and close both pipes, even on a partial read."""
         self._guard.cancel()
+        if self.proc.poll() is None:
+            _kill(self.proc)
         try:
-            self.proc.kill()
             self.proc.wait()
-        except OSError:
-            pass
+        finally:
+            self.proc.stdout.close()
+            self.proc.stderr.close()
 
 
 def start(path, pop_types, mob_types, army_techs=(), navy_techs=(),

@@ -77,6 +77,28 @@ POP_KNOWN_FIELDS = frozenset([
 _BRACE_RE = re.compile(r'["{}]')
 
 
+def block_end(text, start):
+    """Position after the closing brace, given the start of an open block's body.
+
+    Jump between braces and quotes rather than visiting every character.
+    Quoted braces do not change depth. None means the block is incomplete.
+    """
+    depth, i = 1, start
+    while depth:
+        match = _BRACE_RE.search(text, i)
+        if match is None:
+            return None
+        if match.group() == '"':
+            quote = text.find('"', match.end())
+            if quote < 0:
+                return None
+            i = quote + 1
+        else:
+            depth += 1 if match.group() == "{" else -1
+            i = match.end()
+    return i
+
+
 class Tokens:
     """Token cursor with one-token pushback and a fast whole-block skip."""
 
@@ -116,20 +138,10 @@ class Tokens:
             if tok == "{":
                 self.skip_to_close()
         text = self._text
-        depth = 1
-        i = self._last.end() if self._last is not None else self._pos
-        while depth:
-            m = _BRACE_RE.search(text, i)
-            if m is None:
-                i = len(text)
-                break
-            c = m.group()
-            if c == '"':
-                j = text.find('"', m.end())
-                i = len(text) if j < 0 else j + 1
-                continue
-            depth += 1 if c == "{" else -1
-            i = m.end()
+        start = self._last.end() if self._last is not None else self._pos
+        i = block_end(text, start)
+        if i is None:
+            i = len(text)
         self._pos = i
         self._last = None             # the kept match is behind the skip now
         self._it = TOKEN_RE.finditer(text, i)

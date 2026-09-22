@@ -36,7 +36,6 @@ import array
 import base64
 import hashlib
 import os
-import pickle
 import re
 import struct
 import tempfile
@@ -44,7 +43,11 @@ import zlib
 
 from itertools import groupby
 
-from v2parse import Tokens, as_list, parse_block, to_float, to_int, unquote
+import cacheio
+import v2parse
+
+from v2parse import (Tokens, as_list, block_end, parse_block, to_float,
+                     to_int, unquote)
 
 _COMMENT = re.compile(r"#[^\r\n]*")
 
@@ -81,16 +84,8 @@ def _block_text(raw, name):
     m = re.search(r"(?<![\w.])" + re.escape(name) + r"\s*=\s*\{", raw)
     if not m:
         return ""
-    depth, i = 0, m.end() - 1
-    while i < len(raw):
-        if raw[i] == "{":
-            depth += 1
-        elif raw[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return raw[m.end():i]
-        i += 1
-    return ""
+    end = block_end(raw, m.end())
+    return raw[m.end():end - 1] if end is not None else ""
 
 
 def _find_mob_size(block):
@@ -115,16 +110,8 @@ def _limit_of(block_text):
     m = re.search(r"limit\s*=\s*\{", block_text)
     if not m:
         return set(), set(), set()
-    depth, i = 0, m.end() - 1
-    while i < len(block_text):
-        if block_text[i] == "{":
-            depth += 1
-        elif block_text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                break
-        i += 1
-    body = block_text[m.end():i]
+    end = block_end(block_text, m.end())
+    body = block_text[m.end():end - 1 if end is not None else len(block_text)]
     positive = _NOT_BLOCK.sub("", body)      # NOT = {...} is not a requirement
     reqs = set(re.findall(r"([a-z_][a-z_0-9]*)\s*=\s*1\b", positive))
     tags = set(re.findall(r"tag\s*=\s*(\w+)", positive))
@@ -144,16 +131,8 @@ def _chance_floor(block_text):
     m = re.search(r"chance\s*=\s*\{", block_text)
     if not m:
         return None, []
-    depth, i = 0, m.end() - 1
-    while i < len(block_text):
-        if block_text[i] == "{":
-            depth += 1
-        elif block_text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                break
-        i += 1
-    body = block_text[m.end():i]
+    end = block_end(block_text, m.end())
+    body = block_text[m.end():end - 1 if end is not None else len(block_text)]
     base = re.search(r"base\s*=\s*([-\d.]+)", body)
     pairs = []
     for mod in re.finditer(r"modifier\s*=\s*\{((?:[^{}]|\{[^{}]*\})*)\}", body, re.S):
@@ -243,17 +222,9 @@ def _named_blocks(text, keyword):
         m = pat.search(text, i)
         if not m:
             return out
-        depth, j = 0, m.end() - 1
-        while j < len(text):
-            if text[j] == "{":
-                depth += 1
-            elif text[j] == "}":
-                depth -= 1
-                if depth == 0:
-                    break
-            j += 1
-        out.append(text[m.end():j])
-        i = j + 1
+        end = block_end(text, m.end())
+        out.append(text[m.end():end - 1 if end is not None else len(text)])
+        i = end if end is not None else len(text)
 
 
 def _plain(path):
@@ -903,16 +874,8 @@ def _drop_block(text, keyword):
             out.append(text[i:])
             return "".join(out)
         out.append(text[i:m.start()])
-        depth, j = 0, m.end() - 1
-        while j < len(text):
-            if text[j] == "{":
-                depth += 1
-            elif text[j] == "}":
-                depth -= 1
-                if depth == 0:
-                    break
-            j += 1
-        i = j + 1
+        end = block_end(text, m.end())
+        i = end if end is not None else len(text)
 
 
 def _ship_changes(text):
@@ -1329,12 +1292,9 @@ def province_raster(path, scale=4):
         return 0, 0, []
 
     slot = _raster_slot(bmp, csv_path, scale)
-    if slot and os.path.isfile(slot):
-        try:
-            with open(slot, "rb") as fh:
-                return pickle.loads(zlib.decompress(fh.read()))
-        except Exception:
-            pass                      # a bad entry just means decoding it again
+    held = cacheio.load(slot)
+    if held is not None:
+        return held
 
     # Keyed by the three bytes as the bitmap stores them -- blue, green, red --
     # so a pixel is looked up by slicing the row rather than by unpacking it
@@ -1389,13 +1349,7 @@ def province_raster(path, scale=4):
 
     made = (out_w, out_h, [(pid, sum(1 for _ in run))
                            for pid, run in groupby(grid)])
-    if slot:
-        try:
-            os.makedirs(os.path.dirname(slot), exist_ok=True)
-            with open(slot, "wb") as fh:
-                fh.write(zlib.compress(pickle.dumps(made, protocol=5), 1))
-        except Exception:
-            pass                      # caching is an optimisation, not a duty
+    cacheio.store(slot, made)
     return made
 
 
@@ -1409,8 +1363,8 @@ def _raster_slot(bmp, csv_path, scale):
     # The trailing number is this decoder's version. Bump it when what comes
     # out of the same two files changes, or a stale entry outlives the change.
     key = hashlib.md5(
-        f"{os.path.abspath(bmp)}|{a.st_size}|{int(a.st_mtime)}"
-        f"|{b.st_size}|{int(b.st_mtime)}|{scale}|2".encode("utf-8")).hexdigest()
+        f"{os.path.abspath(bmp)}|{a.st_size}|{a.st_mtime_ns}"
+        f"|{b.st_size}|{b.st_mtime_ns}|{scale}|2".encode("utf-8")).hexdigest()
     return os.path.join(tempfile.gettempdir(), "vic2_analyzer_cache",
                         "map_" + key + ".pkl")
 
@@ -1781,7 +1735,7 @@ def invention_index(path):
     """
     out = {}
     for target in _resolved_files(path, "inventions").values():
-        raw = _COMMENT.sub("", open(target, "rb").read().decode("latin-1"))
+        raw = _plain(target)
         for name, block in _read_clausewitz(target):
             reqs, _tags, _invs = _limit_of(_block_text(raw, name))
             if reqs:
@@ -1921,6 +1875,56 @@ def _brace_blocks(text):
     return out
 
 
+def mod_signature(mod_path):
+    """Track the mod and inherited game data without reading file contents.
+
+    Only game inputs under the base install are visited: other mods and save
+    games must not invalidate this mod or make the walk unbounded.
+    """
+    if not mod_path:
+        return "no-mod"
+    mod_path = os.path.abspath(os.path.expanduser(os.path.expandvars(mod_path)))
+    roots = [mod_path]
+    base = base_game_path(mod_path)
+    if base:
+        roots.extend(os.path.join(base, folder) for folder in (
+            "common", "decisions", "gfx/flags", "inventions", "localisation",
+            "map", "poptypes", "technologies", "units"))
+    digest = hashlib.md5()
+    for source in roots:
+        digest.update(source.encode("utf-8", "replace"))
+        for root, dirs, files in os.walk(source):
+            dirs.sort()
+            for name in sorted(files):
+                path = os.path.join(root, name)
+                try:
+                    stat = os.stat(path)
+                except OSError:
+                    continue
+                digest.update(("%s|%d|%d\n" % (os.path.relpath(path, source),
+                                               stat.st_size, stat.st_mtime_ns))
+                              .encode("utf-8", "replace"))
+    return digest.hexdigest()
+
+
+def _reader_fingerprint():
+    """Both the mod reader and its token parser determine a cached mod."""
+    return cacheio.source_fingerprint(__file__, v2parse.__file__, cacheio.__file__)
+
+
+def _mod_slot(path):
+    """Where this mod's loaded form lives, keyed by every file in it and by
+    the code that reads them."""
+    version = _reader_fingerprint()
+    if not version:
+        return None
+    key = hashlib.md5(("%s|%s|%s" % (os.path.abspath(path),
+                                     mod_signature(path), version))
+                      .encode("utf-8")).hexdigest()
+    return os.path.join(tempfile.gettempdir(), "vic2_analyzer_cache",
+                        "mod_" + key + ".pkl")
+
+
 def load_mod(path):
     """
     Returns {
@@ -1932,7 +1936,21 @@ def load_mod(path):
     }
     Raises FileNotFoundError if the folder has neither techs nor inventions.
     """
-    path = os.path.expanduser(os.path.expandvars(path))
+    path = os.path.abspath(os.path.expanduser(os.path.expandvars(path)))
+    slot = _mod_slot(path)
+    cached = cacheio.load(slot)
+    if cached is not None:
+        return cached
+    made = _load_mod(path)
+    # Do not publish mixed data under the old signature if a mod was updated
+    # during loading. The next run will read the new files again.
+    if slot == _mod_slot(path):
+        cacheio.store(slot, made)
+    return made
+
+
+def _load_mod(path):
+    """Read mod data, resolving each missing file against the base game."""
     # Both folders resolve file by file against the game underneath, the way
     # the engine does: a mod that ships one invention file still runs on the
     # game's other four, and reading only the mod folder lost them.
@@ -1956,8 +1974,7 @@ def load_mod(path):
     # this folder does not contain. Requirements are stable and checkable.
     invention_rules = {}
     for fname in sorted(inv_files, key=str.lower):
-        raw = _COMMENT.sub("", open(inv_files[fname], "rb")
-                           .read().decode("latin-1"))
+        raw = _plain(inv_files[fname])
         for name, block in _read_clausewitz(inv_files[fname]):
             size = _find_mob_size(block)
             if not size:
@@ -2006,7 +2023,7 @@ def load_mod(path):
     modifier_impacts = {k: v for k, v in modifier_mob_impacts(path).items()
                         if k not in judged}
 
-    return {
+    made = {
         "path": path,
         "invention_sequence": invention_sequence(path),
         "party_sequence": party_sequence(path),
@@ -2050,6 +2067,7 @@ def load_mod(path):
         "tech_count": tech_count,
         "invention_count": len(inventions),
     }
+    return made
 
 
 def invention_sequence(path):

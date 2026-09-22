@@ -12,8 +12,8 @@ python3 testkit/all.py "/path/to/saves" --mod "/path/to/mod"
 python3 testkit/all.py "/path/to/saves" --quick     # skip the slow ones
 ```
 
-Ten checks, about twenty seconds without the smoke matrix and a few
-minutes with it. A check that cannot run here — no Firefox, no display, no
+The suite includes parser parity, cache invalidation, worker startup, GUI,
+browser and CLI checks. Allow a few minutes for a full campaign run. A check that cannot run here — no Firefox, no display, no
 mod, no saves — says so and does not count against the total. One that
 fails prints its own output in full, because the point of a suite is the
 one that broke.
@@ -36,6 +36,8 @@ python3 testkit/sharing.py                       # no saves needed
 python3 testkit/savefmt.py                       # no saves needed
 python3 testkit/packing.py                       # no saves needed
 python3 testkit/matching.py                      # no saves needed
+python3 testkit/modcache.py                      # no saves needed
+python3 testkit/caching.py                       # no saves needed
 python3 testkit/window.py "/path/to/saves"
 python3 testkit/spawned.py "/path/to/saves"
 python3 testkit/smoke.py "/path/to/saves" --mod "/path/to/mod"
@@ -137,6 +139,16 @@ a shared base rate the same cruiser differently, so the same save read under
 the other reports guns it never had. Four discriminators, each tried in both
 orderings, and the decoy is named so that a tie goes to it: switch any one
 discriminator off and exactly its own case fails.
+
+**`modcache.py`** checks cached mod data against fresh reads, including
+changes to inherited base-game files, local overrides, parser dependencies,
+corrupt cache entries and failed atomic writes. It also checks quoted braces
+and the shared tokenizer's block skip.
+
+**`caching.py`** checks that invention summaries preserve order, skip invalid
+saves, survive corruption, and expire after same-size edits within one second.
+It compares cached and uncached runs after changing mobilizable pop types,
+and checks scanner cleanup on completion, abandonment and timeout.
 
 **`packing.py`** checks the executable would carry every module the program
 needs. `build_exe.py` names them explicitly, because most are imported

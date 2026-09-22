@@ -2,7 +2,7 @@
 """
 Run every check, fastest first, and say what held and what did not.
 
-There are seventeen of these now and they want running in an order: the
+The checks run in dependency order: the
 save-builder the tests themselves are written on, then the ones that need
 nothing, then the ones that need saves, then the ones that need a built
 report, then the slow ones. Doing that by hand means doing it wrong or not
@@ -73,6 +73,8 @@ def main():
         ("sharing a report", [os.path.join(KIT, "sharing.py")]),
         ("what the executable carries", [os.path.join(KIT, "packing.py")]),
         ("matching a campaign to its mod", [os.path.join(KIT, "matching.py")]),
+        ("mod reading and caching", [os.path.join(KIT, "modcache.py")]),
+        ("save caching and projections", [os.path.join(KIT, "caching.py")]),
     ]
 
     try:

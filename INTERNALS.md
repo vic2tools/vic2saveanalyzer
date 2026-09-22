@@ -482,6 +482,48 @@ occupied; only that third one took anything.
 
 ## Speed
 
+### Mod campaign optimization, 2026-09-21
+
+Measured on the Netherlands campaign: 103 saves (3.51 GB), the supplied
+Modus Omnino Demens 1.6 folder, Python 3.14, and `--jobs 8`. Three interleaved
+before/after runs, each using a separate `TMPDIR`. The baseline includes the
+pending mod cache from the preceding work. Cold here means **empty application
+caches with a warm operating-system file cache**, not a physical cold-disk run.
+Times include CLI startup and all report/CSV outputs; rebuilds use `--rebuild`.
+
+| Mode | Before, median (range) | After, median (range) |
+|---|---:|---:|
+| Empty app cache | 8.567 s (8.484–8.773) | 8.010 s (7.942–8.216) |
+| Cached rebuild | 5.142 s (4.964–5.169) | 3.522 s (3.481–3.675) |
+| Existing unchanged report | 0.111 s (0.100–0.111) | 0.103 s (0.102–0.103) |
+
+The mod preflight now transfers and caches only the technologies and invention
+IDs needed to decode the campaign, instead of loading every full save twice.
+The second pass still reads each full parse once to build the report. Adding or
+changing a save invalidates the campaign summary; individual raw parses remain
+reusable. This introduces no background precomputation.
+
+`v2parse.block_end` replaces five character-by-character mod scans and shares
+quote handling with the save tokenizer. The population eligibility loop now
+builds its ordered list directly, without two intermediate dictionaries.
+
+`cacheio` owns compressed cache reads and atomic writes for saves, summaries,
+mods and maps. Mod keys include inherited base-game inputs and parser code.
+Save keys include nanosecond timestamps and mobilizable pop types. Packaged
+builds key on the executable rather than the scanner's temporary extraction
+time. Scanner collection and abandonment both reap the child and close pipes;
+the watchdog no longer keeps its owner alive after an abandoned read.
+
+All nine HTML/CSV outputs matched the starting tree byte for byte on every
+benchmark run. The complete 19-check suite passed, including browser and GUI
+checks, scanner parity, diagnostic modes and fresh-cache fork/spawn runs.
+The cache and scanner lifetime checks are in `testkit/caching.py`; inherited
+mod files and shared block parsing are covered by `testkit/modcache.py`.
+These results do **not** establish an absolute performance floor or subsecond
+cold builds.
+
+### Earlier measurements
+
 A campaign folder is 38 saves of 44 MB each, and reading them used to be the
 whole runtime. Measured on the same folder and the same machine, 32 logical
 cores:

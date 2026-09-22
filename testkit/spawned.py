@@ -51,7 +51,11 @@ def build(how, saves, out, mod, holding):
     argv = [sys.executable, driver, saves, "--out", out, "--rebuild", "-q"]
     if mod:
         argv += ["--mod-path", mod]
-    return subprocess.run(argv, capture_output=True, text=True, cwd=HERE)
+    cache = os.path.join(holding, how + "-cache")
+    os.makedirs(cache)
+    return subprocess.run(argv, capture_output=True, text=True, cwd=HERE,
+                          env={**os.environ, "TMPDIR": cache, "TEMP": cache,
+                               "TMP": cache})
 
 
 def fingerprints(folder):
