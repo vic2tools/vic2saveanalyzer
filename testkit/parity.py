@@ -52,6 +52,15 @@ def normalise(o):
     stable sort, so two entries of equal size come out in the order the file
     first mentioned them. Sorted away, a scanner that emitted its counts
     alphabetically looked identical here and changed a real report.
+
+    A number carries the kind of number it is, because `0 == 0.0` in Python
+    and the CSV does not agree. `nation._add_if` exists for exactly this: a
+    province with no naval base leaves `naval_base_levels` the int 0 it
+    started as, rather than adding a float nought to it and making it 0.0.
+    Changing that one rule moves `nations_timeseries.csv` on 114 lines --
+    and with a plain `==` here, this check and all 23 others went on
+    passing. `True` is an int in Python too, and `True` and `1` are two
+    different things in a CSV, so a bool is a third kind.
     """
     if isinstance(o, dict):
         return [(k, normalise(v)) for k, v in o.items()]
@@ -59,6 +68,12 @@ def normalise(o):
         return sorted(o)
     if isinstance(o, (list, tuple)):
         return [normalise(v) for v in o]
+    if isinstance(o, bool):
+        return ("bool", o)
+    if isinstance(o, int):
+        return ("int", o)
+    if isinstance(o, float):
+        return ("float", o)
     return o
 
 

@@ -77,19 +77,15 @@ def mutation(name, bug, catcher, args=()):
           "crossrows.py")
 def m1():
     patch("vic2_analyzer.py",
-          """        if ("POP_SIZE_PER_REGIMENT" in defines
-                and pop_per_regiment == POP_SIZE_PER_REGIMENT):
-            pop_per_regiment = int(defines["POP_SIZE_PER_REGIMENT"])""",
-          """        if False:
-            pop_per_regiment = int(defines["POP_SIZE_PER_REGIMENT"])""")
+          """        pop_per_regiment = int(defines.get("POP_SIZE_PER_REGIMENT",
+                                           POP_SIZE_PER_REGIMENT))""",
+          """        pop_per_regiment = POP_SIZE_PER_REGIMENT""")
 
 
 @mutation("cross-mob-types", "the mod's pop list overrides --mob-types instead of deferring",
           "crossrows.py")
 def m2():
-    patch("vic2_analyzer.py",
-          "        if mod.mob_types and mob_types == sorted(MOBILIZABLE_TYPES):",
-          "        if mod.mob_types:")
+    patch("vic2_analyzer.py", "    if mob_types is None:", "    if True:")
 
 
 @mutation("cross-player-human-only", "only human=yes counts as a player; --player-nations unread",
@@ -115,6 +111,16 @@ def m5():
     patch("vic2_analyzer.py",
           '    return {meta["player"]} if meta.get("player") else set()',
           '    return set()')
+
+
+@mutation("mod-overrides-explicit-default",
+          "asking for the vanilla regiment size reads as asking for nothing",
+          "crossrows.py")
+def m22():
+    # "the caller left it alone" decided by comparing the value against the
+    # default again, so --pop-per-regiment 3000 is silently overridden.
+    patch("vic2_analyzer.py", "    if pop_per_regiment is None:",
+          "    if pop_per_regiment in (None, POP_SIZE_PER_REGIMENT):")
 
 
 # ---- commit aadea15: the record both readers fill
@@ -185,9 +191,9 @@ def m20():
                        '    ("ports", "states", _add),')
 
 
-@mutation("record-int-becomes-float",
+@mutation("naval-base-int-becomes-float",
           "a nation with no naval base carries 0.0 where the CSV wrote 0",
-          "record.py")
+          "parity.py")
 def m21():
     # `_add_if` exists so an untouched int stays an int. Nothing compares
     # types, and in Python 0 == 0.0, so every value check steps over this --

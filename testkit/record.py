@@ -119,16 +119,24 @@ def rules_name_real_fields():
     """[what went wrong] with what the rules say they fill."""
     declared = set(nation.blank_nation())
     wrong = []
+    # Across both tables, not within each. `fold_provinces` and `fold_country`
+    # fill the same nation, so a province rule and a country rule aiming at
+    # one field is the same collision as two rules in one table -- and it was
+    # the one nothing looked for: pointing the province rule for `ports` at
+    # the country field `states` was accepted without complaint.
+    seen = {}
     for what, table, _extras in TABLES:
-        seen = {}
         for key, field, _rule in table:
             if field not in declared:
                 wrong.append("%s: the rule for %r fills %r, which is not a "
                              "field of the record" % (what, key, field))
             if field in seen:
-                wrong.append("%s: %r and %r both fill %r"
-                             % (what, seen[field], key, field))
-            seen[field] = key
+                first_what, first_key = seen[field]
+                wrong.append(
+                    "%r (%s) and %r (%s) both fill %r, and both folds write "
+                    "the same nation"
+                    % (first_key, first_what, key, what, field))
+            seen[field] = (what, key)
     missing = [r for _w, t, _e in TABLES for _k, _f, r in t if r not in SAMPLES]
     if missing:
         wrong.append("no sample value for %d rule(s), so they go unexercised"

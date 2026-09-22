@@ -456,16 +456,24 @@ def mod_defaults(args, mod):
     `args` for all of them. `main` still writes the answer back -- it has the
     one mod, and the rest of a single-campaign run reads these off `args` --
     but `run_cross` cannot, and so it used not to apply them at all.
+
+    "Left alone" is `None`, not "happens to equal the default". It used to be
+    the second, and so `--pop-per-regiment 3000` was indistinguishable from
+    not passing the flag: under a mod whose defines.lua said 1000, asking for
+    2000 got 2000 and asking for 3000 got 1000. Somebody typing that flag is
+    usually holding a modded campaign against vanilla numbers, which is the
+    one thing it silently refused to do. Same for `--mob-types` named as
+    exactly the vanilla three.
     """
     pop_per_regiment = args.pop_per_regiment
-    mob_types = list(args.mob_types)
-    if mod is not None:
-        defines = mod.defines or {}
-        if ("POP_SIZE_PER_REGIMENT" in defines
-                and pop_per_regiment == POP_SIZE_PER_REGIMENT):
-            pop_per_regiment = int(defines["POP_SIZE_PER_REGIMENT"])
-        if mod.mob_types and mob_types == sorted(MOBILIZABLE_TYPES):
-            mob_types = sorted(mod.mob_types)
+    mob_types = list(args.mob_types) if args.mob_types is not None else None
+    defines = (mod.defines or {}) if mod is not None else {}
+    if pop_per_regiment is None:
+        pop_per_regiment = int(defines.get("POP_SIZE_PER_REGIMENT",
+                                           POP_SIZE_PER_REGIMENT))
+    if mob_types is None:
+        mob_types = sorted((mod.mob_types if mod else None)
+                           or MOBILIZABLE_TYPES)
     return pop_per_regiment, mob_types
 
 
@@ -2111,11 +2119,15 @@ def command_line():
                     help="mobilisation size modifier, e.g. 0.05 for 5%%. The save "
                          "does not store it; read it off the in-game military "
                          "panel. Default 1.0 reports the absolute ceiling.")
-    ap.add_argument("--pop-per-regiment", type=_number(int, 1),
-                    default=POP_SIZE_PER_REGIMENT,
-                    help="POP_SIZE_PER_REGIMENT from defines.lua (default 3000)")
-    ap.add_argument("--mob-types", nargs="*",
-                    default=sorted(MOBILIZABLE_TYPES),
+    # Both default to None rather than to the value they fall back to, so
+    # `mod_defaults` can tell "the caller said nothing" from "the caller
+    # asked for exactly what vanilla does". `main` writes the settled answer
+    # back onto `args` below, so everything downstream still reads a number
+    # and a list here.
+    ap.add_argument("--pop-per-regiment", type=_number(int, 1), default=None,
+                    help="POP_SIZE_PER_REGIMENT from defines.lua (default 3000, "
+                         "or the mod's own where --mod-path gives one)")
+    ap.add_argument("--mob-types", nargs="*", default=None,
                     help="pop types that can mobilize. With --mod-path this "
                          "comes from the mod's poptypes/ strata; the default "
                          "here is what vanilla works out to.")
@@ -2306,17 +2318,21 @@ def main():
             # the program, which is what the window used to show.
             sys.exit(str(exc))
         extra = set(mod.pop_types) - VANILLA_POP_TYPES
-        # Written back onto `args` because the rest of a single-campaign run
-        # reads them off it -- the finishing spec, the two printed lines
-        # below. `run_cross` asks the same function and keeps the answer to
-        # itself, because it has a mod per campaign.
-        args.pop_per_regiment, args.mob_types = mod_defaults(args, mod)
-        if verbose:
-            print("defines.lua: POP_SIZE_PER_REGIMENT="
-                  f"{args.pop_per_regiment}")
-            print(f"poptypes/: mobilizable = {' '.join(args.mob_types)}"
-                  + (f"; mod-only pop types read: {' '.join(sorted(extra))}"
-                     if extra else ""))
+    # Written back onto `args` because the rest of a single-campaign run reads
+    # them off it -- the finishing spec, the reading below, the two printed
+    # lines, and `explain.py`. `run_cross` asks the same function and keeps
+    # the answer to itself, because it has a mod per campaign.
+    #
+    # Outside the `if` above: with no mod this is what turns the two "nothing
+    # was asked for" Nones into the vanilla numbers, and everything after here
+    # expects to find those rather than a None.
+    args.pop_per_regiment, args.mob_types = mod_defaults(args, mod)
+    if mod is not None and verbose:
+        print("defines.lua: POP_SIZE_PER_REGIMENT="
+              f"{args.pop_per_regiment}")
+        print(f"poptypes/: mobilizable = {' '.join(args.mob_types)}"
+              + (f"; mod-only pop types read: {' '.join(sorted(extra))}"
+                 if extra else ""))
 
     # One object for how this run reads a save. It sets the three globals
     # the parser keeps -- here, and again in every worker, which on Windows
