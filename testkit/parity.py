@@ -76,15 +76,40 @@ def really_used(path):
 
 
 def both_ways(path):
-    """One save, parsed with the scanner and without it."""
+    """
+    One save, parsed with the scanner and without it.
+
+    Switched off by the argument `analyze_save` has for it, and then checked
+    to have stayed off. It used to be switched off by replacing
+    `fastscan.scan` -- which `analyze_save` does not call. It calls `start`,
+    `head` and `collect`, because it works between the scanner's two halves
+    rather than waiting for both. So the "slow" read ran the scanner as well,
+    this compared the scanner against itself, and it had been reporting
+    "identical across 41 nations" for free.
+
+    That is the failure this whole check exists to notice -- a comparison
+    that has quietly stopped comparing -- so the guard below is not
+    belt-and-braces. It is the check on the check.
+    """
     v2parse.register_pop_types([])
     fast = va.analyze_save(path, verbose=False)
-    real_scan = fastscan.scan
-    fastscan.scan = lambda *a, **k: None
+
+    started = []
+    real_start = fastscan.start
+
+    def watched(*a, **k):
+        started.append(1)
+        return real_start(*a, **k)
+
+    fastscan.start = watched
     try:
-        slow = va.analyze_save(path, verbose=False)
+        slow = va.analyze_save(path, verbose=False, use_scanner=False)
     finally:
-        fastscan.scan = real_scan
+        fastscan.start = real_start
+    if started:
+        raise AssertionError(
+            "the Python-only read started the scanner %d time(s), so this "
+            "would have compared the scanner against itself" % len(started))
     return fast, slow
 
 
