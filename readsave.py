@@ -29,9 +29,10 @@ held to each other field by field by `testkit/parity.py`.
 
 import os
 import re
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 import v2parse
+from nation import (MOBILIZABLE_TYPES, accepted_cultures_of, blank_nation)
 from v2parse import (
     BLOCK,
     HEAD_SCALAR,
@@ -64,12 +65,6 @@ STRATA = {
     "rich": ["aristocrats", "capitalists"],
 }
 
-# Mobilization draws from poor-strata pops that are neither soldiers (they
-# already man the standing army) nor slaves, and only from pops of the primary
-# or an accepted culture, in unoccupied non-colonial provinces. Which types
-# those are is a property of the mod's poptypes/ folder, not a constant, so
-# --mod-path replaces this default; it is what vanilla and IGoR both work out to.
-MOBILIZABLE_TYPES = frozenset(["farmers", "labourers", "craftsmen"])
 
 # The set read_province actually collects pops for. main() narrows or widens it
 # from the mod's strata table (or --mob-types) before any save is parsed,
@@ -179,139 +174,6 @@ def read_worldmarket(block, save_date):
     }
 
 
-def blank_nation():
-    return {
-        "primary_culture": "",
-        "accepted_cultures": [],
-        "civilized": "",
-        "government": "",
-        "capital": "",
-        "prestige": 0.0,
-        "infamy": 0.0,
-        "treasury": 0.0,
-        "tax_base": 0.0,
-        "war_exhaustion": 0.0,
-        "plurality": 0.0,
-        "research_points": 0.0,
-        "techs": 0,
-        "brigades": 0,
-        "armies": 0,
-        "ships": 0,
-        "navies": 0,
-        "ships_by_type": defaultdict(int),
-        # Per ship type, the sum over its hulls of `strength / (1 - experience)`
-        # -- the two terms of the damage formula that differ between two real
-        # fleets. It equals the hull count for a fresh, green navy, falls with
-        # damage and rises with veterancy, and multiplying it by the type's
-        # power level gives what those hulls are worth as they stand.
-        "ship_crew": defaultdict(float),
-        "regiments_by_type": defaultdict(int),
-        "regiment_pops": [],
-        # province id -> {unit type: brigades}, for the deployment map
-        "units_at": defaultdict(Counter),
-        # The men standing in each province, by unit type. A regiment writes
-        # its `strength` in thousands -- a full one at POP_SIZE_PER_REGIMENT
-        # 3000 reads 3.000, and one that has taken 400 casualties reads
-        # 2.600 -- so counting regiments says a stack is the same size the
-        # day after a battle as the day before it. Ships use a different
-        # scale entirely (0 to 100, a percentage) and are not summed here.
-        "men_at": defaultdict(Counter),
-        "mobilized_brigades": 0,
-        "regular_brigades": 0,
-        "mobilizing": 0,
-        "is_mobilized": 0,
-        "tech_list": [],
-        "invention_ids": [],
-        "nationalvalue": "",
-        "tag": "",
-        "modifiers": [],
-        "revanchism": 0.0,
-        "ruling_party": 0,
-        "war_policy": "",
-        "country_flags": set(),
-        # reform group -> the option this nation has chosen, for the handful of
-        # reforms a mod attaches mobilisation size to.
-        "reforms": {},
-        "human": False,
-        "is_player": False,
-        "army_techs": 0,
-        "navy_techs": 0,
-        "factory_count": 0,
-        "factory_levels": 0,
-        "states": 0,
-        "provinces": 0,
-        "naval_base_levels": 0,
-        "max_naval_base": 0,
-        "ports": 0,
-        "fort_levels": 0,
-        "railroad_levels": 0,
-        "total_pop": 0,
-        "pop_by_type": defaultdict(int),
-        "pop_by_culture": defaultdict(int),
-        # province id -> soldier pop living there. Kept per province rather than
-        # as one total because soldiers in a colonial state raise no brigades,
-        # and which provinces those are is only known once the country block
-        # has been read -- provinces come first in a save.
-        # People in pops that cannot afford everything they need to live.
-        # Not the same as starving to death -- a pop short of its life needs
-        # shrinks, migrates and grows militant -- but it is the line under
-        # which a population is in trouble.
-        "life_unmet": 0,
-        # And the sharper reading: pops at or near nothing, which are the
-        # ones actually losing people. The two are nothing like the same
-        # size -- in one 1836 save 64% of the world is short of something
-        # while under 1% is starving -- so which is meant has to be said
-        # rather than implied.
-        "starving": 0,
-        "soldiers_at": defaultdict(int),
-        # The cap is a per-pop rule, not a per-province one: two pops of 1000
-        # raise two brigades where a single pop of 2000 raises one, so the
-        # sizes cannot be added up before the rule is applied to each.
-        "soldier_pops_at": defaultdict(list),
-        # Which of the nation's provinces it holds a core on, and which of its
-        # colonies are protectorates -- the two facts that pick the multiplier.
-        "core_provinces": set(),
-        "colonial_level": {},
-        # A province carries its own `colonial=` beside the `is_colonial` on the
-        # state holding it. They agree in ordinary saves -- 498 of 498 in one
-        # here, 285 of 288 in another -- but it is the province's own flag the
-        # engine charges the multiplier against, measured on a test bed that
-        # set only that one. Kept separately rather than folded into
-        # `colonial_provinces`, which mobilization and the stated-states
-        # literacy were both measured against as they stand.
-        "province_colonial": {},
-        # Per province, because whether a province is colonial is not known
-        # until the country's state blocks are read, and provinces are read
-        # first. Same shape as `soldiers_at`, which exists for the same reason.
-        "pop_at": defaultdict(int),
-        "literacy_at": defaultdict(float),
-        # good -> what this nation put on the world market, from the save's own
-        # `saved_country_supply`. Summed over the nations still holding land it
-        # comes back to the world market's supply pool exactly, which is what
-        # makes it a share of production rather than a stockpile. Summed over
-        # every country block it overshoots, because a nation that no longer
-        # exists keeps the last figure it ever had.
-        "goods_supply": {},
-        # Every eligible pop kept whole, as (poptype, culture, size, province).
-        # The engine truncates each bucket of manpower it counts and throws the
-        # remainder away, so the ceiling cannot be derived from a national
-        # total -- where the buckets are drawn is the whole question.
-        "mobilizable_pops": [],
-        # What the pops dropped below came to, so the readout can still say so
-        "mob_excluded_culture": 0,
-        "colonial_provinces": set(),
-        # province id -> state ordinal, because unused mobilization manpower
-        # is pooled by state before it reaches the nation.
-        "province_state": {},
-        # Provinces the owner does not control. The engine mobilizes nobody
-        # from an occupied province, so their pops are held aside rather than
-        # dropped -- the difference is worth being able to see.
-        "occupied_provinces": set(),
-        "literacy_weighted": 0.0,
-        "con_weighted": 0.0,
-        "mil_weighted": 0.0,
-        "money_total": 0.0,
-    }
 
 
 def building_level(value):
@@ -1124,12 +986,6 @@ def analyze_save(path, verbose=True, use_scanner=True, again=False):
     return meta, live
 
 
-def accepted_cultures_of(nat):
-    """The primary culture plus every accepted one, as a set."""
-    accepted = set(nat["accepted_cultures"])
-    if nat["primary_culture"]:
-        accepted.add(nat["primary_culture"])
-    return accepted
 
 
 _DATE_KEYS = {}

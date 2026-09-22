@@ -157,7 +157,7 @@ _DEFINE_KEYS = (
 )
 
 
-def read_defines(path):
+def _read_defines(path):
     """
     The handful of `common/defines.lua` constants that touch brigade counts.
 
@@ -197,7 +197,7 @@ def read_poptypes(path):
     return out
 
 
-def mobilizable_types(strata):
+def _mobilizable_types(strata):
     """Poor-strata pop types minus the two the engine never mobilizes."""
     return frozenset(
         name for name, layer in strata.items()
@@ -289,7 +289,7 @@ def party_sequence(path):
     return out
 
 
-def modifier_mob_impacts(path):
+def _modifier_mob_impacts(path):
     """
     {modifier name: mobilization_impact} for every national modifier that moves
     it, from event_modifiers.txt and triggered_modifiers.txt.
@@ -309,7 +309,7 @@ def modifier_mob_impacts(path):
     return out
 
 
-def mobilization_impacts(path):
+def _mobilization_impacts(path):
     """
     {war policy: mobilization_impact}, out of the mod's own issues.txt.
 
@@ -431,7 +431,7 @@ def _trigger_conditions(trigger, out):
     return out
 
 
-def watched_reforms(sizes, groups, triggers):
+def _watched_reforms(sizes, groups, triggers):
     """
     The reform groups a save has to carry, which is as few as possible.
 
@@ -450,7 +450,7 @@ def watched_reforms(sizes, groups, triggers):
 def culture_groups(path):
     """{culture: its culture group} from `common/cultures.txt`."""
     out = {}
-    for root in (base_game_path(path), path):
+    for root in (_base_game_path(path), path):
         if not root:
             continue
         target = os.path.join(root, "common", "cultures.txt")
@@ -499,7 +499,7 @@ def continents(path):
 
 
 
-def read_localisation(path):
+def _read_localisation(path):
     """
     Country names out of the mod's own `localisation/*.csv`.
 
@@ -522,7 +522,7 @@ def read_localisation(path):
     """
     wanted = re.compile(r"^[A-Z][A-Z0-9]{2}(_[a-z_]+)?$")
     out = {}
-    for root in (path, base_game_path(path)):
+    for root in (path, _base_game_path(path)):
         if not root:
             continue
         folder = os.path.join(root, "localisation")
@@ -575,7 +575,7 @@ def base_prices(path):
     return out
 
 
-def regions(path):
+def _regions(path):
     """
     {state name: [province ids]} from `map/region.txt`.
 
@@ -608,7 +608,7 @@ def _resolved_file(path, *parts):
     own = os.path.join(path, *parts)
     if os.path.isfile(own):
         return own
-    root = base_game_path(path)
+    root = _base_game_path(path)
     if root:
         inherited = os.path.join(root, *parts)
         if os.path.isfile(inherited):
@@ -626,7 +626,7 @@ def _resolved_files(path, folder):
     name -- the same rule `country_files` and `map_source` follow.
     """
     out = {}
-    for root in (base_game_path(path), path):
+    for root in (_base_game_path(path), path):
         if not root:
             continue
         target = os.path.join(root, folder)
@@ -653,7 +653,7 @@ _SHIP_STATS = ("hull", "gun_power", "evasion", "torpedo_attack",
                "supply_consumption_score")
 
 
-def naval_units(path):
+def _naval_units(path):
     """
     {ship: {hull, gun_power, evasion, torpedo_attack, score, heavy}} for every
     naval unit in `units/*.txt`.
@@ -723,7 +723,7 @@ def _ship_changes(text):
     return found
 
 
-def naval_tech_effects(path):
+def _naval_tech_effects(path):
     """
     {technology: {ship or 'navy_base': {stat: delta}}} from `technologies/*.txt`.
 
@@ -747,7 +747,7 @@ def naval_tech_effects(path):
     return out
 
 
-def naval_invention_effects(path):
+def _naval_invention_effects(path):
     """
     {invention: {ship or 'navy_base': {stat: delta}}} for the inventions that
     upgrade a ship.
@@ -852,8 +852,8 @@ def naval_profile(nation, mod):
 
 def state_names(path):
     """{state key: the name the game shows}, e.g. PER_1112 -> Tabriz."""
-    keys = set(regions(path))
-    return {k: v for k, v in text_localisation(path, keys).items() if v}
+    keys = set(_regions(path))
+    return {k: v for k, v in _text_localisation(path, keys).items() if v}
 
 
 def province_regions(path):
@@ -867,7 +867,7 @@ def province_regions(path):
     of them to it, which turned every state in the war tab into "Earth".
     """
     out = {}
-    for name, ids in regions(path).items():
+    for name, ids in _regions(path).items():
         for pid in ids:
             out.setdefault(pid, name)
     return out
@@ -886,7 +886,7 @@ def country_order(path):
 _COUNTRY_ENTRY = re.compile(r'^\s*([A-Z0-9]{3})\s*=\s*"?([^"\r\n]+?)"?\s*$', re.M)
 
 
-def country_files(path):
+def _country_files(path):
     """
     {tag: the file defining it}, the mod's copy winning over the game's.
 
@@ -898,7 +898,7 @@ def country_files(path):
     in.
     """
     out = {}
-    for root in (base_game_path(path), path):
+    for root in (_base_game_path(path), path):
         if not root:
             continue
         listing = os.path.join(root, "common", "countries.txt")
@@ -919,7 +919,7 @@ def country_files(path):
 def country_colours(path):
     """{tag: '#rrggbb'} from each country file's `color = { r g b }`."""
     out = {}
-    for tag, target in country_files(path).items():
+    for tag, target in _country_files(path).items():
         hit = re.search(r"color\s*=\s*\{\s*(\d+)\s+(\d+)\s+(\d+)\s*\}",
                         _plain(target))
         if hit:
@@ -927,7 +927,7 @@ def country_colours(path):
     return out
 
 
-def base_game_path(path):
+def _base_game_path(path):
     """
     The Victoria II install a mod sits inside, or None when there isn't one.
 
@@ -945,7 +945,7 @@ def base_game_path(path):
     return root
 
 
-def map_source(path):
+def _map_source(path):
     """
     Where to read the province layout from: the mod, or the game beneath it.
 
@@ -966,12 +966,12 @@ def map_source(path):
     if (os.path.isfile(os.path.join(own, "provinces.bmp"))
             and os.path.isfile(os.path.join(own, "definition.csv"))):
         return path
-    return base_game_path(path) or path
+    return _base_game_path(path) or path
 
 
 def _map_file(path, name):
     """One file from `map/`, taken from wherever the province layout is."""
-    return os.path.join(map_source(path), "map", name)
+    return os.path.join(_map_source(path), "map", name)
 
 
 def unit_positions(path):
@@ -1373,7 +1373,7 @@ def flag_images(path, wanted, governments=None, width=46):
     return out
 
 
-def text_localisation(path, wanted):
+def _text_localisation(path, wanted):
     """
     {key: english} for an arbitrary set of localisation keys.
 
@@ -1388,7 +1388,7 @@ def text_localisation(path, wanted):
     """
     wanted = set(wanted)
     out = {}
-    for root in (path, base_game_path(path)):
+    for root in (path, _base_game_path(path)):
         if not root:
             continue
         folder = os.path.join(root, "localisation")
@@ -1429,7 +1429,7 @@ def culture_names(path):
     without this lists China's people as `nanfaren` and `beifaren`.
     """
     keys = []
-    for root in (base_game_path(path), path):
+    for root in (_base_game_path(path), path):
         if not root:
             continue
         target = os.path.join(root, "common", "cultures.txt")
@@ -1446,7 +1446,7 @@ def culture_names(path):
                     keys.append(name)
     if not keys:
         return {}
-    return {k: v for k, v in text_localisation(path, keys).items() if v}
+    return {k: v for k, v in _text_localisation(path, keys).items() if v}
 
 
 def _top_level_keys(path, folder):
@@ -1473,7 +1473,7 @@ def display_names(path):
     localisation and there is nothing to gain from four passes over it.
     """
     keys = set()
-    for root in (base_game_path(path), path):
+    for root in (_base_game_path(path), path):
         if not root:
             continue
         target = os.path.join(root, "common", "goods.txt")
@@ -1493,7 +1493,7 @@ def display_names(path):
     keys |= _top_level_keys(path, "technologies")
     if not keys:
         return {}
-    return {k: v for k, v in text_localisation(path, keys).items() if v}
+    return {k: v for k, v in _text_localisation(path, keys).items() if v}
 
 
 # Bookkeeping rather than an effect a player would read off the tech.
@@ -1546,7 +1546,7 @@ def _invention_effects(block):
     return out
 
 
-def invention_index(path):
+def _invention_index(path):
     """
     {invention: {"requires": set of techs its `limit` needs,
                  "effects": [(label, value), ...] it grants}}, for every
@@ -1568,7 +1568,7 @@ def invention_index(path):
     return out
 
 
-def technology_tree(path, rules=None):
+def _technology_tree(path, rules=None):
     """
     The tech tree as the game draws it: five folders, columns, then techs.
 
@@ -1585,7 +1585,7 @@ def technology_tree(path, rules=None):
     if not files:
         return {}
 
-    rule_map = rules if rules is not None else invention_index(path)
+    rule_map = rules if rules is not None else _invention_index(path)
     gated = {}
     inv_effects = {}
     for name, info in rule_map.items():
@@ -1629,7 +1629,7 @@ def technology_tree(path, rules=None):
             tree[category] = areas
             keys.add(category)
 
-    names = text_localisation(path, keys)
+    names = _text_localisation(path, keys)
     for category, areas in tree.items():
         for column in areas:
             column["label"] = names.get(column["area"]) or _pretty(column["area"])
@@ -1654,7 +1654,7 @@ def _pretty(key):
     return key.replace("_", " ").strip().capitalize()
 
 
-def formation_decisions(path):
+def _formation_decisions(path):
     """
     {formed tag: {tags allowed to form it}}, from the mod's own decisions.
 
@@ -1710,7 +1710,7 @@ def mod_signature(mod_path):
         return "no-mod"
     mod_path = os.path.abspath(os.path.expanduser(os.path.expandvars(mod_path)))
     roots = [mod_path]
-    base = base_game_path(mod_path)
+    base = _base_game_path(mod_path)
     if base:
         roots.extend(os.path.join(base, folder) for folder in (
             "common", "decisions", "gfx/flags", "inventions", "localisation",
@@ -1838,35 +1838,35 @@ def _load_mod(path):
     strata = read_poptypes(path)
     reform_sizes, reform_groups = reform_mob(path)
     triggers = triggered_mob(path)
-    reform_names = watched_reforms(reform_sizes, reform_groups, triggers)
+    reform_names = _watched_reforms(reform_sizes, reform_groups, triggers)
 
     # A modifier is either looked up by name in the country's own list or
     # judged from its trigger. Names that are both are judged, so that the two
     # paths cannot both count the same thing.
     judged = {name for name, _s, _i, _t in triggers}
     event_mob = {k: v for k, v in event_mob.items() if k not in judged}
-    modifier_impacts = {k: v for k, v in modifier_mob_impacts(path).items()
+    modifier_impacts = {k: v for k, v in _modifier_mob_impacts(path).items()
                         if k not in judged}
 
     made = {
         "path": path,
         "invention_sequence": invention_sequence(path),
         "party_sequence": party_sequence(path),
-        "localisation": read_localisation(path),
+        "localisation": _read_localisation(path),
         "base_prices": base_prices(path),
         "country_order": country_order(path),
-        "formations": formation_decisions(path),
+        "formations": _formation_decisions(path),
         "culture_names": culture_names(path),
         "display_names": display_names(path),
         "province_names": province_names(path),
         "province_regions": province_regions(path),
         "state_names": state_names(path),
         "unit_kinds": unit_kinds(path),
-        "naval_units": naval_units(path),
-        "naval_effects": naval_invention_effects(path),
-        "naval_tech_effects": naval_tech_effects(path),
-        "technology": technology_tree(path),
-        "mob_impacts": mobilization_impacts(path),
+        "naval_units": _naval_units(path),
+        "naval_effects": _naval_invention_effects(path),
+        "naval_tech_effects": _naval_tech_effects(path),
+        "technology": _technology_tree(path),
+        "mob_impacts": _mobilization_impacts(path),
         "modifier_impacts": modifier_impacts,
         "reform_mob": reform_sizes,
         "reform_names": reform_names,
@@ -1880,10 +1880,10 @@ def _load_mod(path):
         # Every technology the mod defines, so an invention gated on one it
         # does not can be told from one a nation simply has not researched.
         "technologies": frozenset(tech_names),
-        "defines": read_defines(path),
+        "defines": _read_defines(path),
         "strata": strata,
         "pop_types": frozenset(strata),
-        "mob_types": mobilizable_types(strata),
+        "mob_types": _mobilizable_types(strata),
         "invention_rules": invention_rules,
         "event_mob": event_mob,
         "tech_mob": tech_mob,

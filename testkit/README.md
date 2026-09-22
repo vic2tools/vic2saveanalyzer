@@ -38,6 +38,8 @@ python3 testkit/packing.py                       # no saves needed
 python3 testkit/matching.py                      # no saves needed
 python3 testkit/modcache.py                      # no saves needed
 python3 testkit/noworkers.py                     # no saves needed
+python3 testkit/staleness.py                     # no saves needed
+python3 testkit/mobrate.py                       # no saves needed
 python3 testkit/caching.py                       # no saves needed
 python3 testkit/window.py "/path/to/saves"
 python3 testkit/spawned.py "/path/to/saves"
@@ -163,6 +165,29 @@ read one at a time and the answer is the same answer. What made it fatal was
 where the guard sat: `ProcessPoolExecutor(...)` succeeds even when no worker
 can start, because it starts them on the first `submit`, and the guard was
 around the constructor.
+
+**`mobrate.py`** asks what a nation's mobilisation size is, in the cases a
+real campaign does not happen to contain. The subtle part is what an empty
+contribution list means: **zero**, because an uncivilized nation has no
+technology or invention granting mobilisation size — not "unknown, use the
+command line". Getting that backwards is a bug this codebase has had twice.
+The second time `--explain-mob-pool` wrote `rate_for(...) or args.mob_rate`,
+and since `--mobilisation-size` defaults to 1.0 it printed **100%** and a
+matching brigade ceiling for nations the report itself scored at **0%**. It
+survived because no campaign it was run against had an uncivilized nation in
+it, and `smoke.py` only ever asks about ENG.
+
+**`staleness.py`** touches every source file the program has, in a copy of it,
+and checks each one moves the report stamp. The stamp is what lets a second run
+say "Nothing has changed since this was built" and skip everything — the most
+dangerous switch in the program, because when it is wrong nothing looks wrong:
+the report opens and every number in it is from the last time somebody looked.
+It *was* wrong. The stamp hashed a hand-written list of five filenames, and
+`modrules.py` — which decides every nation's mobilisation size — was lifted out
+of `mod_reader.py`, which was on that list, and did not inherit its place.
+Doubling every rate then changed nothing the stamp could see. The suite could
+not catch it, because it tested that the skip happens and never what it is
+keyed on.
 
 **`packing.py`** checks the executable would carry every module the program
 needs. `build_exe.py` names them explicitly, because most are imported

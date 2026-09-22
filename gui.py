@@ -29,22 +29,14 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import vic2_analyzer
+# `human_size` lives in `keeper`, which is the lower of the two and imports
+# nothing but the standard library, so taking it from there costs this
+# module nothing and keeps one definition of how a byte count is said.
+from keeper import human_size
 
 APP = "Victoria 2 Save Analyzer"
 AUTO = "(work it out from the saves)"
 SELECTED = "(the mod picked above)"
-
-
-def human_size(count):
-    """A byte count the way a person would say it."""
-    if count < 1024:
-        return "%d byte%s" % (count, "" if count == 1 else "s")
-    for unit in ("KB", "MB", "GB"):
-        count /= 1024.0
-        if count < 1024 or unit == "GB":
-            break
-    return "%.0f %s" % (count, unit) if count >= 10 else (
-        "%.1f %s" % (count, unit))
 
 
 def _plural(n, one, many):

@@ -328,11 +328,11 @@ Darkness renames Post-Napoleonic Thought to Post-Wenceslian Thought.
 All five are ordinary localisation keys sharing one namespace, so
 `display_names` gathers the keys from `common/goods.txt`, `poptypes/`, `units/`,
 `technologies/` and `common/cb_types.txt` across base game and mod, and looks
-all of them up in one pass. `text_localisation` reads the mod first and the base
+all of them up in one pass. `_text_localisation` reads the mod first and the base
 game after it with the first definition winning, so a mod's rename wins and a
 partial mod still gets the game's names for what it left alone.
 
-Country names took longer to get there. `read_localisation` read the mod folder
+Country names took longer to get there. `_read_localisation` read the mod folder
 and stopped, which is fine for a total conversion and wrong for everything else:
 Divergences of Darkness names 599 of its 658 tags and leaves Denmark, Norway,
 Sweden, Belgium and 55 more to the game underneath, and CE 1v1 ships two

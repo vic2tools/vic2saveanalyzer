@@ -76,6 +76,8 @@ def main():
         ("mod reading and caching", [os.path.join(KIT, "modcache.py")]),
         ("save caching and projections", [os.path.join(KIT, "caching.py")]),
         ("a machine with no workers", [os.path.join(KIT, "noworkers.py")]),
+        ("what can make a report stale", [os.path.join(KIT, "staleness.py")]),
+        ("the mobilisation rate rule", [os.path.join(KIT, "mobrate.py")]),
     ]
 
     try:

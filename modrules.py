@@ -361,19 +361,35 @@ def _unreadable(trigger, mod):
     return False
 
 
-def rate_for(nation, mod, live=None, world=None):
+def rate_for(nation, mod, live=None, world=None, fallback=0.0):
     """
-    Sum of every mobilisation size contribution a nation has, floored at zero.
+    The share of its people a nation may mobilize.
 
-    Contributions can be strongly negative -- IGoR nerfs China's mobilisation
-    by -100 -- and the engine clamps the result at zero rather than letting it
-    wrap into something meaningful.
+    Sum of every contribution, floored at zero. Contributions can be
+    strongly negative -- IGoR nerfs China's mobilisation by -100 -- and the
+    engine clamps the result at zero rather than letting it wrap into
+    something meaningful.
+
+    `fallback` is for a run with no mod at all, where the command line is
+    the only source of a rate. It is **not** what an empty contribution
+    list means. An empty list is zero: an uncivilized nation has no
+    technology or invention granting mobilisation size, and in IGoR no
+    national value grants it either, so its rate really is zero. Handing
+    it the command-line rate instead gave every uncivilized nation 100%,
+    which the old "uncivilized cannot mobilize" shortcut happened to hide.
+
+    That distinction is why this takes the fallback rather than leaving
+    callers to write `rate_for(...) or default`. Two callers did, and one
+    of them -- `--explain-mob-pool` -- went on printing 100% for nations
+    the report itself scored at 0.
     """
+    if mod is None:
+        return fallback
     return max(0.0, sum(value for _kind, _name, value in
                         breakdown(nation, mod, live, world)))
 
 
-def impact_for(nation, mod, world=None, inventions=False):
+def impact_for(nation, mod, world=None, inventions=None):
     """
     A nation's mobilization_impact from every national modifier that moves it.
 
@@ -381,7 +397,10 @@ def impact_for(nation, mod, world=None, inventions=False):
     what sits on top -- event modifiers, which a save lists by name, and
     triggered modifiers, which it does not.
     """
-    if inventions is False:
+    # `None` means "work them out", an empty list means "this nation holds
+    # none". `False` used to stand in for the first, which reads as a
+    # boolean answer to a question about a list.
+    if inventions is None:
         inventions = held_inventions(nation, mod)
     total = 0.0
     for name in nation.get("modifiers", ()):

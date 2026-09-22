@@ -57,13 +57,25 @@ from tech_groups import TECH_GROUP
 # what the save says out. Nothing in it knows about caches, workers, reports
 # or the command line, which is why it could be lifted out whole.
 from explain import asked, explain, save_world
-from readsave import (
+from modrules import rate_for
+from nation import (
+    AS_PLAIN_DICTS,
+    AS_PLAIN_DICTS_INSIDE,
+    KEEP_FOR_INVENTIONS,
+    KEEP_NATION,
     MOBILIZABLE_TYPES,
+    POP_SIZE_PER_REGIMENT,
+    SPENT_ON_FINALIZE,
+    accepted_cultures_of,
+    brigades_from_clusters,
+    mobilization_clusters,
+    trim_save,
+)
+from readsave import (
     MOB_CANDIDATES,
     POP_TYPE_LIST,
     REFORM_KEYS,
     STRATA,
-    accepted_cultures_of,
     analyze_save,
     date_key,
     set_mob_candidates,
@@ -142,9 +154,6 @@ def _tell_report_ready(path):
             pass
 
 
-# Victoria II defines. A mod can change these; --mod-path reads the real values
-# out of common/defines.lua, and the command line overrides both.
-POP_SIZE_PER_REGIMENT = 3000
 # The engine applies no minimum pop size to *mobilization*. POP_MIN_SIZE_FOR_REGIMENT
 # governs how small a *soldier* pop may be and still support a standing brigade,
 # which is a different rule on a different pop type -- IGoR sets it to 1000.
@@ -162,68 +171,8 @@ POP_SIZE_PER_REGIMENT = 3000
 
 
 
-def mobilization_clusters(nat, mob_types=MOBILIZABLE_TYPES,
-                          include_occupied=False):
-    """
-    The manpower buckets a mobilization ceiling is counted over.
-
-    Eligibility follows the engine: poor-strata pops that are neither soldiers
-    nor slaves, of the primary or an accepted culture, in provinces that are
-    neither colonial nor under enemy control.
-
-    Returns (buckets, pool, entries), where buckets is a list of
-    (province, state, poptype, size). The province and state travel with each
-    bucket because the counting rule hands whatever a bucket cannot turn into
-    a regiment up to them.
-    """
-    accepted = accepted_cultures_of(nat)
-    colonial = nat["colonial_provinces"]
-    occupied = set() if include_occupied else nat["occupied_provinces"]
-    states = nat["province_state"]
-    buckets = []
-    pool = 0
-    for poptype, culture, size, province_id in nat["mobilizable_pops"]:
-        if poptype not in mob_types or culture not in accepted:
-            continue
-        if province_id in colonial or province_id in occupied:
-            continue
-        pool += size
-        buckets.append((province_id, states.get(province_id, -1), poptype, size))
-    return buckets, pool, len(buckets)
 
 
-# Where a bucket's unused manpower goes, in order. Each rung pools what the one
-# below it could not use and truncates again.
-def brigades_from_clusters(buckets, rate, pop_per_regiment=POP_SIZE_PER_REGIMENT):
-    """
-    Brigades a nation's mobilizable pops yield, in the order the save lists them.
-
-    The engine carries one pool of manpower too small to have raised a regiment
-    yet. A pop big enough to raise regiments on its own raises them and EMPTIES
-    that pool; a pop too small adds to it, and the pool yields a regiment and
-    empties whenever it reaches the cost. That flush is why nations whose big
-    and small pops interleave -- which is what cultural variety produces --
-    mobilize worse than their population suggests, and it is why `buckets` must
-    stay in save order.
-
-    Measured against 139 controlled readings from a purpose-built test bed and
-    57 in-game campaign readings; the only constant is POP_SIZE_PER_REGIMENT.
-    """
-    total = 0
-    pool = 0.0
-    for _province, _state, _poptype, size in buckets:
-        manpower = size * rate
-        if manpower <= 0:
-            continue
-        if manpower >= pop_per_regiment:
-            total += int(manpower // pop_per_regiment)
-            pool = 0.0
-        else:
-            pool += manpower
-            if pool >= pop_per_regiment:
-                total += 1
-                pool = 0.0
-    return total
 
 
 def _parser_fingerprint():
@@ -295,14 +244,24 @@ def report_stamp(files, args, world):
     if getattr(sys, "frozen", False):
         digest.update(("frozen=" + _parser_fingerprint()).encode("utf-8"))
     else:
+        # Every source file beside this one, rather than the handful that
+        # were thought of at the time. That list was wrong within a day:
+        # `modrules.py` was lifted out of `mod_reader.py`, which was on it,
+        # and did not inherit its place -- so doubling every nation's
+        # mobilisation size changed nothing the skip could see and the next
+        # run answered "nothing has changed since this was built" and served
+        # the old report. A list of names is a thing to forget; a folder is
+        # not. The file's name is hashed too, so renaming one counts.
         here = os.path.dirname(os.path.abspath(__file__))
-        for name in ("report.py", "template.py", "cross.py", "mod_reader.py",
-                     "explain.py"):
-            try:
+        try:
+            for name in sorted(os.listdir(here)):
+                if not name.endswith(".py"):
+                    continue
                 with open(os.path.join(here, name), "rb") as fh:
+                    digest.update(name.encode("utf-8"))
                     digest.update(fh.read())
-            except OSError:
-                return ""
+        except OSError:
+            return ""
     # Every setting that reaches a number in the report. Not --jobs, not
     # --quiet, not where it is written: those change how it is made, not what
     # it says.
@@ -472,32 +431,7 @@ def clear_cache():
     return removed, freed
 
 
-# --- reading a folder of saves across however many cores the machine has -----
-#
-# Saves do not depend on each other, so the only thing stopping a folder from
-# being read all at once is that every worker needs the same two pieces of
-# global state the mod sets up: which pop types exist, and which of them can be
-# mobilized. Windows starts workers with a fresh interpreter, so both are passed
-# in and applied before the worker touches a save.
 
-# Everything a nation carries that exists only to be folded into its totals.
-# Each one is a table with an entry per province -- eleven thousand of them
-# for a large nation -- they are about a third of what a parsed save weighs,
-# and `finalize` is the last thing that ever reads any of them.
-SPENT_ON_FINALIZE = ("mobilizable_pops", "literacy_at", "pop_at",
-                     "soldiers_at", "soldier_pops_at", "province_state")
-
-# Counted with a `Counter` or a `defaultdict` because that is what counting
-# wants, and sent as the plain dicts they already are. Rebuilding one on the
-# far side of a pipe runs its `__init__`, and a save carries sixteen of them
-# a nation: on a campaign of a hundred saves that is sixty-eight thousand
-# constructor calls in the one process that has everything else to do.
-# Nothing past here adds to them -- every reader does `.get`, `.items` or a
-# plain walk -- and `dict()` keeps the order they were counted in, which
-# several stable sorts downstream depend on.
-AS_PLAIN_DICTS = ("ships_by_type", "ship_crew", "regiments_by_type",
-                  "pop_by_type", "pop_by_culture")
-AS_PLAIN_DICTS_INSIDE = ("units_at", "men_at")
 
 # What a worker needs to finish a save where it read it. A named shape
 # rather than a dict of strings because it crosses a process boundary and
@@ -518,35 +452,6 @@ def _worker_setup(pop_types, mob_types, reform_keys=(), transform=None):
     set_mob_candidates(mob_types)
     set_reform_keys(reform_keys)
     _TRANSFORM = transform
-
-
-def mob_rate(nat, mod, live, stage, fallback):
-    """
-    The share of its people a nation may mobilize.
-
-    Without a mod it is whatever the command line said. With one it is the
-    sum of every technology, invention, national value and triggered
-    modifier that grants mobilisation size, which is what `breakdown`
-    works out.
-
-    A nation can be modified *below* zero -- IGoR's
-    china_mobilization_nerf is -100 -- and the engine floors mobilisation
-    size at zero. An empty contribution list means zero, not "unknown": an
-    uncivilized nation has no technology or invention granting
-    mobilisation size, and in IGoR no national value grants it either, so
-    its rate really is zero. Falling back to the command-line rate here
-    used to hand every uncivilized nation 100%, which the old "uncivilized
-    cannot mobilize" shortcut happened to hide. The fallback belongs to
-    the no-mod path and to nowhere else.
-
-    Both the worker and the parent finalize saves, so both ask this. It
-    lives here rather than in either of them.
-    """
-    if mod is None:
-        return fallback
-    from modrules import breakdown
-    return max(0.0, sum(v for _k, _n, v in
-                        breakdown(nat, mod, live=live, world=stage)))
 
 
 def _finish_save(meta, nations, spec):
@@ -584,7 +489,7 @@ def _finish_save(meta, nations, spec):
     for tag, nat in nations.items():
         if (not wanted or tag in wanted) and nat["total_pop"] >= min_pop:
             nat["is_player"] = (tag in players)
-            rate = mob_rate(nat, spec.mod, spec.live, stage, spec.rate)
+            rate = rate_for(nat, spec.mod, spec.live, stage, spec.rate)
             done = finalize(nat, rate, spec.pop_per_regiment,
                             mob_types=spec.mob_types,
                             include_occupied=spec.include_occupied,
@@ -618,7 +523,7 @@ def _finalize_here(nat, mod, live, stage, args, keep_pools):
     per-province tables -- so those runs keep the saves whole and pay for
     it in the parent. Every other run finishes where the save was read.
     """
-    rate = mob_rate(nat, mod, live, stage, args.mob_rate)
+    rate = rate_for(nat, mod, live, stage, args.mob_rate)
     done = finalize(nat, rate, args.pop_per_regiment,
                     mob_types=frozenset(args.mob_types),
                     include_occupied=args.mob_include_occupied,
@@ -803,31 +708,10 @@ def in_date_order(files):
     return sorted(files, key=lambda p: (save_sort_key(p, date_of(p)), p))
 
 
-# What survives a save once its own row has been built. Everything else in a
-# parsed save is working material for that row -- the mobilizable pops, the
-# per-province soldier, literacy and population tallies, the war histories
-# once they have been folded -- and nothing reads it again. Holding it for
-# the length of the campaign is what made a monthly century need gigabytes.
-KEEP_META = ("date", "player", "file", "province_owner", "great_nations",
-             "world_pop", "market")
-KEEP_NATION = ("units_at", "men_at", "primary_culture", "accepted_cultures",
-               "government", "total_pop", "is_player")
 
 
-# What `--inventions` and `--check-inventions` read back off the saves after
-# the run, on top of the above. Both used to answer zero of everything --
-# `--check-inventions` blaming the campaign for being too short to judge --
-# because the trim had taken the two fields out from under them. Added to
-# what is kept rather than keeping saves whole: two fields a nation against
-# half a megabyte of them.
-KEEP_FOR_INVENTIONS = ("tech_list", "invention_ids")
 
 
-def trim_save(meta, nations, keep=KEEP_NATION):
-    """One save reduced to what the rest of the run still asks for."""
-    thin = {tag: {k: nat[k] for k in keep if k in nat}
-            for tag, nat in nations.items()}
-    return {k: v for k, v in meta.items() if k in KEEP_META}, thin
 
 
 def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
@@ -1616,7 +1500,7 @@ def campaign_rows(parsed, mod, args):
             if nat["total_pop"] < max(1, args.min_pop):
                 continue
             nat["is_player"] = tag in humans
-            rate = mob_rate(nat, mod, live, stage, args.mob_rate)
+            rate = rate_for(nat, mod, live, stage, args.mob_rate)
             done = finalize(nat, rate, args.pop_per_regiment,
                             mob_types=frozenset(args.mob_types),
                             include_occupied=args.mob_include_occupied,

@@ -17,7 +17,8 @@ import os
 import sys
 from collections import defaultdict
 
-from readsave import accepted_cultures_of
+from nation import (accepted_cultures_of, brigades_from_clusters,
+                    mobilization_clusters)
 
 
 def explain_mob_pool(tag, nat, meta, rate, args):
@@ -29,11 +30,6 @@ def explain_mob_pool(tag, nat, meta, rate, args):
     poor type, and diverge in proportion to how many cultures those pops are
     split across. That gap is the cost of truncating each pop separately.
     """
-    # `vic2_analyzer` imports this module, so its counting functions are
-    # fetched here rather than at import -- the same way that module
-    # reaches for `report` and `mod_reader`.
-    from vic2_analyzer import brigades_from_clusters, mobilization_clusters
-
     mob_types = frozenset(args.mob_types)
     accepted = accepted_cultures_of(nat)
     occ = args.mob_include_occupied
@@ -159,12 +155,10 @@ def explain(args, mod, live, parsed):
         nat = nations.get(tag)
         if nat is None:
             sys.exit(f"{tag} is not in {meta['file']}.")
-        if mod is not None:
-            from modrules import rate_for
-            rate = rate_for(nat, mod, live=live,
-                            world=save_world(meta, mod)) or args.mob_rate
-        else:
-            rate = args.mob_rate
+        from modrules import rate_for
+        rate = rate_for(nat, mod, live=live,
+                        world=save_world(meta, mod) if mod else None,
+                        fallback=args.mob_rate)
         explain_mob_pool(tag, nat, meta, rate, args)
         return True
 
