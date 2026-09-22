@@ -39,6 +39,7 @@ sys.path.insert(0, HERE)
 import matching                                            # noqa: E402
 import savefmt                                             # noqa: E402
 import vic2_analyzer as vic2                               # noqa: E402
+import finishing                                            # noqa: E402
 import nation                                               # noqa: E402
 from mod_reader import load_mod                             # noqa: E402
 
@@ -133,9 +134,15 @@ def watched_run(argv):
 
     `finish_nations` is the one place a parsed save becomes numbers, so
     wrapping it catches both callers -- the cross path through
-    `campaign_rows`, the report path through `_finish_save` -- without this
+    `campaign_rows`, the report path through `finish_and_pack` -- without this
     check having to rebuild either caller's setup and inherit the very drift
     it is here to notice.
+
+    It is wrapped where it lives, on `finishing`, and both callers look it
+    up there: `finish_and_pack` is in the same module, and `vic2_analyzer`
+    calls `finishing.finish_nations(...)` rather than importing the name. Were
+    it imported by name, the analyzer would hold its own copy, the cross path
+    would go unwatched, and this would fail saying it saw only one of the two.
 
     `-j 1` is not about speed. The finishing normally happens out in a
     worker process, where a wrapper installed here would never be called at
@@ -144,7 +151,7 @@ def watched_run(argv):
     seen = {"cross": [], "report": []}
     inside = []
 
-    real_finish = vic2.finish_nations
+    real_finish = finishing.finish_nations
     real_rows = vic2.campaign_rows
 
     def watch_finish(meta, nations, spec):
@@ -153,7 +160,7 @@ def watched_run(argv):
         seen[where].append(
             (meta.get("date"), spec,
              {tag: done for tag, done in out.items()
-              if vic2.kept_by(spec, tag, done)}))
+              if finishing.kept_by(spec, tag, done)}))
         return out
 
     def watch_rows(parsed, mod, args, wanted=None):
@@ -164,7 +171,7 @@ def watched_run(argv):
             inside.pop()
 
     argv_was, out_was = sys.argv, sys.stdout
-    vic2.finish_nations = watch_finish
+    finishing.finish_nations = watch_finish
     vic2.campaign_rows = watch_rows
     try:
         sys.argv = ["vic2_analyzer.py"] + argv
@@ -175,7 +182,7 @@ def watched_run(argv):
             if exc.code:
                 raise AssertionError("the run stopped: %s" % exc.code)
     finally:
-        vic2.finish_nations = real_finish
+        finishing.finish_nations = real_finish
         vic2.campaign_rows = real_rows
         sys.argv, sys.stdout = argv_was, out_was
     return seen

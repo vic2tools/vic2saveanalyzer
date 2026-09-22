@@ -86,7 +86,7 @@ def mutation(name, bug, catcher, args=()):
 @mutation("cross-regiment-size", "campaign_rows ignores the mod's POP_SIZE_PER_REGIMENT",
           "crossrows.py")
 def m1():
-    patch("vic2_analyzer.py",
+    patch("finishing.py",
           """        pop_per_regiment = int(defines.get("POP_SIZE_PER_REGIMENT",
                                            POP_SIZE_PER_REGIMENT))""",
           """        pop_per_regiment = POP_SIZE_PER_REGIMENT""")
@@ -95,13 +95,13 @@ def m1():
 @mutation("cross-mob-types", "the mod's pop list overrides --mob-types instead of deferring",
           "crossrows.py")
 def m2():
-    patch("vic2_analyzer.py", "    if mob_types is None:", "    if True:")
+    patch("finishing.py", "    if mob_types is None:", "    if True:")
 
 
 @mutation("cross-player-human-only", "only human=yes counts as a player; --player-nations unread",
           "crossrows.py")
 def m3():
-    patch("vic2_analyzer.py",
+    patch("finishing.py",
           """    if told is not None:
         return set(told)
     played = {tag for tag, nat in nations.items() if nat.get("human")}""",
@@ -110,7 +110,7 @@ def m3():
 
 @mutation("cross-min-pop", "the filter silently raises --min-pop to 1", "crossrows.py")
 def m4():
-    patch("vic2_analyzer.py",
+    patch("finishing.py",
           '            and nat["total_pop"] >= spec.min_pop)',
           '            and nat["total_pop"] >= max(1, spec.min_pop))')
 
@@ -118,7 +118,7 @@ def m4():
 @mutation("cross-player-ignores-save", "the save's own player= marker goes unread",
           "crossrows.py")
 def m5():
-    patch("vic2_analyzer.py",
+    patch("finishing.py",
           '    return {meta["player"]} if meta.get("player") else set()',
           '    return set()')
 
@@ -129,7 +129,7 @@ def m5():
 def m22():
     # "the caller left it alone" decided by comparing the value against the
     # default again, so --pop-per-regiment 3000 is silently overridden.
-    patch("vic2_analyzer.py", "    if pop_per_regiment is None:",
+    patch("finishing.py", "    if pop_per_regiment is None:",
           "    if pop_per_regiment in (None, POP_SIZE_PER_REGIMENT):")
 
 
@@ -281,14 +281,15 @@ def m23():
 
 
 @mutation("parse-key-too-wide",
-          "the reader imports something that only uses a save, and the key follows it",
+          "the reader imports the finishing, and the parse cache key follows it",
           "caching.py")
 def m24():
     # The opposite mistake. The key is everything readfolder reaches, so
-    # readfolder importing what reads no save puts that in the key, and
-    # rewording a label in it throws every cached save away.
+    # readfolder importing the finishing -- which reads no save, it spends
+    # one -- puts the finishing, the mod rules and explain.py in the key, and
+    # rewording a label in any of them throws every cached save away.
     patch("readfolder.py", "import cacheio\nfrom cacheio import load as _cache_read\n",
-          "import cacheio\nimport explain\nfrom cacheio import load as _cache_read\n")
+          "import cacheio\nimport finishing\nfrom cacheio import load as _cache_read\n")
 
 
 # ---- the workers, which Windows starts as fresh interpreters
@@ -302,8 +303,8 @@ def m25():
     # itself, and the files come out identical -- so a check comparing them
     # passed while Windows read a campaign on one core.
     patch("vic2_analyzer.py",
-          "        transform=partial(_finish_save, spec=spec) if in_workers else None,",
-          "        transform=(lambda m, n: _finish_save(m, n, spec)) if in_workers else None,")
+          "        transform=partial(finishing.finish_and_pack, spec=spec) if in_workers else None,",
+          "        transform=(lambda m, n: finishing.finish_and_pack(m, n, spec)) if in_workers else None,")
 
 
 # ---- commit 8caa343: a mod refusing to guess what it has not read

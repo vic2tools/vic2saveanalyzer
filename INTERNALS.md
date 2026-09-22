@@ -686,7 +686,7 @@ also overrode `--mob-types` instead of deferring to it, read the mod's pop
 list when parsing and the caller's when counting, counted only `human=yes` as
 a player, and raised `--min-pop` to one behind the caller's back. There is one
 `finish_nations` now, one `kept_by` beside it, and one `finish_spec` that
-decides what either of them is given; `testkit/crossrows.py` builds two
+decides what either of them is given, all in `finishing.py`; `testkit/crossrows.py` builds two
 campaigns on two mods and fails if the two callers ever disagree again.
 
 **A save is read once, not twice.** `analyze_save` had a comment saying the
