@@ -18,7 +18,10 @@ So this module owns the record. It holds:
   * the rules for what is dropped when -- `SPENT_ON_FINALIZE` is what
     finishing consumes, `KEEP_NATION` is what survives the trim, and the
     `AS_PLAIN_DICTS` pair is what stops a counter being rebuilt as a
-    counter on the far side of a pipe.
+    counter on the far side of a pipe, and
+  * how a scanned reading folds into one -- `SCANNED_PROVINCES` and
+    `SCANNED_COUNTRY` say what the Rust scanner sends, where each piece
+    goes and how it combines.
 
 It imports nothing of ours, which is the point: `readsave`, `fastscan`,
 `vic2_analyzer` and `explain` can all depend on it without any of them
@@ -27,14 +30,25 @@ reach back into `vic2_analyzer` for the two counting functions, which
 `vic2_analyzer` imports in turn, a circle held apart only by importing
 late.
 
-What this module does **not** yet do is stop the two producers knowing
-the field names for themselves. `fastscan.apply_countries` still fills
-the containers `blank_nation` made, by name, and what holds the Python
-reader and the Rust scanner to the same shape is still `testkit/parity.py`
-comparing their output byte for byte. Narrowing that is a separate job.
+`fastscan` no longer names any of these fields. It starts the scanner,
+waits for it and hands what comes back here, and the folding -- which
+container each piece goes into and whether it is added, replaced, updated
+or extended -- is declared beside the fields themselves. A key the scanner
+sends that no rule accounts for is refused rather than dropped in silence,
+which is the direction that used to be dangerous: a scanner that has
+learnt to send a new field and a Python that quietly ignores it look
+exactly like everything working.
+
+What is still written twice is `COUNTRY_SCALARS` and `COUNTRY_NUMERICS`,
+because the second copy is in Rust and cannot import this. The check in
+`testkit/record.py` reads those names straight out of
+`scanner/src/country.rs` and fails if the two have drifted, along with the
+rest of the shape -- and needs no save, no mod, no Rust compiler and not
+even the built binary.
 """
 
 from collections import Counter, defaultdict
+from sys import intern as _intern
 
 
 # Mobilization draws from poor-strata pops that are neither soldiers (they
@@ -315,3 +329,268 @@ def trim_save(meta, nations, keep=KEEP_NATION):
     thin = {tag: {k: nat[k] for k in keep if k in nat}
             for tag, nat in nations.items()}
     return {k: v for k, v in meta.items() if k in KEEP_META}, thin
+
+
+# ---------------------------------------------------------------------------
+# Folding a scanner's reading into a record
+#
+# The Rust scanner in `scanner/` reads the provinces and the countries, which
+# is most of a save, and hands them back in shapes chosen to be cheap to write
+# and cheap to read: pairs rather than objects, one shared table of pop-type
+# names rather than the name against every pop. Turning those into the record
+# above is a fold, and it used to live in `fastscan` -- which meant `fastscan`
+# named fifty-three of these fields itself, and had to know that `pop_by_type`
+# is a counter you add into and `core_provinces` a set you update. Two files
+# knowing the record is how two files drift apart.
+#
+# So the fold lives here, beside the fields it fills. What a scanner sends is
+# declared as (what it calls it, where it goes, how it combines), and anything
+# it sends that is not in these tables is an error rather than a silence --
+# the dangerous direction, because a scanner that has learnt to send a new
+# field and a Python that quietly drops it look exactly like everything
+# working.
+
+
+def _add(nat, field, value):
+    nat[field] += value
+
+
+def _add_if(nat, field, value):
+    # Only when there is one, because that is what the Python reader does:
+    # `naval_base_levels` starts as int 0 and is left alone by a province
+    # with no naval base, so a nation without one carries `0` and not `0.0`.
+    # The report never notices; the CSV writes the number out and does.
+    if value:
+        nat[field] += value
+
+
+def _highest(nat, field, value):
+    if value > nat[field]:
+        nat[field] = value
+
+
+def _put(nat, field, value):
+    nat[field] = value
+
+
+def _extend(nat, field, value):
+    nat[field].extend(value)
+
+
+def _extend_interned(nat, field, value):
+    nat[field].extend(_intern(v) for v in value)
+
+
+def _update_set(nat, field, value):
+    nat[field].update(value)
+
+
+def _replace(nat, field, value):
+    # The scanner sends an empty list for "this nation has none", and the
+    # blank record already holds the right empty thing -- which is not always
+    # a list. Replacing only when there is something keeps the blank's type.
+    if value:
+        nat[field] = value
+
+
+def _replace_list_interned(nat, field, value):
+    if value:
+        nat[field] = [_intern(v) for v in value]
+
+
+def _replace_set_interned(nat, field, value):
+    if value:
+        nat[field] = {_intern(v) for v in value}
+
+
+def _replace_dict_interned(nat, field, value):
+    if value:
+        nat[field] = {_intern(k): v for k, v in value}
+
+
+def _pairs_put(nat, field, value):
+    target = nat[field]
+    for key, item in value:
+        target[key] = item
+
+
+def _pairs_put_interned(nat, field, value):
+    target = nat[field]
+    for key, item in value:
+        target[_intern(key)] = _intern(item)
+
+
+def _pairs_add(nat, field, value):
+    target = nat[field]
+    for key, item in value:
+        target[key] += item
+
+
+def _pairs_add_interned(nat, field, value):
+    # Pairs, in the order the file first mentioned each name, because a
+    # stable sort downstream breaks ties on it.
+    target = nat[field]
+    for key, item in value:
+        target[_intern(key)] += item
+
+
+def _pairs_extend(nat, field, value):
+    target = nat[field]
+    for key, items in value:
+        target[key].extend(items)
+
+
+def _pairs_add_nested(nat, field, value):
+    target = nat[field]
+    for key, items in value:
+        counter = target[key]
+        for kind, item in items:
+            counter[_intern(kind)] += item
+
+
+# What the scanner sends about the provinces a nation owns, and what becomes
+# of each. `mobilizable` is not here: its pop types and cultures arrive as
+# numbers into a shared name table, so it needs something the others do not.
+SCANNED_PROVINCES = (
+    ("provinces", "provinces", _add),
+    ("ports", "ports", _add),
+    ("total_pop", "total_pop", _add),
+    ("life_unmet", "life_unmet", _add),
+    ("starving", "starving", _add),
+    ("naval_base_levels", "naval_base_levels", _add_if),
+    ("max_naval_base", "max_naval_base", _highest),
+    ("fort_levels", "fort_levels", _add),
+    ("railroad_levels", "railroad_levels", _add),
+    ("literacy_weighted", "literacy_weighted", _add),
+    ("con_weighted", "con_weighted", _add),
+    ("mil_weighted", "mil_weighted", _add),
+    ("money_total", "money_total", _add),
+    ("cores", "core_provinces", _update_set),
+    ("occupied", "occupied_provinces", _update_set),
+    ("colonial", "province_colonial", _pairs_put),
+    ("pop_by_type", "pop_by_type", _pairs_add_interned),
+    ("pop_by_culture", "pop_by_culture", _pairs_add_interned),
+    ("pop_at", "pop_at", _pairs_add),
+    ("soldiers_at", "soldiers_at", _pairs_add),
+    ("literacy_at", "literacy_at", _pairs_add),
+    ("soldier_pops_at", "soldier_pops_at", _pairs_extend),
+)
+
+
+# And what it sends about the country block itself. `tag`, `scalars` and
+# `numerics` are not here: the first is the key the block is found under, and
+# the other two are name/value pairs whose names are fields of this record,
+# which is the one thing the scanner is still told rather than asked.
+SCANNED_COUNTRY = (
+    ("is_mobilized", "is_mobilized", _put),
+    ("human", "human", _put),
+    ("reforms", "reforms", _pairs_put_interned),
+    ("accepted_cultures", "accepted_cultures", _replace_list_interned),
+    ("country_flags", "country_flags", _replace_set_interned),
+    ("modifiers", "modifiers", _extend),
+    ("goods_supply", "goods_supply", _replace_dict_interned),
+    ("invention_ids", "invention_ids", _replace),
+    ("mobilizing", "mobilizing", _add),
+    ("states", "states", _add),
+    ("province_state", "province_state", _pairs_put),
+    ("colonial_provinces", "colonial_provinces", _update_set),
+    ("colonial_level", "colonial_level", _pairs_put),
+    ("factory_count", "factory_count", _add),
+    ("factory_levels", "factory_levels", _add),
+    ("techs", "techs", _add),
+    ("tech_list", "tech_list", _extend_interned),
+    ("army_techs", "army_techs", _add),
+    ("navy_techs", "navy_techs", _add),
+    ("brigades", "brigades", _add),
+    ("armies", "armies", _add),
+    ("navies", "navies", _add),
+    ("ships", "ships", _add),
+    ("regiment_pops", "regiment_pops", _extend),
+    ("regiments_by_type", "regiments_by_type", _pairs_add_interned),
+    ("ships_by_type", "ships_by_type", _pairs_add_interned),
+    ("ship_crew", "ship_crew", _pairs_add_interned),
+    ("units_at", "units_at", _pairs_add_nested),
+    ("men_at", "men_at", _pairs_add_nested),
+)
+
+
+# What a country block's own lines are called in a save, and what they are
+# called in this record. Both readers need this and both used to hold their
+# own copy -- Python rebuilt these two dicts inside the loop, once per nation
+# per save, and `scanner/src/country.rs` has the same pairs as two `const`
+# arrays. The Rust one cannot import this, so it is still written twice; what
+# is no longer true is that nobody checks. `testkit/record.py` reads the
+# names straight out of the .rs file and fails if the two lists have drifted,
+# which needs neither a Rust compiler nor a save.
+COUNTRY_SCALARS = {
+    "nationalvalue": "nationalvalue",
+    "primary_culture": "primary_culture",
+    "civilized": "civilized",
+    "government": "government",
+    "capital": "capital",
+}
+
+COUNTRY_NUMERICS = {
+    "prestige": "prestige",
+    "badboy": "infamy",
+    "money": "treasury",
+    "tax_base": "tax_base",
+    "war_exhaustion": "war_exhaustion",
+    "revanchism": "revanchism",
+    "plurality": "plurality",
+    "research_points": "research_points",
+    "ruling_party": "ruling_party",
+}
+
+
+# The keys each fold handles without a rule of its own, so a block carrying
+# something neither the table nor this set accounts for can be spotted.
+PROVINCE_EXTRAS = frozenset(("mobilizable",))
+COUNTRY_EXTRAS = frozenset(("tag", "scalars", "numerics"))
+
+
+def _unknown(block, table, extras, what):
+    stray = sorted(set(block) - {key for key, _f, _r in table} - extras)
+    if stray:
+        raise ValueError(
+            "the scanner sent %s this does not know what to do with: %s. It "
+            "is a newer build than this Python; rebuild the scanner from this "
+            "tree, or add the field to nation.py."
+            % (what, ", ".join(stray)))
+
+
+def fold_provinces(nat, block, names):
+    """
+    What one nation's provinces came to, folded into its record.
+
+    `names` is the scanner's shared table of interned strings: pop types and
+    cultures arrive as indices into it, because a campaign has a dozen types
+    and a few hundred cultures against tens of thousands of entries, and
+    sending numbers is cheaper on both sides.
+    """
+    _unknown(block, SCANNED_PROVINCES, PROVINCE_EXTRAS, "province totals")
+    for key, field, rule in SCANNED_PROVINCES:
+        rule(nat, field, block[key])
+    pool = nat["mobilizable_pops"]
+    for kind, culture, size, pid in block["mobilizable"]:
+        pool.append((names[kind], names[culture], size, pid))
+
+
+def fold_country(nat, block):
+    """
+    One country block from the scanner, folded into its record.
+
+    The containers are the ones `blank_nation` made, filled rather than
+    replaced, so a Counter stays a Counter and a defaultdict stays a
+    defaultdict for everything downstream that leans on it.
+    """
+    _unknown(block, SCANNED_COUNTRY, COUNTRY_EXTRAS, "a country block")
+    tag = _intern(block["tag"])
+    nat["tag"] = tag
+    for name, value in block["scalars"]:
+        nat[name] = _intern(value)
+    for name, value in block["numerics"]:
+        nat[name] = value
+    for key, field, rule in SCANNED_COUNTRY:
+        rule(nat, field, block[key])
+    return tag

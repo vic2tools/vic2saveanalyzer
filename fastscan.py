@@ -30,6 +30,8 @@ import subprocess
 import sys
 import threading
 
+from nation import fold_country, fold_provinces
+
 BINARY = "vic2scan.exe" if sys.platform == "win32" else "vic2scan"
 
 # What the first line has to carry, and what the rest has to. A binary that
@@ -283,141 +285,35 @@ def apply(got, nations, province_owner, pop_registry, world_sink,
     """
     Fold a scan into the structures `analyze_save` is filling.
 
-    The shapes here are the scanner's, chosen to be cheap to write and cheap
-    to read back: pairs rather than objects, one shared table of pop type
-    names rather than the name against every pop. Turning them into the
-    dicts, sets and lists Python expects is the price of not parsing the
-    file twice, and it is about a twentieth of what parsing it costs.
+    What belongs to a nation is handed to `nation.fold_provinces`, which is
+    where the record and the rules for filling it live. What is left here is
+    the save's own bookkeeping -- who owns which province, what type each pop
+    was, how many people the world holds -- which is not part of any one
+    nation and has no record to belong to.
+
+    The shapes are the scanner's, chosen to be cheap to write and cheap to
+    read back: pairs rather than objects, one shared table of pop type names
+    rather than the name against every pop. Turning them into the dicts, sets
+    and lists Python expects is the price of not parsing the file twice, and
+    it is about a twentieth of what parsing it costs.
     """
     world_sink[0] += got["world_pop"]
     for pid, owner, held in got["owners"]:
         province_owner[pid] = (sys.intern(owner), sys.intern(held))
         province_counts[owner] += 1
 
-    kinds = [sys.intern(k) for k in got["kind_names"]]
+    # The one shared table of names, interned once here rather than once per
+    # pop: a save has tens of thousands of pops and a few hundred names.
+    names = [sys.intern(k) for k in got["kind_names"]]
     ids, kind_of = got["pop_ids"], got["pop_kinds"]
     for i, pop_id in enumerate(ids):
-        pop_registry[pop_id] = kinds[kind_of[i]]
+        pop_registry[pop_id] = names[kind_of[i]]
 
     for tag, block in got["nations"].items():
-        nat = nations[sys.intern(tag)]
-        nat["provinces"] += block["provinces"]
-        nat["ports"] += block["ports"]
-        nat["total_pop"] += block["total_pop"]
-        nat["life_unmet"] += block["life_unmet"]
-        nat["starving"] += block["starving"]
-        # Only when there is one, because that is what Python does: these two
-        # start as int 0 and are left alone by a province with no naval base,
-        # so a nation without one carries `0` and not `0.0`. The report never
-        # notices; the CSV writes the number out and does.
-        if block["naval_base_levels"]:
-            nat["naval_base_levels"] += block["naval_base_levels"]
-        if block["max_naval_base"] > nat["max_naval_base"]:
-            nat["max_naval_base"] = block["max_naval_base"]
-        nat["fort_levels"] += block["fort_levels"]
-        nat["railroad_levels"] += block["railroad_levels"]
-        nat["literacy_weighted"] += block["literacy_weighted"]
-        nat["con_weighted"] += block["con_weighted"]
-        nat["mil_weighted"] += block["mil_weighted"]
-        nat["money_total"] += block["money_total"]
-
-        nat["core_provinces"].update(block["cores"])
-        nat["occupied_provinces"].update(block["occupied"])
-        for pid, flag in block["colonial"]:
-            nat["province_colonial"][pid] = flag
-
-        # Pairs, in the order the file first mentioned each name, because a
-        # stable sort downstream breaks ties on it.
-        by_type = nat["pop_by_type"]
-        for kind, size in block["pop_by_type"]:
-            by_type[sys.intern(kind)] += size
-        by_culture = nat["pop_by_culture"]
-        for culture, size in block["pop_by_culture"]:
-            by_culture[sys.intern(culture)] += size
-
-        pop_at = nat["pop_at"]
-        for pid, size in block["pop_at"]:
-            pop_at[pid] += size
-        soldiers_at = nat["soldiers_at"]
-        for pid, size in block["soldiers_at"]:
-            soldiers_at[pid] += size
-        literacy_at = nat["literacy_at"]
-        for pid, value in block["literacy_at"]:
-            literacy_at[pid] += value
-        soldier_pops_at = nat["soldier_pops_at"]
-        for pid, sizes in block["soldier_pops_at"]:
-            soldier_pops_at[pid].extend(sizes)
-
-        # Pop type and culture arrive as ids into `kind_names`: a campaign has
-        # a dozen types and a few hundred cultures against tens of thousands
-        # of entries, so sending numbers is cheaper on both sides.
-        pool = nat["mobilizable_pops"]
-        for kind, culture, size, pid in block["mobilizable"]:
-            pool.append((kinds[kind], kinds[culture], size, pid))
+        fold_provinces(nations[sys.intern(tag)], block, names)
 
 
 def apply_countries(got, nations):
-    """
-    Fold the scanner's country blocks into the nations being built.
-
-    The shapes are the scanner's -- pairs in the order the file gave them --
-    and the containers here are the ones `blank_nation` made, filled rather
-    than replaced, so a Counter stays a Counter and a defaultdict stays a
-    defaultdict for everything downstream that leans on it.
-    """
+    """Fold the scanner's country blocks into the nations being built."""
     for block in got.get("countries", ()):
-        tag = sys.intern(block["tag"])
-        nat = nations[tag]
-        nat["tag"] = tag
-        for name, value in block["scalars"]:
-            nat[name] = sys.intern(value)
-        for name, value in block["numerics"]:
-            nat[name] = value
-        nat["is_mobilized"] = block["is_mobilized"]
-        nat["human"] = block["human"]
-        for key, value in block["reforms"]:
-            nat["reforms"][sys.intern(key)] = sys.intern(value)
-        if block["accepted_cultures"]:
-            nat["accepted_cultures"] = [sys.intern(c)
-                                        for c in block["accepted_cultures"]]
-        if block["country_flags"]:
-            nat["country_flags"] = {sys.intern(f)
-                                    for f in block["country_flags"]}
-        nat["modifiers"].extend(block["modifiers"])
-        if block["goods_supply"]:
-            nat["goods_supply"] = {sys.intern(g): v
-                                   for g, v in block["goods_supply"]}
-        if block["invention_ids"]:
-            nat["invention_ids"] = block["invention_ids"]
-        nat["mobilizing"] += block["mobilizing"]
-        nat["states"] += block["states"]
-        for pid, ordinal in block["province_state"]:
-            nat["province_state"][pid] = ordinal
-        nat["colonial_provinces"].update(block["colonial_provinces"])
-        for pid, level in block["colonial_level"]:
-            nat["colonial_level"][pid] = level
-        nat["factory_count"] += block["factory_count"]
-        nat["factory_levels"] += block["factory_levels"]
-        nat["techs"] += block["techs"]
-        nat["tech_list"].extend(sys.intern(t) for t in block["tech_list"])
-        nat["army_techs"] += block["army_techs"]
-        nat["navy_techs"] += block["navy_techs"]
-        nat["brigades"] += block["brigades"]
-        nat["armies"] += block["armies"]
-        nat["navies"] += block["navies"]
-        nat["ships"] += block["ships"]
-        nat["regiment_pops"].extend(block["regiment_pops"])
-        for kind, n in block["regiments_by_type"]:
-            nat["regiments_by_type"][sys.intern(kind)] += n
-        for kind, n in block["ships_by_type"]:
-            nat["ships_by_type"][sys.intern(kind)] += n
-        for kind, v in block["ship_crew"]:
-            nat["ship_crew"][sys.intern(kind)] += v
-        for pid, types in block["units_at"]:
-            counter = nat["units_at"][pid]
-            for kind, n in types:
-                counter[sys.intern(kind)] += n
-        for pid, types in block["men_at"]:
-            counter = nat["men_at"][pid]
-            for kind, n in types:
-                counter[sys.intern(kind)] += n
+        fold_country(nations[sys.intern(block["tag"])], block)

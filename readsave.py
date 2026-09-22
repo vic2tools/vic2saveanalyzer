@@ -32,7 +32,9 @@ import re
 from collections import defaultdict
 
 import v2parse
-from nation import (MOBILIZABLE_TYPES, accepted_cultures_of, blank_nation)
+from nation import (COUNTRY_NUMERICS, COUNTRY_SCALARS,
+                    MOBILIZABLE_TYPES, accepted_cultures_of,
+                    blank_nation)
 from v2parse import (
     BLOCK,
     HEAD_SCALAR,
@@ -603,24 +605,13 @@ def read_country(text, at, stop, tag, nations, flat=True):
     """One country block."""
     nat = nations[tag]
     nat["tag"] = tag
-    scalars = {
-        "nationalvalue": "nationalvalue",
-        "primary_culture": "primary_culture",
-        "civilized": "civilized",
-        "government": "government",
-        "capital": "capital",
-    }
-    numerics = {
-        "prestige": "prestige",
-        "badboy": "infamy",
-        "money": "treasury",
-        "tax_base": "tax_base",
-        "war_exhaustion": "war_exhaustion",
-        "revanchism": "revanchism",
-        "plurality": "plurality",
-        "research_points": "research_points",
-        "ruling_party": "ruling_party",
-    }
+    # Declared beside the record in `nation`, and bound to a local because
+    # the loop below looks them up per entry. They were two dict literals
+    # built afresh for every nation of every save -- and a second copy of
+    # what `scanner/src/country.rs` keeps as two `const` arrays, with
+    # nothing checking the copies still agreed. `testkit/record.py` does.
+    scalars = COUNTRY_SCALARS
+    numerics = COUNTRY_NUMERICS
 
     entries = (scan_entries(text, at, stop) if flat
                else walk_entries(Tokens(text, at)))

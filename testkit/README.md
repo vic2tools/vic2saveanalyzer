@@ -28,7 +28,7 @@ python3 testkit/edges.py                          # no saves needed
 python3 testkit/facts.py out/report.html          # the report is optional
 python3 testkit/invariants.py out/nations_timeseries.csv out/report.html
 python3 testkit/mangled.py "/path/to/one/save.v2"
-python3 testkit/parity.py "/path/to/saves" 8
+python3 testkit/parity.py ["/path/to/saves"] [8]   # builds one if none
 python3 testkit/boots.py out/report.html
 python3 testkit/looks.py out/report.html shot.png   # for eyes, not for CI
 python3 testkit/keeping.py                        # no saves needed
@@ -41,6 +41,7 @@ python3 testkit/noworkers.py                     # no saves needed
 python3 testkit/staleness.py                     # no saves needed
 python3 testkit/mobrate.py                       # no saves needed
 python3 testkit/crossrows.py                     # no saves needed
+python3 testkit/record.py                        # no saves needed
 python3 testkit/caching.py                       # no saves needed
 python3 testkit/window.py "/path/to/saves"
 python3 testkit/spawned.py "/path/to/saves"
@@ -67,7 +68,17 @@ python3 testkit/savefmt.py
 **`parity.py`** holds the Rust scanner to the Python parser, save by save,
 field by field, exactly — no tolerance, because the floats are accumulated
 in the same order on both sides and a tolerance would hide the drift this
-exists to catch.
+exists to catch. It had stopped doing it: the scanner was switched off by
+replacing `fastscan.scan`, which `analyze_save` does not call — it calls
+`start`, `head` and `collect`, because it works between the scanner's two
+halves rather than waiting for both — so the "slow" read ran the scanner
+too and this compared it against itself, reporting "identical across 41
+nations" for free. It uses `analyze_save`'s own `use_scanner` argument now
+and then *checks the scanner stayed off*, because a comparison that has
+quietly stopped comparing is the failure this file is for. Given no save
+folder it builds one with `savefmt.furnished`, so it runs on a machine that
+has never seen a Victoria 2 campaign; real saves are still better where
+there are any, since they carry shapes nobody thought to write on purpose.
 
 **`awkward.py`** and **`countries.py`** write saves with the layouts that
 are legal but rare — a pop with a mod's own block nested inside it, an army
@@ -194,6 +205,25 @@ where the report keeps them. The check watches the one finishing function
 both paths now call, so it compares the settings each path asked for *and*
 the numbers each got back -- putting any one of the five divergences back
 fails it.
+
+**`record.py`** holds the nation record and its two readers to each other
+without needing either of them to run. A save is read in Python by
+`readsave` and, where it has been built, by the Rust scanner, whose answer
+`nation.fold_provinces` and `nation.fold_country` fold into the same
+seventy-two fields. Two implementations of one thing are safe only while
+something proves continuously that they agree, and the proof was
+`parity.py` alone -- which needs a folder of real saves *and* a compiled
+binary and says nothing without both. That is the wrong shape for the
+failure it guards: the dangerous drift is not a wrong number on a machine
+with a scanner, it is a field one side learns about and the other does not,
+which on a machine without one looks exactly like everything working. So
+this checks the shape instead, from the sources: every fold rule names a
+field the record declares, no field is claimed twice, the save-key names
+Python and `scanner/src/country.rs` each keep a copy of still match, every
+key the scanner emits is handled and every key handled is emitted, the fold
+fills the containers `blank_nation` made rather than replacing them, and a
+key nobody accounted for raises instead of being dropped in silence. Seven
+ways of drifting were each put in and each came out.
 
 **`staleness.py`** touches every source file the program has, in a copy of it,
 and checks each one moves the report stamp. The stamp is what lets a second run

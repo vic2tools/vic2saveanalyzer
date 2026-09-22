@@ -275,12 +275,191 @@ def rich(path):
     return wrong
 
 
+def furnished(path):
+    """
+    A save with as much in it as these builders can write.
+
+    For the checks that want a save to be *read* rather than to carry one
+    particular thing. Two nations, four cultures, pops of every mobilizable
+    type, and provinces that are cored, colonial, occupied and built on;
+    countries with accepted cultures, flags, a national modifier, a place on
+    the world market, a mobilization order, states with factories in them,
+    an army and a navy.
+
+    Coverage is the point. A check that compares two readers of a save
+    learns nothing from a field that neither of them finds anything in, and
+    the minimal saves above leave most of a nation empty.
+    """
+    ideology = [("ideology", ["\t\t\t%d=%.5f" % (i, 0.1 * i)
+                             for i in range(1, 7)])]
+
+    def people(pid, kinds, hungry=0, nested=()):
+        """
+        One list of lines per pop, which is what `province` lays out.
+
+        `hungry` of them are at nothing rather than merely short of
+        something. The ids are bare, the way the saves this was checked
+        against write them, because the id is what says which pop a regiment
+        was raised from -- a brigade whose pop cannot be found is counted as
+        a standing one, so a builder writing an id nothing reads makes every
+        mobilized brigade disappear quietly. `nested` names the ones to write
+        the other way anyhow, to keep that shape covered.
+        """
+        out = []
+        for i, (kind, size, culture, faith) in enumerate(kinds):
+            out.append(pop(kind, pid * 100 + i, size, culture=culture,
+                           religion=faith, nested_id=i in nested,
+                           life=0.02 if i < hungry else 0.8,
+                           extra=["money=12.00000", "con=1.00000",
+                                  "mil=2.00000"],
+                           blocks=ideology))
+        return out
+
+    built = ["naval_base=", "{", "\tlevel=4", "}",
+             "fort=", "{", "\tlevel=2", "}",
+             "railroad=", "{", "\tlevel=3", "}",
+             "garrison=10.000", "life_rating=25"]
+
+    parts = [head("1881.3.24", player="SWE", flags=("a_world_flag",))]
+    # Cored, built on, and holding one pop of every type that can mobilize
+    # plus two that cannot.
+    parts.append(province(1, "SWE", people(1, [
+        ("farmers", 12000, "swedish", "protestant"),
+        ("labourers", 7000, "swedish", "protestant"),
+        ("craftsmen", 5500, "swedish", "protestant"),
+        ("soldiers", 2000, "swedish", "protestant"),
+        ("aristocrats", 800, "swedish", "protestant"),
+        # Mobilizable by type and of no accepted culture, so it is held out
+        # of the pool and counted in what was held out.
+        ("farmers", 1700, "finnish", "protestant")]), extra=built))
+    # Owned by SWE and held by DEN: the engine mobilizes nobody from a
+    # province under someone else's control.
+    parts.append(province(2, "SWE", people(2, [
+        ("farmers", 4000, "swedish", "protestant"),
+        ("farmers", 3000, "norwegian", "protestant")]),
+        extra=['controller="DEN"']))
+    # A colony, whose pops are outside the stated states as well.
+    parts.append(province(3, "SWE", people(3, [
+        ("labourers", 2500, "swedish", "protestant")], nested=(0,)),
+        extra=["colonial=2"]))
+    parts.append(province(4, "DEN", people(4, [
+        ("farmers", 9000, "danish", "catholic"),
+        ("craftsmen", 3300, "danish", "catholic")], hungry=1)))
+
+    parts.append(country(
+        "SWE", culture="swedish", religion="protestant",
+        techs=[("flintlock_rifles", 1.0), ("clipper_design", 0.25)],
+        inventions=[1, 2, 5],
+        extra=["badboy=4.500", "prestige=120.000", "money=5000.00000",
+               "tax_base=900.00000", "war_exhaustion=3.000",
+               "revanchism=0.250", "plurality=12.500",
+               "research_points=40.000", "ruling_party=3",
+               "nationalvalue=nv_order", "mobilize=yes", "human=yes",
+               "vote_franschise=universal_weighted_voting",
+               "war_policy=jingoism"],
+        blocks=[("culture", ['\t\t"norwegian" "danish"']),
+                ("flags", ["\t\tmy_country_flag=yes",
+                          "\t\tanother_flag=yes"]),
+                ("modifier", ['\t\tmodifier="national_confusion"',
+                             '\t\tdate="1881.1.1"']),
+                ("saved_country_supply", ["\t\tcoal=5.00000",
+                                         "\t\tiron=2.50000"]),
+                ("scheduled_mobilization", ["\t\tspawned=no"]),
+                ("state", nest("provinces", ["\t\t\t1 2"], 2)
+                          + nest("state_buildings", ["\t\t\tlevel=2"], 2)
+                          + nest("state_buildings", ["\t\t\tlevel=1"], 2)),
+                ("state", nest("provinces", ["\t\t\t3"], 2)
+                          + ["\t\tis_colonial=2"]),
+                ("army", ['\t\tname="First Army"']
+                         + nest("regiment", ['\t\t\tname="1 Brigade"',
+                                            "\t\t\ttype=infantry",
+                                            "\t\t\tpop=", "\t\t\t{",
+                                            "\t\t\t\tid=100",
+                                            "\t\t\t\tprovince_id=1", "\t\t\t}",
+                                            "\t\t\tcount=2000",
+                                            "\t\t\tstrength=3.000"], 2)
+                         + nest("regiment", ['\t\t\tname="2 Brigade"',
+                                            "\t\t\ttype=hussar",
+                                            "\t\t\tpop=", "\t\t\t{",
+                                            "\t\t\t\tid=103",
+                                            "\t\t\t\tprovince_id=1", "\t\t\t}",
+                                            "\t\t\tcount=3000",
+                                            "\t\t\tstrength=2.600"], 2)
+                         + ["\t\tlocation=1"]),
+                ("navy", ['\t\tname="Home Fleet"']
+                         + nest("ship", ['\t\t\tname="Vasa"',
+                                        "\t\t\ttype=frigate",
+                                        "\t\t\tstrength=100.000",
+                                        "\t\t\texperience=25.000"], 2))]))
+    parts.append(country(
+        "DEN", culture="danish", religion="catholic", capital=4,
+        techs=["flintlock_rifles"], inventions=[1],
+        extra=["prestige=30.000", "money=200.00000"],
+        blocks=[("state", nest("provinces", ["\t\t\t4"], 2))]))
+    parts.append(war("The Scanian War", "DEN", "SWE"))
+    return write(path, *parts)
+
+
+def furnished_check(path):
+    """
+    [what went wrong] when the furnished save is read back.
+
+    `furnished` exists so a check can compare two readers of a save without
+    a real campaign to hand, and a comparison learns nothing from a field
+    that is empty on both sides. So what is checked here is that the save is
+    actually full: the pops are there, the brigades are told apart, the
+    province is occupied and the colony is a colony.
+
+    It has already gone wrong once, in the way this file was written to
+    catch. The pops were handed to `province` as one flat list of lines
+    rather than one list per pop, so `province` extended its output with the
+    characters of each string, the save parsed without complaint, and every
+    nation in it had a population of nought. Nothing said so.
+    """
+    import readsave
+    import v2parse
+    v2parse.register_pop_types([])
+    readsave.set_reform_keys({"vote_franschise", "war_policy"})
+    furnished(path)
+    meta, nations = readsave.analyze_save(path, verbose=False,
+                                          use_scanner=False)
+
+    wrong = []
+    if sorted(nations) != ["DEN", "SWE"]:
+        return ["the furnished save came back with %s" % sorted(nations)]
+    swe, den = nations["SWE"], nations["DEN"]
+    # (what it is, what it should be) -- written out rather than derived,
+    # because a builder and a checker that share their arithmetic agree
+    # about everything including being wrong.
+    for name, got, want in (
+            ("SWE's people", swe["total_pop"], 38500),
+            ("SWE's provinces", swe["provinces"], 3),
+            ("SWE's standing brigades", swe["regular_brigades"], 1),
+            ("SWE's mobilized brigades", swe["mobilized_brigades"], 1),
+            ("SWE's ships", swe["ships"], 1),
+            ("SWE's states", swe["states"], 2),
+            ("SWE's factories", swe["factory_count"], 2),
+            ("SWE's occupied provinces", sorted(swe["occupied_provinces"]), [2]),
+            ("SWE's colonies", sorted(swe["colonial_provinces"]), [3]),
+            ("SWE's cores", sorted(swe["core_provinces"]), [1, 2, 3]),
+            ("SWE's reforms", len(swe["reforms"]), 2),
+            ("SWE's unaccepted pops", swe["mob_excluded_culture"], 1700),
+            ("SWE's mobilizable pops", len(swe["mobilizable_pops"]), 6),
+            ("DEN's starving", den["starving"], 9000),
+            ("the world's people", meta["world_pop"], 50800),
+            ("the wars", len(meta["wars"] or ()), 1)):
+        if got != want:
+            wrong.append("%s came back as %r, not %r" % (name, got, want))
+    return wrong
+
+
 def main():
     import shutil
     import tempfile
     holding = tempfile.mkdtemp(prefix="vic2fmt")
     try:
         wrong = selfcheck(os.path.join(holding, "a.v2"))
+        wrong += furnished_check(os.path.join(holding, "f.v2"))
     finally:
         shutil.rmtree(holding, ignore_errors=True)
     if wrong:

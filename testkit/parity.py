@@ -9,19 +9,31 @@ compares every field of every nation, exactly. Not approximately: the floats
 are accumulated in the same order on both sides, so they should match to the
 bit, and a tolerance here would hide the very drift this exists to catch.
 
-    python3 testkit/parity.py "/path/to/saves" [how many]
+    python3 testkit/parity.py ["/path/to/saves"] [how many]
+
+Given no saves it builds one, with `savefmt.furnished` -- two nations,
+four cultures, pops of every mobilizable type, provinces cored, colonial,
+occupied and built on, and countries with states, factories, reforms, an
+army and a navy. That covers sixty-eight of the record's seventy-two
+fields, and it means this runs on a machine that has never seen a
+Victoria 2 campaign. Real saves are still better when there are any: they
+carry shapes nobody thought to write on purpose.
 
 Says nothing and exits 0 when they agree.
 """
 
 import glob
 import os
+import shutil
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
 import fastscan                                            # noqa: E402
+import readsave                                            # noqa: E402
+import savefmt                                             # noqa: E402
 import v2parse                                             # noqa: E402
 import vic2_analyzer as va                                 # noqa: E402
 
@@ -136,11 +148,27 @@ def main():
         print("no scanner built, so nothing to compare; "
               "run `cargo build --release` in scanner/")
         return 0
+    v2parse.register_pop_types([])
+    # Which lines of a country block are reforms is told to both readers, and
+    # a run that tells neither leaves that half of the country block dark on
+    # both sides -- which is agreement about nothing.
+    readsave.set_reform_keys({"vote_franschise", "war_policy"})
+
+    holding = None
     files = sorted(glob.glob(os.path.join(where, "*.v2")))[:limit]
     if not files:
-        print("no saves in %s" % where)
-        return 2
-    v2parse.register_pop_types([])
+        holding = tempfile.mkdtemp(prefix="vic2parity")
+        files = [savefmt.furnished(os.path.join(holding, "furnished.v2"))]
+        print("no saves in %s, so comparing on one built here" % where)
+    try:
+        return run(files)
+    finally:
+        if holding:
+            shutil.rmtree(holding, ignore_errors=True)
+
+
+def run(files):
+    """[exit code] for the saves given."""
     if not really_used(files[0]):
         print("the scanner at %s is built, and the analyzer could not use\n"
               "its answer -- so every save below was read in Python twice\n"

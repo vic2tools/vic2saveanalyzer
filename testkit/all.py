@@ -66,6 +66,8 @@ def main():
         # nothing, and one of them did pass for the wrong reason once.
         ("the save-builder the tests use", [os.path.join(KIT, "savefmt.py")]),
         ("names read before they exist", [os.path.join(KIT, "tooearly.py")]),
+        ("the record both readers fill",
+         [os.path.join(KIT, "record.py")]),
         ("awkward save layouts", [os.path.join(KIT, "awkward.py")]),
         ("awkward country blocks", [os.path.join(KIT, "countries.py")]),
         ("the keeper", [os.path.join(KIT, "keeping.py")]),
