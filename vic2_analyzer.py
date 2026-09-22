@@ -544,7 +544,7 @@ def mob_rate(nat, mod, live, stage, fallback):
     """
     if mod is None:
         return fallback
-    from mod_reader import breakdown
+    from modrules import breakdown
     return max(0.0, sum(v for _k, _n, v in
                         breakdown(nat, mod, live=live, world=stage)))
 
@@ -1155,7 +1155,7 @@ def finalize(nat, rate=1.0, pop_per_regiment=POP_SIZE_PER_REGIMENT,
             # Event modifiers, which the save lists by name, plus triggered
             # ones, which it does not and which have to be judged from their
             # own triggers.
-            from mod_reader import impact_for
+            from modrules import impact_for
             impact += impact_for(nat, mod, world)
             floor_ = int(to_float((mod.get("defines") or {}).get(
                 "MIN_MOBILIZE_LIMIT", 3), 3))
@@ -2418,8 +2418,8 @@ def main():
     live = None
     if mod is not None:
         from mod_reader import (attainable_inventions, index_base_for,
-                                index_coverage, unjudged_triggers,
-                                validate_indices)
+                                index_coverage, validate_indices)
+        from modrules import unjudged_triggers
         # Decode invention indices from compact summaries. Population and
         # province data stay in the raw cache until the report needs them.
         walked = campaign_inventions(files, verbose=verbose, **parse_options)

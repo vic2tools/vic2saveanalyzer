@@ -482,6 +482,43 @@ occupied; only that third one took anything.
 
 ## Speed
 
+### Finishing a mod campaign in the workers, 2026-09-21
+
+Same campaign and machine as the entry below: 103 saves (3.51 GB), Modus
+Omnino Demens 1.6, Python 3.14, sixteen cores. Three interleaved rounds each,
+run one at a time with nothing else on the machine -- an earlier attempt at
+this ran the benchmark and the test suite at once and was worthless for it.
+Cold means the parse cache emptied with the mod and map caches kept; warm
+means `--rebuild` over a full cache.
+
+| Mode | Before, median (range) | After, median (range) |
+|---|---:|---:|
+| Cold, with mod | 15.35 s (15.34-15.80) | 6.00 s (5.93-6.15) |
+| Warm rebuild | 3.56 s (3.38-3.69) | 3.13 s (3.05-3.32) |
+
+Peak memory is unchanged at about 266 MB either way.
+
+The cold figure is not a tuning win, it is a missing pool. `pooled` is the
+saves with no cache entry unless the workers have been given something to do
+beyond reading. On a mod run the invention pass had just written a cache
+entry for every save, so the report pass found nothing outstanding, took
+`workers = 1`, never built a pool at all, and read a hundred cache entries
+and finalized four thousand nations one after another while fifteen cores
+did nothing.
+
+What kept the finishing in the parent was that a mod's rate comes from
+`breakdown`, which needs the inventions anyone in the campaign could reach,
+and that is not known until the campaign has been walked. But the invention
+pass above works it out, and is cheap now that it carries only technologies
+and invention IDs, so by the time the report pass starts the rate is
+answerable. The mod goes to the workers inside the finish spec: a third of a
+megabyte pickled once per worker, against a hundred full saves pickled one at
+a time into the process that has everything else left to do.
+
+All nine HTML and CSV outputs are byte-identical, as is each of the four
+diagnostics. This does **not** mean the cold path is now near any floor: the
+serial fraction is smaller, not gone.
+
 ### Mod campaign optimization, 2026-09-21
 
 Measured on the Netherlands campaign: 103 saves (3.51 GB), the supplied

@@ -109,7 +109,7 @@ def build():
     # These are imported inside functions rather than at the top of the file, so
     # they are named here in case the bundler's scan ever stops following them.
     carried = ["vic2_analyzer", "readsave", "explain", "cacheio", "v2parse", "mod_reader",
-               "report",
+               "modrules", "report",
                "template", "tech_groups",
                # the window's two halves and the one thing that leaves the
                # machine, all reached from app.py

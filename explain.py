@@ -160,7 +160,7 @@ def explain(args, mod, live, parsed):
         if nat is None:
             sys.exit(f"{tag} is not in {meta['file']}.")
         if mod is not None:
-            from mod_reader import rate_for
+            from modrules import rate_for
             rate = rate_for(nat, mod, live=live,
                             world=save_world(meta, mod)) or args.mob_rate
         else:
@@ -283,7 +283,7 @@ def explain(args, mod, live, parsed):
     if args.explain_mob:
         if mod is None:
             sys.exit("--explain-mob needs --mod-path.")
-        from mod_reader import breakdown
+        from modrules import breakdown
         tag = args.explain_mob.upper()
         meta, nations = parsed[-1]
         nat = nations.get(tag)
@@ -299,7 +299,7 @@ def explain(args, mod, live, parsed):
         print(f"\n{tag} has {len(nat['tech_list'])} techs and "
               f"{len(nat['invention_ids'])} active inventions; "
               f"{len(parts)} sources grant it mobilisation size.")
-        from mod_reader import unjudged_triggers
+        from modrules import unjudged_triggers
         skipped = unjudged_triggers(mod)
         if skipped:
             print(f"Left out, because their trigger asks something this "

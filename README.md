@@ -793,6 +793,7 @@ runs it.
 | `v2parse.py` | The tokenizer underneath it |
 | `scanner/` | The same province and country scan in Rust, used when it has been built |
 | `mod_reader.py` | Reads the mod: names, colours, map, tech, pop types, modifiers |
+| `modrules.py` | What those rules are worth to one nation, triggers and all |
 | `cross.py` | Finds campaigns, works out which mod each was played on |
 | `report.py` | Prepares everything the report needs |
 | `template.py` | The report's HTML, CSS and JavaScript |
