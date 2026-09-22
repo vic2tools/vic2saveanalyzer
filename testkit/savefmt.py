@@ -53,11 +53,19 @@ def pop(kind, pid, size, culture="british", religion="protestant",
     -- which is how the game writes it and how the reader finds it, by
     elimination against the fields it knows.
 
-    `nested_id` writes the `id={ id= type= }` form the game uses for a pop
-    in a province, rather than the bare number; `extra` takes further
-    `\t\t` lines and `blocks` further `\t\t` blocks, which is how a pop
-    grows its ideology and issues without this function knowing about
-    either.
+    `nested_id` writes the `id={ id= type= }` form rather than the bare
+    number. The game does write that form -- for leaders, armies, navies,
+    states and constructions -- but not for a pop in a province: of the
+    32,118 pop ids in one campaign save, every one is bare and all 7,259
+    nested ones belong to something else. It is written here anyway because
+    the reader must not fall over on it, but it is the *bare* form a fixture
+    wants when the pop's id matters, because only that one reaches the pop
+    registry -- and the registry is what says whether a brigade raised from
+    that pop is a standing one or mobilized manpower.
+
+    `extra` takes further `\t\t` lines and `blocks` further `\t\t` blocks,
+    which is how a pop grows its ideology and issues without this function
+    knowing about either.
     """
     out = ["\t%s=" % kind, "\t{"]
     if nested_id:
