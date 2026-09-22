@@ -19,6 +19,11 @@ Copy the scanner in first. A fresh worktree has no `scanner/target/`, so
 every save is read in Python -- four times slower, and `parity.py` has
 nothing to compare against.
 
+Every check it uses is first run on the tree with no bug in it, and must
+pass there. A check that fails anyway is reported UNTESTED for each of its
+mutations rather than counted as catching them: it would have failed
+whatever was put back. It exits non-zero unless every mutation is caught.
+
 This is not one of the 24 checks and `all.py` does not run it. It is the
 thing you reach for when you have written a new check and want to know
 whether it would fail on the code it is supposed to reject.
@@ -54,6 +59,11 @@ def check(script, args=()):
     done = subprocess.run([sys.executable, os.path.join("testkit", script)] + list(args),
                           capture_output=True, text=True, cwd=TREE, timeout=900)
     return done.returncode == 0, (done.stdout + done.stderr)
+
+
+def argv_for(extra):
+    """What a mutation's check is handed: "saves" means the save folder."""
+    return (SAVES,) if extra == "saves" else tuple(extra)
 
 
 # --- the mutations -------------------------------------------------------
@@ -197,7 +207,8 @@ def m20():
 def m21():
     # `_add_if` exists so an untouched int stays an int. Nothing compares
     # types, and in Python 0 == 0.0, so every value check steps over this --
-    # while nations_timeseries.csv moves on 114 lines.
+    # while 1,999 of the 4,271 rows of nations_timeseries.csv move, measured
+    # on 103 saves with --no-cache on both sides.
     patch("nation.py",
           '    ("naval_base_levels", "naval_base_levels", _add_if),',
           '    ("naval_base_levels", "naval_base_levels", _add),')
@@ -206,7 +217,7 @@ def m21():
 # ---- commit 8b9f243: the reading profile and the cache key
 
 @mutation("reading-apply-forgets-global", "apply() forgets to set REFORM_KEYS",
-          "caching.py", "saves")
+          "caching.py")
 def m12():
     patch("readsave.py",
           """        v2parse.register_pop_types(self.pop_types)
@@ -217,7 +228,7 @@ def m12():
 
 
 @mutation("reading-pop-types-accumulate", "register_pop_types grows instead of replacing",
-          "caching.py", "saves")
+          "caching.py")
 def m13():
     src = open(os.path.join(TREE, "v2parse.py")).read()
     import re
@@ -229,7 +240,7 @@ def m13():
 
 
 @mutation("reading-key-drops-mod", "the cache key stops naming the mod",
-          "caching.py", "saves")
+          "caching.py")
 def m14():
     patch("readsave.py",
           '        ((os.path.abspath(mod_path) if mod_path else "no-mod")',
@@ -237,7 +248,7 @@ def m14():
 
 
 @mutation("reading-key-drops-pop-types", "the cache key stops naming the pop types",
-          "caching.py", "saves")
+          "caching.py")
 def m15():
     patch("readsave.py",
           '         + "|" + ",".join(sorted(pop_types))',
@@ -245,11 +256,42 @@ def m15():
 
 
 @mutation("reading-key-drops-mob-types", "the cache key stops naming the mobilizable types",
-          "caching.py", "saves")
+          "caching.py")
 def m16():
     patch("readsave.py",
           '         + "|" + ",".join(sorted(mob_types)))',
           '         + "")')
+
+
+# ---- the parse cache key, which hashed six files named by hand and not the
+# ---- one the fold had moved into
+
+@mutation("parse-key-hand-list",
+          "the parse cache key goes back to six files by hand, without nation.py",
+          "caching.py")
+def m23():
+    # Exactly what the key was before it was derived. `nation.py` fills every
+    # parsed save, and an edit to it was served out of the old parses.
+    patch("vic2_analyzer.py",
+          """    source = cacheio.source_fingerprint(*sorted(
+        {os.path.abspath(__file__), os.path.abspath(cacheio.__file__)}
+        | set(cacheio.sources_reached(readsave.__file__))))""",
+          """    import fastscan, tech_groups
+    source = cacheio.source_fingerprint(
+        __file__, readsave.__file__, v2parse.__file__, fastscan.__file__,
+        tech_groups.__file__, cacheio.__file__)""")
+
+
+@mutation("parse-key-too-wide",
+          "the parse cache key follows everything the analyzer imports",
+          "caching.py")
+def m24():
+    # The opposite mistake: walking from the file that writes the entry
+    # rather than from the reader. The report and `explain.py` land in the
+    # key, and rewording a label throws every cached save away.
+    patch("vic2_analyzer.py",
+          "        | set(cacheio.sources_reached(readsave.__file__))))",
+          "        | set(cacheio.sources_reached(readsave.__file__, __file__))))")
 
 
 # ---- commit 8caa343: a mod refusing to guess what it has not read
@@ -307,13 +349,33 @@ def main():
     if not os.path.exists(os.path.join(TREE, "scanner/target/release/vic2scan")):
         print("note: no scanner in %s, so parity.py compares Python with "
               "Python. Copy scanner/target/release/vic2scan in first.\n" % TREE)
-    wanted = args.names
+    chosen = [m for m in MUTATIONS if not args.names or m[0] in args.names]
+
+    # Every check first runs on the tree with no bug in it, and has to pass.
+    # A check that fails anyway fails for some reason of its own, and then
+    # failing with a bug in place says nothing about the bug. This harness
+    # reported five mutations "caught" that way: it handed `caching.py` the
+    # save folder as an argument, `unittest` read the folder as the name of
+    # a test, and every run failed on that before any test had been tried.
     revert()
+    control = {}
+    for _name, _bug, catcher, extra, _fn in chosen:
+        if (catcher, extra) not in control:
+            control[(catcher, extra)] = check(catcher, argv_for(extra))
+    for (catcher, extra), (passed, out) in control.items():
+        if not passed:
+            print("CONTROL FAILED: %s %s fails with no bug put back, so its "
+                  "mutations are not tried:\n%s\n"
+                  % (catcher, " ".join(argv_for(extra)),
+                     "\n".join("      " + l for l in out.splitlines()[-25:])))
+
     print("%-34s %-10s %s" % ("MUTATION", "VERDICT", "BUG PUT BACK"))
     print("-" * 100)
     results = []
-    for name, bug, catcher, args, fn in MUTATIONS:
-        if wanted and name not in wanted:
+    for name, bug, catcher, extra, fn in chosen:
+        if not control[(catcher, extra)][0]:
+            print("%-34s %-10s %s  [%s]" % (name, "UNTESTED", bug, catcher))
+            results.append((name, "UNTESTED", bug, catcher, ""))
             continue
         revert()
         try:
@@ -323,7 +385,7 @@ def main():
             results.append((name, "NOAPPLY", bug, catcher, ""))
             continue
         try:
-            passed, out = check(catcher, (SAVES,) if args == "saves" else args)
+            passed, out = check(catcher, argv_for(extra))
         except subprocess.TimeoutExpired:
             passed, out = True, "TIMEOUT"
         verdict = "BLIND" if passed else "caught"
@@ -334,13 +396,15 @@ def main():
     print("\n" + "=" * 100)
     blind = [r for r in results if r[1] == "BLIND"]
     noapply = [r for r in results if r[1] == "NOAPPLY"]
-    print("%d mutations: %d caught, %d BLIND, %d did not apply"
-          % (len(results), len(results) - len(blind) - len(noapply),
-             len(blind), len(noapply)))
+    untested = [r for r in results if r[1] == "UNTESTED"]
+    caught = len(results) - len(blind) - len(noapply) - len(untested)
+    print("%d mutations: %d caught, %d BLIND, %d did not apply, %d untested"
+          % (len(results), caught, len(blind), len(noapply), len(untested)))
     for name, _v, bug, catcher, out in blind:
         print("\n--- BLIND: %s (%s)\n    bug: %s\n    check output:\n%s"
               % (name, catcher, bug, "\n".join("      " + l for l in out.splitlines()[-25:])))
+    return 0 if caught == len(results) else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

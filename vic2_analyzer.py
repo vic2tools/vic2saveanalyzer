@@ -175,19 +175,26 @@ def _tell_report_ready(path):
 
 
 def _parser_fingerprint():
-    """Invalidate cached parses when any parser or scanner dependency changes."""
-    import fastscan
-    import readsave
-    import tech_groups
-    source = cacheio.source_fingerprint(
-        __file__, readsave.__file__, v2parse.__file__, fastscan.__file__,
-        tech_groups.__file__, cacheio.__file__)
-    if not source:
-        return ""
+    """
+    Invalidate cached parses when any code that decides what one holds
+    changes: the reader, every file of ours it reaches, this one, which
+    writes the entry, and `cacheio`, which decides its shape on disk.
+
+    The reader's files are found by following its imports, not listed.
+    They used to be listed, six of them, and `nation.py` was not one -- so
+    after the fold that fills every save moved into it, editing that fold
+    rebuilt the report out of parses the old fold had made.
+    """
     if getattr(sys, "frozen", False):
         # The bundled scanner is covered by the executable fingerprint. Its
         # temporary extraction timestamp changes on every launch.
-        return source[:10]
+        return cacheio.source_fingerprint()[:10]
+    import readsave
+    source = cacheio.source_fingerprint(*sorted(
+        {os.path.abspath(__file__), os.path.abspath(cacheio.__file__)}
+        | set(cacheio.sources_reached(readsave.__file__))))
+    if not source:
+        return ""
     return hashlib.md5((source + _scanner_fingerprint()).encode()).hexdigest()[:10]
 
 

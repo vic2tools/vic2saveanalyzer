@@ -341,3 +341,109 @@ python3 testkit/mutate.py --tree /tmp/mut --saves "/path/to/saves"
 
 The scanner copy is not optional: a fresh worktree has no `scanner/target/`,
 so every save is read in Python and `parity.py` has nothing to compare.
+
+---
+
+## 9. The parse cache key did not hash `nation.py`
+
+Found after the review above, and the worst thing in this file: it serves
+wrong numbers from an ordinary run, and nothing in the suite noticed.
+
+A parsed save is cached under a key that includes a hash of the code that
+parsed it, so that editing the parser throws the old entries away. That code
+was six files named by hand in `_parser_fingerprint`: `vic2_analyzer.py`,
+`readsave.py`, `v2parse.py`, `fastscan.py`, `tech_groups.py`, `cacheio.py`.
+Commit `549fd6e` then moved the fold that fills every parsed save --
+`fold_provinces`, `fold_country`, the rules table, `blank_nation`,
+`COUNTRY_SCALARS` -- out of `fastscan.py`, which was on the list, into
+`nation.py`, which was not.
+
+**The experiment**, on `f09e2f4`, with `TMPDIR=/tmp/nc` so the real cache was
+not touched. Warm the cache on the 103-save campaign under the mod. Change
+one fold rule in `nation.py` -- `_add_if` to `_add` on `naval_base_levels`,
+the one §2 is about. Run again with the cache on and without `--rebuild`.
+
+| | `nations_timeseries.csv` |
+|---|---|
+| the report rebuilt? | yes -- the stamp hashes every `.py` and saw the edit |
+| against the code *before* the edit | **identical** |
+| against `--no-cache` of the same code | **1,999 of 4,271 rows differ**, all in `naval_base_levels` |
+
+So the report was rebuilt, and rebuilt out of parses the old rule had made:
+numbers from the last time somebody looked, which is the one thing the stamp
+exists to prevent. The shipped executable is not affected -- frozen, the key
+covers the whole executable -- but every run from source was.
+
+It also meant the handoff contract could not see it. Step 1 ran the nine
+outputs *with* the cache, so for any edit to `nation.py` it compared a run
+against the old parses with a run against the old parses, and said
+"byte-identical". The contract now runs both sides with `--no-cache`.
+
+On the figure: §2 and the brief that reported this said 114 lines. With
+`--no-cache` on both sides, with the mod or without it, the same rule change
+moves 1,999. A comparison made with the cache on -- which is what the
+contract did at the time -- undercounts it for exactly the reason in this
+section.
+
+**Fixed** by deriving the list rather than writing it.
+`cacheio.sources_reached` follows imports from `readsave.py` -- including
+the ones made inside a function, since `readsave` reaches `fastscan` that way
+and `fastscan` reaches `nation` -- and the key hashes what it finds, plus the
+file that writes the entry and `cacheio.py`. It reads import lines off the
+source rather than parsing it, because a real parse costs 12 ms on the path
+of a run with nothing to do, which takes 80 ms in all; the line scan costs
+under one, and agrees with the parsed walk on all nineteen modules.
+
+The same experiment after the fix: the cached run matches `--no-cache` on
+every row, and the cache stands a second generation up beside the first
+(207 entries against 104), as it should.
+
+**The check** is in `testkit/caching.py` and does not read the list. It
+edits every file of the program in turn, in a copy, and watches which edits
+move the key: they must be exactly what `readsave` reaches (walked off the
+syntax tree, the same walk `packing.py` uses) plus the two files that write
+an entry. Too few is this bug; too many is the other mistake INTERNALS
+records, a key that throws every cached save away for a reworded label in
+`explain.py`. `testkit/mutate.py` has a mutation for each -- the key put
+back to the six hand-written files, and the key walked from the analyzer
+instead of the reader -- and both are caught.
+
+`mod_reader._reader_fingerprint` is also a hand-written list: itself,
+`v2parse.py`, `cacheio.py`. It is complete today, because those are the only
+files of ours `mod_reader` imports, so it was left alone. It is the same
+shape of hazard, and `sources_reached(__file__)` is the one-line fix the day
+it is not.
+
+## 10. The harness counted five mutations as caught without running the check
+
+`testkit/mutate.py` said 22 of 22 caught. Five of them were not tested at
+all.
+
+The five `reading-*` mutations name `caching.py` as their catcher and were
+declared to want the save folder, so the harness ran
+`python3 testkit/caching.py "/path/to/saves"`. `caching.py` is a `unittest`
+script. `unittest.main()` read the folder as the name of a test to run,
+found no such test, and failed -- every time, before any real test had been
+tried, bug or no bug:
+
+```
+ERROR: /path/to/saves/1870s (unittest.loader._FailedTest...)
+AttributeError: module '__main__' has no attribute '/path/to/...'
+Ran 1 test in 0.000s
+```
+
+A check that fails with no bug in place fails for some reason of its own, so
+its failing with a bug in place is not evidence of anything. The verdicts
+said "caught" because the harness only ever looked at whether the check
+failed.
+
+Run the way the suite runs it, with no argument, `caching.py` does catch all
+five -- each one fails a named test for the right reason -- so what §"What
+was checked and found sound" says about `caching.py` holds. It was not the
+harness that showed it.
+
+**Fixed** in `testkit/mutate.py`: `caching.py` is run with no argument, and
+every check is first run on the tree with no bug in it and must pass there.
+One that does not is reported `CONTROL FAILED`, and its mutations `UNTESTED`
+rather than caught. The harness also exits non-zero unless every mutation is
+caught. Re-run on the tree with both fixes: 24 mutations, 24 caught.

@@ -763,15 +763,20 @@ almost always repeats the one to its left, which skips nine lookups in ten.
 
 The cache key is the save's path, size and timestamp, **a hash of the parsing
 code**, and **which mod it was read under**. The first expires every entry the
-moment `readsave.py`, `v2parse.py` or `vic2_analyzer.py` changes -- the one
-version counter nobody forgets to bump. `explain.py` is deliberately not in
-it: it prints things about a nation and parses nothing, so rewording one of
-its readouts should not throw away everybody's cached saves. That is the
-other half of keeping the list honest -- too many files in it is a slower
-mistake than too few, but it is still a mistake. Which files those are has to be kept
-honest: the reading moved into `readsave.py`, and a hash that had gone on
-covering only the file it used to be in would have stopped noticing changes
-to it, handing back stale entries as though they were current. The second matters because a save is not read the same
+moment the code that fills one changes -- the one version counter nobody
+forgets to bump. That code is `readsave.py` and every file of ours it
+imports, found by following the imports (`cacheio.sources_reached`), plus the
+file that writes the entry and `cacheio.py`, which decides its shape.
+`explain.py` is deliberately not in it: it prints things about a nation and
+parses nothing, so rewording one of its readouts should not throw away
+everybody's cached saves. That is the other half of keeping the list honest
+-- too many files in it is a slower mistake than too few, but it is still a
+mistake. It used to be six names written out by hand, and it went wrong the
+way a list does: the fold that fills every parsed save moved out of
+`fastscan.py`, which was on it, into `nation.py`, which was not, and an edit
+to that fold rebuilt the report out of parses the old fold had made
+(`REVIEW.md` section 9). `testkit/caching.py` now edits every file of the
+program in turn and fails unless exactly the right ones move the key. The second matters because a save is not read the same
 way under every mod: the mod's own pop types are registered before parsing and
 decide which pop blocks the province reader keeps, so the same file under two
 mods is two different parses and must not share a slot. Output is byte-identical

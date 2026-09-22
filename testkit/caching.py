@@ -5,6 +5,7 @@ import csv
 import gc
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,9 @@ sys.path.insert(0, str(HERE))
 import fastscan
 # The smallest thing `Mod` will make, from the check that already needed one.
 from mobrate import a_mod
+# The imports walked properly, off the syntax tree, including those made
+# inside a function -- the same walk that decides what the executable carries.
+from packing import reached
 import readsave
 import savefmt
 import v2parse
@@ -115,6 +119,88 @@ class SaveCacheTests(unittest.TestCase):
         self.assertEqual(craftsmen, build("craftsmen", "fresh", cached=False))
         self.assertEqual(float(farmers["mobilization_pool"]), 1000)
         self.assertEqual(float(craftsmen["mobilization_pool"]), 2000)
+
+
+# Run inside a copy of the program, where editing a file costs nothing: note
+# the key, then append a comment to each file in turn and note which of those
+# edits moved it.
+EDIT_EACH = r'''
+import os, sys
+here = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, here)
+import vic2_analyzer as reader
+before = reader._parser_fingerprint()
+moved = []
+for name in sorted(os.listdir(here)):
+    if not name.endswith(".py") or name == "edit_each.py":
+        continue
+    path = os.path.join(here, name)
+    with open(path, "rb") as fh:
+        was = fh.read()
+    with open(path, "ab") as fh:
+        fh.write(b"\n# edited\n")
+    try:
+        if reader._parser_fingerprint() != before:
+            moved.append(name[:-3])
+    finally:
+        with open(path, "wb") as fh:
+            fh.write(was)
+print("BEFORE", before)
+print("MOVED", " ".join(moved))
+'''
+
+
+class ParserKeyTests(unittest.TestCase):
+    """
+    The parse cache key has to move whenever the code that fills an entry does.
+
+    It is a hash of source files, and the files used to be six names written
+    out by hand. `aadea15` then moved the fold that fills every parsed save
+    -- `fold_provinces`, `fold_country`, the rules table -- out of
+    `fastscan.py`, which was on the list, into `nation.py`, which was not.
+    Measured on 103 saves under a mod: warm the cache, change one fold rule,
+    run again. The report rebuilt, because its stamp hashes every file, and
+    rebuilt out of parses the old rule had made: `nations_timeseries.csv`
+    came out exactly as it was before the edit, and 1,999 of its 4,271 rows
+    differed from a `--no-cache` run of the same code. All 24 checks passed.
+
+    So this does not read the key's list of files. It edits each file of the
+    program in turn, in a copy, and watches which edits move the key. They
+    must be exactly the reader, everything it imports, and the two files that
+    write an entry. Not more, either: `explain.py` is kept out on purpose, and
+    a key that moved with every file would throw away a campaign's cached
+    saves for rewording a label in the report.
+    """
+
+    def test_the_key_moves_with_exactly_the_code_that_fills_it(self):
+        # What decides a cached save: reading one, and writing the entry.
+        wanted = reached("readsave") | {"vic2_analyzer", "cacheio"}
+        with tempfile.TemporaryDirectory(prefix="vic2key") as copy:
+            for name in os.listdir(HERE):
+                if name.endswith(".py"):
+                    shutil.copy2(HERE / name, os.path.join(copy, name))
+            probe = os.path.join(copy, "edit_each.py")
+            with open(probe, "w") as fh:
+                fh.write(EDIT_EACH)
+            done = subprocess.run([sys.executable, probe], cwd=copy,
+                                  capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        said = dict(line.split(" ", 1) for line in done.stdout.splitlines()
+                    if " " in line)
+        self.assertTrue(said.get("BEFORE"),
+                        "the key came back empty, so nothing is being cached "
+                        "and nothing below means anything")
+        moved = set(said.get("MOVED", "").split())
+        self.assertIn("nation", wanted, "the walk no longer reaches nation.py, "
+                      "which fills every parsed save; the walk is wrong")
+        self.assertEqual(sorted(wanted - moved), [],
+                         "these files decide what a cached save holds, and "
+                         "editing them does not move the parse cache key -- "
+                         "an edit to them is served out of the old parses")
+        self.assertEqual(sorted(moved - wanted), [],
+                         "editing these moves the parse cache key although "
+                         "nothing that reads a save reaches them, so every "
+                         "edit to them throws every cached save away")
 
 
 class ReadingProfileTests(unittest.TestCase):
