@@ -184,6 +184,13 @@ Twelve lines buying 0.6 KB, and marginally slower. The disk cache is keyed on a
 hash of `mod_reader.py`'s own source, so changing this invalidates old entries
 by itself.
 
+**Decided: left in place.** Dead weight is still not worth removing here. The
+measurement says the gain is zero — the default form is very slightly *larger*
+— and deleting them makes the program quietly require Python 3.11 on the
+Windows machine that builds `dist/vic2saveanalyzer.exe`, which cannot be tested
+from this one. Nothing in the tree states a minimum version. Zero gain against
+an untestable floor is not a trade worth making.
+
 **On the wider question — would a dataclass do the same work with less?** No,
 and the measurement says why. A generated `__repr__` on `Mod` would print
 **348,505 characters**; the hand-written one prints 53:
@@ -295,3 +302,42 @@ So the record is not only complaints. These were attacked and held up:
    could hit without touching the code.
 4. **§3** — cross-table field collision unchecked.
 5. **§5**, **§6**, **§7 field column** — tidying, no behaviour at stake.
+
+---
+
+## What was done about it
+
+`bd0d9c2` fixes §1, §1b, §2, §3 and §4 and leaves §5, §6 and §7 as they are.
+Re-running the harness against that commit:
+
+```
+22 mutations: 22 caught, 0 BLIND
+```
+
+against 15 of 21 before it. The six that used to go through are the four
+`crossrows.py` cases, the cross-table collision, and the naval-base int. The
+twenty-second is new: it puts back the `--pop-per-regiment` bug from §4.
+
+Still open, and all of them cosmetic:
+
+- **§5** `keep_pools` and `in_workers` are still two expressions of one fact
+  held together by reading order. Correct today; nothing asserts it.
+- **§6** decided against, above.
+- **§7** the fold table's field column still repeats the wire key in 48 of 51
+  rows. The seventeen rules should stay as they are.
+- `nation._unknown` rebuilds a constant key set on every nation of every save.
+  Hoisting it is 2.7x faster per call and saves 12 ms on a campaign of 103
+  saves, which is nothing against a 1.6 s parse. Worth doing because it is
+  simpler, not because it is faster — and not worth doing on its own.
+
+### How to re-run any of this
+
+```bash
+git worktree add /tmp/mut HEAD
+mkdir -p /tmp/mut/scanner/target/release
+cp scanner/target/release/vic2scan /tmp/mut/scanner/target/release/
+python3 testkit/mutate.py --tree /tmp/mut --saves "/path/to/saves"
+```
+
+The scanner copy is not optional: a fresh worktree has no `scanner/target/`,
+so every save is read in Python and `parity.py` has nothing to compare.
