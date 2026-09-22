@@ -157,9 +157,8 @@ def selfcheck(path):
     reader alone would have caught nothing.
     """
     import cross
-    import v2parse
     import readsave
-    v2parse.register_pop_types([])
+    readsave.PLAIN.apply()
 
     techs = ["flintlock_rifles", "clipper_design"]
     write(path,
@@ -417,9 +416,8 @@ def furnished_check(path):
     nation in it had a population of nought. Nothing said so.
     """
     import readsave
-    import v2parse
-    v2parse.register_pop_types([])
-    readsave.set_reform_keys({"vote_franschise", "war_policy"})
+    readsave.PLAIN._replace(
+        reform_keys=("vote_franschise", "war_policy")).apply()
     furnished(path)
     meta, nations = readsave.analyze_save(path, verbose=False,
                                           use_scanner=False)

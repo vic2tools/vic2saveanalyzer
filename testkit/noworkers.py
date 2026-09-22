@@ -62,10 +62,9 @@ def refusing_pool(saves, out):
     constructor returns an object, and the first piece of work is where
     it falls over.
     """
+    import readsave
     import vic2_analyzer as va
-    import v2parse
-    v2parse.register_pop_types([])
-    va.REFORM_KEYS.clear()
+    readsave.PLAIN.apply()
 
     # Patched on `concurrent.futures` rather than on `vic2_analyzer`,
     # because the pool is imported inside the function that uses it and so
@@ -135,10 +134,9 @@ def main():
             saves = a_campaign(os.path.join(holding, "saves"))
 
         # The ordinary run first, so there is something to compare against.
+        import readsave
         import vic2_analyzer as va
-        import v2parse
-        v2parse.register_pop_types([])
-        va.REFORM_KEYS.clear()
+        readsave.PLAIN.apply()
         normal = os.path.join(holding, "normal")
         old = sys.argv
         quiet = io.StringIO()

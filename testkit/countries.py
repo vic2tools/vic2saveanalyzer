@@ -204,18 +204,16 @@ ENG=
 
 def main():
     import fastscan
-    import v2parse
+    import readsave
     import vic2_analyzer as va
 
     out = os.path.join(HERE, "testkit", "_countries.v2")
     with open(out, "w", encoding="latin-1", newline="\r\n") as fh:
         fh.write(SAVE)
-    v2parse.register_pop_types([])
     # Reforms are the mod's business, and without one nothing here would
-    # exercise them. These two are real IGoR reform keys.
-    va.REFORM_KEYS.clear()
-    va.REFORM_KEYS.update({"voting_system", "slavery"})
-    v2parse.register_pop_types([])
+    # exercise them. These two are real IGoR reform keys, and they are set
+    # the way the program sets them: one profile, applied.
+    readsave.PLAIN._replace(reform_keys=("slavery", "voting_system")).apply()
 
     fast = va.analyze_save(out, verbose=False)
     real = fastscan.scan

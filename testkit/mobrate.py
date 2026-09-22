@@ -37,8 +37,8 @@ sys.path.insert(0, HERE)
 def a_nation(**over):
     """A blank nation with whatever the case needs written over it."""
     import nation
-    import v2parse
-    v2parse.register_pop_types([])
+    import readsave
+    readsave.PLAIN.apply()
     nat = nation.blank_nation()
     nat.update(tag="ZUL", tech_list=[], invention_ids=[], civilized="no",
                primary_culture="zulu", government="absolute_monarchy",

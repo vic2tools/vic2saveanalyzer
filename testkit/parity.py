@@ -34,8 +34,13 @@ sys.path.insert(0, HERE)
 import fastscan                                            # noqa: E402
 import readsave                                            # noqa: E402
 import savefmt                                             # noqa: E402
-import v2parse                                             # noqa: E402
 import vic2_analyzer as va                                 # noqa: E402
+
+
+# Which country lines are reform choices. Only a mod can say, and both
+# readers have to be told the same answer or half the country block is dark
+# on both sides -- which is agreement about nothing.
+REFORMS = ("vote_franschise", "war_policy")
 
 
 def normalise(o):
@@ -103,7 +108,7 @@ def both_ways(path):
     that has quietly stopped comparing -- so the guard below is not
     belt-and-braces. It is the check on the check.
     """
-    v2parse.register_pop_types([])
+    readsave.PLAIN._replace(reform_keys=REFORMS).apply()
     fast = va.analyze_save(path, verbose=False)
 
     started = []
@@ -148,11 +153,10 @@ def main():
         print("no scanner built, so nothing to compare; "
               "run `cargo build --release` in scanner/")
         return 0
-    v2parse.register_pop_types([])
-    # Which lines of a country block are reforms is told to both readers, and
-    # a run that tells neither leaves that half of the country block dark on
-    # both sides -- which is agreement about nothing.
-    readsave.set_reform_keys({"vote_franschise", "war_policy"})
+    # Which lines of a country block are reforms is told to both readers,
+    # and a run that tells neither leaves that half of the country block dark
+    # on both sides -- which is agreement about nothing.
+    readsave.PLAIN._replace(reform_keys=REFORMS).apply()
 
     holding = None
     files = sorted(glob.glob(os.path.join(where, "*.v2")))[:limit]

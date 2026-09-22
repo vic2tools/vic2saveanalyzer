@@ -72,14 +72,13 @@ from nation import (
     trim_save,
 )
 from readsave import (
-    MOB_CANDIDATES,
+    PLAIN,
     POP_TYPE_LIST,
-    REFORM_KEYS,
     STRATA,
     analyze_save,
     date_key,
-    set_mob_candidates,
-    set_reform_keys,
+    reading_for,
+    reading_now,
 )
 
 
@@ -301,24 +300,6 @@ def write_stamp(outdir, stamp):
         pass                          # a report that cannot be skipped later
 
 
-def mod_fingerprint(mod_path, pop_types, reform_keys=(), mob_types=()):
-    """
-    What the mod changes about parsing, as a short string.
-
-    A save is not read the same way under every mod. `register_pop_types` adds
-    the mod's own pop types to the set the province reader keeps, so the same
-    file parsed under two mods yields two different results -- and the cache,
-    keyed only by the file, would hand the second run the first one's answer.
-    Naming the mod and the pop types it registered keeps those apart.
-    """
-    return hashlib.md5(
-        ((os.path.abspath(mod_path) if mod_path else "no-mod")
-         + "|" + ",".join(sorted(pop_types))
-         + "|" + ",".join(sorted(reform_keys))
-         + "|" + ",".join(sorted(mob_types)))
-        .encode("utf-8")).hexdigest()[:10]
-
-
 def cache_dir():
     """Where parsed saves are remembered between runs."""
     return os.path.join(tempfile.gettempdir(), "vic2_analyzer_cache")
@@ -357,7 +338,8 @@ def campaign_inventions(files, **options):
     needed for decoding cross the worker boundary, preserving input order.
     """
     fingerprint = _parser_fingerprint() if options.get("use_cache", True) else ""
-    slots = [_cache_slot(path, fingerprint, options.get("world", "no-mod"))
+    world = options.get("reading", PLAIN).fingerprint()
+    slots = [_cache_slot(path, fingerprint, world)
              for path in files] if fingerprint else []
     slot = None
     if slots and all(slots):
@@ -447,11 +429,16 @@ Finish = namedtuple(
 _TRANSFORM = None
 
 
-def _worker_setup(pop_types, mob_types, reform_keys=(), transform=None):
+def _worker_setup(reading, transform=None):
+    """
+    What a fresh interpreter has to be told before it can read a save.
+
+    Windows starts a worker by re-running this file, so nothing the parent
+    set is set here. It used to be told three lists and had to put them back
+    in the right three places; it is told the one profile and asks it to.
+    """
     global _TRANSFORM
-    v2parse.register_pop_types(pop_types)
-    set_mob_candidates(mob_types)
-    set_reform_keys(reform_keys)
+    reading.apply()
     _TRANSFORM = transform
 
 
@@ -706,8 +693,8 @@ def worker_count(jobs, biggest_save, asked=None):
     return max(1, min(cores, jobs, room))
 
 
-def parse_saves(files, verbose=True, use_cache=True, world="no-mod",
-                pop_types=(), mob_types=(), reform_keys=(), jobs=None):
+def parse_saves(files, verbose=True, use_cache=True, reading=PLAIN,
+                jobs=None):
     """
     Every save in the folder, read in parallel when that is worth doing.
 
@@ -716,6 +703,7 @@ def parse_saves(files, verbose=True, use_cache=True, world="no-mod",
     saves. Only what is left over is worth spreading out.
     """
     fingerprint = _parser_fingerprint() if use_cache else ""
+    world = reading.fingerprint()
     slots = [_cache_slot(p, fingerprint, world) if fingerprint else None
              for p in files]
 
@@ -744,8 +732,7 @@ def parse_saves(files, verbose=True, use_cache=True, world="no-mod",
     if workers > 1:
         try:
             return _parse_parallel(files, out, todo, slots, workers, verbose,
-                                   pop_types, mob_types, reform_keys,
-                                   already=done)
+                                   reading, already=done)
         except Cancelled:
             raise                     # asked to stop, not a machine that cannot
         except Exception as exc:
@@ -797,9 +784,8 @@ def in_date_order(files):
 
 
 
-def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
-                       pop_types=(), mob_types=(), reform_keys=(), jobs=None,
-                       window=None, transform=None):
+def parse_saves_stream(files, verbose=True, use_cache=True, reading=PLAIN,
+                       jobs=None, window=None, transform=None):
     """
     Every save, handed over one at a time, in the order given.
 
@@ -816,6 +802,7 @@ def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
     """
     from concurrent.futures import ProcessPoolExecutor
     fingerprint = _parser_fingerprint() if use_cache else ""
+    world = reading.fingerprint()
     slots = [_cache_slot(p, fingerprint, world) if fingerprint else None
              for p in files]
     ready = [bool(sl) and os.path.exists(sl) for sl in slots]
@@ -841,8 +828,7 @@ def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
         try:
             pool = ProcessPoolExecutor(
                 max_workers=workers, initializer=_worker_setup,
-                initargs=(tuple(pop_types), tuple(mob_types),
-                          tuple(reform_keys), transform))
+                initargs=(reading, transform))
         except Exception as exc:
             print(f"  reading one at a time ({exc})", file=sys.stderr)
 
@@ -935,8 +921,8 @@ def parse_saves_stream(files, verbose=True, use_cache=True, world="no-mod",
             pool.shutdown(wait=False, cancel_futures=True)
 
 
-def _parse_parallel(files, out, todo, slots, workers, verbose, pop_types,
-                    mob_types, reform_keys=(), already=0):
+def _parse_parallel(files, out, todo, slots, workers, verbose, reading,
+                    already=0):
     """
     Read the outstanding saves across several processes.
 
@@ -951,8 +937,7 @@ def _parse_parallel(files, out, todo, slots, workers, verbose, pop_types,
         print(f"Reading {len(todo)} save(s) on {workers} cores.")
     done = 0
     pool = ProcessPoolExecutor(max_workers=workers, initializer=_worker_setup,
-                               initargs=(tuple(pop_types), tuple(mob_types),
-                                         tuple(reform_keys)))
+                               initargs=(reading,))
     try:
         # `todo` is the saves with no cache entry, so none of these is
         # cached, and no finishing was asked of this pool.
@@ -1470,10 +1455,11 @@ def verify_all(files, jobs=None):
             print(text)
         return
     print("Checking %d save(s) on %d cores." % (len(files), workers))
+    # `--verify` runs before a mod is chosen, so what it reads the saves
+    # under is whatever the run has settled on by now. See `reading_now`.
     pool = ProcessPoolExecutor(
         max_workers=workers, initializer=_worker_setup,
-        initargs=(tuple(v2parse.POP_TYPES), tuple(MOB_CANDIDATES),
-                  tuple(REFORM_KEYS)))
+        initargs=(reading_now(),))
     try:
         for text, _bad in pool.map(verify_save, files):
             print(text)
@@ -1603,7 +1589,6 @@ def run_cross(parent, game_root, args, verbose=True):
     """
     import cross as crossmod
     from mod_reader import load_mod, name_for
-    from v2parse import register_pop_types
 
     # Told, rather than worked out: `--campaign-mod NAME=PATH` settles one
     # campaign each. Two mods built on the same base can agree on their
@@ -1712,10 +1697,7 @@ def run_cross(parent, game_root, args, verbose=True):
                 print("  skipping %s: no mod in %s explains its saves"
                       % (entry["name"], game_root))
             continue
-        register_pop_types(())
-        set_reform_keys(())
         mod = load_mod(entry["mod_path"])
-        register_pop_types(mod["pop_types"])
         # The defaults `main` applies, applied here too. The mod's list used
         # to be taken unconditionally, so `--mob-types` was read on a
         # single-campaign run and ignored on a cross one; and it was taken
@@ -1726,18 +1708,18 @@ def run_cross(parent, game_root, args, verbose=True):
         # here. The regiment size is read from the same function further
         # down, where `campaign_rows` builds the spec that finishes the save.
         _regiment_size, mob_types = mod_defaults(args, mod)
-        set_mob_candidates(mob_types)
-        set_reform_keys(mod["reform_names"])
-        world = mod_fingerprint(entry["mod_path"], v2parse.POP_TYPES,
-                                REFORM_KEYS, mob_types)
+        # One object for how this campaign's saves are read: it sets the
+        # globals and it is the cache key, so the key cannot describe a state
+        # the parse is not in. The three globals used to be cleared, set,
+        # and then read back out again to make the key.
+        reading = reading_for(entry["mod_path"], mod, mob_types)
+        reading.apply()
         if verbose:
             print("Reading %s (%d saves) under %s"
                   % (entry["name"], len(entry["files"]), entry["mod_label"]))
         parsed = parse_saves(entry["files"], verbose=False,
-                             use_cache=not args.no_cache, world=world,
-                             pop_types=sorted(v2parse.POP_TYPES),
-                             mob_types=mob_types,
-                             reform_keys=sorted(REFORM_KEYS), jobs=args.jobs)
+                             use_cache=not args.no_cache, reading=reading,
+                             jobs=args.jobs)
         if not parsed:
             continue
         parsed.sort(key=lambda p: save_sort_key(p[0]["file"], p[0]["date"]))
@@ -2308,9 +2290,7 @@ def main():
         return 0
 
     mod = None
-    from v2parse import VANILLA_POP_TYPES, register_pop_types
-    register_pop_types(())
-    set_reform_keys(())
+    from v2parse import VANILLA_POP_TYPES
     if args.mod_path:
         from mod_reader import load_mod
         try:
@@ -2322,13 +2302,11 @@ def main():
             # the program, which is what the window used to show.
             sys.exit(str(exc))
         extra = set(mod["pop_types"]) - VANILLA_POP_TYPES
-        register_pop_types(mod["pop_types"])
-        # Written back onto `args` because a single-campaign run reads them
-        # off it in five more places -- the cache key, the worker pool, the
-        # two printed lines below. `run_cross` asks the same function and
-        # keeps the answer to itself, because it has a mod per campaign.
+        # Written back onto `args` because the rest of a single-campaign run
+        # reads them off it -- the finishing spec, the two printed lines
+        # below. `run_cross` asks the same function and keeps the answer to
+        # itself, because it has a mod per campaign.
         args.pop_per_regiment, args.mob_types = mod_defaults(args, mod)
-        set_reform_keys(mod["reform_names"])
         if verbose:
             print("defines.lua: POP_SIZE_PER_REGIMENT="
                   f"{args.pop_per_regiment}")
@@ -2336,14 +2314,15 @@ def main():
                   + (f"; mod-only pop types read: {' '.join(sorted(extra))}"
                      if extra else ""))
 
-    set_mob_candidates(args.mob_types)
-
-    # Which mod a save is read under changes what comes out of it, so it is part
-    # of the cache key. Two campaigns on two mods no longer share entries.
-    # Keyed on what the parse will actually use rather than on what the mod
-    # declares: they are the same thing only when nothing has leaked in.
-    world = mod_fingerprint(args.mod_path, v2parse.POP_TYPES,
-                            REFORM_KEYS, args.mob_types)
+    # One object for how this run reads a save. It sets the three globals
+    # the parser keeps -- here, and again in every worker, which on Windows
+    # is a fresh interpreter that inherits nothing -- and it is the cache
+    # key. Which mod a save is read under changes what comes out of it, so
+    # two campaigns on two mods no longer share cache entries; and the key
+    # cannot be worked out from a state different from the one the parse is
+    # in, because there is only one state.
+    reading = reading_for(args.mod_path, mod, args.mob_types)
+    reading.apply()
 
     # Oldest first, decided from each save's own first line rather than by
     # sorting them after the fact -- the campaign is now walked in one pass
@@ -2371,10 +2350,8 @@ def main():
     if args.inventions or args.check_inventions:
         keep_fields = KEEP_NATION + KEEP_FOR_INVENTIONS
 
-    parse_options = dict(
-        use_cache=not args.no_cache, world=world,
-        pop_types=sorted(v2parse.POP_TYPES), mob_types=args.mob_types,
-        reform_keys=sorted(REFORM_KEYS), jobs=args.jobs)
+    parse_options = dict(use_cache=not args.no_cache, reading=reading,
+                         jobs=args.jobs)
 
     live = None
     if mod is not None:

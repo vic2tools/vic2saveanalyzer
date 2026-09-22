@@ -225,6 +225,17 @@ fills the containers `blank_nation` made rather than replacing them, and a
 key nobody accounted for raises instead of being dropped in silence. Seven
 ways of drifting were each put in and each came out.
 
+**`caching.py`** checks that a cached answer is the answer the run would
+have computed, and that the key it is filed under says everything that
+changes it. Part of that is `readsave.Reading`, the one object that says how
+a run reads a save: applying it and then reading the three globals back the
+long way round has to give the same profile, because if it ever does not,
+the key names one parse and the parse is another. That is the shape of the
+worst bug this file has seen -- a pop-type set that only grew carried one
+mod's `bankers` into the next campaign, read one anyway, and cached it under
+a key that said it had not. Five ways of making the key and the state
+disagree were each put in and each came out.
+
 **`staleness.py`** touches every source file the program has, in a copy of it,
 and checks each one moves the report stamp. The stamp is what lets a second run
 say "Nothing has changed since this was built" and skip everything — the most

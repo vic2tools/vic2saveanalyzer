@@ -120,9 +120,8 @@ def main():
         print(__doc__.strip())
         return 2
 
-    import v2parse
     import readsave
-    v2parse.register_pop_types([])
+    readsave.PLAIN.apply()
 
     raw = open(source, "rb").read()
     rng = random.Random(SEED)

@@ -27,9 +27,10 @@ sends into exactly the structures this would have filled, so the two are
 held to each other field by field by `testkit/parity.py`.
 """
 
+import hashlib
 import os
 import re
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 
 import v2parse
 from nation import (COUNTRY_NUMERICS, COUNTRY_SCALARS,
@@ -91,6 +92,103 @@ def set_mob_candidates(types):
     """Choose which pop types read_province keeps for the mobilization pool."""
     MOB_CANDIDATES.clear()
     MOB_CANDIDATES.update(types)
+
+
+def mod_fingerprint(mod_path, pop_types, reform_keys=(), mob_types=()):
+    """
+    What the mod changes about parsing, as a short string.
+
+    A save is not read the same way under every mod. `register_pop_types`
+    adds the mod's own pop types to the set the province reader keeps, so
+    the same file parsed under two mods yields two different results -- and
+    the cache, keyed only by the file, would hand the second run the first
+    one's answer. Naming the mod and what it registered keeps those apart.
+    """
+    return hashlib.md5(
+        ((os.path.abspath(mod_path) if mod_path else "no-mod")
+         + "|" + ",".join(sorted(pop_types))
+         + "|" + ",".join(sorted(reform_keys))
+         + "|" + ",".join(sorted(mob_types)))
+        .encode("utf-8")).hexdigest()[:10]
+
+
+class Reading(namedtuple("Reading", "mod_path pop_types mob_types reform_keys")):
+    """
+    How this run reads a save, as one thing rather than six agreements.
+
+    Three module globals decide what comes out of a save file:
+    `v2parse.POP_TYPES`, which pop blocks the province reader keeps;
+    `MOB_CANDIDATES`, which of those it keeps for a mobilization pool; and
+    `REFORM_KEYS`, which country scalars are a reform choice rather than an
+    ordinary number. All three come from the mod, none is an argument to
+    anything, and each one changes what a parsed save says.
+
+    They had to be set in `main`, again in `run_cross` for every campaign,
+    and again in every worker -- Windows starts a worker as a fresh
+    interpreter, so a global set in the parent is not set in it -- and then
+    derived twice more: into the cache key, and into the arguments the pool
+    is started with. Six places agreeing about one thing, and the worst way
+    for them to disagree is quiet. `register_pop_types` records what that
+    looked like: a set that only ever grew carried one mod's `bankers` into
+    the next campaign, which read one anyway "and then cached it under a key
+    that said it had not".
+
+    So there is one object. `apply` sets the three globals, here or in a
+    worker; `fingerprint` is the cache key. The key can no longer be
+    computed from a state different from the one the parse will use, because
+    there is only the one state to compute it from.
+    """
+
+    __slots__ = ()
+
+    def apply(self):
+        """Set the three globals in this interpreter, replacing what was there."""
+        v2parse.register_pop_types(self.pop_types)
+        set_mob_candidates(self.mob_types)
+        set_reform_keys(self.reform_keys)
+
+    def fingerprint(self):
+        """The cache key for a save read this way."""
+        return mod_fingerprint(self.mod_path, self.pop_types,
+                               self.reform_keys, self.mob_types)
+
+
+def reading_for(mod_path, mod, mob_types):
+    """
+    The reading a mod asks for. `mod` is a loaded mod or None for no mod.
+
+    Sorted tuples rather than sets, because this is pickled to every worker
+    and hashed into the cache key, and a set is neither ordered nor ordered
+    the same way twice.
+    """
+    named = (mod or {}).get("pop_types") or ()
+    return Reading(
+        mod_path=mod_path,
+        pop_types=tuple(sorted(v2parse.VANILLA_POP_TYPES
+                               | {n for n in named if n})),
+        mob_types=tuple(sorted(mob_types)),
+        reform_keys=tuple(sorted((mod or {}).get("reform_names") or ())))
+
+
+# No mod: the twelve pop types the game ships and the three that can
+# mobilize. What a run with no --mod-path reads a save under, and the
+# default every reader here starts at.
+PLAIN = reading_for(None, None, MOBILIZABLE_TYPES)
+
+
+def reading_now(mod_path=None):
+    """
+    A profile of whatever the globals hold at this moment.
+
+    For the one caller that has no mod to build one from. `--verify` runs
+    before a mod is chosen and asks only whether the saves parse at all, so
+    what it reads them under is whatever the run has already settled on:
+    nothing for a plain run, the last campaign's mod after `--cross`.
+    Everywhere else the profile comes first and the globals come from it,
+    which is the whole point of having one.
+    """
+    return Reading(mod_path, tuple(sorted(v2parse.POP_TYPES)),
+                   tuple(sorted(MOB_CANDIDATES)), tuple(sorted(REFORM_KEYS)))
 
 
 # Below this share of its life needs a pop is losing people, and not slowly.

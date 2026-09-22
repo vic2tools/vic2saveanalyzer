@@ -14,7 +14,9 @@ from unittest.mock import patch
 HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
 import fastscan
+import readsave
 import savefmt
+import v2parse
 import vic2_analyzer as analyzer
 
 
@@ -30,7 +32,13 @@ class SaveCacheTests(unittest.TestCase):
         self.files = [str(self.root / f"{i}.v2") for i in range(2)]
         for i in range(2):
             self.write_save(i, i + 1)
-        self.options = dict(jobs=1, verbose=False, mob_types=("farmers", "craftsmen"))
+        # One profile says how a save is read: which pop types exist,
+        # which of them can mobilize, which scalars are reforms -- and
+        # it is the cache key, so a run cannot be keyed on settings it
+        # is not using.
+        reading = analyzer.reading_for(None, None,
+                                       ("farmers", "craftsmen"))
+        self.options = dict(jobs=1, verbose=False, reading=reading)
 
     def write_save(self, index, invention):
         return savefmt.write(
@@ -105,6 +113,67 @@ class SaveCacheTests(unittest.TestCase):
         self.assertEqual(craftsmen, build("craftsmen", "fresh", cached=False))
         self.assertEqual(float(farmers["mobilization_pool"]), 1000)
         self.assertEqual(float(craftsmen["mobilization_pool"]), 2000)
+
+
+class ReadingProfileTests(unittest.TestCase):
+    """
+    The cache key has to describe the state the parse is actually in.
+
+    Three module globals decide what comes out of a save -- which pop types
+    exist, which of them can mobilize, which country scalars are reform
+    choices -- and all three used to be set in one place and read back in
+    another to make the key. `v2parse.register_pop_types` records what that
+    cost: a set that only ever grew carried one mod's `bankers` into the
+    next campaign, which read one anyway "and then cached it under a key
+    that said it had not", and served the wrong numbers with nothing wrong
+    to see.
+    """
+
+    def setUp(self):
+        self.addCleanup(readsave.PLAIN.apply)
+
+    def test_applying_a_profile_is_the_state_the_key_describes(self):
+        mod = {"pop_types": ["bankers", "serfs"],
+               "reform_names": ["slavery", "voting_system"]}
+        reading = readsave.reading_for("/some/mod", mod,
+                                       ("farmers", "bankers"))
+        reading.apply()
+        # What the globals now hold, read back the long way round. If this
+        # ever differs from what was applied, the key names one parse and
+        # the parse is another.
+        self.assertEqual(readsave.reading_now("/some/mod"), reading)
+
+    def test_a_profile_replaces_rather_than_adds(self):
+        readsave.reading_for("/a", {"pop_types": ["bankers"],
+                                    "reform_names": ["slavery"]},
+                             ("farmers",)).apply()
+        second = readsave.reading_for("/b", {"pop_types": ["serfs"],
+                                             "reform_names": ["voting"]},
+                                      ("labourers",))
+        second.apply()
+        self.assertEqual(readsave.reading_now("/b"), second)
+        self.assertNotIn("bankers", v2parse.POP_TYPES)
+        self.assertNotIn("slavery", readsave.REFORM_KEYS)
+        self.assertNotIn("farmers", readsave.MOB_CANDIDATES)
+
+    def test_every_part_of_the_reading_moves_the_key(self):
+        base = readsave.reading_for("/a", {"pop_types": ["bankers"],
+                                           "reform_names": ["slavery"]},
+                                    ("farmers",))
+        for field, other in (("mod_path", "/b"),
+                             ("pop_types", base.pop_types + ("serfs",)),
+                             ("mob_types", ("labourers",)),
+                             ("reform_keys", ("voting_system",))):
+            with self.subTest(field=field):
+                self.assertNotEqual(base.fingerprint(),
+                                    base._replace(**{field: other}).fingerprint())
+
+    def test_no_mod_is_the_plain_reading(self):
+        self.assertEqual(readsave.reading_for(None, None,
+                                              readsave.MOBILIZABLE_TYPES),
+                         readsave.PLAIN)
+        readsave.PLAIN.apply()
+        self.assertEqual(readsave.reading_now(), readsave.PLAIN)
 
 
 class ScannerLifetimeTests(unittest.TestCase):

@@ -385,6 +385,26 @@ from the set the mod declares. The regression test runs Divergences alone, then
 after IGoR, then after a no-mod run, and requires all three tables to be
 byte-identical.
 
+Three globals decide this, not one: `v2parse.POP_TYPES`, which pop blocks the
+province reader keeps; `readsave.MOB_CANDIDATES`, which of those it keeps for a
+mobilization pool; and `readsave.REFORM_KEYS`, which country scalars are a
+reform choice rather than an ordinary number. All three had to be set in
+`main`, again in `run_cross` for every campaign, and again in every worker --
+Windows starts a worker as a fresh interpreter, which inherits nothing -- and
+then derived twice more, into the cache key and into the arguments the pool is
+started with. Six places agreeing about one thing.
+
+`readsave.Reading` is that one thing. `apply` sets the three globals, here or
+in a worker; `fingerprint` is the cache key; `reading_for(mod_path, mod,
+mob_types)` builds it, and `PLAIN` is the no-mod one. The key can no longer be
+computed from a state different from the one the parse will use, because there
+is only the one state to compute it from -- which is the shape the bug above
+needed. `parse_saves`, `parse_saves_stream` and `campaign_inventions` take the
+profile in place of the four arguments they used to, and the eight checks in
+`testkit/` that used to reach past the interface and reset the globals by hand
+-- one of them reaching for `REFORM_KEYS` through a module that merely imported
+it -- say `readsave.PLAIN.apply()` instead.
+
 ### Who was playing
 
 Each country a person is playing carries `human = yes` as the first line of its

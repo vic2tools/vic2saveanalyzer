@@ -107,13 +107,13 @@ FRA=
 
 def main():
     import fastscan
-    import v2parse
+    import readsave
     import vic2_analyzer as va
 
     out = os.path.join(HERE, "testkit", "_awkward.v2")
     with open(out, "w", encoding="latin-1", newline="\r\n") as fh:
         fh.write(SAVE)
-    v2parse.register_pop_types([])
+    readsave.PLAIN.apply()
 
     fast = va.analyze_save(out, verbose=False)
     real = fastscan.scan
