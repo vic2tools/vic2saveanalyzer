@@ -78,6 +78,8 @@ def main():
         ("a machine with no workers", [os.path.join(KIT, "noworkers.py")]),
         ("what can make a report stale", [os.path.join(KIT, "staleness.py")]),
         ("the mobilisation rate rule", [os.path.join(KIT, "mobrate.py")]),
+        ("the cross block against the report",
+         [os.path.join(KIT, "crossrows.py")]),
     ]
 
     try:

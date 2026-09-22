@@ -651,9 +651,23 @@ later. With no mod, every argument `finalize` takes is either the nation
 itself or a setting, so it runs in the worker and they never leave it. With a
 mod it cannot: the rate comes from `breakdown`, which wants the mod, the
 state of the world in that save, and the set of reachable inventions, which
-is not known until the campaign has been walked once. The filter in
-`_finish_save` is the row loop's own repeated exactly, because a nation the
-report leaves out has to come back untouched.
+is not known until the campaign has been walked once. A nation the report
+leaves out has to come back untouched, so the same filter has to be applied
+in both places.
+
+That used to be four places. Picking the players, filtering, working out the
+rate, calling `finalize` and stamping the mobilisation size was written out
+once for the workers, once for the parent, once in the row loop and once for
+`--cross`, each promising in a comment to match the others. They did not.
+`--cross` never applied the mod's `POP_SIZE_PER_REGIMENT`, so the brigade
+counts in the cross-campaign block were divided by the vanilla 3000 while the
+same nation's in the chart above it were divided by the mod's own number; it
+also overrode `--mob-types` instead of deferring to it, read the mod's pop
+list when parsing and the caller's when counting, counted only `human=yes` as
+a player, and raised `--min-pop` to one behind the caller's back. There is one
+`finish_nations` now, one `kept_by` beside it, and one `finish_spec` that
+decides what either of them is given; `testkit/crossrows.py` builds two
+campaigns on two mods and fails if the two callers ever disagree again.
 
 **A save is read once, not twice.** `analyze_save` had a comment saying the
 scanner is set going first so that it reads the file while Python reads it

@@ -439,7 +439,8 @@ def clear_cache():
 # that somebody hoped it would be there.
 Finish = namedtuple(
     "Finish", "rate pop_per_regiment mob_types include_occupied "
-              "player_nations wanted min_pop mod live")
+              "player_nations wanted min_pop mod live keep_pools",
+    defaults=(False,))
 
 # A picklable callable applied after reading and caching a save. The parent
 # can request either invention summaries or finalized nations.
@@ -454,9 +455,103 @@ def _worker_setup(pop_types, mob_types, reform_keys=(), transform=None):
     _TRANSFORM = transform
 
 
-def _finish_save(meta, nations, spec):
+def mod_defaults(args, mod):
     """
-    Run `finalize` over a save's nations and drop what it has spent.
+    The two numbers a mod has an opinion about, as this run should use them.
+
+    `defines.lua` says how many people a regiment costs and `poptypes/` says
+    which pops can be mobilized, and both are defaults rather than overrides:
+    they fill in what the caller left alone and give way to
+    `--pop-per-regiment` and `--mob-types`.
+
+    Worked out here and handed back rather than written into `args`, because
+    `--cross` reads several campaigns under several mods and there is one
+    `args` for all of them. `main` still writes the answer back -- it has the
+    one mod, and the rest of a single-campaign run reads these off `args` --
+    but `run_cross` cannot, and so it used not to apply them at all.
+    """
+    pop_per_regiment = args.pop_per_regiment
+    mob_types = list(args.mob_types)
+    if mod is not None:
+        defines = mod["defines"] or {}
+        if ("POP_SIZE_PER_REGIMENT" in defines
+                and pop_per_regiment == POP_SIZE_PER_REGIMENT):
+            pop_per_regiment = int(defines["POP_SIZE_PER_REGIMENT"])
+        if mod["mob_types"] and mob_types == sorted(MOBILIZABLE_TYPES):
+            mob_types = sorted(mod["mob_types"])
+    return pop_per_regiment, mob_types
+
+
+def finish_spec(args, mod, live, wanted=None, keep_pools=False):
+    """
+    Everything finishing a save needs, decided in one place.
+
+    There used to be two of these. `main` built one for the workers and
+    `run_cross` built its own by hand for each campaign, and they disagreed
+    about five things -- the mod's regiment size, whether `--mob-types` was
+    read at all, which list the parse and the finishing each used, who
+    counted as a player, and the smallest population worth measuring.
+
+    The worst of them was the first. `--cross` puts a cross-campaign block in
+    a report whose other charts are about one of those same campaigns, so the
+    same nation appeared twice on one page with its brigades divided by 3000
+    in one place and by the mod's own number in the other, and nothing said
+    which was which.
+    """
+    pop_per_regiment, mob_types = mod_defaults(args, mod)
+    return Finish(
+        rate=args.mob_rate,
+        pop_per_regiment=pop_per_regiment,
+        mob_types=frozenset(mob_types),
+        include_occupied=args.mob_include_occupied,
+        player_nations=(set(args.player_nations)
+                        if args.player_nations is not None else None),
+        wanted=wanted,
+        min_pop=args.min_pop,
+        mod=mod,
+        live=live,
+        keep_pools=keep_pools)
+
+
+def players_in(meta, nations, told):
+    """
+    Which tags a person was playing, in the order the answers are believed.
+
+    What was said outright first. Then the save's own markers: every country
+    a person is playing carries `human=yes` in its own block, so a
+    multiplayer save names all of its players and not just whoever pressed
+    save. Older saves and some mods write no such marker at all, hence the
+    fall back to the save's own player.
+
+    This decides more than a column. IGoR and GFM both pay a human-run
+    nation a mobilisation size an AI does not get, so a run that answers it
+    differently reports different brigade counts for the same save.
+    """
+    if told is not None:
+        return set(told)
+    played = {tag for tag, nat in nations.items() if nat.get("human")}
+    if played:
+        return played
+    return {meta["player"]} if meta.get("player") else set()
+
+
+def kept_by(spec, tag, nat):
+    """
+    Whether this run measures this nation.
+
+    One definition, because three loops used to carry their own copy of it
+    and a nation the report leaves out has to be left out everywhere:
+    `is_player` is set on the nations that are kept and on no others, and
+    the trim keeps that key only where it exists.
+    """
+    return ((not spec.wanted or tag in spec.wanted)
+            and nat["total_pop"] >= spec.min_pop)
+
+
+def finish_nations(meta, nations, spec):
+    """
+    One save's nations, finished: the players picked, the rest filtered out,
+    and `finalize` run over what is left.
 
     This is the last step that reads a save whole, and it turns two megabytes
     of per-province tables into a few dozen numbers a nation. Done where the
@@ -464,22 +559,11 @@ def _finish_save(meta, nations, spec):
     sent back; done in the parent it happens one save at a time, after the
     tables have already been pickled, piped and unpickled to get there.
 
-    The filter is the row loop's own, repeated exactly, because a nation the
-    report leaves out must come out of here untouched: `is_player` is set on
-    the nations that are kept and on no others, and the trim keeps that key
-    only where it exists.
+    Every nation comes back -- finished where it was kept, untouched where it
+    was not -- so a caller that needs to know which is which asks `kept_by`
+    rather than repeating the filter and drifting away from it.
     """
-    players = spec.player_nations
-    if players is None:
-        # Every country a person is playing carries `human=yes` in its own
-        # block, so a multiplayer save names all of its players and not just
-        # whoever pressed save. Older saves and some mods write no such
-        # marker, hence the fall back to the save's own player.
-        players = {tag for tag, nat in nations.items() if nat.get("human")}
-        if not players:
-            players = {meta["player"]} if meta.get("player") else set()
-
-    wanted, min_pop = spec.wanted, spec.min_pop
+    players = players_in(meta, nations, spec.player_nations)
     # What this save says about everyone, which is what the mod's triggered
     # modifiers ask about: the year, the great powers, who is at war and who
     # owns what. One per save rather than one per nation, and worked out
@@ -487,16 +571,38 @@ def _finish_save(meta, nations, spec):
     stage = save_world(meta, spec.mod) if spec.mod is not None else None
     out = {}
     for tag, nat in nations.items():
-        if (not wanted or tag in wanted) and nat["total_pop"] >= min_pop:
-            nat["is_player"] = (tag in players)
-            rate = rate_for(nat, spec.mod, spec.live, stage, spec.rate)
-            done = finalize(nat, rate, spec.pop_per_regiment,
-                            mob_types=spec.mob_types,
-                            include_occupied=spec.include_occupied,
-                            mod=spec.mod, world=stage)
-            done["mobilisation_size"] = round(rate, 5)
-        else:
-            done = nat
+        if not kept_by(spec, tag, nat):
+            out[tag] = nat
+            continue
+        nat["is_player"] = (tag in players)
+        rate = rate_for(nat, spec.mod, spec.live, stage, spec.rate)
+        done = finalize(nat, rate, spec.pop_per_regiment,
+                        mob_types=spec.mob_types,
+                        include_occupied=spec.include_occupied,
+                        mod=spec.mod, world=stage)
+        done["mobilisation_size"] = round(rate, 5)
+        if not spec.keep_pools:
+            # A nation's mobilizable pops are one entry per pop per province
+            # -- eleven thousand of them for a large nation, two megabytes a
+            # save -- and `finalize` copies a nation shallowly, so the
+            # finished one still points at the raw pool that made it. Only
+            # `--explain-mob-pool` prints that back, so every other run lets
+            # it go here instead of carrying it for the whole campaign.
+            done["mobilizable_pops"] = ()
+        out[tag] = done
+    return out
+
+
+def _finish_save(meta, nations, spec):
+    """
+    `finish_nations`, and then what a save needs to cross a pipe.
+
+    Finishing in the worker is what lets a save come back as numbers rather
+    than tables, so what the finishing has spent is dropped here, and the
+    counters go over as the plain dicts they already are.
+    """
+    out = finish_nations(meta, nations, spec)
+    for done in out.values():
         for name in SPENT_ON_FINALIZE:
             done.pop(name, None)
         for name in AS_PLAIN_DICTS:
@@ -508,30 +614,7 @@ def _finish_save(meta, nations, spec):
             if counted is not None:
                 done[name] = {where: dict(kinds)
                               for where, kinds in counted.items()}
-        out[tag] = done
     return meta, out
-
-
-def _finalize_here(nat, mod, live, stage, args, keep_pools):
-    """
-    One nation finalized in the parent, for the runs that cannot delegate it.
-
-    The same call `_finish_save` makes in a worker. Only the diagnostics
-    come here now: `--explain-mob-pool` and `--explain-mob` read a nation
-    back out of the last save afterwards, and what they want is exactly
-    what finishing spends -- the raw mobilizable pools and the
-    per-province tables -- so those runs keep the saves whole and pay for
-    it in the parent. Every other run finishes where the save was read.
-    """
-    rate = rate_for(nat, mod, live, stage, args.mob_rate)
-    done = finalize(nat, rate, args.pop_per_regiment,
-                    mob_types=frozenset(args.mob_types),
-                    include_occupied=args.mob_include_occupied,
-                    mod=mod, world=stage)
-    if not keep_pools:
-        nat["mobilizable_pops"] = ()
-    done["mobilisation_size"] = round(rate, 5)
-    return done
 
 
 def _worker_parse(job):
@@ -1472,14 +1555,19 @@ def peek_save(path):
 
 
 
-def campaign_rows(parsed, mod, args):
+def campaign_rows(parsed, mod, args, wanted=None):
     """
     One campaign's saves as finalized rows: (date, tag, nation).
 
-    The same `finalize` the single-campaign path runs, so a measure means here
-    exactly what it means on the report's own charts. Building the cross block
-    from a handful of fields read off the raw parse instead would have been a
-    second, quietly different definition of every number.
+    The same finishing the single-campaign path runs -- the same function
+    against a spec from the same builder -- so a measure means here exactly
+    what it means on the report's own charts.
+
+    It said that before and was not doing it. Building the cross block out
+    of fields read off the raw parse would have been an obviously different
+    definition of every number; a second copy of the recipe was a quietly
+    different one, and by the time the two were read side by side it had
+    drifted in five places.
     """
     from mod_reader import attainable_inventions, index_base_for
 
@@ -1492,21 +1580,12 @@ def campaign_rows(parsed, mod, args):
     if mod is not None:
         mod["index_base"] = index_base_for(mod, every)
 
+    spec = finish_spec(args, mod, live, wanted)
     out = []
     for meta, nations in parsed:
-        stage = save_world(meta, mod) if mod else None
-        humans = {t for t, n in nations.items() if n.get("human")}
-        for tag, nat in nations.items():
-            if nat["total_pop"] < max(1, args.min_pop):
-                continue
-            nat["is_player"] = tag in humans
-            rate = rate_for(nat, mod, live, stage, args.mob_rate)
-            done = finalize(nat, rate, args.pop_per_regiment,
-                            mob_types=frozenset(args.mob_types),
-                            include_occupied=args.mob_include_occupied,
-                            mod=mod, world=stage)
-            done["mobilisation_size"] = round(rate, 5)
-            out.append((meta["date"], tag, done))
+        for tag, done in finish_nations(meta, nations, spec).items():
+            if kept_by(spec, tag, done):
+                out.append((meta["date"], tag, done))
     return out
 
 
@@ -1637,7 +1716,16 @@ def run_cross(parent, game_root, args, verbose=True):
         set_reform_keys(())
         mod = load_mod(entry["mod_path"])
         register_pop_types(mod["pop_types"])
-        mob_types = sorted(mod["mob_types"]) or args.mob_types
+        # The defaults `main` applies, applied here too. The mod's list used
+        # to be taken unconditionally, so `--mob-types` was read on a
+        # single-campaign run and ignored on a cross one; and it was taken
+        # for the parse while the finishing below went on reading the command
+        # line's, which is two different lists deciding one number.
+        #
+        # Only the pop list is wanted here, because only the parse happens
+        # here. The regiment size is read from the same function further
+        # down, where `campaign_rows` builds the spec that finishes the save.
+        _regiment_size, mob_types = mod_defaults(args, mod)
         set_mob_candidates(mob_types)
         set_reform_keys(mod["reform_names"])
         world = mod_fingerprint(entry["mod_path"], v2parse.POP_TYPES,
@@ -1654,7 +1742,8 @@ def run_cross(parent, game_root, args, verbose=True):
             continue
         parsed.sort(key=lambda p: save_sort_key(p[0]["file"], p[0]["date"]))
         results.append((entry["name"], entry["mod_label"],
-                        campaign_rows(parsed, mod, args)))
+                        campaign_rows(parsed, mod, args,
+                                      set(args.tags) if args.tags else None)))
         # Nation names come from whichever mod names them: a tag any mod names
         # is better than the bare tag, and where two mods share a tag they were
         # measured to agree on it. Country names live in the localisation, not
@@ -1699,13 +1788,15 @@ Campaign = namedtuple(
                 "tech_rows naval_profiles naval_of supply parsed war_book "
                 "pop_columns")
 
-# Which of a save's fields survive it. `pools` keeps the raw mobilizable
-# pops, `whole` keeps the save entire, `fields` is what the trim keeps when
-# it does not. See `keep_pools` and `keep_whole` in `main` for who asks.
-Keep = namedtuple("Keep", "pools whole fields")
+# Which of a save's fields survive it. `whole` keeps the save entire,
+# `fields` is what the trim keeps when it does not. See `keep_whole` in
+# `main` for who asks. Whether the raw mobilizable pops survive is the
+# finishing's business and travels in the spec, because the finishing is
+# what spends them.
+Keep = namedtuple("Keep", "whole fields")
 
 
-def walk_campaign(stream, args, mod, live, finish, keep, wanted):
+def walk_campaign(stream, spec, finished, keep):
     """
     Read the campaign once, oldest save first, spending each save as it
     passes.
@@ -1718,6 +1809,14 @@ def walk_campaign(stream, args, mod, live, finish, keep, wanted):
     Lifted out of `main` unchanged: it was a hundred and ten lines in the
     middle of an eight-hundred-line function, holding a dozen accumulators
     that nothing above it touched and everything below it read.
+
+    `finished` says the stream already ran `finish_nations` out in the
+    workers. When it did not -- the two diagnostics keep their saves whole,
+    and finishing is what spends the tables they want to print -- it runs
+    here instead, the same function against the same spec. This loop used to
+    hold its own filter and its own call to a parent-side twin of the
+    worker's, and the comment promising they matched was the only thing
+    holding them together.
     """
     rows, ship_rows, pop_rows, culture_rows = [], [], [], []
     brigade_rows, tech_rows = [], []
@@ -1745,46 +1844,24 @@ def walk_campaign(stream, args, mod, live, finish, keep, wanted):
         _stop_if_asked()
         date = meta["date"]
         year = date.split(".")[0] if date else ""
-        # What this save says about everyone, which is what the triggered
-        # modifiers ask about: the year, the great powers, who is at war and
-        # who owns what.
-        stage = save_world(meta, mod) if mod is not None else None
-        # Who was human. Every country a person is playing carries `human=yes`
-        # in its own block, so a multiplayer game names all of its players and
-        # not just whoever pressed save. Older saves and some mods write no
-        # such marker at all, hence the fall back to the save's own player;
-        # --player-nations still overrides both. Already decided per save by
-        # `_finish_save` when the finishing went to the workers.
-        humans = ()
-        if finish is None:
-            played = {tag for tag, nat in nations.items() if nat.get("human")}
-            humans = (set(args.player_nations)
-                      if args.player_nations is not None
-                      else played if played
-                      else {meta["player"]} if meta.get("player") else set())
-        for tag, nat in nations.items():
-            if wanted and tag not in wanted:
+        if not finished:
+            # Only the diagnostics reach this now. They asked for the
+            # per-province tables to be kept, and finishing is what spends
+            # them, so it waits for the parent.
+            nations = finish_nations(meta, nations, spec)
+        for tag, done in nations.items():
+            # The same question the finishing asked, asked of the same spec,
+            # so a nation finished out in a worker and a nation finished just
+            # above are kept or dropped by one rule.
+            if not kept_by(spec, tag, done):
                 continue
-            if nat["total_pop"] < args.min_pop:
-                continue
-            if finish is not None:
-                # Finalized in the worker, under this same filter, so `nat`
-                # is already what `finalize` would have returned here.
-                done = nat
-            else:
-                # Only the diagnostics reach this now. They asked for the
-                # per-province tables to be kept, and finishing is what
-                # spends them, so it waits for the parent.
-                nat["is_player"] = (tag in humans)
-                done = _finalize_here(nat, mod, live, stage, args,
-                                      keep.pools)
             accepted_set = set(done["accepted_cultures"]) | {done["primary_culture"]}
 
             row = {
                 "date": date,
                 "year": year,
                 "tag": tag,
-                "is_player": int(nat["is_player"]),
+                "is_player": int(done["is_player"]),
                 "accepted_cultures": ";".join(sorted(done["accepted_cultures"])),
             }
             for col in BASE_COLUMNS:
@@ -1802,9 +1879,9 @@ def walk_campaign(stream, args, mod, live, finish, keep, wanted):
             for stype, count in sorted(done["ships_by_type"].items()):
                 ship_rows.append((date, year, tag, stype, count,
                                   round(done["ship_crew"].get(stype, count), 3)))
-            if mod is not None and done["ships"]:
+            if spec.mod is not None and done["ships"]:
                 from mod_reader import naval_profile
-                profile = naval_profile(done, mod)
+                profile = naval_profile(done, spec.mod)
                 key = json.dumps(profile, sort_keys=True)
                 if key not in naval_index:
                     naval_index[key] = len(naval_profiles)
@@ -2246,11 +2323,11 @@ def main():
             sys.exit(str(exc))
         extra = set(mod["pop_types"]) - VANILLA_POP_TYPES
         register_pop_types(mod["pop_types"])
-        defines = mod["defines"]
-        if "POP_SIZE_PER_REGIMENT" in defines and args.pop_per_regiment == POP_SIZE_PER_REGIMENT:
-            args.pop_per_regiment = int(defines["POP_SIZE_PER_REGIMENT"])
-        if mod["mob_types"] and args.mob_types == sorted(MOBILIZABLE_TYPES):
-            args.mob_types = sorted(mod["mob_types"])
+        # Written back onto `args` because a single-campaign run reads them
+        # off it in five more places -- the cache key, the worker pool, the
+        # two printed lines below. `run_cross` asks the same function and
+        # keeps the answer to itself, because it has a mod per campaign.
+        args.pop_per_regiment, args.mob_types = mod_defaults(args, mod)
         set_reform_keys(mod["reform_names"])
         if verbose:
             print("defines.lua: POP_SIZE_PER_REGIMENT="
@@ -2382,27 +2459,17 @@ def main():
     # into the one process that has everything else left to do.
     #
     # The diagnostics that print a nation back raw still want the tables,
-    # so they keep the finishing in the parent.
-    finish = None
-    if not keep_whole:
-        finish = Finish(
-            rate=args.mob_rate,
-            pop_per_regiment=args.pop_per_regiment,
-            mob_types=frozenset(args.mob_types),
-            include_occupied=args.mob_include_occupied,
-            player_nations=(set(args.player_nations)
-                            if args.player_nations is not None else None),
-            wanted=wanted,
-            min_pop=args.min_pop,
-            mod=mod,
-            live=live)
+    # so they keep the finishing in the parent. One spec either way: what a
+    # run means by a finished nation cannot depend on where it was finished.
+    spec = finish_spec(args, mod, live, wanted, keep_pools=keep_pools)
+    in_workers = not keep_whole
 
     stream = parse_saves_stream(
         files, verbose=verbose and mod is None,
-        transform=partial(_finish_save, spec=finish) if finish else None,
+        transform=partial(_finish_save, spec=spec) if in_workers else None,
         **parse_options)
-    keep = Keep(pools=keep_pools, whole=keep_whole, fields=keep_fields)
-    campaign = walk_campaign(stream, args, mod, live, finish, keep, wanted)
+    keep = Keep(whole=keep_whole, fields=keep_fields)
+    campaign = walk_campaign(stream, spec, in_workers, keep)
     # What is left in `main` is what `main` still uses: the tables it
     # starts, the two counts it prints and the saves it checks are there
     # at all. Everything the page needs travels as `campaign`.

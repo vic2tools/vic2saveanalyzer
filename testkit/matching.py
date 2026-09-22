@@ -34,11 +34,22 @@ TECHS = ["flintlock_rifles", "post_napoleonic_thought", "clipper_design",
          "the_stirrup", "iron_working"]
 
 
-def a_mod(root, tags=None, techs=None, provinces=None, inventions=2):
-    """The smallest folder `_mod_facts` will read as a mod."""
+def a_mod(root, tags=None, techs=None, provinces=None, inventions=2,
+          pops=None, pop_per_regiment=None, mob_size=0.0):
+    """
+    The smallest folder `_mod_facts` will read as a mod.
+
+    The last three are for the callers that go on to *read* the mod rather
+    than only match a campaign against it: which pops it lets a nation
+    mobilize, what a regiment of them costs, and whether anything in it
+    grants a mobilisation size at all. A mod that grants none is a mod every
+    nation scores zero under, which makes a brigade count that cannot tell
+    two regiment sizes apart. Left alone they write what they always wrote.
+    """
     tags = TAGS if tags is None else tags
     techs = TECHS if techs is None else techs
     provinces = range(1, 41) if provinces is None else provinces
+    pops = POPS if pops is None else pops
 
     os.makedirs(os.path.join(root, "common"), exist_ok=True)
     with open(os.path.join(root, "common", "countries.txt"), "w") as fh:
@@ -46,7 +57,7 @@ def a_mod(root, tags=None, techs=None, provinces=None, inventions=2):
             fh.write('%s = "countries/%s.txt"\n' % (tag, tag))
 
     os.makedirs(os.path.join(root, "poptypes"), exist_ok=True)
-    for pop in POPS:
+    for pop in pops:
         with open(os.path.join(root, "poptypes", pop + ".txt"), "w") as fh:
             fh.write("strata = poor\n")
 
@@ -54,8 +65,22 @@ def a_mod(root, tags=None, techs=None, provinces=None, inventions=2):
     with open(os.path.join(root, "technologies", "army_tech.txt"), "w") as fh:
         fh.write("folder = army_tech\n")
         for tech in techs:
+            # Only the first one grants it, so a nation holding every
+            # technology in the mod has a rate the test can state outright
+            # rather than derive.
+            grant = ("\tmobilisation_size = %.3f\n" % mob_size
+                     if mob_size and tech == techs[0] else "")
             fh.write("%s = {\n\tarea = army_tech\n\tyear = 1836\n"
-                     "\tcost = 100\n}\n" % tech)
+                     "\tcost = 100\n%s}\n" % (tech, grant))
+
+    if pop_per_regiment is not None:
+        # defines.lua is Lua, and `_read_defines` finds the key by regex
+        # wherever it sits, so the real file's nesting is written out rather
+        # than a flat line that would pass here and not in the game.
+        with open(os.path.join(root, "common", "defines.lua"), "w") as fh:
+            fh.write("NDefines = {\n\tNMilitary = {\n"
+                     "\t\tPOP_SIZE_PER_REGIMENT = %d,\n\t},\n}\n"
+                     % pop_per_regiment)
 
     os.makedirs(os.path.join(root, "inventions"), exist_ok=True)
     with open(os.path.join(root, "inventions", "army.txt"), "w") as fh:

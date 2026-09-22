@@ -40,6 +40,7 @@ python3 testkit/modcache.py                      # no saves needed
 python3 testkit/noworkers.py                     # no saves needed
 python3 testkit/staleness.py                     # no saves needed
 python3 testkit/mobrate.py                       # no saves needed
+python3 testkit/crossrows.py                     # no saves needed
 python3 testkit/caching.py                       # no saves needed
 python3 testkit/window.py "/path/to/saves"
 python3 testkit/spawned.py "/path/to/saves"
@@ -176,6 +177,23 @@ and since `--mobilisation-size` defaults to 1.0 it printed **100%** and a
 matching brigade ceiling for nations the report itself scored at **0%**. It
 survived because no campaign it was run against had an uncivilized nation in
 it, and `smoke.py` only ever asks about ENG.
+
+**`crossrows.py`** builds two campaigns on two mods and runs `--cross` over
+them, then checks that the campaign the report is *about* was measured the
+same way twice. It is measured twice because that is what `--cross` does: it
+compares several campaigns in one block and then builds the rest of the
+report out of the largest of them. Those two readings were made by two
+copies of one recipe, and the copies had drifted in five places. The cross
+one never applied the mod's `POP_SIZE_PER_REGIMENT`, so the same nation's
+brigades were divided by the vanilla 3000 in the cross block and by the
+mod's own number in the chart directly above it. It overrode `--mob-types`
+where the report deferred to it, read the mod's pop list when parsing and
+the caller's when counting, counted only `human=yes` as a player so
+`--player-nations` went unread, and dropped every nation under one person
+where the report keeps them. The check watches the one finishing function
+both paths now call, so it compares the settings each path asked for *and*
+the numbers each got back -- putting any one of the five divergences back
+fails it.
 
 **`staleness.py`** touches every source file the program has, in a copy of it,
 and checks each one moves the report stamp. The stamp is what lets a second run
