@@ -787,7 +787,8 @@ runs it.
 | | |
 |---|---|
 | `gui.py` | The window: the folder pickers and the log box |
-| `vic2_analyzer.py` | Command line, caching, workers, aggregation, CSV output |
+| `vic2_analyzer.py` | Command line, aggregation, CSV output |
+| `readfolder.py` | A folder of saves: read on every core, cached, stoppable |
 | `readsave.py` | One save into numbers: provinces, pops, countries, wars, the market |
 | `nation.py` | What a nation record is, and what may be dropped from one when |
 | `explain.py` | The four flags that print something about one nation and stop |

@@ -20,6 +20,7 @@ from mobrate import a_mod
 # The imports walked properly, off the syntax tree, including those made
 # inside a function -- the same walk that decides what the executable carries.
 from packing import reached
+import readfolder
 import readsave
 import savefmt
 import v2parse
@@ -31,7 +32,7 @@ class SaveCacheTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="vic2savecache")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        cache = patch.object(analyzer, "cache_dir",
+        cache = patch.object(readfolder, "cache_dir",
                              return_value=str(self.root / "vic2_analyzer_cache"))
         cache.start()
         self.addCleanup(cache.stop)
@@ -64,10 +65,10 @@ class SaveCacheTests(unittest.TestCase):
 
     def test_packaged_cache_survives_scanner_reextraction(self):
         with patch.object(sys, "frozen", True, create=True):
-            with patch.object(analyzer, "_scanner_fingerprint", return_value="first extraction"):
-                first = analyzer._parser_fingerprint()
-            with patch.object(analyzer, "_scanner_fingerprint", return_value="next extraction"):
-                self.assertEqual(first, analyzer._parser_fingerprint())
+            with patch.object(readfolder, "_scanner_fingerprint", return_value="first extraction"):
+                first = readfolder.parser_fingerprint()
+            with patch.object(readfolder, "_scanner_fingerprint", return_value="next extraction"):
+                self.assertEqual(first, readfolder.parser_fingerprint())
 
     def test_same_size_edit_within_one_second(self):
         path = self.files[0]
@@ -128,8 +129,8 @@ EDIT_EACH = r'''
 import os, sys
 here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, here)
-import vic2_analyzer as reader
-before = reader._parser_fingerprint()
+import readfolder as reader
+before = reader.parser_fingerprint()
 moved = []
 for name in sorted(os.listdir(here)):
     if not name.endswith(".py") or name == "edit_each.py":
@@ -140,7 +141,7 @@ for name in sorted(os.listdir(here)):
     with open(path, "ab") as fh:
         fh.write(b"\n# edited\n")
     try:
-        if reader._parser_fingerprint() != before:
+        if reader.parser_fingerprint() != before:
             moved.append(name[:-3])
     finally:
         with open(path, "wb") as fh:
@@ -174,7 +175,7 @@ class ParserKeyTests(unittest.TestCase):
 
     def test_the_key_moves_with_exactly_the_code_that_fills_it(self):
         # What decides a cached save: reading one, and writing the entry.
-        wanted = reached("readsave") | {"vic2_analyzer", "cacheio"}
+        wanted = reached("readsave") | {"readfolder", "cacheio"}
         with tempfile.TemporaryDirectory(prefix="vic2key") as copy:
             for name in os.listdir(HERE):
                 if name.endswith(".py"):

@@ -447,3 +447,32 @@ every check is first run on the tree with no bug in it and must pass there.
 One that does not is reported `CONTROL FAILED`, and its mutations `UNTESTED`
 rather than caught. The harness also exits non-zero unless every mutation is
 caught. Re-run on the tree with both fixes: 24 mutations, 24 caught.
+
+## 11. `testkit/spawned.py` passed with no worker started under spawn
+
+Found while moving the parallel reader into `readfolder.py`, the move for
+which this is the check that matters: Windows starts every worker as a fresh
+interpreter, so everything handed to one has to be found again by name.
+
+`spawned.py` builds the campaign under fork and under spawn and compares the
+files. But a pool that will not start is not an error to the analyzer -- it
+prints `reading one at a time (...)` and reads every save itself, which is
+the right thing for a user and gives exactly the same files. So the
+comparison cannot tell a worker that started under spawn from one that never
+did.
+
+Measured on `5a4a685`: hand the finishing to the workers as a lambda instead
+of a `partial`. Fork inherits it and is untouched. Spawn cannot pickle it,
+fails at the first submit, and reads all 103 saves on one core:
+
+```
+spawn  stderr: reading one at a time (Can't pickle local object <function main.<locals>.<lambda> ...>)
+all 10 files identical whichever way the workers start
+```
+
+and the check passed. That is a failure only Windows would see, as a
+campaign that takes many times longer and no error.
+
+**Fixed**: `spawned.py` fails when either run says it read one save at a
+time. `testkit/mutate.py` gains `spawn-job-not-picklable`, which puts the
+lambda back; it is caught.

@@ -16,7 +16,9 @@ download runs under spawn, and nothing had ever run it that way.
 
     python3 testkit/spawned.py "/path/to/saves" [--mod "/path/to/mod"]
 
-Builds the same campaign both ways and compares every file byte for byte.
+Builds the same campaign both ways and compares every file byte for byte,
+and fails if either way had to read the saves one at a time because its
+workers would not start.
 """
 
 import argparse
@@ -87,9 +89,22 @@ def main():
                 continue
             out = os.path.join(holding, how)
             done = build(how, args.saves, out, args.mod, holding)
+            said = done.stdout + done.stderr
             if done.returncode:
-                print("  %s: the run failed\n%s"
-                      % (how, (done.stdout + done.stderr)[-1500:]))
+                print("  %s: the run failed\n%s" % (how, said[-1500:]))
+                return 1
+            # A pool that will not start is not an error to the analyzer: it
+            # says so and reads every save itself, and the files come out
+            # the same. So comparing them cannot tell a worker that started
+            # under spawn from one that never did -- and a job that cannot be
+            # sent to a fresh interpreter by name is exactly what spawn breaks
+            # and fork does not. Measured: with the finishing handed over as a
+            # lambda, spawn fell back to one save at a time and this check
+            # said "all 10 files identical" and passed.
+            if "reading one at a time" in said:
+                print("  %s: the workers never started, so every save was "
+                      "read one at a time and nothing was read the way %s "
+                      "reads it\n%s" % (how, how, said[-1500:]))
                 return 1
             made[how] = fingerprints(out)
             print("  %-6s wrote %d files" % (how, len(made[how])))

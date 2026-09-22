@@ -272,26 +272,38 @@ def m16():
 def m23():
     # Exactly what the key was before it was derived. `nation.py` fills every
     # parsed save, and an edit to it was served out of the old parses.
-    patch("vic2_analyzer.py",
-          """    source = cacheio.source_fingerprint(*sorted(
-        {os.path.abspath(__file__), os.path.abspath(cacheio.__file__)}
-        | set(cacheio.sources_reached(readsave.__file__))))""",
-          """    import fastscan, tech_groups
+    patch("readfolder.py",
+          """    source = cacheio.source_fingerprint(*cacheio.sources_reached(__file__))""",
+          """    import fastscan, readsave, tech_groups, v2parse
     source = cacheio.source_fingerprint(
         __file__, readsave.__file__, v2parse.__file__, fastscan.__file__,
         tech_groups.__file__, cacheio.__file__)""")
 
 
 @mutation("parse-key-too-wide",
-          "the parse cache key follows everything the analyzer imports",
+          "the reader imports something that only uses a save, and the key follows it",
           "caching.py")
 def m24():
-    # The opposite mistake: walking from the file that writes the entry
-    # rather than from the reader. The report and `explain.py` land in the
-    # key, and rewording a label throws every cached save away.
+    # The opposite mistake. The key is everything readfolder reaches, so
+    # readfolder importing what reads no save puts that in the key, and
+    # rewording a label in it throws every cached save away.
+    patch("readfolder.py", "import cacheio\nfrom cacheio import load as _cache_read\n",
+          "import cacheio\nimport explain\nfrom cacheio import load as _cache_read\n")
+
+
+# ---- the workers, which Windows starts as fresh interpreters
+
+@mutation("spawn-job-not-picklable",
+          "the finishing reaches the workers as a lambda, so under spawn none start",
+          "spawned.py", "saves")
+def m25():
+    # Fork inherits the job; spawn has to send it by name, and a lambda has
+    # none. The pool fails at the first submit, the analyzer reads every save
+    # itself, and the files come out identical -- so a check comparing them
+    # passed while Windows read a campaign on one core.
     patch("vic2_analyzer.py",
-          "        | set(cacheio.sources_reached(readsave.__file__))))",
-          "        | set(cacheio.sources_reached(readsave.__file__, __file__))))")
+          "        transform=partial(_finish_save, spec=spec) if in_workers else None,",
+          "        transform=(lambda m, n: _finish_save(m, n, spec)) if in_workers else None,")
 
 
 # ---- commit 8caa343: a mod refusing to guess what it has not read

@@ -66,7 +66,7 @@ def refusing_pool(saves, out):
     import vic2_analyzer as va
     readsave.PLAIN.apply()
 
-    # Patched on `concurrent.futures` rather than on `vic2_analyzer`,
+    # Patched on `concurrent.futures` rather than on `readfolder`,
     # because the pool is imported inside the function that uses it and so
     # is looked up fresh, from there, on every call.
     import concurrent.futures as cf
