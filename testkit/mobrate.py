@@ -48,13 +48,24 @@ def a_nation(**over):
 
 
 def a_mod(**over):
-    """The smallest mod `rate_for` will read."""
-    mod = {"tech_mob": {}, "invention_rules": {}, "event_mob": {},
-           "nv_mob": {}, "triggered_mob": [], "reform_mob": {},
-           "static_mob": {}, "invention_sequence": [], "index_base": None,
-           "technologies": frozenset(), "modifier_impacts": {},
-           "mob_impacts": {}}
-    mod.update(over)
+    """
+    The smallest mod `rate_for` will read.
+
+    Built through `Mod` rather than as a dict, so a field this forgets is a
+    failure here and not a wrong number somewhere downstream. The indices
+    are decoded against no nations, which is how a mod that has been asked
+    and could not tell differs from one nobody asked.
+    """
+    import mod_reader
+    blank = {name: () for name in mod_reader.MOD_FIELDS}
+    blank.update(path="", tech_count=0, invention_count=0,
+                 tech_mob={}, invention_rules={}, event_mob={}, nv_mob={},
+                 triggered_mob=[], reform_mob={}, static_mob={},
+                 invention_sequence=[], technologies=frozenset(),
+                 modifier_impacts={}, mob_impacts={}, defines={})
+    blank.update(over)
+    mod = mod_reader.Mod(**blank)
+    mod.decode_indices([])
     return mod
 
 
@@ -104,6 +115,64 @@ def _(rate_for):
     return got, 0.0, "a mod run answers from the mod, whatever the flag says"
 
 
+def undecoded_indices_refuse():
+    """
+    [what went wrong] when a mod is asked before its indices are decoded.
+
+    A save writes each nation's inventions as bare numbers into an array
+    the engine builds at load time. Which number means which invention is
+    only decidable against a save, so a freshly loaded mod does not know --
+    and used to say so with `index_base = None`, which is also what it says
+    when the indices have been checked and do not decode.
+
+    The two are not the same answer and the difference is a number. Decoded,
+    a nation's mobilisation size counts the inventions the save says it
+    rolled. Undecodable, `breakdown` falls back to every invention whose
+    requirements the nation meets, which its own comment calls an upper
+    bound that "overstates nations with poor luck". So a caller that simply
+    forgot to decode got the upper bound, silently, for every nation.
+
+    Two callers remembered. Nothing made a third, and nothing would have
+    said so. Now the mod refuses the question until it has been asked.
+    """
+    import mod_reader
+    import modrules
+
+    wrong = []
+    blank = {name: () for name in mod_reader.MOD_FIELDS}
+    blank.update(path="", tech_count=0, invention_count=0, tech_mob={},
+                 invention_rules={}, event_mob={}, nv_mob={},
+                 triggered_mob=[], reform_mob={}, static_mob={},
+                 invention_sequence=[], technologies=frozenset(),
+                 modifier_impacts={}, mob_impacts={}, defines={})
+    fresh = mod_reader.Mod(**blank)
+    if fresh.indices_read:
+        wrong.append("a mod says its indices are decoded before anyone has "
+                     "decoded them")
+    try:
+        modrules.rate_for(a_nation(civilized="yes"), fresh, set(), None, 1.0)
+    except RuntimeError:
+        pass
+    else:
+        wrong.append("a mod nobody decoded answered anyway, which is the "
+                     "upper bound served as though it were the real count")
+
+    # And the other case really is an answer: asked, and it does not decode.
+    asked = mod_reader.Mod(**blank)
+    asked.decode_indices([])
+    if not asked.indices_read:
+        wrong.append("decode_indices ran and the mod still says nobody asked")
+    if asked.index_base is not None:
+        wrong.append("nothing to decode against came back as a base anyway")
+    try:
+        modrules.rate_for(a_nation(civilized="yes"), asked, set(), None, 1.0)
+    except RuntimeError:
+        wrong.append("a mod that was asked and could not tell refuses the "
+                     "question instead of falling back, so a campaign whose "
+                     "indices do not decode cannot be read at all")
+    return wrong
+
+
 def both_paths_agree():
     """
     [what went wrong] when the report's rate and the diagnostic's differ.
@@ -146,6 +215,11 @@ def main():
 
     said = both_paths_agree()
     print("  %-*s %s" % (width, "one definition of the rule, not two",
+                         "ok" if not said else "FAIL"))
+    wrong += said
+
+    said = undecoded_indices_refuse()
+    print("  %-*s %s" % (width, "a mod nobody decoded refuses to guess",
                          "ok" if not said else "FAIL"))
     wrong += said
 

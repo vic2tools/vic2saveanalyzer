@@ -236,6 +236,20 @@ mod's `bankers` into the next campaign, read one anyway, and cached it under
 a key that said it had not. Five ways of making the key and the state
 disagree were each put in and each came out.
 
+**`mobrate.py`** also holds the line a mod must not cross when nobody has
+decoded its invention indices. A save writes each nation's inventions as
+bare numbers into an array the engine builds at load time, and which number
+means which invention is only decidable against a save -- so a freshly
+loaded mod does not know. It used to say so with `index_base = None`, which
+is also what it says once the indices *have* been checked and do not decode.
+Those are not the same answer: decoded, a nation's mobilisation size counts
+the inventions the save says it rolled; undecodable, `breakdown` falls back
+to every invention whose requirements it meets, an upper bound that
+overstates nations with poor luck. A caller who forgot to decode got that
+upper bound silently, for every nation. The mod refuses the question now
+until it has been asked, and the check holds both halves -- refusing before,
+and still falling back after.
+
 **`staleness.py`** touches every source file the program has, in a copy of it,
 and checks each one moves the report stamp. The stamp is what lets a second run
 say "Nothing has changed since this was built" and skip everything — the most

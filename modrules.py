@@ -120,7 +120,7 @@ def _condition_ok(cond, nat, mod, world, inventions):
 
     text = unquote(str(value))
     reforms = nat.get("reforms") or {}
-    groups = mod.get("reform_names") or frozenset()
+    groups = mod.reform_names or frozenset()
 
     if key in _TRIGGER_YESNO:
         want = text.lower() == "yes"
@@ -163,7 +163,7 @@ def _condition_ok(cond, nat, mod, world, inventions):
         return world.get("owner", {}).get(to_int(text, -1)) == nat.get("tag")
 
     if key == "is_culture_group":
-        table = mod.get("culture_groups") or {}
+        table = mod.culture_groups or {}
         if not table:
             return None
         return table.get(str(nat.get("primary_culture", ""))) == text
@@ -209,7 +209,7 @@ def _province_condition(cond, pid, mod):
     if isinstance(value, dict):
         return None
     if key == "continent":
-        where = (mod.get("continents") or {}).get(pid)
+        where = (mod.continents or {}).get(pid)
         if not where:
             return None
         return where == unquote(str(value))
@@ -227,10 +227,10 @@ def held_inventions(nation, mod):
     inventions the nation *could* have -- and a trigger asking whether it holds
     one deserves "cannot tell" rather than that.
     """
-    base = mod.get("index_base")
+    base = mod.index_base
     if base is None:
         return None
-    seq = mod.get("invention_sequence") or ()
+    seq = mod.invention_sequence or ()
     out = set()
     for idx in nation.get("invention_ids", ()):
         j = idx - base
@@ -250,19 +250,19 @@ def breakdown(nation, mod, live=None, world=None):
     """
     parts = []
     for tech in nation["tech_list"]:
-        value = mod["tech_mob"].get(tech, 0.0)
+        value = mod.tech_mob.get(tech, 0.0)
         if value:
             parts.append(("tech", tech, value))
 
     # Which inventions the nation holds, both for the ones that grant
     # mobilisation size and for the triggered modifiers that ask about one.
     inventions = held_inventions(nation, mod)
-    base = mod.get("index_base")
+    base = mod.index_base
     if base is not None:
         # The save says exactly which inventions this nation rolled. Nothing
         # else does: two nations with identical technology routinely differ,
         # because inventions fire on a chance roll.
-        seq = mod["invention_sequence"]
+        seq = mod.invention_sequence
         for idx in nation.get("invention_ids", ()):
             j = idx - base
             if 0 <= j < len(seq) and seq[j]["size"]:
@@ -273,7 +273,7 @@ def breakdown(nation, mod, live=None, world=None):
         # is an upper bound, and it overstates nations with poor luck.
         techs = set(nation["tech_list"])
         tag = nation.get("tag", "")
-        for name, rule in mod.get("invention_rules", {}).items():
+        for name, rule in (mod.invention_rules or {}).items():
             if live is not None and name not in live:
                 continue
             if not rule["techs"] <= techs:
@@ -283,12 +283,12 @@ def breakdown(nation, mod, live=None, world=None):
             parts.append(("invention", name, rule["size"]))
 
     nv = nation.get("nationalvalue", "")
-    value = mod["nv_mob"].get(nv, 0.0)
+    value = mod.nv_mob.get(nv, 0.0)
     if value:
         parts.append(("national value", nv, value))
 
     for name in nation.get("modifiers", ()):
-        value = mod.get("event_mob", {}).get(name, 0.0)
+        value = (mod.event_mob or {}).get(name, 0.0)
         if value:
             parts.append(("event modifier", name, value))
 
@@ -297,7 +297,7 @@ def breakdown(nation, mod, live=None, world=None):
     # all; it was simply never read. GFM's conscription ladder is worth up to
     # +6%, which is more than its whole technology tree grants.
     for reform, option in (nation.get("reforms") or {}).items():
-        value = (mod.get("reform_mob") or {}).get((reform, option), 0.0)
+        value = (mod.reform_mob or {}).get((reform, option), 0.0)
         if value:
             parts.append(("reform", f"{reform} = {option}", value))
 
@@ -306,7 +306,7 @@ def breakdown(nation, mod, live=None, world=None):
     # down. -10% in the base game, -20% in Divergences of Darkness, absent in
     # IGoR and Ferrum Mare.
     if str(nation.get("civilized", "")).lower() == "no":
-        value = (mod.get("static_mob") or {}).get("unciv_nation", 0.0)
+        value = (mod.static_mob or {}).get("unciv_nation", 0.0)
         if value:
             parts.append(("uncivilized", "unciv_nation", value))
 
@@ -314,7 +314,7 @@ def breakdown(nation, mod, live=None, world=None):
     # player-unciv special case as well as everything neither of them reached:
     # GFM alone hands AI France +13%, Prussia +10% before 1880, Afghanistan
     # +20% and the smaller South American nations up to +8.5%.
-    for name, size, _impact, trigger in mod.get("triggered_mob", ()):
+    for name, size, _impact, trigger in (mod.triggered_mob or ()):
         if not size:
             continue
         if _trigger_ok(trigger, nation, mod, world, inventions):
@@ -328,7 +328,7 @@ def unjudged_triggers(mod):
     can say what it left out instead of quietly being wrong by that much.
     """
     out = []
-    for name, size, _impact, trigger in mod.get("triggered_mob", ()):
+    for name, size, _impact, trigger in (mod.triggered_mob or ()):
         if not size:
             continue
         if _unreadable(trigger, mod):
@@ -341,7 +341,7 @@ def _unreadable(trigger, mod):
     if not isinstance(trigger, dict):
         return False
     known = (set(_TRIGGER_YESNO) | set(_TRIGGER_TEXT) | set(_TRIGGER_NUMBER)
-             | set(mod.get("reform_names") or ())
+             | set(mod.reform_names or ())
              | {"year", "capital", "owns", "is_culture_group", "invention",
                 "technology", "has_country_flag", "has_country_modifier"})
     for cond in _conditions(trigger):
@@ -404,8 +404,8 @@ def impact_for(nation, mod, world=None, inventions=None):
         inventions = held_inventions(nation, mod)
     total = 0.0
     for name in nation.get("modifiers", ()):
-        total += (mod.get("modifier_impacts") or {}).get(name, 0.0)
-    for name, _size, impact, trigger in mod.get("triggered_mob", ()):
+        total += (mod.modifier_impacts or {}).get(name, 0.0)
+    for name, _size, impact, trigger in (mod.triggered_mob or ()):
         if not impact:
             continue
         if _trigger_ok(trigger, nation, mod, world, inventions):

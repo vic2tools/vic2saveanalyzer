@@ -28,8 +28,8 @@ class ModCacheTests(unittest.TestCase):
         with patch.object(mod_reader, "_load_mod", side_effect=AssertionError("cache miss")):
             cached = mod_reader.load_mod(str(self.mod))
             self.assertEqual(fresh, cached)
-            cached["index_base"] = 1
-            cached["defines"]["POP_SIZE_PER_REGIMENT"] = 99
+            cached.decode_indices([])
+            cached.defines["POP_SIZE_PER_REGIMENT"] = 99
             self.assertEqual(fresh, mod_reader.load_mod(str(self.mod)))
 
     def test_edits_additions_and_deletions_change_loaded_data(self):
@@ -37,13 +37,15 @@ class ModCacheTests(unittest.TestCase):
         tech = self.mod / "technologies/army_tech.txt"
         tech.write_text(tech.read_text() + "\nnew_tech = { mobilisation_size = 0.125 }\n")
         after = mod_reader.load_mod(str(self.mod))
-        self.assertEqual(after["tech_count"], before["tech_count"] + 1)
-        self.assertEqual(after["tech_mob"]["new_tech"], 0.125)
+        self.assertEqual(after.tech_count, before.tech_count + 1)
+        self.assertEqual(after.tech_mob["new_tech"], 0.125)
         added = self.mod / "inventions/extra.txt"
         added.write_text("new_invention = { mobilisation_size = 0.25 }\n")
-        self.assertIn("new_invention", mod_reader.load_mod(str(self.mod))["invention_rules"])
+        self.assertIn("new_invention",
+                      mod_reader.load_mod(str(self.mod)).invention_rules)
         added.unlink()
-        self.assertNotIn("new_invention", mod_reader.load_mod(str(self.mod))["invention_rules"])
+        self.assertNotIn("new_invention",
+                         mod_reader.load_mod(str(self.mod)).invention_rules)
 
     def test_inherited_data_and_local_override(self):
         game = self.root / "game"
@@ -54,15 +56,15 @@ class ModCacheTests(unittest.TestCase):
         base_defines.write_text("POP_SIZE_PER_REGIMENT = 3000,\n")
         mod = Path(a_mod(str(game / "mod/partial")))
         first_stamp = mod_reader.mod_signature(str(mod))
-        self.assertEqual(mod_reader.load_mod(str(mod))["defines"]["POP_SIZE_PER_REGIMENT"], 3000)
+        self.assertEqual(mod_reader.load_mod(str(mod)).defines["POP_SIZE_PER_REGIMENT"], 3000)
         base_defines.write_text("POP_SIZE_PER_REGIMENT = 2000,\n")
         self.assertNotEqual(first_stamp, mod_reader.mod_signature(str(mod)))
-        self.assertEqual(mod_reader.load_mod(str(mod))["defines"]["POP_SIZE_PER_REGIMENT"], 2000)
+        self.assertEqual(mod_reader.load_mod(str(mod)).defines["POP_SIZE_PER_REGIMENT"], 2000)
         own = mod / "common/defines.lua"
         own.write_text("POP_SIZE_PER_REGIMENT = 1000,\n")
-        self.assertEqual(mod_reader.load_mod(str(mod))["defines"]["POP_SIZE_PER_REGIMENT"], 1000)
+        self.assertEqual(mod_reader.load_mod(str(mod)).defines["POP_SIZE_PER_REGIMENT"], 1000)
         own.unlink()
-        self.assertEqual(mod_reader.load_mod(str(mod))["defines"]["POP_SIZE_PER_REGIMENT"], 2000)
+        self.assertEqual(mod_reader.load_mod(str(mod)).defines["POP_SIZE_PER_REGIMENT"], 2000)
         stamp = mod_reader.mod_signature(str(mod))
         (game / "save games").mkdir()
         (game / "save games/autosave.v2").write_text("unrelated")

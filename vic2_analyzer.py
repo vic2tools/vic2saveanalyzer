@@ -460,12 +460,12 @@ def mod_defaults(args, mod):
     pop_per_regiment = args.pop_per_regiment
     mob_types = list(args.mob_types)
     if mod is not None:
-        defines = mod["defines"] or {}
+        defines = mod.defines or {}
         if ("POP_SIZE_PER_REGIMENT" in defines
                 and pop_per_regiment == POP_SIZE_PER_REGIMENT):
             pop_per_regiment = int(defines["POP_SIZE_PER_REGIMENT"])
-        if mod["mob_types"] and mob_types == sorted(MOBILIZABLE_TYPES):
-            mob_types = sorted(mod["mob_types"])
+        if mod.mob_types and mob_types == sorted(MOBILIZABLE_TYPES):
+            mob_types = sorted(mod.mob_types)
     return pop_per_regiment, mob_types
 
 
@@ -1075,7 +1075,7 @@ def finalize(nat, rate=1.0, pop_per_regiment=POP_SIZE_PER_REGIMENT,
     out["starving_pct"] = round(100.0 * nat["starving"] / total, 3) \
         if total else 0.0
     out["brigade_cap"] = max(
-        brigade_cap(nat, (mod or {}).get("defines") or {}, pop_per_regiment),
+        brigade_cap(nat, (mod.defines if mod else None) or {}, pop_per_regiment),
         nat["regular_brigades"])
     out["mobilization_pool"] = pool_stated
     out["mobilization_pops"] = entries
@@ -1098,18 +1098,18 @@ def finalize(nat, rate=1.0, pop_per_regiment=POP_SIZE_PER_REGIMENT,
     policy = ""
     cap = 0
     if mod:
-        table = mod.get("party_sequence") or ()
+        table = mod.party_sequence or ()
         index = int(nat.get("ruling_party") or 0) - 1
         if 0 <= index < len(table):
             policy = table[index][3]
-        impact = (mod.get("mob_impacts") or {}).get(policy)
+        impact = (mod.mob_impacts or {}).get(policy)
         if impact is not None:
             # Event modifiers, which the save lists by name, plus triggered
             # ones, which it does not and which have to be judged from their
             # own triggers.
             from modrules import impact_for
             impact += impact_for(nat, mod, world)
-            floor_ = int(to_float((mod.get("defines") or {}).get(
+            floor_ = int(to_float((mod.defines or {}).get(
                 "MIN_MOBILIZE_LIMIT", 3), 3))
             cap = int(max(nat["regular_brigades"], floor_) * (1.0 + impact))
     out["war_policy"] = policy
@@ -1135,7 +1135,7 @@ def finalize(nat, rate=1.0, pop_per_regiment=POP_SIZE_PER_REGIMENT,
     # and Ferrum Mare rich `bankers`. Counted against the vanilla list those
     # people simply vanished -- Ferrum Mare's LCT is 98% bankers and read as a
     # nation of two thousand.
-    layers = (mod or {}).get("strata") or {}
+    layers = (mod.strata if mod else None) or {}
     if layers:
         for stratum in STRATA:
             out[f"pop_{stratum}"] = sum(
@@ -1555,7 +1555,7 @@ def campaign_rows(parsed, mod, args, wanted=None):
     different one, and by the time the two were read side by side it had
     drifted in five places.
     """
-    from mod_reader import attainable_inventions, index_base_for
+    from mod_reader import attainable_inventions
 
     every, all_techs = [], {}
     for _meta, nations in parsed:
@@ -1564,7 +1564,11 @@ def campaign_rows(parsed, mod, args, wanted=None):
             all_techs.setdefault(tag, set()).update(nat["tech_list"])
     live = attainable_inventions(mod, all_techs) if mod else None
     if mod is not None:
-        mod["index_base"] = index_base_for(mod, every)
+        # Which base decodes this campaign's invention indices. Until this
+        # has run the mod refuses to say, because "nobody looked" and "they
+        # do not decode" mean different things and only one of them is a
+        # reason to fall back to guessing what a nation holds.
+        mod.decode_indices(every)
 
     spec = finish_spec(args, mod, live, wanted)
     out = []
@@ -1730,7 +1734,7 @@ def run_cross(parent, game_root, args, verbose=True):
         # is better than the bare tag, and where two mods share a tag they were
         # measured to agree on it. Country names live in the localisation, not
         # in `display_names`, which is goods and unit types.
-        loc = mod.get("localisation") or {}
+        loc = mod.localisation or {}
         for _meta, nations in parsed:
             for tag, nat in nations.items():
                 if tag not in names:
@@ -1962,9 +1966,9 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
         # government the nation ended the series with. Without --mod-path there
         # is nothing to read and tags stand in for names.
         report_names = {}
-        if mod is not None and mod.get("localisation"):
+        if mod is not None and mod.localisation:
             from mod_reader import name_for
-            loc = mod["localisation"]
+            loc = mod.localisation
             for _meta, _nations in parsed:
                 for _tag, _nat in _nations.items():
                     report_names[_tag] = name_for(
@@ -1979,13 +1983,13 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
         # The save ranks the great powers itself, as 1-based indices into the
         # country array common/countries.txt defines, so the mod is needed to
         # turn them back into tags.
-        order = (mod or {}).get("country_order") or []
+        order = (mod.country_order if mod else None) or []
         great_powers = {}
         flags = {}
         if order:
             from mod_reader import (flag_images, flag_suffixes,
                                     government_flag_types)
-            styles = government_flag_types(mod["path"])
+            styles = government_flag_types(mod.path)
             for meta_i, nations_i in parsed:
                 picks = [order[i - 1] for i in meta_i.get("great_nations", ())
                          if 0 < i <= len(order)]
@@ -2001,7 +2005,7 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
                     # a flagType and still fly different flags.
                     key = tag + "|" + (flag_suffixes(gov, styles)[0] or "base")
                     if key not in flags:
-                        got = flag_images(mod["path"], [tag], {tag: gov})
+                        got = flag_images(mod.path, [tag], {tag: gov})
                         if tag in got:
                             flags[key] = got[tag]
                     row.append([tag, key])
@@ -2019,7 +2023,7 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
                             fighters.add(who["country"])
             for tag in sorted(t for t in fighters if t and t != "---"):
                 if tag + "|" not in flags:
-                    got = flag_images(mod["path"], [tag], {})
+                    got = flag_images(mod.path, [tag], {})
                     if tag in got:
                         flags[tag + "|"] = got[tag]
         try:
@@ -2028,21 +2032,21 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
                 snapshot_rows, brigade_rows, tech_rows, args.out,
                 tag_names=report_names,
                 map_data=map_data,
-                base_prices=(mod or {}).get("base_prices"),
+                base_prices=(mod.base_prices if mod else None),
                 great_powers=great_powers,
                 flags=flags,
                 cross=cross_payload,
-                technology=(mod or {}).get("technology"),
-                wars=build_wars(parsed, (mod or {}).get("province_names"),
-                                (mod or {}).get("province_regions"),
-                                (mod or {}).get("state_names"),
-                                (mod or {}).get("unit_kinds"), book=war_book),
+                technology=(mod.technology if mod else None),
+                wars=build_wars(parsed, (mod.province_names if mod else None),
+                                (mod.province_regions if mod else None),
+                                (mod.state_names if mod else None),
+                                (mod.unit_kinds if mod else None), book=war_book),
                 succession=build_succession(parsed,
-                                            (mod or {}).get("formations")),
-                culture_names=(mod or {}).get("culture_names"),
-                display_names=(mod or {}).get("display_names"),
+                                            (mod.formations if mod else None)),
+                culture_names=(mod.culture_names if mod else None),
+                display_names=(mod.display_names if mod else None),
                 naval={"profiles": naval_profiles, "of": naval_of,
-                       "exact": (mod or {}).get("index_base") is not None}
+                       "exact": (mod.index_base if mod else None) is not None}
                       if naval_profiles else None,
                 supply=supply_by,
                 # One number a save rather than one a nation, so it is
@@ -2301,7 +2305,7 @@ def main():
             # about it. Wrapped in a stack trace it reads like a crash in
             # the program, which is what the window used to show.
             sys.exit(str(exc))
-        extra = set(mod["pop_types"]) - VANILLA_POP_TYPES
+        extra = set(mod.pop_types) - VANILLA_POP_TYPES
         # Written back onto `args` because the rest of a single-campaign run
         # reads them off it -- the finishing spec, the two printed lines
         # below. `run_cross` asks the same function and keeps the answer to
@@ -2355,8 +2359,8 @@ def main():
 
     live = None
     if mod is not None:
-        from mod_reader import (attainable_inventions, index_base_for,
-                                index_coverage, validate_indices)
+        from mod_reader import (attainable_inventions, index_coverage,
+                                validate_indices)
         from modrules import unjudged_triggers
         # Decode invention indices from compact summaries. Population and
         # province data stay in the raw cache until the report needs them.
@@ -2371,19 +2375,19 @@ def main():
         # Saves name each nation's inventions by index. Decoding them is what
         # turns the mobilisation size from "every invention this nation could
         # have" into the ones it actually rolled.
-        mod["index_base"] = index_base_for(mod, every_nation)
+        mod.decode_indices(every_nation)
         if verbose:
-            if mod["index_base"] is None:
+            if mod.index_base is None:
                 print("\nInvention indices could not be decoded from "
-                      f"{len(mod['invention_sequence'])} inventions; falling back "
+                      f"{len(mod.invention_sequence)} inventions; falling back "
                       "to requirement matching, which overstates unlucky nations.")
             else:
-                bad, total = validate_indices(mod, every_nation, mod["index_base"])
+                bad, total = validate_indices(mod, every_nation, mod.index_base)
                 print(f"\nInvention indices decoded against "
-                      f"{len(mod['invention_sequence'])} inventions "
-                      f"(base {mod['index_base']}): {bad} of {total} nation-invention "
+                      f"{len(mod.invention_sequence)} inventions "
+                      f"(base {mod.index_base}): {bad} of {total} nation-invention "
                       f"pairs are unreachable ({bad / total * 100:.1f}%).")
-                odd, seen = index_coverage(mod, walked, mod["index_base"])
+                odd, seen = index_coverage(mod, walked, mod.index_base)
                 if odd:
                     lost = sum(v[1] for v in odd.values())
                     print(
@@ -2401,20 +2405,20 @@ def main():
                         "are short by whatever those inventions grant; the rest "
                         "of the campaign is unaffected.")
         if verbose:
-            rules = mod["invention_rules"]
-            print(f"\nMod scan: {mod['tech_count']} techs "
-                  f"({len(mod['tech_mob'])} grant mobilisation_size), "
+            rules = mod.invention_rules
+            print(f"\nMod scan: {mod.tech_count} techs "
+                  f"({len(mod.tech_mob)} grant mobilisation_size), "
                   f"{len(rules)} inventions grant it "
                   f"({len(live)} obtainable), "
-                  f"{len(mod['event_mob'])} event modifiers, "
-                  f"{sum(1 for _n, size, _i, _t in mod['triggered_mob'] if size)} "
+                  f"{len(mod.event_mob)} event modifiers, "
+                  f"{sum(1 for _n, size, _i, _t in mod.triggered_mob if size)} "
                   f"triggered modifiers.")
             skipped = unjudged_triggers(mod)
             if skipped:
                 print("  triggered modifiers left out, because their trigger "
                       "asks something this cannot answer: "
                       + ", ".join(skipped))
-            for t, v in sorted(mod["tech_mob"].items()):
+            for t, v in sorted(mod.tech_mob.items()):
                 print(f"  tech       {t:<44} +{v:.3f}")
             for n in sorted(rules):
                 mark = "" if n in live else "   (unobtainable)"

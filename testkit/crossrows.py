@@ -237,10 +237,11 @@ def specs_agree(cross, report):
     if sorted(cross.live or ()) != sorted(report.live or ()):
         wrong.append("the two paths disagree about which inventions are "
                      "obtainable")
-    if (cross.mod or {}).get("path") != (report.mod or {}).get("path"):
+    mine = cross.mod.path if cross.mod else None
+    theirs = report.mod.path if report.mod else None
+    if mine != theirs:
         wrong.append("the two paths read different mods: %r against %r"
-                     % ((cross.mod or {}).get("path"),
-                        (report.mod or {}).get("path")))
+                     % (mine, theirs))
     return wrong
 
 

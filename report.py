@@ -216,14 +216,14 @@ def build_map(mod, parsed, scale=5):
     from mod_reader import (country_colours, province_anchors, province_names,
                             province_raster, sea_provinces, unit_positions)
 
-    if not mod or not mod.get("path"):
+    if not mod or not mod.path:
         return None
-    width, height, runs = province_raster(mod["path"], scale)
+    width, height, runs = province_raster(mod.path, scale)
     if not width:
         return None
 
-    colours = country_colours(mod["path"])
-    sea = sea_provinces(mod["path"])
+    colours = country_colours(mod.path)
+    sea = sea_provinces(mod.path)
     full_height = height * scale
 
     # Only provinces that ever hold troops need an anchor, which is a fraction
@@ -234,7 +234,7 @@ def build_map(mod, parsed, scale=5):
                   for pid in nat.get("units_at", {})
                   if pid > 0}
     spots = {}
-    for pid, (x, y) in unit_positions(mod["path"]).items():
+    for pid, (x, y) in unit_positions(mod.path).items():
         if pid not in garrisoned:
             continue
         # positions.txt measures y from the bottom, like the bitmap
@@ -311,13 +311,13 @@ def build_map(mod, parsed, scale=5):
         "colours": {t: colours[t] for t in tags if t in colours},
         "sea": sorted(sea),
         "spots": spots,
-        "names": {p: n for p, n in province_names(mod["path"]).items()
+        "names": {p: n for p, n in province_names(mod.path).items()
                   if p in spots},
         "owners": owners,
         "armies": armies,
         # What a regiment holds at full strength, so the map can say whether a
         # brigade is under-strength rather than just how many men it has.
-        "regimentSize": int((mod.get("defines") or {}).get(
+        "regimentSize": int((mod.defines or {}).get(
             "POP_SIZE_PER_REGIMENT") or 3000),
     }
 

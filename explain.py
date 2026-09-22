@@ -105,7 +105,7 @@ def save_world(meta, mod):
     none of which is a property of the country block itself. This gathers the
     four of them once per save rather than once per nation.
     """
-    order = (mod or {}).get("country_order") or []
+    order = (mod.country_order if mod else None) or []
     powers = {order[i - 1] for i in meta.get("great_nations", ())
               if 0 < i <= len(order)}
     at_war = set()
@@ -168,8 +168,8 @@ def explain(args, mod, live, parsed):
         from mod_reader import (alignment_score, index_holdings,
                                 invention_files, ungated_inventions)
         holdings = index_holdings(parsed)
-        base = mod["index_base"]
-        seq = mod["invention_sequence"]
+        base = mod.index_base
+        seq = mod.invention_sequence
         print(f"\nChecking {len(seq)} inventions against {len(parsed)} saves.")
         if base is None:
             sys.exit("  the indices did not decode at all, so there is "
@@ -240,8 +240,8 @@ def explain(args, mod, live, parsed):
         nat = nations.get(tag)
         if nat is None:
             sys.exit(f"{tag} is not in {meta['file']}.")
-        seq = mod["invention_sequence"]
-        base = mod["index_base"]
+        seq = mod.invention_sequence
+        base = mod.index_base
         where = invention_files(args.mod_path)
         held = sorted(nat.get("invention_ids", ()))
         print(f"\n{tag} at {meta['date']} in {meta['file']}")
@@ -300,8 +300,8 @@ def explain(args, mod, live, parsed):
                   f"cannot answer: {', '.join(skipped)}.")
         print(f"Invention indices in save run "
               f"{min(nat['invention_ids'], default=0)}..{max(nat['invention_ids'], default=0)}; "
-              f"the mod defines {len(mod['invention_sequence'])} inventions, "
-              f"{mod['invention_count']} of which grant mobilisation size.")
+              f"the mod defines {len(mod.invention_sequence)} inventions, "
+              f"{mod.invention_count} of which grant mobilisation size.")
         return True
     return False
 

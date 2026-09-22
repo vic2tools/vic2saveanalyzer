@@ -161,13 +161,13 @@ def reading_for(mod_path, mod, mob_types):
     and hashed into the cache key, and a set is neither ordered nor ordered
     the same way twice.
     """
-    named = (mod or {}).get("pop_types") or ()
+    named = (mod.pop_types if mod else None) or ()
     return Reading(
         mod_path=mod_path,
         pop_types=tuple(sorted(v2parse.VANILLA_POP_TYPES
                                | {n for n in named if n})),
         mob_types=tuple(sorted(mob_types)),
-        reform_keys=tuple(sorted((mod or {}).get("reform_names") or ())))
+        reform_keys=tuple(sorted((mod.reform_names if mod else None) or ())))
 
 
 # No mod: the twelve pop types the game ships and the three that can

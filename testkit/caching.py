@@ -14,6 +14,8 @@ from unittest.mock import patch
 HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
 import fastscan
+# The smallest thing `Mod` will make, from the check that already needed one.
+from mobrate import a_mod
 import readsave
 import savefmt
 import v2parse
@@ -133,8 +135,8 @@ class ReadingProfileTests(unittest.TestCase):
         self.addCleanup(readsave.PLAIN.apply)
 
     def test_applying_a_profile_is_the_state_the_key_describes(self):
-        mod = {"pop_types": ["bankers", "serfs"],
-               "reform_names": ["slavery", "voting_system"]}
+        mod = a_mod(pop_types=["bankers", "serfs"],
+                    reform_names=["slavery", "voting_system"])
         reading = readsave.reading_for("/some/mod", mod,
                                        ("farmers", "bankers"))
         reading.apply()
@@ -144,11 +146,11 @@ class ReadingProfileTests(unittest.TestCase):
         self.assertEqual(readsave.reading_now("/some/mod"), reading)
 
     def test_a_profile_replaces_rather_than_adds(self):
-        readsave.reading_for("/a", {"pop_types": ["bankers"],
-                                    "reform_names": ["slavery"]},
+        readsave.reading_for("/a", a_mod(pop_types=["bankers"],
+                                         reform_names=["slavery"]),
                              ("farmers",)).apply()
-        second = readsave.reading_for("/b", {"pop_types": ["serfs"],
-                                             "reform_names": ["voting"]},
+        second = readsave.reading_for("/b", a_mod(pop_types=["serfs"],
+                                                  reform_names=["voting"]),
                                       ("labourers",))
         second.apply()
         self.assertEqual(readsave.reading_now("/b"), second)
@@ -157,8 +159,8 @@ class ReadingProfileTests(unittest.TestCase):
         self.assertNotIn("farmers", readsave.MOB_CANDIDATES)
 
     def test_every_part_of_the_reading_moves_the_key(self):
-        base = readsave.reading_for("/a", {"pop_types": ["bankers"],
-                                           "reform_names": ["slavery"]},
+        base = readsave.reading_for("/a", a_mod(pop_types=["bankers"],
+                                                reform_names=["slavery"]),
                                     ("farmers",))
         for field, other in (("mod_path", "/b"),
                              ("pop_types", base.pop_types + ("serfs",)),

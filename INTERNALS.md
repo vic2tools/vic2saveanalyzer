@@ -1242,6 +1242,38 @@ folder. `mp_Xifang1850_01_01.v2` decodes against a different array, so every
 invention it contributes lands on the wrong name and drags the other 28 saves'
 fingerprints with it. On its own it does not decode at all.
 
+### A mod that will not guess
+
+`load_mod` returned a bare dict. Its docstring named five keys; callers read
+thirty-one, which is only a documentation problem. The real problem was the
+thirty-eighth.
+
+`index_base` is the offset that turns a save's bare `active_inventions`
+numbers into invention names, and it cannot be known when the mod is read: the
+engine's invention array is reconstructed from the folder and then *checked
+against a save*, so the base is only decidable once a campaign is in hand. So
+the mod came back with `index_base` set to `None` and the caller was expected
+to walk the campaign and write the answer back into the dict it had been
+handed. Two callers did. Nothing made a third.
+
+And the failure was silent, because `None` already meant something else.
+`modrules.breakdown` reads it as "the indices could not be decoded for this
+install" and falls back to assuming a nation holds every invention whose
+requirements it meets -- an upper bound its own comment calls a thing that
+"overstates nations with poor luck". A caller who simply forgot the write-back
+therefore got every nation's mobilisation size quietly too high, with nothing
+anywhere to say so.
+
+It is a `Mod` now, with `MOD_FIELDS` naming what it carries and named
+attributes to read them by -- `mod["tech_mob"]` is a typo that returns `None`,
+`mod.tech_mob` is a typo that says so. `decode_indices(nations)` is the step
+that settles the base, and until it has run `index_base` raises instead of
+answering `None`. "Nobody looked" and "they do not decode" are different
+answers now, and only the second is a reason to fall back to guessing.
+`testkit/mobrate.py` holds both halves: a mod nobody decoded refuses the
+question, and a mod that was asked and could not tell still falls back, so a
+campaign whose indices genuinely do not decode can still be read.
+
 ### A gate that never closes
 
 Ferrum Mare read one suspect until the check learned about this. Its

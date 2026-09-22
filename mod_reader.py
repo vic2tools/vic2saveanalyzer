@@ -802,8 +802,8 @@ def naval_profile(nation, mod):
     guessed as every invention whose requirements the nation meets, which
     flatters nations with bad luck.
     """
-    units = mod.get("naval_units") or {}
-    rules = mod.get("naval_effects") or {}
+    units = mod.naval_units or {}
+    rules = mod.naval_effects or {}
     out = {ship: dict(stats) for ship, stats in units.items()}
     if not out:
         return out
@@ -818,14 +818,14 @@ def naval_profile(nation, mod):
                     out[ship][key] = out[ship].get(key, 0.0) + delta
 
     # Technologies are named outright by the save, so these need no guessing.
-    tech_rules = mod.get("naval_tech_effects") or {}
+    tech_rules = mod.naval_tech_effects or {}
     for tech in nation.get("tech_list", ()):
         if tech in tech_rules:
             apply(tech_rules[tech])
 
-    base = mod.get("index_base")
+    base = mod.index_base
     if base is not None:
-        seq = mod.get("invention_sequence") or []
+        seq = mod.invention_sequence or []
         held = [seq[i - base]["name"] for i in nation.get("invention_ids", ())
                 if 0 <= i - base < len(seq)]
     else:
@@ -1737,6 +1737,121 @@ def _reader_fingerprint():
     return cacheio.source_fingerprint(__file__, v2parse.__file__, cacheio.__file__)
 
 
+# Everything reading a mod folder produces, in the order `_load_mod` builds
+# it. Named here so the record has one declaration rather than thirty-seven
+# strings scattered across six files -- `mod.tech_mob` is a typo waiting
+# to return `None` where `mod.tech_mob` is a typo that says so.
+MOD_FIELDS = (
+    "path", "invention_sequence", "party_sequence", "localisation",
+    "base_prices", "country_order", "formations", "culture_names",
+    "display_names", "province_names", "province_regions", "state_names",
+    "unit_kinds", "naval_units", "naval_effects", "naval_tech_effects",
+    "technology", "mob_impacts", "modifier_impacts", "reform_mob",
+    "reform_names", "static_mob", "triggered_mob", "culture_groups",
+    "continents", "technologies", "defines", "strata", "pop_types",
+    "mob_types", "invention_rules", "event_mob", "tech_mob", "inventions",
+    "nv_mob", "tech_count", "invention_count",
+)
+
+
+class Mod:
+    """
+    One mod folder, read once.
+
+    It was a bare dict. `load_mod`'s docstring documented five of its keys
+    and callers read thirty-one, which is a documentation problem; the real
+    problem was the thirty-eighth.
+
+    `index_base` is the number that turns a save's bare `active_inventions`
+    indices into invention names, and it cannot be known when the mod is
+    read. The engine's invention array is reconstructed from the folder and
+    then *checked against a save*, so the base is only decidable once a
+    campaign is in hand. The mod therefore came back with `index_base` set
+    to None, and the caller was expected to walk the campaign and write the
+    answer back into the dict it had been handed.
+
+    Two callers did. Nothing made a third. And the failure was silent,
+    because None already meant something: `modrules.breakdown` reads it as
+    "the indices could not be decoded for this install" and falls back to
+    assuming a nation holds every invention whose requirements it meets --
+    an upper bound its own comment admits "overstates nations with poor
+    luck". So a caller that forgot the write-back got every nation's
+    mobilisation size quietly too high, with nothing anywhere to say so.
+
+    The two cases are told apart now. `decode_indices` is the step that
+    settles it, and until it has run `index_base` raises rather than
+    answering None. Forgetting it is a traceback naming this docstring
+    instead of a report full of plausible numbers.
+    """
+
+    __slots__ = MOD_FIELDS + ("_index_base", "_indices_read")
+
+    def __init__(self, **fields):
+        for name in MOD_FIELDS:
+            setattr(self, name, fields.pop(name))
+        if fields:
+            raise TypeError("a mod has no %s" % ", ".join(sorted(fields)))
+        self._index_base = None
+        self._indices_read = False
+
+    def decode_indices(self, nations):
+        """
+        Work out which base decodes this campaign's invention indices.
+
+        Returns the base, or None when neither fits -- which is a real
+        answer, and a different one from not having asked.
+        """
+        self._index_base = index_base_for(self, nations)
+        self._indices_read = True
+        return self._index_base
+
+    @property
+    def indices_read(self):
+        """Whether `decode_indices` has run. A `None` base means it has."""
+        return self._indices_read
+
+    @property
+    def index_base(self):
+        if not self._indices_read:
+            raise RuntimeError(
+                "this mod's invention indices have not been decoded, so "
+                "asking what they mean would answer 'cannot tell' when the "
+                "truth is 'nobody looked'. Call decode_indices(nations) "
+                "with the campaign's nations first -- see Mod's docstring "
+                "for what reading it too early used to cost.")
+        return self._index_base
+
+    def __eq__(self, other):
+        if not isinstance(other, Mod):
+            return NotImplemented
+        return (all(getattr(self, n) == getattr(other, n)
+                    for n in MOD_FIELDS)
+                and self._indices_read == other._indices_read
+                and self._index_base == other._index_base)
+
+    def __repr__(self):
+        return "<Mod %s, %d techs, %d inventions%s>" % (
+            os.path.basename(self.path or "?"), self.tech_count,
+            self.invention_count,
+            "" if not self._indices_read
+            else ", indices base %s" % self._index_base)
+
+    # A mod is pickled to every worker and stored on disk, and `__slots__`
+    # without a `__dict__` needs these spelled out. Whether the indices have
+    # been decoded travels with it, because a worker asking is asking about
+    # the campaign the parent already read.
+    def __getstate__(self):
+        return ([getattr(self, n) for n in MOD_FIELDS],
+                self._indices_read, self._index_base)
+
+    def __setstate__(self, state):
+        values, read, base = state
+        for name, value in zip(MOD_FIELDS, values):
+            setattr(self, name, value)
+        self._indices_read = read
+        self._index_base = base
+
+
 def _mod_slot(path):
     """Where this mod's loaded form lives, keyed by every file in it and by
     the code that reads them."""
@@ -1752,13 +1867,12 @@ def _mod_slot(path):
 
 def load_mod(path):
     """
-    Returns {
-      'tech_mob':      {tech_name: mobilisation_size},
-      'inventions':    [ (name, mobilisation_size), ... ] in index order,
-      'nv_mob':        {national_value_name: mobilisation_size},
-      'tech_count':    int,
-      'invention_count': int,
-    }
+    One mod folder as a `Mod`, read once and remembered between runs.
+
+    `MOD_FIELDS` is what it carries; `Mod` is what each of them is for. The
+    one thing not settled here is `index_base`, which needs a save to check
+    against -- see `Mod.decode_indices`.
+
     Raises FileNotFoundError if the folder has neither techs nor inventions.
     """
     path = os.path.abspath(os.path.expanduser(os.path.expandvars(path)))
@@ -1874,9 +1988,6 @@ def _load_mod(path):
         "triggered_mob": triggers,
         "culture_groups": culture_groups(path),
         "continents": continents(path),
-        # Set by index_base_for once a save is in hand; None means the indices
-        # could not be decoded and inventions fall back to requirement matching.
-        "index_base": None,
         # Every technology the mod defines, so an invention gated on one it
         # does not can be told from one a nation simply has not researched.
         "technologies": frozenset(tech_names),
@@ -1892,7 +2003,7 @@ def _load_mod(path):
         "tech_count": tech_count,
         "invention_count": len(inventions),
     }
-    return made
+    return Mod(**made)
 
 
 def invention_sequence(path):
@@ -1965,8 +2076,8 @@ def alignment_score(mod, holdings, base, settled=0.95, suspect=0.5):
     gate never closes and every nation has it from the start -- which says
     nothing at all about whether the array is right.
     """
-    seq = mod.get("invention_sequence") or ()
-    known = mod.get("technologies") or frozenset()
+    seq = mod.invention_sequence or ()
+    known = mod.technologies or frozenset()
     counts = [0, 0, 0, 0, 0]        # settled, granted, suspect, unjudged, ungated
     detail = []
     for idx, rows in sorted(holdings.items()):
@@ -2000,11 +2111,11 @@ def ungated_inventions(mod):
     Ferrum Mare has one and CE 1v1 has four; the base game and the other five
     mods here have none.
     """
-    known = mod.get("technologies") or frozenset()
+    known = mod.technologies or frozenset()
     out = {}
     if not known:
         return out
-    for entry in mod.get("invention_sequence") or ():
+    for entry in mod.invention_sequence or ():
         missing = sorted(entry["techs"] - known)
         if missing:
             out[entry["name"]] = missing
@@ -2031,7 +2142,7 @@ def index_coverage(mod, parsed, base=1):
     does not know and a hundred and forty more inventions -- and blaming the
     folder for it sends you looking in the wrong place.
     """
-    top = len(mod.get("invention_sequence") or ()) + base - 1
+    top = len(mod.invention_sequence or ()) + base - 1
     out, total = {}, 0
     for meta, nations in parsed:
         past, lost = set(), 0
@@ -2063,7 +2174,7 @@ def validate_indices(mod, nations, base=1):
     handful survive because events and decisions can grant an invention whose
     `limit` the nation does not meet. A wrong ordering leaves tens of percent.
     """
-    seq = mod.get("invention_sequence") or []
+    seq = mod.invention_sequence or []
     bad = total = 0
     for nat in nations:
         techs = set(nat.get("tech_list", ()))
@@ -2112,7 +2223,7 @@ def attainable_inventions(mod, all_nations):
     `total_war_mobilisation`, and nothing in the save can reach that, so the
     chance is always zero.
     """
-    rules = mod.get("invention_rules", {})
+    rules = (mod.invention_rules or {})
     live = {}
     for name, rule in rules.items():
         eligible = any(
