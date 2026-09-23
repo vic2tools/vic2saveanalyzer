@@ -330,6 +330,36 @@ def in_date_order(files):
     return sorted(files, key=lambda p: (save_sort_key(p, date_of(p)), p))
 
 
+def one_per_date(files):
+    """
+    `files`, in date order, with one save per in-game date.
+
+    Two saves carrying the same date used to be read twice over: every
+    table held both, so a copy of one save doubled its rows, while the
+    report -- which keeps one reading a date -- showed the later of the two.
+    It happens for real. Every game's first save is 1836.1.1, so a folder
+    holding two games holds two of those, and a save made by hand can fall
+    on an autosave's day. The later-named file is kept, which is the one
+    the report already showed, and the rest are named on the way past.
+    """
+    kept, dates, clash = [], [], {}
+    for path in files:
+        date = date_of(path)
+        key = save_sort_key(path, date)
+        if kept and key[0] == 0 and key == dates[-1]:
+            clash.setdefault(date, [kept[-1]]).append(path)
+            kept[-1] = path
+            continue
+        kept.append(path)
+        dates.append(key)
+    for date, same in clash.items():
+        print("note: %s are all dated %s, so only %s is read. Saves from two "
+              "games in one folder? Keep each game in a folder of its own."
+              % (", ".join(os.path.basename(p) for p in same), date,
+                 os.path.basename(same[-1])), file=sys.stderr)
+    return kept
+
+
 def save_sort_key(path, meta_date):
     """Sort by in-game date when we have it, filename otherwise."""
     parts = meta_date.split(".")
@@ -952,6 +982,7 @@ def run_cross(parent, survey, args, verbose=True):
         # and then read back out again to make the key.
         reading = reading_for(entry["mod_path"], mod, mob_types)
         reading.apply()
+        entry["files"] = one_per_date(in_date_order(entry["files"]))
         if verbose:
             print("Reading %s (%d saves) under %s"
                   % (entry["name"], len(entry["files"]), entry["mod_label"]))
@@ -1580,7 +1611,7 @@ def main():
     # sorting them after the fact -- the campaign is now walked in one pass
     # and a pass cannot be sorted halfway through. `stream` is a generator:
     # nothing is read until the loop below asks for it.
-    files = in_date_order(files)
+    files = one_per_date(in_date_order(files))
     wanted = set(args.tags) if args.tags else None
     # A nation's mobilizable pops are one entry per pop per province -- eleven
     # thousand of them for a large nation, two megabytes a save -- and the only

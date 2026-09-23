@@ -408,6 +408,17 @@ def m32():
           "        path = os.path.join(outdir, name)")
 
 
+# ---- two saves with the same date were both read into the tables
+
+@mutation("same-date-read-twice",
+          "two saves with the same in-game date are both read, doubling "
+          "their rows in every table while the report shows one",
+          "edges.py")
+def m33():
+    patch("vic2_analyzer.py", "    files = one_per_date(in_date_order(files))",
+          "    files = in_date_order(files)")
+
+
 # ---- a save cut short was read as a whole one
 
 @mutation("cut-save-read-as-whole",

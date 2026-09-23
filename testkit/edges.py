@@ -128,9 +128,28 @@ def _(folder, out):
 
 @case("two saves on the same date")
 def _(folder, out):
+    # Read once, not twice: the tables used to hold both while the report
+    # showed one, so a copy of a save doubled its rows. Every game's first
+    # save is 1836.1.1, so a folder of two games has two of them.
+    import csv
     a_save(os.path.join(folder, "a.v2"), "1840.6.1")
     a_save(os.path.join(folder, "b.v2"), "1840.6.1")
-    return run(folder, out), "a manual save beside an autosave"
+    a_save(os.path.join(folder, "c.v2"), "1841.6.1")
+    got = run(folder, out)
+    wrong = []
+    # One line naming both and the date they share. Not the three words
+    # anywhere in the output: a verbose run prints every file name and
+    # every date on its own, so that passed with no warning at all.
+    if not any("a.v2" in line and "b.v2" in line and "1840.6.1" in line
+               for line in got[1].splitlines()):
+        wrong.append("nothing said the two saves share a date")
+    table = os.path.join(out, "nations_timeseries.csv")
+    if os.path.isfile(table):
+        rows = [(r["date"], r["tag"]) for r in csv.DictReader(open(table))]
+        if len(rows) != len(set(rows)):
+            wrong.append("the table holds %d rows for %d nation-dates"
+                         % (len(rows), len(set(rows))))
+    return got, "a manual save beside an autosave", wrong
 
 
 @case("saves out of order on disk")
@@ -259,8 +278,17 @@ def main():
         out = os.path.join(holding, "out")
         os.makedirs(folder)
         try:
-            (code, said), _why = fn(folder, out)
+            got = fn(folder, out)
+            (code, said), _why = got[:2]
+            # A case may also say what it found wrong beyond crashing.
+            wrong = got[2] if len(got) > 2 else []
             crashed = code == "crash" or "Traceback" in said
+            if wrong and not crashed:
+                print("  %-*s FAILED" % (width, name))
+                bad.append(name)
+                for one in wrong:
+                    print("      | %s" % one)
+                continue
             # `main` returns None when it worked and a sentence when it
             # refused. A refusal is a pass: what is being looked for here is
             # a stack trace, not an unhappy answer.
@@ -287,7 +315,7 @@ def main():
             shutil.rmtree(holding, ignore_errors=True)
     print()
     if bad:
-        print("CRASHED: %s" % ", ".join(bad))
+        print("FAILED: %s" % ", ".join(bad))
         return 1
     print("every edge case either works or refuses in a sentence")
     return 0
