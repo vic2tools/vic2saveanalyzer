@@ -199,6 +199,52 @@ def both_paths_agree():
     return wrong
 
 
+def at_war_is_who_is_fighting():
+    """
+    [what went wrong] when "at war" is not who the war says is in it now.
+
+    A trigger's `war = yes` is asked of the war's current sides, which the
+    war block lists outright. It used to be answered from the history's
+    joins, which is a different list twice over: a nation that made a
+    separate peace keeps its join, and one put into the war by hand -- in
+    this campaign the host merged two wars, and seven nations, the player's
+    among them, have no join at all -- never had one. The save here has one
+    of each: GER joined and left, SPA was never logged joining.
+    """
+    import shutil
+    import tempfile
+    sys.path.insert(0, os.path.join(HERE, "testkit"))
+    import explain
+    import readsave
+    import savefmt
+
+    readsave.PLAIN.apply()
+    holding = tempfile.mkdtemp(prefix="vic2atwar")
+    try:
+        path = savefmt.write(
+            os.path.join(holding, "war.v2"),
+            savefmt.head("1870.1.1"),
+            savefmt.province(1, "ENG", [savefmt.pop("farmers", 1, 9000)]),
+            savefmt.country("ENG"),
+            ["active_war=", "{", '\tname="The Merged War"', "\thistory=", "\t{",
+             "\t\t1869.5.1=", "\t\t{", '\t\t\tadd_attacker="ENG"', "\t\t}",
+             "\t\t1869.5.1=", "\t\t{", '\t\t\tadd_defender="GER"', "\t\t}",
+             "\t\t1869.5.1=", "\t\t{", '\t\t\tadd_defender="FRA"', "\t\t}",
+             "\t\t1869.9.1=", "\t\t{", '\t\t\trem_defender="GER"', "\t\t}",
+             "\t}",
+             '\tattacker="ENG"', '\tattacker="SPA"', '\tdefender="FRA"',
+             '\toriginal_attacker="ENG"', '\toriginal_defender="GER"',
+             '\taction="1869.5.1"', "}"])
+        meta, _nations = readsave.analyze_save(path, verbose=False)
+    finally:
+        shutil.rmtree(holding, ignore_errors=True)
+    got = sorted(explain.save_world(meta, a_mod())["at_war"])
+    if got != ["ENG", "FRA", "SPA"]:
+        return ["at war: %s, where the war lists ENG, SPA and FRA -- GER has "
+                "made peace and SPA was put in by hand" % " ".join(got)]
+    return []
+
+
 def main():
     from modrules import rate_for
 
@@ -215,6 +261,11 @@ def main():
 
     said = both_paths_agree()
     print("  %-*s %s" % (width, "one definition of the rule, not two",
+                         "ok" if not said else "FAIL"))
+    wrong += said
+
+    said = at_war_is_who_is_fighting()
+    print("  %-*s %s" % (width, "at war is who the war lists now",
                          "ok" if not said else "FAIL"))
     wrong += said
 

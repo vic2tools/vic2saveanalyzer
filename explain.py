@@ -112,8 +112,12 @@ def save_world(meta, mod):
     for war in meta.get("wars", ()):
         if not war.get("active"):
             continue
-        at_war.update(war.get("attackers", ()))
-        at_war.update(war.get("defenders", ()))
+        # The war's own list of who is in it now. The history's joins keep
+        # a nation that has since made peace and miss one added by hand; a
+        # war that lists nobody, which the game never writes, falls back to
+        # them rather than to no one.
+        at_war.update(war.get("fighting") or (list(war.get("attackers", ()))
+                                              + list(war.get("defenders", ()))))
     year = 0
     date = meta.get("date") or ""
     if date.split(".")[0].isdigit():

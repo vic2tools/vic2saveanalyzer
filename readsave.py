@@ -670,6 +670,13 @@ def read_war(block, active):
         "original_defender": unquote(str(block.get("original_defender", ""))),
         "attackers": sorted({w for _d, w, a in joined if a}),
         "defenders": sorted({w for _d, w, a in joined if not a}),
+        # Who is in it now, as the war block itself lists them. The joins
+        # above are not that: a nation that made a separate peace keeps its
+        # join and gains a leave, and one put into the war by hand -- the
+        # host of a multiplayer game merging two wars -- has no join at all.
+        # This is what a trigger's `war = yes` is asked about.
+        "fighting": sorted({unquote(str(tag)) for side in ("attacker", "defender")
+                            for tag in as_list(block.get(side))}),
         # Raw (date, tag, is_attacker) join events, kept alongside the flat tag
         # sets above so a consumer can tell an original belligerent from a
         # later intervention -- the sets alone collapse that distinction.

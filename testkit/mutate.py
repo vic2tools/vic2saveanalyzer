@@ -373,6 +373,16 @@ def m29():
           "        except ZeroDivisionError:\n            refused.append(path)")
 
 
+# ---- who is at war, for a trigger, taken from the history's joins
+
+@mutation("at-war-from-joins",
+          "war = yes is answered from the history's joins, which keep a nation "
+          "that made peace and miss one put into the war by hand", "mobrate.py")
+def m30():
+    patch("explain.py", 'at_war.update(war.get("fighting") or (list(',
+          'at_war.update((list(')
+
+
 # ---- a save cut short was read as a whole one
 
 @mutation("cut-save-read-as-whole",
