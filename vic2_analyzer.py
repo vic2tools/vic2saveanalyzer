@@ -202,6 +202,24 @@ def write_stamp(outdir, stamp):
         pass                          # a report that cannot be skipped later
 
 
+def already_built(args, stamp):
+    """
+    Whether the report on disk is the one this run would write, said aloud.
+
+    Only a run whose whole job is the report can be answered with the
+    report that is already there. The four `explain` answers print
+    something about a nation instead, and are not in the stamp because they
+    change nothing the report says.
+    """
+    if (args.rebuild or args.no_html or asked(args)
+            or not stamp_matches(args.out, stamp)):
+        return False
+    if not args.quiet:
+        print(f"Nothing has changed since this was built. Opening it as it "
+              f"is.\n\nWrote:\n  {os.path.join(args.out, 'report.html')}")
+    return True
+
+
 def invention_summary(meta, nations):
     """The country fields needed to decode invention IDs across a campaign."""
     return ({"file": meta.get("file", "?"), "date": meta.get("date", "")},
@@ -728,20 +746,21 @@ def campaign_rows(parsed, mod, args, wanted=None):
     return out
 
 
-def run_cross(parent, game_root, args, verbose=True):
+def survey_cross(parent, game_root, args, verbose=True):
     """
-    Read every campaign under `parent`, each under its own mod.
+    Every campaign under `parent`, and the mod each one will be read under.
 
-    Returns (cross payload, the largest campaign's files, its mod path). The
-    largest campaign becomes the subject of the ordinary report, so the
-    cross-campaign block is an addition rather than a replacement.
-
-    The globals the parser keeps are reset between campaigns for the same reason
-    `main` resets them between runs: a set that only grew would carry one mod's
-    pop types into the next campaign's saves, which have none.
+    Returns one dict per campaign -- its name, its saves, its mod -- and
+    reads no save whole: the mod is named, or worked out from the last save
+    or two. This is everything the report is made from, which is why it is
+    its own step. The report stamp has to cover every campaign in the
+    comparison, not just the one the rest of the report is about -- it
+    covered only that one, so a new save in any other campaign answered
+    "nothing has changed" with the old comparison -- and it has to be taken
+    before the campaigns are read, or a run with nothing to do reads all of
+    them first to find that out.
     """
     import cross as crossmod
-    from mod_reader import load_mod, name_for
 
     # Told, rather than worked out: `--campaign-mod NAME=PATH` settles one
     # campaign each. Two mods built on the same base can agree on their
@@ -842,13 +861,45 @@ def run_cross(parent, game_root, args, verbose=True):
                 print("      note: %s disagrees with all %d later saves by at "
                       "least %d event flags; it may be from another game"
                       % (stray, of, worst))
+    return survey
+
+
+def cross_stamp(survey, args):
+    """
+    The report stamp of a `--cross` run: every campaign that will be read,
+    its saves, and the mod it is read under.
+    """
+    from mod_reader import mod_signature
+    read = [entry for entry in survey if entry["mod_path"]]
+    world = "\n".join("%s|%s|%s" % (entry["name"],
+                                    os.path.abspath(entry["mod_path"]),
+                                    mod_signature(entry["mod_path"]))
+                       for entry in read)
+    return report_stamp([f for entry in read for f in entry["files"]], args,
+                        world)
+
+
+def run_cross(parent, survey, args, verbose=True):
+    """
+    Read every campaign `survey_cross` found, each under its own mod.
+
+    Returns (cross payload, the largest campaign's files, its mod path). The
+    largest campaign becomes the subject of the ordinary report, so the
+    cross-campaign block is an addition rather than a replacement.
+
+    The globals the parser keeps are reset between campaigns for the same reason
+    `main` resets them between runs: a set that only grew would carry one mod's
+    pop types into the next campaign's saves, which have none.
+    """
+    import cross as crossmod
+    from mod_reader import load_mod, name_for
 
     results, names, primary = [], {}, None
     for entry in survey:
         if not entry["mod_path"]:
             if verbose:
                 print("  skipping %s: no mod in %s explains its saves"
-                      % (entry["name"], game_root))
+                      % (entry["name"], args.game_root))
             continue
         mod = load_mod(entry["mod_path"])
         # The defaults `main` applies, applied here too. The mod's list used
@@ -1395,9 +1446,17 @@ def main():
     # side. The heavy single-campaign report that follows is built from the
     # largest of them, so this adds a section rather than replacing anything.
     cross_payload = None
+    stamp = None
     if args.cross:
+        survey = survey_cross(saves_path, args.game_root, args,
+                              verbose=not args.quiet)
+        # Stamped before anything is read, and over every campaign rather
+        # than the one the rest of the report is about.
+        stamp = cross_stamp(survey, args)
+        if not args.verify and already_built(args, stamp):
+            return 0
         cross_payload, files, args.mod_path = run_cross(
-            saves_path, args.game_root, args, verbose=not args.quiet)
+            saves_path, survey, args, verbose=not args.quiet)
         if not files:
             sys.exit("--cross found no campaigns under %s" % saves_path)
 
@@ -1432,18 +1491,11 @@ def main():
     # Imported here rather than at the top: a run with nothing to do is
     # answered in seventy milliseconds, and loading this module costs ten of
     # them whether or not there is a mod to read.
-    from mod_reader import mod_signature
-    stamp = report_stamp(files, args, mod_signature(args.mod_path))
-    ready = os.path.join(args.out, "report.html")
-    # Only a run whose whole job is the report can be answered with the
-    # report that is already there. The four `explain` answers print
-    # something about a nation instead, and are not in the stamp because
-    # they change nothing the report says.
-    if (not args.rebuild and not args.no_html and not asked(args)
-            and stamp_matches(args.out, stamp)):
-        if verbose:
-            print(f"Nothing has changed since this was built. "
-                  f"Opening it as it is.\n\nWrote:\n  {ready}")
+    # A `--cross` run was stamped above, before its campaigns were read.
+    if stamp is None:
+        from mod_reader import mod_signature
+        stamp = report_stamp(files, args, mod_signature(args.mod_path))
+    if already_built(args, stamp):
         return 0
 
     mod = None

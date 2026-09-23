@@ -342,6 +342,17 @@ def m18():
         self._indices_read = True""")
 
 
+# ---- the --cross stamp, which covered only the campaign the report is about
+
+@mutation("cross-stamp-primary-only",
+          "the --cross stamp covers only the largest campaign, so a new save "
+          "in another is answered with the old report", "staleness.py")
+def m27():
+    patch("vic2_analyzer.py",
+          '    read = [entry for entry in survey if entry["mod_path"]]\n',
+          '    read = [max(survey, key=lambda entry: len(entry["files"]))]\n')
+
+
 # ---- a save cut short was read as a whole one
 
 @mutation("cut-save-read-as-whole",

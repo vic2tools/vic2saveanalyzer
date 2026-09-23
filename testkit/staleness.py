@@ -25,6 +25,13 @@ the program has, and the stamp must move.
 
 The touching happens to a **copy** of the program in a temp folder, never
 to the real tree, so a failure here cannot leave the working copy edited.
+
+Then the same question for `--cross`, which compares several campaigns and
+builds the rest of the report from the largest. Its stamp covered only that
+one: a new save in any other campaign was read, and then answered "nothing
+has changed" with the old comparison. So two small campaigns are built, each
+under its own mod, and the smaller one is given a save, and then its mod is
+edited -- and each time the report has to be built again.
 """
 
 import os
@@ -79,6 +86,76 @@ print("%s|%s" % ("MOVED" if va.report_stamp(saves, args, "no-mod") != first
 '''
 
 
+def cross_campaigns():
+    """[what went wrong] in what makes a `--cross` report stale."""
+    sys.path.insert(0, os.path.join(HERE, "testkit"))
+    import matching
+    import savefmt
+
+    holding = tempfile.mkdtemp(prefix="vic2xstale")
+    try:
+        mods = {name: matching.a_mod(os.path.join(holding, "mod-" + name),
+                                     pop_per_regiment=1000)
+                for name in ("alpha", "beta")}
+        parent = os.path.join(holding, "campaigns")
+
+        def a_save(folder, n, year):
+            os.makedirs(folder, exist_ok=True)
+            savefmt.write(os.path.join(folder, "s%d.v2" % n),
+                          savefmt.head("%d.1.1" % year),
+                          savefmt.province(1, "ENG", [savefmt.pop(
+                              "farmers", 100 + n, 20000 + 100 * n)]),
+                          savefmt.country("ENG", techs=matching.TECHS))
+
+        for n in range(3):
+            a_save(os.path.join(parent, "alpha"), n, 1840 + n)
+        for n in range(2):
+            a_save(os.path.join(parent, "beta"), n, 1850 + n)
+        out = os.path.join(holding, "out")
+        env = dict(os.environ, TMPDIR=holding)
+
+        def run():
+            done = subprocess.run(
+                [sys.executable, os.path.join(HERE, "vic2_analyzer.py"),
+                 parent, "--cross", "--out", out, "--no-cache",
+                 "--campaign-mod", "alpha=" + mods["alpha"],
+                 "--campaign-mod", "beta=" + mods["beta"]],
+                capture_output=True, text=True, cwd=HERE, env=env)
+            if done.returncode:
+                return None
+            return "Nothing has changed" in done.stdout
+
+        wrong = []
+        steps = [("built once", None, False),
+                 ("run again, nothing changed", None, True),
+                 ("the smaller campaign gains a save",
+                  lambda: a_save(os.path.join(parent, "beta"), 2, 1852), False),
+                 ("run again, nothing changed", None, True),
+                 ("the smaller campaign's mod is edited",
+                  lambda: open(os.path.join(mods["beta"], "common",
+                                            "defines.lua"), "a").write(
+                      "-- edited\n"), False)]
+        for what, change, skipped in steps:
+            if change:
+                change()
+            said = run()
+            if said is None:
+                wrong.append("--cross failed outright after: %s" % what)
+                break
+            ok = said == skipped
+            print("  --cross, %-38s %s" % (what, ("skipped" if said else
+                                                  "rebuilt") if ok else
+                                          "FAILED"))
+            if not ok:
+                wrong.append(
+                    "--cross after %s: %s" % (what,
+                    "answered \"nothing has changed\" with the old report"
+                    if said else "rebuilt a report nothing had changed"))
+        return wrong
+    finally:
+        shutil.rmtree(holding, ignore_errors=True)
+
+
 def main():
     holding = tempfile.mkdtemp(prefix="vic2stale")
     copy = os.path.join(holding, "program")
@@ -126,6 +203,7 @@ def main():
     finally:
         shutil.rmtree(holding, ignore_errors=True)
 
+    deaf += cross_campaigns()
     print()
     if deaf:
         print("PROBLEMS:")
