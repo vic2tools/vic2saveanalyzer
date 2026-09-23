@@ -520,6 +520,17 @@ def m42():
           "            os.startfile(where)\n        except (OSError, AttributeError) as err:")
 
 
+# ---- the mod cache key, written by hand, the way the parse key went wrong
+
+@mutation("mod-key-hand-list",
+          "the mod cache key is a hand-written list that leaves out the parser "
+          "a mod is read with", "modcache.py")
+def m43():
+    patch("mod_reader.py",
+          "    return cacheio.source_fingerprint(*cacheio.sources_reached(__file__))",
+          "    return cacheio.source_fingerprint(__file__, cacheio.__file__)")
+
+
 # ---- a save cut short was read as a whole one
 
 @mutation("cut-save-read-as-whole",

@@ -44,7 +44,6 @@ import zlib
 from itertools import groupby
 
 import cacheio
-import v2parse
 
 from v2parse import (Tokens, as_list, block_end, parse_block, to_float,
                      to_int, unquote)
@@ -1742,8 +1741,17 @@ def mod_signature(mod_path):
 
 
 def _reader_fingerprint():
-    """Both the mod reader and its token parser determine a cached mod."""
-    return cacheio.source_fingerprint(__file__, v2parse.__file__, cacheio.__file__)
+    """
+    The code that decides what a cached mod holds: this file and every file
+    of ours it reaches, found by following the imports.
+
+    It was three names written by hand -- this file, `v2parse.py` and
+    `cacheio.py` -- which was right, because those are all it imports. The
+    parse cache's key was six names written by hand and was right too, until
+    the fold that fills every save moved to a file that was not one of them
+    and an edit to it went on being served out of old parses (REVIEW.md §9).
+    """
+    return cacheio.source_fingerprint(*cacheio.sources_reached(__file__))
 
 
 # Everything reading a mod folder produces, in the order `_load_mod` builds
