@@ -504,7 +504,7 @@ told about first, then crashes, then Windows-only, then checks, then security.
 `readsave.py:671`, `read_war`. A war's sides are built only from its history's
 `add_attacker`/`add_defender` entries. The war's own `attacker=`/`defender=`
 lines, which the game writes for every nation currently in it, are never read.
-The game does not log every joiner, so those that it does not log never appear.
+A nation in the war with no join entry therefore never appears.
 
 In this campaign, the *3rd American War of Independence*, as the save itself
 lists it (`NET1874_08_01.v2`):
@@ -533,6 +533,15 @@ campaign moves. Under a mod that has one, it would.
 **Fix.** Read `attacker=`/`defender=` as the current sides. The table lists the
 union of those and the history across saves. `at_war` uses the current sides
 only. This changes what the Wars tab shows, so it is the maintainer's call (§29).
+
+**Correction, from the maintainer.** The seven are not a gap in the game's logging. The
+host of the game merged the wars by hand, editing the save to add those
+participants, and that is why they have no join entries. The finding narrows
+to hand-edited saves. The Wars tab is left as it is; the maintainer explained the cause
+and did not ask for a change. The `at_war` half does not depend on the hand
+edit. A nation with a `rem_*` entry has left, and the engine judges
+`war = yes` on the current sides. So that half is fixed (§30), and it moves no
+number in this campaign.
 
 ## 14. A save that was cut short is read as if it were whole
 
@@ -854,3 +863,12 @@ Fixes that change what a user sees, so the maintainer decides:
    were one short.
 3. **§20**, whether a second save with the same date is dropped from the
    tables or only warned about.
+
+## 30. What the maintainer decided
+
+- **§13**: the missing belligerents came from a hand merge by the game's host.
+  The Wars tab stays as it is. Who counts as at war for a trigger is taken
+  from the war's current sides.
+- **§18**: leave the cap arithmetic as it is.
+- **§20**: warn, and keep one save per date (the later-named file) so the
+  tables match the report.
