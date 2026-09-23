@@ -383,6 +383,18 @@ def m30():
           'at_war.update((list(')
 
 
+# ---- --explain-mob judged war triggers after the wars had been thrown away
+
+@mutation("explain-without-wars",
+          "a save kept whole for the diagnostics loses its wars, so "
+          "--explain-mob explains a rate without the war modifiers in it",
+          "mobrate.py")
+def m31():
+    patch("vic2_analyzer.py",
+          "        if not keep.whole:\n            meta[\"wars\"] = ()\n",
+          "        meta[\"wars\"] = ()\n")
+
+
 # ---- a save cut short was read as a whole one
 
 @mutation("cut-save-read-as-whole",

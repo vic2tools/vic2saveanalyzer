@@ -245,6 +245,69 @@ def at_war_is_who_is_fighting():
     return []
 
 
+def the_diagnostic_explains_the_report():
+    """
+    [what went wrong] when `--explain-mob` explains a different number from
+    the one the report shows.
+
+    Both judge the nation's triggered modifiers, and a trigger can ask
+    whether the nation is at war. The report asks while the save is being
+    finished; the diagnostic asked after the run had thrown every save's
+    wars away, so a nation at war read 5% in the report and 0.00% in the
+    one readout that exists to say where its 5% came from.
+    """
+    import csv
+    import re
+    import shutil
+    import subprocess
+    import tempfile
+    sys.path.insert(0, os.path.join(HERE, "testkit"))
+    import matching
+    import savefmt
+
+    holding = tempfile.mkdtemp(prefix="vic2explain")
+    try:
+        mod = matching.a_mod(os.path.join(holding, "mod"), pop_per_regiment=1000)
+        with open(os.path.join(mod, "common", "triggered_modifiers.txt"),
+                  "w") as fh:
+            fh.write("war_footing = {\n\ticon = 1\n\ttrigger = {\n"
+                     "\t\twar = yes\n\t}\n\tmobilisation_size = 0.05\n}\n")
+        saves = os.path.join(holding, "saves")
+        os.makedirs(saves)
+        for n, date in enumerate(("1870.1.1", "1871.1.1")):
+            savefmt.write(
+                os.path.join(saves, "s%d.v2" % n), savefmt.head(date),
+                savefmt.province(1, "ENG", [savefmt.pop("farmers", 1, 60000)]),
+                savefmt.province(2, "FRA", [savefmt.pop("farmers", 2, 60000,
+                                                        culture="french")]),
+                savefmt.country("ENG", techs=matching.TECHS, inventions=[1]),
+                savefmt.country("FRA", culture="french", capital=2,
+                                techs=matching.TECHS, inventions=[1]),
+                savefmt.war("A War", "ENG", "FRA"))
+        out = os.path.join(holding, "out")
+        env = dict(os.environ, TMPDIR=holding)
+        run = [sys.executable, os.path.join(HERE, "vic2_analyzer.py"), saves,
+               "--mod-path", mod, "--out", out, "--no-cache", "-q"]
+        subprocess.run(run, cwd=HERE, env=env, capture_output=True, check=True)
+        rows = [r for r in csv.DictReader(open(os.path.join(
+            out, "nations_timeseries.csv"))) if r["tag"] == "ENG"]
+        report = float(rows[-1]["mobilisation_size"])
+        said = subprocess.run(run + ["--explain-mob", "ENG"], cwd=HERE,
+                              env=env, capture_output=True, text=True).stdout
+    finally:
+        shutil.rmtree(holding, ignore_errors=True)
+    total = re.search(r"TOTAL\s+(-?[\d.]+)%", said)
+    explained = float(total.group(1)) / 100 if total else None
+    if report != 0.05:
+        return ["the report gave ENG %s, where a war modifier of 5%% applies "
+                "-- the case is not testing what it says" % report]
+    if explained is None or abs(explained - report) > 1e-9:
+        return ["--explain-mob ENG explains %s where the report shows %s"
+                % ("nothing" if explained is None else "%.2f%%" % (explained * 100),
+                   "%.2f%%" % (report * 100))]
+    return []
+
+
 def main():
     from modrules import rate_for
 
@@ -266,6 +329,11 @@ def main():
 
     said = at_war_is_who_is_fighting()
     print("  %-*s %s" % (width, "at war is who the war lists now",
+                         "ok" if not said else "FAIL"))
+    wrong += said
+
+    said = the_diagnostic_explains_the_report()
+    print("  %-*s %s" % (width, "--explain-mob explains the report's number",
                          "ok" if not said else "FAIL"))
     wrong += said
 

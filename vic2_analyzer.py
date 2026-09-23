@@ -1122,7 +1122,12 @@ def walk_campaign(stream, spec, finished, keep):
         # first, which is the order the stream is in, so folding here costs
         # nothing and means no save has to keep its own copy.
         fold_wars(war_book, meta.get("wars", ()))
-        meta["wars"] = ()
+        # A save kept whole keeps its wars too. The two diagnostics that
+        # keep saves whole judge a nation's triggered modifiers again, and
+        # `war = yes` is asked of these; emptied, `--explain-mob` explained
+        # a rate without the war modifier the report had counted in it.
+        if not keep.whole:
+            meta["wars"] = ()
         # `--explain-mob-pool` prints a nation's raw pool back, so that one
         # caller keeps the save whole.
         parsed.append((meta, nations) if keep.whole
