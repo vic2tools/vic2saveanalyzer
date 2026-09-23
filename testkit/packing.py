@@ -59,6 +59,53 @@ def reached(start="app"):
     return seen
 
 
+def the_scanner_opens_no_window():
+    """
+    [what went wrong] in how the scanner is started, as Windows would see it.
+
+    The executable is built windowed and the scanner is a console program,
+    and on Windows that combination opens a console window for every save
+    read unless `Popen` is told `CREATE_NO_WINDOW`. Nothing here runs
+    Windows, so this asks what `fastscan.start` would hand `Popen` there --
+    and here, where the same flag is refused outright.
+    """
+    sys.path.insert(0, HERE)
+    import subprocess
+    import fastscan
+
+    asked = []
+
+    class Popen:
+        def __init__(self, argv, **kwargs):
+            asked.append(kwargs)
+            raise OSError("not really started")
+
+    real_popen, real_platform = subprocess.Popen, sys.platform
+    real_found = fastscan._FOUND
+    wrong = []
+    try:
+        subprocess.Popen = Popen
+        fastscan._FOUND = __file__            # anything that is a file
+        for platform in ("win32", real_platform):
+            del asked[:]
+            sys.platform = platform
+            fastscan.start("a.v2", (), ())
+            flags = asked[0].get("creationflags", 0) if asked else None
+            if flags is None:
+                wrong.append("fastscan.start never called Popen")
+            elif platform == "win32" and not flags & 0x08000000:
+                wrong.append("on Windows the scanner is started without "
+                             "CREATE_NO_WINDOW, so every save read opens a "
+                             "console window")
+            elif platform != "win32" and flags:
+                wrong.append("here the scanner is started with Windows-only "
+                             "creation flags, which Popen refuses")
+    finally:
+        subprocess.Popen, sys.platform = real_popen, real_platform
+        fastscan._FOUND = real_found
+    return wrong
+
+
 def main():
     named = carried()
     if named is None:
@@ -82,7 +129,14 @@ def main():
         print("\n  named but not reached: %s" % ", ".join(unused))
         print("  (not a failure -- either dead, or reached a way this "
               "walk cannot see)")
-    if missing:
+    window = the_scanner_opens_no_window()
+    print("  the scanner is started with no window on Windows: %s"
+          % ("FAILED" if window else "ok"))
+    if window:
+        print("\nPROBLEMS:")
+        for one in window:
+            print("  %s" % one)
+    if missing or window:
         return 1
     print("\nthe executable would carry everything the program reaches")
     return 0

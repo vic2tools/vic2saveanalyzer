@@ -155,6 +155,21 @@ class Running:
             self.proc.stderr.close()
 
 
+def _no_window():
+    """
+    What `Popen` is told so the scanner opens no window of its own.
+
+    The executable is a windowed program and the scanner a console one, and
+    on Windows a windowed program that starts a console program gets a new
+    console window for it -- one flashed up for every save read -- unless
+    it says `CREATE_NO_WINDOW`. Everywhere else there is no such flag, and
+    `Popen` refuses any.
+    """
+    if sys.platform != "win32":
+        return 0
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
+
 def start(path, pop_types, mob_types, army_techs=(), navy_techs=(),
           reform_keys=(), timeout=600):
     """
@@ -174,7 +189,8 @@ def start(path, pop_types, mob_types, army_techs=(), navy_techs=(),
              "--army-techs", ",".join(sorted(army_techs)),
              "--navy-techs", ",".join(sorted(navy_techs)),
              "--reform-keys", ",".join(sorted(reform_keys))],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE), timeout)
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            creationflags=_no_window()), timeout)
     except OSError:
         return None
 

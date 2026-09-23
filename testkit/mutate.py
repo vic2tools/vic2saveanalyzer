@@ -465,6 +465,19 @@ def m37():
           "            chosen[name] = (name, os.path.join(target, name))")
 
 
+# ---- the scanner, started from the windowed executable, opened a console
+
+@mutation("scanner-opens-console-window",
+          "on Windows the scanner is started without CREATE_NO_WINDOW, so the "
+          "windowed executable flashes a console window per save",
+          "packing.py")
+def m38():
+    patch("fastscan.py",
+          "            stdout=subprocess.PIPE, stderr=subprocess.PIPE,\n"
+          "            creationflags=_no_window()), timeout)",
+          "            stdout=subprocess.PIPE, stderr=subprocess.PIPE), timeout)")
+
+
 # ---- a save cut short was read as a whole one
 
 @mutation("cut-save-read-as-whole",
