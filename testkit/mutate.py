@@ -478,6 +478,16 @@ def m38():
           "            stdout=subprocess.PIPE, stderr=subprocess.PIPE), timeout)")
 
 
+# ---- a name out of a save ran as script in the report
+
+@mutation("name-runs-as-script",
+          "a war named <img onerror=...> runs its script when the report's "
+          "Wars tab draws", "boots.py", ("--hostile",))
+def m39():
+    patch("report.py",
+          '    raw = raw.replace("<", "\\\\u2039").replace(">", "\\\\u203a")\n', "")
+
+
 # ---- a save cut short was read as a whole one
 
 @mutation("cut-save-read-as-whole",

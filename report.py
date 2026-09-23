@@ -23,6 +23,7 @@ import gzip
 import json
 import os
 import threading
+from html import escape as _escape
 
 from tech_groups import ARMY_LINES, NAVY_LINES
 from template import TEMPLATE
@@ -1067,11 +1068,26 @@ def pack(payload):
 
 
 def pack_bytes(payload):
-    """The payload gzipped, which is what both the page and `--split` carry."""
-    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    """
+    The payload gzipped, which is what both the page and `--split` carry.
+
+    Every `<` and `>` in it is turned into a look-alike first. The page
+    writes names into its HTML -- war and battle names, leaders, provinces,
+    nations, goods -- and those come out of save files and mods, which is
+    to say out of anybody's hands: a war named `<img src=x onerror=...>`
+    ran its script the moment the Wars tab drew, in a report that may be
+    published to a public site. A name never has a real use for either
+    character, and without them no text becomes markup, at any of the
+    thirty places the page writes HTML or any it gains later. No name is
+    ever written into an attribute, which is where a quote would matter
+    instead. Done on the text, which only has them inside strings, rather
+    than by walking the payload, so it costs a pass of `str.replace`.
+    """
+    raw = json.dumps(payload, separators=(",", ":"))
+    raw = raw.replace("<", "\\u2039").replace(">", "\\u203a")
     # Level 6 rather than 9: the last 5% of size costs three times the wall
     # clock, and this runs once per report over a hundred megabytes.
-    return gzip.compress(raw, 6)
+    return gzip.compress(raw.encode("utf-8"), 6)
 
 
 def _trim_supply(supply, dates):
@@ -1355,8 +1371,10 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
         "cross": cross or None,
     }
 
-    span = f"{dates[0]} – {dates[-1]}" if dates else "—"
-    price_span = (f"{price_dates[0]} – {price_dates[-1]}"
+    # These two go into the page as it is written, outside the payload, and
+    # a save's date is whatever the save says it is.
+    span = _escape(f"{dates[0]} – {dates[-1]}") if dates else "—"
+    price_span = (_escape(f"{price_dates[0]} – {price_dates[-1]}")
                   if price_dates else "no price data")
 
     # A report normally carries its payload inside it, because a report is a

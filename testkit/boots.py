@@ -163,7 +163,82 @@ def looked(html_path, seconds=90, wait_ms=6000):
         shutil.rmtree(holding, ignore_errors=True)
 
 
+def hostile_names():
+    """
+    [what went wrong] with a report built from names that are markup.
+
+    Names reach the page out of save files and mods: war and battle names,
+    leaders, provinces, nations. The page writes them into its HTML, and a
+    war named `<img src=x onerror=...>` ran its script the moment the Wars
+    tab drew -- in a report that may be published to a public site, or
+    built from a multiplayer save somebody else wrote. The campaign here
+    carries two such probes, one in a war's name and one in a nation
+    joining it, each of which reports back if it ever runs.
+    """
+    import subprocess
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
+    import savefmt
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def probe(n):
+        text = "%sinjected=%d\n" % (MARK, n)
+        return "<img src=x onerror=dump(String.fromCharCode(%s))>" % ",".join(
+            str(ord(c)) for c in text)
+
+    holding = tempfile.mkdtemp(prefix="vic2hostile")
+    try:
+        saves = os.path.join(holding, "saves")
+        os.makedirs(saves)
+        for n, date in enumerate(("1870.1.1", "1871.1.1")):
+            savefmt.write(
+                os.path.join(saves, "s%d.v2" % n), savefmt.head(date),
+                savefmt.province(1, "ENG", [savefmt.pop("farmers", 1, 9000)]),
+                savefmt.province(2, "FRA", [savefmt.pop("farmers", 2, 9000,
+                                                        culture="french")]),
+                savefmt.country("ENG"),
+                savefmt.country("FRA", culture="french", capital=2),
+                ["active_war=", "{", '\tname="%s"' % probe(1), "\thistory=", "\t{",
+                 "\t\t1869.5.1=", "\t\t{", '\t\t\tadd_attacker="ENG"', "\t\t}",
+                 "\t\t1869.5.1=", "\t\t{", '\t\t\tadd_attacker="%s"' % probe(2),
+                 "\t\t}",
+                 "\t\t1869.5.1=", "\t\t{", '\t\t\tadd_defender="FRA"', "\t\t}",
+                 "\t}", '\tattacker="ENG"', '\tdefender="FRA"',
+                 '\toriginal_attacker="ENG"', '\toriginal_defender="FRA"',
+                 '\taction="1869.5.1"', "}"])
+        out = os.path.join(holding, "out")
+        built = subprocess.run(
+            [sys.executable, os.path.join(here, "vic2_analyzer.py"), saves,
+             "--out", out, "--no-cache", "-q"], capture_output=True,
+            text=True, env=dict(os.environ, TMPDIR=holding))
+        report = os.path.join(out, "report.html")
+        if built.returncode or not os.path.isfile(report):
+            return ["the hostile campaign did not build: %s"
+                    % (built.stdout + built.stderr).strip()[-200:]]
+        said = looked(report)
+    finally:
+        shutil.rmtree(holding, ignore_errors=True)
+    if said is None:
+        return ([] if shutil.which("firefox") is None else
+                ["the browser never reported back on the hostile campaign"])
+    ran = said.get("injected")
+    if ran:
+        return ["a name from a save ran as script in the report (probe %s)"
+                % ran]
+    if not said.get("done"):
+        return ["the hostile campaign's report never finished loading"]
+    print("  names that are markup stay text: ok")
+    return []
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--hostile":
+        if shutil.which("firefox") is None:
+            print("no firefox here, so nothing was opened")
+            return 0
+        wrong = hostile_names()
+        for one in wrong:
+            print("PROBLEMS:\n  %s" % one)
+        return 1 if wrong else 0
     if len(sys.argv) < 2:
         print(__doc__.strip())
         return 2
@@ -217,6 +292,7 @@ def main():
                     t.split(":")[2] if t.count(":") > 1 else "?")
         for t in said["oktab"]))
     print("          the bracket is how many shapes that tab's charts drew")
+    problems += hostile_names()
     if problems:
         print("\nPROBLEMS:")
         for one in problems:

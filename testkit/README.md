@@ -322,6 +322,7 @@ bytes of another one, which catches a changed number and misses the only
 failure a reader would notice: a page that does not run. A helper called
 from outside the function that defined it is a `ReferenceError` at boot and
 a blank page, and the file is byte-for-byte what it was supposed to be.
+Then it builds a campaign of its own whose war name and one of whose belligerents are script, and requires both to stay text: names come out of saves and mods, and a war named `<img onerror=...>` used to run when the Wars tab drew. `boots.py --hostile` runs that part alone.
 It also checks the tab the reader lands on has something on it. That one
 is there because counting missed it: a report built without a mod opened on
 the map tab with no map in it, every section inside hidden, the page blank
