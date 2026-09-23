@@ -62,8 +62,19 @@ def check(script, args=()):
 
 
 def argv_for(extra):
-    """What a mutation's check is handed: "saves" means the save folder."""
-    return (SAVES,) if extra == "saves" else tuple(extra)
+    """
+    What a mutation's check is handed: "saves" means the save folder, and
+    "one-save" the first save in it, for the checks that damage a copy of
+    one -- handed with a round count of one, because each round is a save
+    read twice over.
+    """
+    if extra == "saves":
+        return (SAVES,)
+    if extra == "one-save":
+        first = next((f for f in sorted(os.listdir(SAVES))
+                      if f.endswith(".v2")), "") if SAVES else ""
+        return (os.path.join(SAVES, first), "1")
+    return tuple(extra)
 
 
 # --- the mutations -------------------------------------------------------
@@ -329,6 +340,19 @@ def m18():
         self._indices_read = False""",
           """        self._index_base = None
         self._indices_read = True""")
+
+
+# ---- a save cut short was read as a whole one
+
+@mutation("cut-save-read-as-whole",
+          "a save that stops part-way through is read as if it were whole",
+          "mangled.py", "one-save")
+def m26():
+    # Two thirds of a save read as 34 of its 41 nations with no army, no
+    # navy and no technology, and every war gone -- and both readers agreed,
+    # so the parity check passed too.
+    patch("v2parse.py", '    if not fh.read().rstrip().endswith(b"}"):',
+          "    if False:")
 
 
 # ---- commit d2fa289: the parity check that had stopped comparing

@@ -95,7 +95,10 @@ into letters, the header gone, a run of nulls. A save folder collects these
 in real life: a crash while the game was writing, a bad sector, a sync
 client copying a file mid-write. The right answer is to read what is there
 or refuse it in a sentence; a stack trace is never right, and it would take
-the whole campaign down with it. The mutations are seeded, so a failure is
+the whole campaign down with it. A save cut short is the one that must be
+refused, by both readers: read, it is a whole save with most of it missing,
+and two thirds of one used to go into the report as 34 of 41 nations with
+no army and no war. The mutations are seeded, so a failure is
 reproducible.
 
 **`invariants.py`** checks the arithmetic the report's own numbers have to

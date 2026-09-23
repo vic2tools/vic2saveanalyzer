@@ -17,6 +17,7 @@ builds Python objects for the branches we actually want; everything else is
 skipped by brace counting.
 """
 
+import os
 import re
 import sys
 
@@ -461,6 +462,44 @@ def looks_like_country_tag(key):
     )
 
 
+def _refuse_unless_whole(fh, path):
+    """
+    Refuse a file that is not a whole plaintext save, and rewind it.
+
+    The first two refusals are about what the file is: a zip, or a binary
+    save. The third is about whether all of it is there. A save the game
+    finished writing ends with the closing brace of its last block, and all
+    103 saves of the campaign this was measured on do. One cut short -- a
+    crash while the game was writing it, a sync client, a full disk -- ends
+    part-way through a line, and both readers used to take what was there as
+    the whole save: two thirds of one read as 34 of its 41 nations holding no
+    army, no navy and no technology, with every war gone, and nothing said.
+    The last few hundred bytes are all this reads to tell.
+    """
+    head = fh.read(4096)
+    if head[:2] == b"PK":
+        raise ValueError(
+            f"{path} is a zip archive. Extract it, or re-save the game in "
+            f"debug mode to get plaintext."
+        )
+    if b"date=" not in head and b'date =' not in head:
+        raise ValueError(
+            f"{path} does not look like a plaintext Vic2 save (no `date=` "
+            f"in the header). If it is binary, launch Victoria 2 in debug "
+            f"mode and re-save."
+        )
+    fh.seek(0, os.SEEK_END)
+    fh.seek(max(0, fh.tell() - 256))
+    if not fh.read().rstrip().endswith(b"}"):
+        raise ValueError(
+            f"{path} stops part-way through, so it was cut short: the game "
+            f"crashed while writing it, or is writing it right now. If this "
+            f"is the game's own save folder, read the copies the keeper "
+            f"makes instead."
+        )
+    fh.seek(0)
+
+
 def read_save_bytes(path):
     """
     A .v2 as bytes, with the same refusals `read_save_text` makes.
@@ -471,19 +510,7 @@ def read_save_bytes(path):
     file.
     """
     with open(path, "rb") as fh:
-        head = fh.read(4096)
-        if head[:2] == b"PK":
-            raise ValueError(
-                f"{path} is a zip archive. Extract it, or re-save the game in "
-                f"debug mode to get plaintext."
-            )
-        if b"date=" not in head and b'date =' not in head:
-            raise ValueError(
-                f"{path} does not look like a plaintext Vic2 save (no `date=` "
-                f"in the header). If it is binary, launch Victoria 2 in debug "
-                f"mode and re-save."
-            )
-        fh.seek(0)
+        _refuse_unless_whole(fh, path)
         return fh.read()
 
 
@@ -501,18 +528,7 @@ def open_save(path):
     """
     fh = open(path, "rb")
     try:
-        head = fh.read(4096)
-        if head[:2] == b"PK":
-            raise ValueError(
-                f"{path} is a zip archive. Extract it, or re-save the game in "
-                f"debug mode to get plaintext."
-            )
-        if b"date=" not in head and b'date =' not in head:
-            raise ValueError(
-                f"{path} does not look like a plaintext Vic2 save (no `date=` "
-                f"in the header). If it is binary, launch Victoria 2 in debug "
-                f"mode and re-save."
-            )
+        _refuse_unless_whole(fh, path)
         return fh
     except BaseException:
         fh.close()
@@ -527,19 +543,7 @@ def read_save_text(path):
     and re-saving produces a plaintext file (about 10x larger).
     """
     with open(path, "rb") as fh:
-        head = fh.read(4096)
-        if head[:2] == b"PK":
-            raise ValueError(
-                f"{path} is a zip archive. Extract it, or re-save the game in "
-                f"debug mode to get plaintext."
-            )
-        if b"date=" not in head and b'date =' not in head:
-            raise ValueError(
-                f"{path} does not look like a plaintext Vic2 save (no `date=` "
-                f"in the header). If it is binary, launch Victoria 2 in debug "
-                f"mode and re-save."
-            )
-        fh.seek(0)
+        _refuse_unless_whole(fh, path)
         raw = fh.read()
     # Vic2 files are Windows-1252 / ANSI. latin-1 never raises, which matters
     # because province names carry stray high bytes in some mods.

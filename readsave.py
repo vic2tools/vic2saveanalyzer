@@ -905,7 +905,14 @@ def analyze_save(path, verbose=True, use_scanner=True, again=False):
         meta["player"] = head["player"]
         blocks = head["blocks"]
         flat = True
-        raw = _Spans(path)
+        try:
+            raw = _Spans(path)
+        except BaseException:
+            # Refused -- a save cut short is refused here, after the scanner
+            # has already started on it -- so the scanner is let go now
+            # rather than whenever its owner happens to be collected.
+            running.abandon()
+            raise
     else:
         if running is not None:
             running.abandon()

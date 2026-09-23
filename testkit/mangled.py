@@ -9,7 +9,9 @@ save folder collects these in real life -- a crash while the game was
 writing, a bad sector, a sync client copying a file mid-write -- and the
 right answer to every one of them is either to read what is there or to
 refuse it in a sentence. A stack trace is never the right answer, and it
-would take the whole campaign down.
+would take the whole campaign down. A save cut short is the exception that
+has to be refused: read, it is a whole save with most of it missing, and
+its numbers go into the report as though they were true.
 
     python3 testkit/mangled.py [path/to/one/save.v2] [how many]
 
@@ -113,6 +115,50 @@ def while_being_written(raw, path):
         time.sleep(0.08)
 
 
+def cut_short(raw, path):
+    """
+    [what went wrong] when the save stops part-way through.
+
+    The one damage above that is allowed to be *read* only because nothing
+    used to check for it. A save cut short parses without complaint, and
+    two thirds of one read as 34 of its 41 nations holding no army, no navy
+    and no technology, with every war gone -- numbers, not an error, so the
+    report showed every army in the world disbanding for a month. Both
+    readers have to refuse it, and say why: the Rust one reads the file
+    whole before Python ever opens it, and the two refuse in different
+    places.
+    """
+    import readsave
+    wrong = []
+    for share in (0.3, 0.5, 0.67, 0.95):
+        cut = raw[:int(len(raw) * share)]
+        # A cut that happens to land just after a closing brace looks whole
+        # from the end, and no end-of-file test can tell. Step back off it,
+        # so what is tested is the case the check claims to catch.
+        while cut.rstrip().endswith(b"}"):
+            cut = cut[:-1]
+        with open(path, "wb") as fh:
+            fh.write(cut)
+        for use_scanner in (True, False):
+            who = "the scanner" if use_scanner else "Python"
+            try:
+                readsave.analyze_save(path, verbose=False,
+                                      use_scanner=use_scanner)
+                wrong.append("%d%% of a save was read as a whole one by %s"
+                             % (share * 100, who))
+            except ValueError as said:
+                if "cut short" not in str(said):
+                    wrong.append("%d%% of a save refused by %s, but for "
+                                 "another reason: %s"
+                                 % (share * 100, who, str(said)[:60]))
+            except BaseException as boom:                # noqa: BLE001
+                wrong.append("%d%% of a save raised %s in %s"
+                             % (share * 100, type(boom).__name__, who))
+    if not wrong:
+        print("  a save cut short, four places, both readers: refused")
+    return wrong
+
+
 def main():
     source = sys.argv[1] if len(sys.argv) > 1 else ""
     rounds = int(sys.argv[2]) if len(sys.argv) > 2 else 5
@@ -127,7 +173,7 @@ def main():
     rng = random.Random(SEED)
     holding = tempfile.mkdtemp(prefix="vic2mangled")
     path = os.path.join(holding, "broken.v2")
-    crashes, read, refused = [], 0, 0
+    crashes, misread, read, refused = [], [], 0, 0
     try:
         for how in HOW:
             for _ in range(rounds):
@@ -143,14 +189,17 @@ def main():
                         (how, traceback.format_exc().strip().splitlines()[-1]))
         crashes += [("rewritten while read", w)
                     for w in while_being_written(raw, path)]
+        misread = cut_short(raw, path)
     finally:
         shutil.rmtree(holding, ignore_errors=True)
 
     tried = len(HOW) * rounds
     print("  %d damaged saves: %d read, %d refused, %d crashed"
           % (tried, read, refused, len(crashes)))
-    if crashes:
+    if crashes or misread:
         print("\nPROBLEMS:")
+        for wrong in misread:
+            print("  %-28s %s" % ("cut short", wrong[:80]))
         seen = set()
         for how, last in crashes:
             if (how, last) in seen:
@@ -158,7 +207,8 @@ def main():
             seen.add((how, last))
             print("  %-28s %s" % (how, last[:80]))
         return 1
-    print("\nnothing crashed; every broken save was read or refused")
+    print("\nnothing crashed; every broken save was read or refused, and "
+          "one cut short was refused")
     return 0
 
 
