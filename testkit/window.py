@@ -174,6 +174,55 @@ def a_stopped_run(root, app, saves, out):
     return wrong
 
 
+def a_start_keeps_other_settings(app, holding):
+    """
+    [what went wrong] when pressing Analyze forgets what the share menu keeps.
+
+    `start` is the one thing here that writes the settings file, and nothing
+    else in this file calls it -- the runs above go through `work`, which
+    is why this went unseen. It wrote its four paths as the whole file, and
+    the same file holds the GitHub token and the report host, so every
+    analysis erased both. The file is pointed somewhere of this check's own
+    first; the real one is never touched.
+    """
+    import gui
+    real, gui.SETTINGS = gui.SETTINGS, os.path.join(holding, "settings.json")
+    saves = os.path.join(holding, "keep-saves")
+    mod = os.path.join(holding, "keep-mod")
+    os.makedirs(saves)
+    os.makedirs(os.path.join(mod, "common"))
+    open(os.path.join(saves, "a.v2"), "w").write('date="1836.1.1"\n')
+    ran = []
+    work, app.work = app.work, lambda *a, **k: ran.append(a)
+    try:
+        gui.save_settings({"github_token": "ghp_kept", "report_host": "https://kept"})
+        app.saves.set(saves)
+        app.mod.set(mod)
+        app.out.set(os.path.join(holding, "keep-out"))
+        app.start()
+        for _ in range(50):
+            if ran:
+                break
+            time.sleep(0.02)
+        after = gui.load_settings()
+    finally:
+        app.work = work
+        app.running = False
+        gui.SETTINGS = real
+    wrong = []
+    if not ran:
+        wrong.append("pressing Analyze never started a run, so the settings "
+                     "check below tested nothing")
+    for key in ("github_token", "report_host"):
+        if key not in after:
+            wrong.append("pressing Analyze erased the %s the share menu keeps"
+                         % key)
+    if after.get("saves") != saves:
+        wrong.append("pressing Analyze did not remember the saves folder")
+    print("  after Analyze, the settings hold: %s" % " ".join(sorted(after)))
+    return wrong
+
+
 def main():
     saves = sys.argv[1] if len(sys.argv) > 1 else ""
     if not saves or not os.path.isdir(saves):
@@ -192,6 +241,7 @@ def main():
         app.show_report = gui.App.show_report.__get__(app)   # the real one
         wrong += opens_on_this_machine(app, os.path.join(out, "report.html"))
         wrong += a_stopped_run(root, app, saves, os.path.join(holding, "two"))
+        wrong += a_start_keeps_other_settings(app, holding)
     finally:
         shutil.rmtree(holding, ignore_errors=True)
         try:

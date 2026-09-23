@@ -707,8 +707,13 @@ class App:
 
         out = self.out.get().strip() or default_out()
         self.out.set(out)
-        save_settings({"saves": saves, "mod": mod, "out": out,
-                       "open_after": self.open_after.get()})
+        # Into what is there, not over it. The same file holds what the
+        # share menu remembers -- the GitHub token and the report host --
+        # and writing these four as the whole file erased both on every run.
+        remembered = load_settings()
+        remembered.update(saves=saves, mod=mod, out=out,
+                          open_after=self.open_after.get())
+        save_settings(remembered)
 
         self.running = True
         self.stop.clear()

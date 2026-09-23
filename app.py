@@ -290,6 +290,17 @@ class Tools:
         try:
             url = publish.publish(report, token, name=name, extra=extra,
                                   say=lambda line: tell("  " + line + "\n"))
+        except publish.TokenRefused as err:
+            # A token GitHub will not take is no use held. Kept, it was
+            # handed straight back on every press, and the only way to a
+            # new one was editing the settings file by hand -- which every
+            # fine-grained token, expiring by default, comes to.
+            forget_token()
+            said = "%s It has been forgotten here, so the next publish " \
+                   "asks for a new one." % err
+            tell("Could not publish it: %s\n" % said)
+            self.root.after(0, self.publish_failed, said)
+            return
         except publish.PublishError as err:
             tell("Could not publish it: %s\n" % err)
             self.root.after(0, self.publish_failed, str(err))
@@ -333,6 +344,13 @@ class Tools:
         except tk.TclError:
             pass
         self.root.destroy()
+
+
+def forget_token():
+    """Drop the GitHub token from the settings file, and nothing else."""
+    saved = gui.load_settings()
+    if saved.pop("github_token", None) is not None:
+        gui.save_settings(saved)
 
 
 def main():

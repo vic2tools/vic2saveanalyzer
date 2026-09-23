@@ -431,6 +431,28 @@ def m34():
           "                except (ZeroDivisionError,) as exc:")
 
 
+# ---- pressing Analyze erased the token; a refused token could not be replaced
+
+@mutation("analyze-erases-share-settings",
+          "pressing Analyze writes its four paths as the whole settings file, "
+          "erasing the GitHub token and the report host", "window.py", "saves")
+def m35():
+    patch("gui.py",
+          """        remembered = load_settings()
+        remembered.update(saves=saves, mod=mod, out=out,
+                          open_after=self.open_after.get())
+        save_settings(remembered)""",
+          """        save_settings({"saves": saves, "mod": mod, "out": out,
+                       "open_after": self.open_after.get()})""")
+
+
+@mutation("refused-token-kept",
+          "a token GitHub refuses stays held and is handed back on every press",
+          "sharing.py")
+def m36():
+    patch("app.py", "            forget_token()\n", "")
+
+
 # ---- a save cut short was read as a whole one
 
 @mutation("cut-save-read-as-whole",

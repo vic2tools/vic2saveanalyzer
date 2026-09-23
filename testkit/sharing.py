@@ -87,6 +87,84 @@ def refuses(path, endpoint, expect, name=None):
     return ["took it and answered %s, when it should have refused" % url], ""
 
 
+def a_refused_token(holding, report):
+    """
+    [what went wrong] when GitHub turns the token down.
+
+    The window keeps the token once it has been pasted, and hands it back
+    on every press. A token GitHub will not take -- mistyped, or expired,
+    which every fine-grained one does by default -- was handed back too,
+    every time, with no way in the program to give it another; the only way
+    out was editing the settings file by hand. So a refusal has to be told
+    apart from the other failures, and the window has to forget the token
+    when it hears one. The settings file is one of this check's own.
+    """
+    import queue
+    import types
+
+    class NoToken(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):                                # noqa: N802
+            body = b'{"message": "Bad credentials"}'
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), NoToken)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = "http://127.0.0.1:%d" % server.server_address[1]
+    wrong = []
+    try:
+        try:
+            publish.publish(report, "ghp_expired", base=base)
+            wrong.append("a refused token was published with")
+        except publish.TokenRefused:
+            pass
+        except Exception as boom:                        # noqa: BLE001
+            wrong.append("a refused token raised %s, not TokenRefused"
+                         % type(boom).__name__)
+
+        try:
+            import app
+            import gui
+        except Exception:                                # noqa: BLE001
+            print("  a refused token is forgotten: no tkinter here, not tried")
+            return wrong
+        real, gui.SETTINGS = gui.SETTINGS, os.path.join(holding, "settings.json")
+        real_publish = publish.publish
+        try:
+            gui.save_settings({"github_token": "ghp_expired", "saves": "x"})
+            publish.publish = lambda *a, **k: real_publish(*a, base=base,
+                                                           **{n: v for n, v in k.items()
+                                                              if n != "base"})
+            told = []
+            window = types.SimpleNamespace(
+                analyzer=types.SimpleNamespace(log_queue=queue.Queue()),
+                root=types.SimpleNamespace(after=lambda _ms, fn, *a: told.append(a)),
+                publish_failed=None, published=None)
+            app.Tools._publish(window, report, "ghp_expired", "a campaign", [])
+            after = gui.load_settings()
+        finally:
+            publish.publish = real_publish
+            gui.SETTINGS = real
+        if "github_token" in after:
+            wrong.append("a token GitHub refused is still held, so the next "
+                         "press hands it back again")
+        if after.get("saves") != "x":
+            wrong.append("forgetting the token took other settings with it")
+        if not any("forgotten" in str(a) for a in told):
+            wrong.append("the person was not told the token was forgotten")
+        print("  %-32s %s" % ("a refused token is forgotten",
+                              "FAIL" if wrong else "ok"))
+    finally:
+        server.shutdown()
+    return wrong
+
+
 def main():
     holding = tempfile.mkdtemp(prefix="vic2share")
     report = os.path.join(holding, "report.html")
@@ -162,6 +240,7 @@ def main():
                                  said[:56]))
     print("  %-*s ok    %s" % (width, "a host that works", got))
 
+    wrong += a_refused_token(holding, report)
     shutil.rmtree(holding, ignore_errors=True)
     print()
     if wrong:

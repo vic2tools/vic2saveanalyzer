@@ -52,6 +52,10 @@ class PublishError(Exception):
     """Something the user needs to read, not a stack trace."""
 
 
+class TokenRefused(PublishError):
+    """GitHub turned the token down: mistyped, expired or revoked."""
+
+
 def _call(base, token, method, path, body=None):
     """One REST call. Returns (status, parsed body)."""
     request = urllib.request.Request(
@@ -103,9 +107,10 @@ def publish(path, token, repo="vic2-reports", name=None, base=API,
 
     status, who = _call(base, token, "GET", "/user")
     if status == 401:
-        raise PublishError("GitHub would not accept that token. It needs to "
-                           "be a token with permission to create "
-                           "repositories and write to them.")
+        raise TokenRefused("GitHub would not accept that token -- it may be "
+                           "mistyped or have expired. It needs to be a token "
+                           "with permission to create repositories and "
+                           "write to them.")
     if status != 200 or not who.get("login"):
         raise PublishError("GitHub said %s when asked who the token belongs "
                            "to: %s" % (status, who.get("message", "")))
