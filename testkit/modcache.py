@@ -70,6 +70,26 @@ class ModCacheTests(unittest.TestCase):
         (game / "save games/autosave.v2").write_text("unrelated")
         self.assertEqual(stamp, mod_reader.mod_signature(str(mod)))
 
+    def test_a_mod_file_named_in_other_case_replaces_the_games(self):
+        # Windows, where the game runs, does not tell these two names apart,
+        # so the mod's file replaces the game's there. Read as two files
+        # the game's inventions joined the array and moved every index
+        # after them.
+        game = self.root / "game"
+        (game / "map").mkdir(parents=True)
+        (game / "map/default.map").write_text("max_provinces = 40\n")
+        (game / "inventions").mkdir()
+        (game / "inventions/army_inventions.txt").write_text(
+            "base_one = { limit = { } }\nbase_two = { limit = { } }\n")
+        (game / "inventions/commerce_inventions.txt").write_text(
+            "base_kept = { limit = { } }\n")
+        mod = game / "mod/cased"
+        (mod / "inventions").mkdir(parents=True)
+        (mod / "inventions/Army_Inventions.txt").write_text(
+            "mod_one = { limit = { } }\n")
+        names = [e["name"] for e in mod_reader.invention_sequence(str(mod))]
+        self.assertEqual(names, ["mod_one", "base_kept"])
+
     def test_parser_dependency_changes_expire_mod_cache(self):
         source = self.root / "parser.py"
         source.write_text("first version")

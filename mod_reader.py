@@ -624,15 +624,24 @@ def _resolved_files(path, folder):
     replaces the game's, and a file the mod does not ship is inherited whole.
     So the base game is listed first and the mod laid over the top, keyed by
     name -- the same rule `country_files` and `map_source` follow.
+
+    Names are matched the way Windows matches them, without regard to case,
+    because that is where the game runs: there a mod's
+    `inventions/Army_Inventions.txt` *is* the game's
+    `inventions/army_inventions.txt`, replacing it. Matched exactly, the two
+    were read as two files, the game's inventions went into the array beside
+    the mod's, and every index after them decoded as the wrong invention.
+    The file that wins keeps its own spelling, because the invention array
+    is sorted on it.
     """
-    out = {}
+    chosen = {}
     for root in (_base_game_path(path), path):
         if not root:
             continue
         target = os.path.join(root, folder)
         for name in _files(target):
-            out[name] = os.path.join(target, name)
-    return out
+            chosen[name.lower()] = (name, os.path.join(target, name))
+    return dict(chosen.values())
 
 
 def unit_kinds(path):

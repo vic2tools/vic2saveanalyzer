@@ -453,6 +453,18 @@ def m36():
     patch("app.py", "            forget_token()\n", "")
 
 
+# ---- a mod file named in other case was read beside the game's
+
+@mutation("mod-file-case-counted-twice",
+          "a mod's Army_Inventions.txt is read beside the game's "
+          "army_inventions.txt, where Windows reads only the mod's",
+          "modcache.py")
+def m37():
+    patch("mod_reader.py",
+          "            chosen[name.lower()] = (name, os.path.join(target, name))",
+          "            chosen[name] = (name, os.path.join(target, name))")
+
+
 # ---- a save cut short was read as a whole one
 
 @mutation("cut-save-read-as-whole",
