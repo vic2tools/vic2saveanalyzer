@@ -34,10 +34,12 @@ against the real thing.
 """
 
 import base64
+import http.client
 import json
 import os
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 
 API = "https://api.github.com"
@@ -56,6 +58,30 @@ class TokenRefused(PublishError):
     """GitHub turned the token down: mistyped, expired or revoked."""
 
 
+class _TokenStaysHome(urllib.request.HTTPRedirectHandler):
+    """
+    Follow a redirect, but take the token only where it was meant to go.
+
+    urllib's own handler copies every header onto the redirected request,
+    `Authorization` included, whatever host the redirect names: a fake API
+    answering 301 to a second address had the token handed to that address
+    on every call. GitHub's own redirects stay on its API host, so they
+    still work; anything else is followed without the token.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        was, now = urllib.parse.urlsplit(req.full_url), \
+            urllib.parse.urlsplit(newurl)
+        if new is not None and (was.scheme, was.netloc) != (now.scheme,
+                                                            now.netloc):
+            new.remove_header("Authorization")
+        return new
+
+
+_OPENER = urllib.request.build_opener(_TokenStaysHome)
+
+
 def _call(base, token, method, path, body=None):
     """One REST call. Returns (status, parsed body)."""
     request = urllib.request.Request(
@@ -68,7 +94,7 @@ def _call(base, token, method, path, body=None):
     if body is not None:
         request.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as answer:
+        with _OPENER.open(request, timeout=TIMEOUT) as answer:
             raw = answer.read()
             return answer.status, (json.loads(raw) if raw else {})
     except urllib.error.HTTPError as err:
@@ -80,6 +106,17 @@ def _call(base, token, method, path, body=None):
         return err.code, parsed
     except urllib.error.URLError as err:
         raise PublishError("could not reach %s: %s" % (base, err.reason))
+    except ValueError:
+        # A page where JSON was expected: most often a network that wants
+        # a sign-in first -- a hotel, a train -- answering for GitHub.
+        raise PublishError("%s answered with a web page rather than GitHub's "
+                           "answer. If this network wants you to sign in "
+                           "first, do that and try again." % base)
+    except (OSError, http.client.HTTPException) as err:
+        # Once connected: the answer stalled past the timeout, or the
+        # connection was dropped part-way. Neither is a URLError.
+        raise PublishError("the connection to %s broke off before GitHub "
+                           "had answered (%s). Try again." % (base, err))
 
 
 def slug(text):
@@ -240,6 +277,9 @@ def upload(path, endpoint, name=None, say=None):
     except ValueError:
         raise PublishError("%s answered with something that was not JSON, so "
                            "it is probably not a report host." % endpoint)
+    except (OSError, http.client.HTTPException) as err:
+        raise PublishError("the connection to %s broke off before it had "
+                           "answered (%s). Try again." % (endpoint, err))
 
     url = got.get("url")
     if not url:

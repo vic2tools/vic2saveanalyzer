@@ -488,6 +488,27 @@ def m39():
           '    raw = raw.replace("<", "\\\\u2039").replace(">", "\\\\u203a")\n', "")
 
 
+# ---- publishing: the token followed redirects, and failures came out raw
+
+@mutation("token-follows-redirect",
+          "a redirect to another address is handed the GitHub token",
+          "sharing.py")
+def m40():
+    patch("publish.py",
+          "        with _OPENER.open(request, timeout=TIMEOUT) as answer:",
+          "        with urllib.request.urlopen(request, timeout=TIMEOUT) as answer:")
+
+
+@mutation("publish-stall-raw",
+          "GitHub stalling mid-answer raises a bare TimeoutError, not a sentence",
+          "sharing.py")
+def m41():
+    patch("publish.py",
+          "    except (OSError, http.client.HTTPException) as err:\n"
+          "        # Once connected",
+          "    except ZeroDivisionError as err:\n        # Once connected")
+
+
 # ---- a save cut short was read as a whole one
 
 @mutation("cut-save-read-as-whole",

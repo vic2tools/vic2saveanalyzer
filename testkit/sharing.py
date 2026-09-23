@@ -25,6 +25,7 @@ import socket
 import sys
 import tempfile
 import threading
+import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
@@ -165,6 +166,110 @@ def a_refused_token(holding, report):
     return wrong
 
 
+def a_github_that_misbehaves(report):
+    """
+    [what went wrong] when the GitHub end of publishing misbehaves.
+
+    Three ways, each of which used to go wrong. An API that redirects to
+    another address was handed the token along with the redirect -- urllib
+    copies every header onto a redirected request. A network that answers
+    for GitHub with its own sign-in page, as hotels and trains do, raised
+    a bare `JSONDecodeError`. And an answer that stalls part-way through
+    raised a bare `TimeoutError`, which is not a `URLError` and so went
+    past every handler; the upload to a report host did the same.
+    """
+    wrong = []
+    heard = []
+
+    class Elsewhere(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):                                # noqa: N802
+            heard.append(self.headers.get("Authorization"))
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    def serve(handler):
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return "http://127.0.0.1:%d" % server.server_address[1], server
+
+    elsewhere, other = serve(Elsewhere)
+
+    class Redirects(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):                                # noqa: N802
+            self.send_response(301)
+            self.send_header("Location", elsewhere + "/somewhere")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    class SignIn(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):                                # noqa: N802
+            body = b"<html>Welcome aboard. Please sign in.</html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    class Stalls(http.server.BaseHTTPRequestHandler):
+        def answer(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            self.wfile.write(b'{"lo')
+            self.wfile.flush()
+            time.sleep(3)
+
+        do_GET = do_POST = answer                        # noqa: N815
+
+        def log_message(self, *a):
+            pass
+
+    servers = [other]
+    real_timeout = publish.TIMEOUT
+    try:
+        for name, handler, call in (
+                ("an API that redirects elsewhere", Redirects,
+                 lambda b: publish.publish(report, "ghp_secret", base=b)),
+                ("a sign-in page answering for GitHub", SignIn,
+                 lambda b: publish.publish(report, "ghp_secret", base=b)),
+                ("GitHub stalling mid-answer", Stalls,
+                 lambda b: publish.publish(report, "ghp_secret", base=b)),
+                ("a report host stalling mid-answer", Stalls,
+                 lambda b: publish.upload(report, b))):
+            base, server = serve(handler)
+            servers.append(server)
+            publish.TIMEOUT = 1
+            try:
+                call(base)
+                said = "published"
+            except publish.PublishError as err:
+                said = "refused in a sentence"
+            except Exception as boom:                    # noqa: BLE001
+                said = "raised %s" % type(boom).__name__
+                wrong.append("%s: raised %s: %s" % (name, type(boom).__name__,
+                                                    boom))
+            print("  %-36s %s" % (name, said))
+        if any(heard):
+            wrong.append("the token was handed to the address a redirect "
+                         "named: %s" % heard[0])
+    finally:
+        publish.TIMEOUT = real_timeout
+        for server in servers:
+            server.shutdown()
+    return wrong
+
+
 def main():
     holding = tempfile.mkdtemp(prefix="vic2share")
     report = os.path.join(holding, "report.html")
@@ -241,6 +346,7 @@ def main():
     print("  %-*s ok    %s" % (width, "a host that works", got))
 
     wrong += a_refused_token(holding, report)
+    wrong += a_github_that_misbehaves(report)
     shutil.rmtree(holding, ignore_errors=True)
     print()
     if wrong:
