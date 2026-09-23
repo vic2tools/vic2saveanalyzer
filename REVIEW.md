@@ -476,3 +476,381 @@ campaign that takes many times longer and no error.
 **Fixed**: `spawned.py` fails when either run says it read one save at a
 time. `testkit/mutate.py` gains `spawn-job-not-picklable`, which puts the
 lambda back; it is caught.
+
+---
+
+# Thermonuclear review of `26f3680`
+
+## 12. How this one was done, and what it covered
+
+Every file, not only `vic2_analyzer.py`, on the assumption that nothing works
+until a machine has shown it does. At `26f3680` all 24 checks pass (2 min 27 s)
+and the harness catches 25 of 25. Every finding below was reproduced on this
+machine, and each gives the command and what it printed. Anything suspected and
+not reproduced is under §27, "Leads". Five independent reviewers were started
+in parallel; all five stopped at a usage limit before reporting anything, so
+nothing here rests on their word.
+
+Experiments ran with `--no-cache` or a private `TMPDIR=/tmp/nc`, in worktrees
+with the scanner copied in. The real cache was never touched. (The machine
+rebooted mid-review, which empties `/tmp` and with it the real cache. That
+was the reboot, not an experiment.)
+
+Ranked by what they cost someone using the program: wrong numbers nobody is
+told about first, then crashes, then Windows-only, then checks, then security.
+
+## 13. The Wars tab leaves out belligerents the game did not log joining
+
+`readsave.py:671`, `read_war`. A war's sides are built only from its history's
+`add_attacker`/`add_defender` entries. The war's own `attacker=`/`defender=`
+lines, which the game writes for every nation currently in it, are never read.
+The game does not log every joiner, so those that it does not log never appear.
+
+In this campaign, the *3rd American War of Independence*, as the save itself
+lists it (`NET1874_08_01.v2`):
+
+| | |
+|---|---|
+| `attacker=` lines | ENG BIK BUN GWA JAS MEW SCA AST **SAR TUR SPA NET FRA RUS WAL** |
+| `defender=` lines | USA MEX BRZ |
+| history `add_*` entries | ENG BIK BUN GWA JAS MEW SCA AST · USA GER MEX BRZ KUK SIC ALD |
+| history `rem_*` entries | GER KUK ALD SIC |
+
+The seven in bold have no history entry at all. Spain fought battles in this
+war as an attacker. The report built from the campaign (40 saves, the mod,
+`--no-cache`) lists the war's attackers as `AST BIK BUN ENG GWA JAS MEW SCA` and
+its defenders as `ALD BRZ GER KUK MEX SIC USA`: seven of fifteen attackers
+missing, **the player's own Netherlands among them**. The same happened in the
+first save of the campaign, so no reading of this campaign ever gets them
+back.
+
+The same lists decide who counts as at war when a triggered modifier asks
+`war = yes` (`explain.save_world`). So Germany, Austria, ALD and Sicily count
+as at war after they left, and the seven above do not count though they are.
+The mod here has no war-triggered modifier, so no mobilisation number in this
+campaign moves. Under a mod that has one, it would.
+
+**Fix.** Read `attacker=`/`defender=` as the current sides. The table lists the
+union of those and the history across saves. `at_war` uses the current sides
+only. This changes what the Wars tab shows, so it is the maintainer's call (§29).
+
+## 14. A save that was cut short is read as if it were whole
+
+`readsave.py:847`, `analyze_save`. The first two thirds of
+`NET1872_09_01.v2`, the rest cut off (a crash while the game was writing, a
+sync client, a full disk), reads without a word:
+
+```
+parity.py on the cut save:  identical across 41 nations
+against the whole save:     34 of 41 nations changed
+                            SCA 86 -> 0 brigades, SPA 94 -> 0, AST 70 -> 0, NET 1 -> 0 ...
+                            and their ships, technologies, treasury and prestige
+                            wars: 153 -> 0
+```
+
+Both readers agree, because both are wrong the same way, so the parity check
+passes. `testkit/mangled.py` checks only that a damaged save never raises a
+stack trace. Reading it and refusing it both count as passing, so it passes
+too. In a report this looks like every army in the world disbanding for one
+month.
+
+**Fix.** A complete save ends with a lone `}` line. All 103 here do, checked. A
+file that does not is refused in a sentence, the way a zip or a binary save
+already is. Reading the last few bytes costs nothing. Only a damaged save's
+output changes; the check's docstring already allows refusing one.
+
+## 15. `--cross` serves an old report when any campaign but the largest changes
+
+`vic2_analyzer.py:1436`. The report stamp is computed after `run_cross` has
+returned only the primary campaign's saves and mod, so the other campaigns'
+saves and mods are not in it.
+
+```
+/tmp/xc/Alpha (4 saves), /tmp/xc/Beta (2 saves), --cross --mod-path MOD
+run 1:                    cross block: Alpha 4 saves, Beta 2
+add a third save to Beta
+run 2 (no --rebuild):     Reading Beta (3 saves) ...
+                          Cross-campaign: 2 campaigns, 41 nations in two or more of them.
+                          Nothing has changed since this was built. Opening it as it is.
+                          cross block: Alpha 4, Beta 2       <- still the old one
+run 3 (--rebuild):        cross block: Alpha 4, Beta 3
+```
+
+It also reads every campaign before deciding there is nothing to do. The window
+takes this path whenever the saves folder holds several campaigns
+(`gui.py:653`), so a window user playing anything but their longest campaign
+never sees its new saves in the comparison. No check covers `--cross`
+staleness.
+
+**Fix.** Hash every campaign's files and mod into the stamp, and take the stamp
+before `run_cross` reads anything, using the survey `run_cross` already makes.
+
+## 16. A table that cannot be written crashes the run, and then the wrong report is served
+
+`vic2_analyzer.py:443` and `:1663`. On Windows, a CSV open in Excel cannot be
+opened for writing. Simulated here by making `nations_timeseries.csv`
+read-only:
+
+```
+A  --tags YNN                     report: 1 tag
+B  all nations, table locked      PermissionError: [Errno 13] ... nations_timeseries.csv
+                                  (stack trace; report.html already rewritten, 41 tags;
+                                   report.stamp still A's)
+A  again, no --rebuild            Nothing has changed since this was built.
+                                  report: 41 tags           <- B's report, served as A's
+```
+
+Two problems. The run ends in a stack trace for an ordinary situation. And the
+stamp from the last good run outlives the report it described. The next run
+with those settings trusts it and serves a report built with different ones.
+
+**Fix.** Delete the stamp before anything is written, so a run that dies
+half-way leaves no stamp to match. A table that cannot be written gets a plain
+message ("close it in Excel") rather than a trace.
+
+## 17. `--explain-mob` judges war triggers after the wars have been thrown away
+
+`vic2_analyzer.py:1043` clears `meta["wars"]` as each save is folded.
+`explain.py:160` and `:286` then build `save_world` from those emptied metas.
+So the two diagnostics that exist to explain a nation's mobilisation size see
+nobody at war, while the report, finished before the wars were folded, did.
+
+```
+mod: triggered modifier war_footing { trigger = { war = yes } mobilisation_size = 0.05 }
+save: ENG at war with FRA (two saves)
+report, nations_timeseries.csv:  ENG mobilisation_size 0.05, 0.05
+--explain-mob ENG:               TOTAL 0.00%   ... 0 sources grant it mobilisation size.
+```
+
+**Fix.** Keep the wars on saves that are kept whole. Those are the diagnostics'
+own runs, which already keep everything else.
+
+## 18. The mobilisation cap can come out one brigade short
+
+`finishing.py:385`, `cap = int(max(standing, MIN) * (1.0 + impact))`. The
+documented formula is floor(max(standing, MIN_MOBILIZE_LIMIT) × (1 + impact)).
+`impact` is the party's war policy plus the sum of the modifiers, in floats.
+Where the exact product is a whole number, the float lands a hair under it
+and `int()` drops one:
+
+```
+policy 1, modifiers +0.1 +0.2, 50 standing:   formula 115, program 114
+policy 4, modifiers -0.2 -0.1, 10 standing:   formula  47, program  46
+```
+
+75 such cases turned up in a small sweep, all needing two or more
+modifiers. The game keeps these numbers to three decimals. **Fix.** Round the
+product to a few decimal places before taking the floor. This changes the
+number in exactly those cases, so it is the maintainer's call (§29).
+
+## 19. A table from an earlier run survives beside the new ones
+
+`vic2_analyzer.py:480`, `if not data: continue`. A table with no rows this run
+is not written, so last run's copy stays:
+
+```
+3 saves -> out/             ships_by_type.csv: 40 nations
+same saves, --tags YNN      Wrote: ... (no ships_by_type.csv)
+                            out/ships_by_type.csv: still the 40 nations, beside a
+                            nations_timeseries.csv holding YNN alone
+```
+
+The window reuses one output folder, so anyone opening the folder in Excel
+reads numbers from a different run. **Fix.** Write a table even when it is empty
+(its header alone), so every file in the folder is from this run.
+
+## 20. Two saves with the same date are counted twice in the tables
+
+Three saves plus a copy of one of them, under another name:
+`nations_timeseries.csv` has 82 rows for `1872.10.1` against 41 without the
+copy, and every per-save table doubles the same way. The report keeps one
+reading per date, so the page and the tables disagree, and nothing says so.
+This happens for real: every game's first save is `1836.1.1`, so a folder
+holding two games has two of them, and a manual save can land on an autosave's
+day. **Fix.** At least a warning naming both files. Dropping the second is a
+change to the tables, so it is the maintainer's call (§29).
+
+## 21. One worker that dies takes the whole run with it
+
+`readfolder.py:447`. If a worker is killed mid-save (out of memory,
+antivirus), every outstanding job raises `BrokenProcessPool`. The streaming
+reader catches only `ValueError`/`OSError` there:
+
+```
+_worker_parse exits abruptly on the 6th save of 40:
+concurrent.futures.process.BrokenProcessPool: A process in the process pool was
+terminated abruptly while the future was running or pending.     (exit 1)
+```
+
+`parse_saves`, the other reader, falls back to one save at a time for the
+very same failure. **Fix.** Do the same here: on a broken pool, finish the
+remaining saves in this process, and say so.
+
+## 22. Every analysis forgets the GitHub token and the report host
+
+`gui.py:710` saves the window's settings by *replacing* the file with four
+keys. `app.py` keeps the token and host in the same file. Driving the real
+window (`App.start`, settings redirected to a scratch folder):
+
+```
+before a run:  ['github_token', 'report_host']
+after a run:   ['mod', 'open_after', 'out', 'saves']
+```
+
+So the "asked for once and remembered" token is asked for again after every
+analysis. The other way round is worse. A token that GitHub rejects (a typo,
+or an expired one; GitHub's fine-grained tokens expire) is handed back by
+`app.py:240` every time, with no way in the app to replace it, until an
+analysis happens to erase it. No check drives `App.start`, because
+`testkit/window.py` calls `work` directly. **Fix.** Merge into the settings
+rather than replacing them, and forget a token GitHub answers 401 to, so the
+next press asks for a new one.
+
+## 23. Windows: a mod's file that differs only in letter case is read twice
+
+`mod_reader.py:634`, `_resolved_files`, keys a folder's files by exact name.
+Windows ignores case, so there a mod's `inventions/Army_Inventions.txt`
+*replaces* the game's `inventions/army_inventions.txt`. Here both are read:
+
+```
+base  inventions/army_inventions.txt   base_one, base_two
+mod   inventions/Army_Inventions.txt   mod_one
+resolved: both files     invention array: [mod_one, base_one, base_two]
+the game on Windows:     [mod_one]
+```
+
+Every invention index after it is then off, and that decides mobilisation
+sizes and ship stats. **Fix.** Key by the lower-cased name, and keep the
+winning file's own name for the ASCII sort the array depends on. Nothing
+changes for the campaign here, because this machine has no game install under
+the mod.
+
+## 24. Windows: the scanner would open a console window for every save
+
+`fastscan.py:177` starts the scanner with no `creationflags`. The scanner is a
+console program: `scanner/src/main.rs` sets no `windows_subsystem`. The
+executable is built `--windowed`. A windowed program that starts a console
+program without `CREATE_NO_WINDOW` gets a new console window each time, so one
+would flash per save read. That is an inference from how Windows starts
+processes; this machine cannot show it.
+
+It has not happened to anyone yet, because **the shipped
+`dist/vic2saveanalyzer.exe` carries no scanner at all**. Its archive has 37
+entries and no `vic2scan`, so Windows users read every save in Python, about
+four times slower. It will happen on the first build made with the scanner.
+**Fix.** Pass `CREATE_NO_WINDOW` on Windows. When rebuilding, run `cargo build
+--release --manifest-path scanner/Cargo.toml` first, or the new exe will also
+read in Python.
+
+## 25. Checks that do not check
+
+Thirteen checks that `mutate.py` had no mutation for were each given one
+realistic bug. Twelve caught theirs, and each failure message was read and
+names the bug (§28). The thirteenth:
+
+**Nothing guards the stamp's list of settings.** `vic2_analyzer.py:169` names by
+hand the fifteen settings that change a number. Take `min_pop` off that list
+and `staleness.py` still says "every one of them moves the stamp: ok", and so
+does every other check. A later run with a different `--min-pop` would then
+answer "nothing has changed" with the old report. This is §9's hand-written
+list again, for settings instead of files. `staleness.py` checks files only.
+Neither §15's `--cross` staleness nor §22's `App.start` is exercised by any
+check either.
+
+**Fix.** Candidate 3 in `HANDOFF.md` (a declared `Run`) gives the settings one
+declaration. A check then changes each output-affecting setting in turn and
+requires the stamp to move.
+
+## 26. Security
+
+**Script in a name runs in the report.** `template.py:4838` writes
+`<td class="warname">${w.name}` into `innerHTML`, as do about thirty other
+sites, with names from saves and mod localisation. A two-save campaign whose
+war is named `<img src=x onerror=dump(...)>`, opened in headless Firefox the
+way `boots.py` does: the page reported `injected=1`, so the script ran when the
+Wars tab drew. Reports get published to github.io and opened from disk, and
+multiplayer saves come from other people. **Fix.** One escaping helper, used at
+every `innerHTML` site that takes a name. That changes the bytes of
+`report.html` (its script), not a number in it.
+
+**The GitHub token follows redirects.** `publish.py:67` uses urllib's default
+redirect handling, which sends the `Authorization` header on to wherever a
+redirect points. A fake API on 127.0.0.1 answering 301 to a second local
+server: the second server received `Authorization: Bearer ghp_SECRET_TOKEN`
+three times. GitHub's API would have to redirect to another host for this to
+bite, so it is low. **Fix.** Refuse cross-host redirects in `_call`.
+
+**Two failures surface raw.** A 200 answer that is not JSON (a hotel's
+log-in page) gives `JSONDecodeError: Expecting value: line 1 column 1`. An
+answer that stalls mid-read gives `TimeoutError: timed out`. Both reach the
+error box as those words. **Fix.** Turn both into `PublishError`s that say
+what happened.
+
+What is uploaded is the report and, for a split report, its data file, both
+to the user's own repository or to a host they named. The report holds no
+paths, user name or save file names. A report built here was searched for
+`/home`, the user name, the saves folder, the mod folder, backslashes and
+`/tmp`, in the payload, the page around it, the nine tables and the stamp,
+and none of them was found.
+
+## 27. Leads, not reproduced
+
+- `mod_reader` ignores a mod's `.mod` descriptor, so `replace_path` goes
+  unread. A mod that replaces a whole folder would still inherit the game's
+  files in it. There is no second mod or game install here to test it.
+- `nation.brigades_from_clusters` compares `size × rate` against the regiment
+  cost in floats, with `rate` a sum of many contributions. The same kind of
+  hair-under error as §18 could decide a regiment. The rule matched 184 of 185
+  in-game readings; whether the one miss (Japan 1908, 467 against 468) is this
+  is unknown.
+- `cross._MOD_FACTS` and `_CAPACITY` are never cleared in a long-running
+  window, so a mod updated while the window is open is matched on its old
+  facts.
+- `host/worker.js` deletes a report on a GET, so a chat app previewing the
+  delete link would take the report down. And the "is this a report" test is
+  three strings anyone can include, so a deployed host serves arbitrary pages
+  under its CSP.
+- GitHub Pages serving `report.data.gz` with `Content-Encoding: gzip` would
+  break `--split` reports. Not checkable without the network.
+
+## 28. Attacked and held up
+
+- **Planted bugs, caught for the right reason.** `staleness.py` (a source
+  file skipped), `noworkers.py` (no fallback when the pool will not start),
+  `edges.py` (a refused file crashing the run), `matching.py` (the map test
+  switched off), `modcache.py` (the mod key ignoring the files),
+  `packing.py` (a module left off the list), `tooearly.py` (a name read
+  early), `keeping.py` (copying twice: "51 copies for 18 months"),
+  `sharing.py` (a 413 explained wrongly), `window.py` (Stop unwired),
+  `invariants.py` (accepted share over primary culture: "90 of 205 rows"),
+  `facts.py` (a field stripped and not named), `boots.py` (a tab that throws).
+- The Rust scanner and Python agree exactly, types included, on the real save
+  with Unix line endings. On a save reflowed onto single lines the scanner
+  declines and Python reads it, as designed.
+- The trigger evaluator's three-valued `AND`/`OR`/`NOT` is right, including
+  `NOT` over several conditions reading as "none of them".
+- `year_fraction` keeps dates in order within and across months. Growth rates
+  skip zero readings. No `NaN` or `Infinity` reaches the payload.
+- A split report finds its data under the name `publish.py` gives it.
+- The keeper retakes a copy caught mid-write, because the next change to the
+  file finds the kept copy the wrong size.
+- `mod_reader._reader_fingerprint` is still complete: `mod_reader` imports
+  exactly `cacheio` and `v2parse` of ours.
+- Still true from `HANDOFF.md`: `keeper_gui.py:199` calls `os.startfile`,
+  `explain.py:222` walks the invention files for nothing, and
+  `report.merge_wars` is reached only from a fallback production never takes.
+
+## 29. What to do, in order, and what needs the maintainer
+
+Fixes that change no number for a correct campaign, safe to make: §15, §16,
+§17, §19, §21, §22, §23, §24, §25, §26, §14 (only a damaged save's output
+changes), and the known items in `HANDOFF.md`.
+
+Fixes that change what a user sees, so the maintainer decides:
+
+1. **§13**, the Wars tab listing every nation in a war. For this campaign it
+   adds SAR, TUR, SPA, NET, FRA, RUS and WAL to one war.
+2. **§18**, the cap rounded before the floor. It moves only the cases that
+   were one short.
+3. **§20**, whether a second save with the same date is dropped from the
+   tables or only warned about.
