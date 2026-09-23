@@ -665,9 +665,8 @@ class App:
             if pick == AUTO:
                 wants_search = True
                 continue
-            told.append("%s=%s" % (
-                row["name"],
-                mod if pick == SELECTED else self.mod_paths.get(pick, pick)))
+            told.append((row["name"],
+                         mod if pick == SELECTED else self.mod_paths.get(pick, pick)))
         if rows:
             mod_arg = ""
             game_root = search_root(mod) if wants_search else None
@@ -735,45 +734,36 @@ class App:
 
     def work(self, saves, mod, out, cross=False, game_root=None, primary="",
              told=()):
-        argv = [sys.argv[0], saves, "-o", out]
-        if cross:
-            argv += ["--cross"]
-            if primary:
-                argv += ["--primary", primary]
-            for pair in told:
-                argv += ["--campaign-mod", pair]
         # Naming one mod and naming the folder mods live in are different
-        # instructions and must not be run together. `--mod-path` says "this
-        # one, for every campaign"; `--game-root` says "work it out from each
+        # instructions and must not be run together. `mod_path` says "this
+        # one, for every campaign"; `game_root` says "work it out from each
         # campaign's own saves, searching here". Passing a chosen mod as the
         # root made the search look for candidates *inside* that mod, where
         # the only thing it could find was the mod itself under the wrong
         # name -- so every campaign was matched to it whether it fitted or not.
         # Where the campaign rows are showing, neither is sent as a blanket:
         # `mod` arrives empty and each campaign has been named instead.
-        if game_root:
-            argv += ["--game-root", game_root]
-        elif mod:
-            argv += ["--mod-path", mod]
-        old_argv, old_out, old_err = sys.argv, sys.stdout, sys.stderr
-        sys.argv = argv
+        #
+        # A `Run`, not an argv: this used to rewrite `sys.argv` for the
+        # analyzer's parser to read back, and join each campaign's name and
+        # mod into a "name=path" string for it to split apart again.
+        run = vic2_analyzer.Run(
+            saves=saves, out=out, cross=cross, primary=primary or None,
+            campaign_mod=tuple(told) if cross else (),
+            game_root=game_root or None,
+            mod_path=None if game_root else (mod or None))
+        old_out, old_err = sys.stdout, sys.stderr
         sys.stdout = sys.stderr = Pipe(self.log_queue)
-        # Everything the analyzer calls back into, wired here rather than in
-        # `start` beside the buttons. A run owns its own wiring: put half of
-        # it in the window's setup and anything that drives `work` directly
-        # -- another caller, a test -- gets a run with the other half
-        # missing, which for the report is the difference between opening
-        # the moment it lands and opening a third of a second later, and
-        # nothing about the finished run looks any different.
-        vic2_analyzer.set_cancel_check(self.stop.is_set)
-        vic2_analyzer.set_progress(self.on_progress)
-        # The report is written before the CSV tables are, so it can be
-        # opened while they are still being written.
-        vic2_analyzer.set_report_ready(self.on_report_ready)
         ok = True
         stopped = False
         try:
-            vic2_analyzer.main()
+            # Everything the analyzer calls back into, handed over with the
+            # run rather than wired by hand around it. The report is written
+            # before the CSV tables are, so it can be opened while they are
+            # still being written.
+            vic2_analyzer.analyze(run, cancel=self.stop.is_set,
+                                  progress=self.on_progress,
+                                  ready=self.on_report_ready)
         except vic2_analyzer.Cancelled:
             ok = False
             stopped = True
@@ -788,10 +778,7 @@ class App:
             import traceback
             self.log_queue.put("\n" + traceback.format_exc())
         finally:
-            vic2_analyzer.set_cancel_check(None)
-            vic2_analyzer.set_progress(None)
-            vic2_analyzer.set_report_ready(None)
-            sys.argv, sys.stdout, sys.stderr = old_argv, old_out, old_err
+            sys.stdout, sys.stderr = old_out, old_err
         self.report = os.path.join(out, "report.html")
         if ok and os.path.isfile(self.report):
             self.log_queue.put(f"\nReport written to {self.report}\n")

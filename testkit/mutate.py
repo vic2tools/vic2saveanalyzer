@@ -531,6 +531,26 @@ def m43():
           "    return cacheio.source_fingerprint(__file__, cacheio.__file__)")
 
 
+# ---- the settings the report stamp covers, which were fifteen names by hand
+
+@mutation("stamp-leaves-out-min-pop",
+          "--min-pop is declared as not changing the report, so a run that "
+          "changes it is answered with the old one", "staleness.py")
+def m44():
+    # REVIEW.md §25, in the form it can take now: the declaration is wrong
+    # rather than a list. Taken off the old hand-written list it passed
+    # every check there was.
+    patch("vic2_analyzer.py", "    min_pop: int = _setting(0, report=True)",
+          "    min_pop: int = _setting(0, report=False)")
+
+
+@mutation("stamp-ignores-declared-setting",
+          "the stamp hashes fewer settings than Run declares", "staleness.py")
+def m45():
+    patch("vic2_analyzer.py", "    for name in REPORTED:\n",
+          "    for name in REPORTED[:-2]:\n")
+
+
 # ---- a save cut short was read as a whole one
 
 @mutation("cut-save-read-as-whole",

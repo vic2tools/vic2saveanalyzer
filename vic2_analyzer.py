@@ -32,6 +32,7 @@ import os
 import re
 import sys
 from collections import defaultdict, namedtuple
+from dataclasses import dataclass, field as _field, fields, replace
 from functools import partial
 
 import cacheio
@@ -79,8 +80,8 @@ from readfolder import (
     worker_count,
     worker_setup,
 )
-# Not used here. The window stops a run and follows it through these, and
-# finds them on the analyzer, because the analyzer is the thing it runs.
+# `analyze` hands a caller's Stop button and progress bar to these, and the
+# window catches `Cancelled` here, because the analyzer is the thing it runs.
 from readfolder import Cancelled, set_cancel_check, set_progress  # noqa: F401
 # What a nation comes to once its save is read. Called through the module,
 # never imported by name: `testkit/crossrows.py` replaces
@@ -166,10 +167,8 @@ def report_stamp(files, args, world):
     # Every setting that reaches a number in the report. Not --jobs, not
     # --quiet, not where it is written: those change how it is made, not what
     # it says.
-    for name in ("tags", "min_pop", "mob_rate", "mob_types", "pop_per_regiment",
-                 "mob_include_occupied", "player_nations", "map_scale",
-                 "split", "no_html", "mod_path", "game_root", "cross",
-                 "primary", "campaign_mod"):
+    # Which those are is declared once, beside each setting in `Run`.
+    for name in REPORTED:
         digest.update(("%s=%r\n" % (name, getattr(args, name, None)))
                       .encode("utf-8"))
     return digest.hexdigest()
@@ -831,17 +830,12 @@ def survey_cross(parent, game_root, args, verbose=True):
     # countries, their technologies and their whole invention array, so the
     # search is a good guess and nothing more -- being told beats it every time.
     chosen = {}
-    for pair in getattr(args, "campaign_mod", None) or []:
-        name, _sep, path = pair.partition("=")
-        if not _sep or not name.strip():
-            sys.exit("--campaign-mod wants NAME=PATH, as in "
-                     '--campaign-mod "NeoMgame=C:\\...\\mod\\IGoR_puir 13.0.5". '
-                     "Got: %r" % pair)
-        path = os.path.expanduser(os.path.expandvars(path.strip()))
+    for name, path in args.campaign_mod or ():
+        path = os.path.expanduser(os.path.expandvars(path))
         if not os.path.isdir(os.path.join(path, "common")):
             sys.exit("--campaign-mod %s: %s has no common/ inside it, so it is "
-                     "not a mod folder." % (name.strip(), path))
-        chosen[name.strip().lower()] = path
+                     "not a mod folder." % (name, path))
+        chosen[name.lower()] = path
 
     # Naming a mod is an answer, not a hint. Campaigns played on the same mod
     # are the ordinary case, and being told which one is better evidence than
@@ -1338,6 +1332,92 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
     return html_path
 
 
+def _setting(default=None, *, report):
+    """
+    One setting of a run. `report` says whether it changes what the report
+    says, and so has to be in the report stamp. It has no default, so a
+    setting cannot be added without deciding which it is.
+    """
+    return _field(default=default, metadata={"report": report})
+
+
+@dataclass(frozen=True)
+class Run:
+    """
+    Everything one run of the analyzer was asked to do, declared once.
+
+    This was argparse's namespace, handed from file to file: twenty-seven
+    settings read across four modules, declared nowhere but the parser,
+    written back onto by `main` once the mod had had its say, and hashed
+    into the report stamp by fifteen names written out by hand -- so a new
+    setting that changed a number, and was not added to that list, would
+    have been answered "nothing has changed" with the old report, and no
+    check would have said so. And the window could only reach any of it by
+    rewriting `sys.argv`, building `"name=path"` strings for the parser to
+    take apart again.
+
+    Now each setting is declared here with whether it changes the report,
+    the stamp hashes exactly those, the command line and the window each
+    build one of these, and what the mod settles is a new `Run` rather
+    than a write onto the old one. The model is `keeper.Options`.
+    """
+
+    saves: str = _field(metadata={"report": False})   # hashed file by file
+    out: str = _setting("vic2_report", report=False)
+    tags: tuple = _setting(report=True)
+    mod_path: str = _setting(report=True)
+    check_inventions: bool = _setting(False, report=False)
+    inventions: str = _setting(report=False)
+    explain_mob: str = _setting(report=False)
+    mob_rate: float = _setting(1.0, report=True)
+    pop_per_regiment: int = _setting(report=True)
+    mob_types: tuple = _setting(report=True)
+    mob_include_occupied: bool = _setting(False, report=True)
+    jobs: int = _setting(report=False)
+    no_cache: bool = _setting(False, report=False)
+    map_scale: int = _setting(1, report=True)
+    player_nations: tuple = _setting(report=True)
+    explain_mob_pool: str = _setting(report=False)
+    min_pop: int = _setting(0, report=True)
+    no_html: bool = _setting(False, report=True)
+    rebuild: bool = _setting(False, report=False)
+    split: bool = _setting(False, report=True)
+    peek: bool = _setting(False, report=False)
+    verify: bool = _setting(False, report=False)
+    cross: bool = _setting(False, report=True)
+    campaign_mod: tuple = _setting((), report=True)   # ((name, mod path), ...)
+    primary: str = _setting(report=True)
+    game_root: str = _setting(report=True)
+    quiet: bool = _setting(False, report=False)
+
+    @classmethod
+    def from_command_line(cls, ns):
+        """
+        A Run from what argparse made of the command line.
+
+        Lists become tuples, because a Run is frozen, and each
+        `--campaign-mod NAME=PATH` is taken apart here, once -- refused in
+        a sentence if it is not a pair -- rather than by whoever reads it.
+        """
+        values = dict(vars(ns))
+        for name in ("tags", "mob_types", "player_nations"):
+            if values.get(name) is not None:
+                values[name] = tuple(values[name])
+        pairs = []
+        for pair in values.get("campaign_mod") or ():
+            name, sep, path = pair.partition("=")
+            if not sep or not name.strip():
+                sys.exit("--campaign-mod wants NAME=PATH, as in "
+                         '--campaign-mod "NeoMgame=C:\\...\\mod\\IGoR_puir '
+                         '13.0.5". Got: %r' % pair)
+            pairs.append((name.strip(), path.strip()))
+        values["campaign_mod"] = tuple(pairs)
+        return cls(**values)
+
+
+REPORTED = tuple(f.name for f in fields(Run) if f.metadata["report"])
+
+
 def command_line():
     """
     Every flag the program takes, and what each one is allowed to be.
@@ -1476,8 +1556,29 @@ def command_line():
     return ap.parse_args()
 
 
-def main():
-    args = command_line()
+def analyze(run, cancel=None, progress=None, ready=None):
+    """
+    One run, for a caller that is not a command line: the window.
+
+    It hands over a `Run` rather than rewriting `sys.argv` for the parser to
+    read back, and the three things it wants told -- whether to stop, how
+    far along the saves are, and where the report landed -- as arguments,
+    which are set for this run and cleared after it whatever happens.
+    """
+    set_cancel_check(cancel)
+    set_progress(progress)
+    set_report_ready(ready)
+    try:
+        return main(run)
+    finally:
+        set_cancel_check(None)
+        set_progress(None)
+        set_report_ready(None)
+
+
+def main(run=None):
+    """One run, as `run` declares it, or as the command line does."""
+    args = run if run is not None else Run.from_command_line(command_line())
 
     saves_path = os.path.expanduser(os.path.expandvars(args.saves))
     if not os.path.exists(saves_path):
@@ -1525,8 +1626,10 @@ def main():
         stamp = cross_stamp(survey, args)
         if not args.verify and already_built(args, stamp):
             return 0
-        cross_payload, files, args.mod_path = run_cross(
+        cross_payload, files, primary_mod = run_cross(
             saves_path, survey, args, verbose=not args.quiet)
+        # The rest of the report is the primary campaign's, under its mod.
+        args = replace(args, mod_path=primary_mod)
         if not files:
             sys.exit("--cross found no campaigns under %s" % saves_path)
 
@@ -1581,15 +1684,18 @@ def main():
             # the program, which is what the window used to show.
             sys.exit(str(exc))
         extra = set(mod.pop_types) - VANILLA_POP_TYPES
-    # Written back onto `args` because the rest of a single-campaign run reads
-    # them off it -- the finishing spec, the reading below, the two printed
-    # lines, and `explain.py`. `run_cross` asks the same function and keeps
-    # the answer to itself, because it has a mod per campaign.
+    # The run as the mod settles it, because the rest of a single-campaign
+    # run reads these two off it -- the finishing spec, the reading below,
+    # the two printed lines, and `explain.py`. `run_cross` asks the same
+    # function and keeps the answer to itself, because it has a mod per
+    # campaign. The stamp was taken above, from the run as it was asked for.
     #
     # Outside the `if` above: with no mod this is what turns the two "nothing
     # was asked for" Nones into the vanilla numbers, and everything after here
     # expects to find those rather than a None.
-    args.pop_per_regiment, args.mob_types = finishing.mod_defaults(args, mod)
+    settled_size, settled_types = finishing.mod_defaults(args, mod)
+    args = replace(args, pop_per_regiment=settled_size,
+                   mob_types=tuple(settled_types))
     if mod is not None and verbose:
         print("defines.lua: POP_SIZE_PER_REGIMENT="
               f"{args.pop_per_regiment}")

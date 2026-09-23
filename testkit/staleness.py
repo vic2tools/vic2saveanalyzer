@@ -44,6 +44,14 @@ in a sentence.
 And a table has to be from this run even when this run has nothing to put
 in it: an empty one used to be skipped, and the last run's copy stayed in
 the folder beside the new ones.
+
+And the settings. The stamp used to hash fifteen of them by name, from a
+list nothing checked -- taking `min_pop` off it passed every check there
+was, and a later `--min-pop` would have been answered with the old report.
+Each setting is now declared in `vic2_analyzer.Run` with whether it
+changes the report, and this holds the declaration to account: every
+setting that does moves the stamp, and every one that is left out is on a
+list below that says why it may be.
 """
 
 import os
@@ -282,6 +290,86 @@ def leftover_tables():
         shutil.rmtree(holding, ignore_errors=True)
 
 
+# The settings allowed to stay out of the report stamp, and why. A setting
+# declared as not changing the report and not named here is a failure: it
+# has to be decided twice, once there and once here, before it can skip.
+OUT_OF_STAMP = {
+    "saves": "each save is hashed on its own, by path, size and time",
+    "out": "where the report goes, not what it says",
+    "check_inventions": "prints and exits; `asked` keeps it from skipping",
+    "inventions": "prints and exits; `asked` keeps it from skipping",
+    "explain_mob": "prints and exits; `asked` keeps it from skipping",
+    "explain_mob_pool": "prints and exits; `asked` keeps it from skipping",
+    "jobs": "how many cores read the saves",
+    "no_cache": "a save read again is the same save",
+    "rebuild": "asks for exactly the rebuild",
+    "peek": "prints one save's shape and exits",
+    "verify": "checks the saves and exits",
+    "quiet": "what is printed, not what is written",
+}
+
+
+def the_settings_the_stamp_covers():
+    """[what went wrong] in which settings the report stamp covers."""
+    import dataclasses
+    sys.path.insert(0, HERE)
+    import vic2_analyzer as va
+
+    wrong = []
+    declared = dataclasses.fields(va.Run)
+    for setting in declared:
+        if "report" not in setting.metadata:
+            wrong.append("%s does not say whether it changes the report"
+                         % setting.name)
+    left_out = {f.name for f in declared if not f.metadata.get("report")}
+    for name in sorted(left_out - set(OUT_OF_STAMP)):
+        wrong.append("%s is left out of the report stamp, and nothing says it "
+                     "may be -- a run that changes it would be answered with "
+                     "the report made before" % name)
+
+    def other(value):
+        if isinstance(value, bool):
+            return not value
+        if isinstance(value, (int, float)):
+            return value + 1
+        if isinstance(value, tuple):
+            return value + (("X", "Y"),)
+        return "x" if value is None else value + "x"
+
+    holding = tempfile.mkdtemp(prefix="vic2sstale")
+    try:
+        save = os.path.join(holding, "a.v2")
+        open(save, "w").write('date="1836.1.1"\n')
+        base = va.Run(saves=holding)
+        first = va.report_stamp([save], base, "no-mod")
+        for setting in declared:
+            if not setting.metadata.get("report"):
+                continue
+            moved = dataclasses.replace(
+                base, **{setting.name: other(getattr(base, setting.name))})
+            if va.report_stamp([save], moved, "no-mod") == first:
+                wrong.append("changing %s does not move the report stamp, so "
+                             "a run that changes it is answered with the old "
+                             "report" % setting.name)
+        old = sys.argv
+        try:
+            sys.argv = [old[0], holding]
+            parsed = va.Run.from_command_line(va.command_line())
+        finally:
+            sys.argv = old
+        if parsed != base:
+            wrong.append("a Run with nothing set is not what the command line "
+                         "makes with nothing given: %s" % sorted(
+                             f.name for f in declared
+                             if getattr(parsed, f.name) != getattr(base, f.name)))
+    finally:
+        shutil.rmtree(holding, ignore_errors=True)
+    print("  %-48s %s" % ("every setting that changes the report moves it",
+                          "FAILED" if wrong else "ok (%d of %d)" % (
+                              len(declared) - len(left_out), len(declared))))
+    return wrong
+
+
 def main():
     holding = tempfile.mkdtemp(prefix="vic2stale")
     copy = os.path.join(holding, "program")
@@ -332,6 +420,7 @@ def main():
     deaf += cross_campaigns()
     deaf += unfinished_runs()
     deaf += leftover_tables()
+    deaf += the_settings_the_stamp_covers()
     print()
     if deaf:
         print("PROBLEMS:")
