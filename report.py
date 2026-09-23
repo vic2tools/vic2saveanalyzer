@@ -508,30 +508,20 @@ def _state_label(region, pid, state_names, province_names):
     return region or ""
 
 
-def merge_wars(parsed):
+def fold_wars(book, war_list):
     """
-    Every war in the campaign, folded into one book.
+    Fold one save's war list into a running book, `{"wars": {}, "order": []}`.
 
     A save carries the whole war history up to its date, not just what is
     happening now: by 1908 that is two and a half megabytes of it, and only two
     hundred and sixty of the wars are distinct. Thirty-eight saves therefore
     hold fifty megabytes of overlapping copies, and twelve hundred monthly ones
-    would hold nearly two gigabytes.
-
-    Folding them into one book up front means the campaign keeps one copy of
-    each war, and every save can drop its own list the moment it has been read.
-    Saves are folded oldest first, because which of two readings of the same
-    war goal is kept depends on which was seen first.
+    would hold nearly two gigabytes. Folded into one book as the campaign is
+    walked, the campaign keeps one copy of each war, and every save can drop
+    its own list the moment it has been read. Saves are folded oldest first,
+    because which of two readings of the same war goal is kept depends on
+    which was seen first.
     """
-    book = {"wars": {}, "order": []}
-    for meta, _nations in sorted(
-            parsed, key=lambda pair: year_fraction(pair[0].get("date") or "")):
-        fold_wars(book, meta.get("wars", ()))
-    return book
-
-
-def fold_wars(book, war_list):
-    """Fold one save's war list into a running book. See `merge_wars`."""
     wars, order = book["wars"], book["order"]
     # Every war each name-and-belligerents triple has produced so far, as
     # [key, first, last] with the stretch it covers kept up to date as records
@@ -622,7 +612,7 @@ def fold_wars(book, war_list):
 
 
 def build_wars(parsed, province_names=None, province_regions=None,
-               state_names=None, unit_kinds=None, book=None):
+               state_names=None, unit_kinds=None, *, book):
     """
     Every war in the campaign, with battle dates recovered across saves.
 
@@ -640,8 +630,8 @@ def build_wars(parsed, province_names=None, province_regions=None,
     # sorts before "mp_The_United States1840". Diffing province ownership down
     # that list compares 1884 against 1840 and invents transfers.
     parsed = sorted(parsed, key=lambda pair: year_fraction(pair[0].get("date") or ""))
-    if book is None:
-        book = merge_wars(parsed)
+    # `book` is the campaign's wars, folded save by save as it was walked;
+    # see `fold_wars`.
     wars, order = book["wars"], book["order"]
 
     # --- who took what, from the province ledger either side of each save.

@@ -811,8 +811,9 @@ Four things were costing more than they were worth.
 it is in; it records every war there has ever been. By 1908 that is 2.7 MB per
 save of which 263 wars are distinct, so thirty-eight saves carry fifty megabytes
 of overlapping copies and twelve hundred would carry nearly two gigabytes. The
-merge that `build_wars` always did at the end now happens once up front, in
-`merge_wars`, and each save drops its own list the moment it has been folded in.
+merge that `build_wars` always did at the end now happens as the campaign is
+walked, in `fold_wars`, and each save drops its own list the moment it has been
+folded in.
 
 **Mobilizable pops that were never eligible.** The biggest thing a parsed save
 carries is one entry per pop per province -- eleven thousand for a large nation,
