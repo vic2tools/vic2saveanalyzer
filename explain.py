@@ -170,7 +170,7 @@ def explain(args, mod, live, parsed):
         if mod is None:
             sys.exit("--check-inventions needs --mod-path.")
         from mod_reader import (alignment_score, index_holdings,
-                                invention_files, ungated_inventions)
+                                ungated_inventions)
         holdings = index_holdings(parsed)
         base = mod.index_base
         seq = mod.invention_sequence
@@ -223,7 +223,6 @@ def explain(args, mod, live, parsed):
                   f"stretch of the array looks like, and it is worth reading the "
                   f"list below before trusting anything taken off an invention.")
         if detail:
-            where = invention_files(args.mod_path)
             print(f"\n  {'index':>6}  {'invention':<38} {'holders':>16}  needs")
             for idx, have, lack in detail[:26]:
                 entry = seq[idx - base]
