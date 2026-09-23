@@ -872,3 +872,75 @@ Fixes that change what a user sees, so the maintainer decides:
 - **§18**: leave the cap arithmetic as it is.
 - **§20**: warn, and keep one save per date (the later-named file) so the
   tables match the report.
+
+## 31. What was done about it
+
+Eighteen commits after the review, one per fix. Each passed all four steps of
+the contract on its own, against the commit before it: the nine outputs and
+four diagnostics byte-identical with `--no-cache` on both sides, the 24 checks,
+and every mutation caught. Each fix came with a check that fails without it.
+Each new mutation was run by hand once, and the check's failure message was
+read to be sure it failed for the right reason. The harness now holds 45
+mutations, up from 25, and all 45 are caught.
+
+| commit | § | what the new check says with the fix taken out |
+|---|---|---|
+| `9b5b7ba` | 14 | mangled.py: "30% of a save was read as a whole one by the scanner" |
+| `5e29953` | 15 | staleness.py: "--cross after the smaller campaign gains a save: answered "nothing has changed" with the old report" |
+| `8a947ff` | 16 | staleness.py: "after a run that could not write a table, the run before it was answered with that run's report"; "a locked table ended the run in a stack trace" |
+| `b1262bb` | 13 | mobrate.py: "at war: ENG FRA GER, where the war lists ENG, SPA and FRA" |
+| `aa65e0c` | 17 | mobrate.py: "--explain-mob ENG explains 0.00% where the report shows 5.00%" |
+| `7e0ecfe` | 19 | staleness.py: "ships_by_type.csv still holds ENG from the run before" |
+| `379c7d8` | 20 | edges.py: "nothing said the two saves share a date"; "the table holds 3 rows for 2 nation-dates" |
+| `24da7f9` | 21 | noworkers.py: "a worker dying took the run down: ... BrokenProcessPool" |
+| `5dc167d` | 22 | window.py: "pressing Analyze erased the github_token the share menu keeps"; sharing.py: "a token GitHub refused is still held" |
+| `a8f8f5e` | 23 | modcache.py: "['mod_one', 'base_one', 'base_two', 'base_kept'] != ['mod_one', 'base_kept']" |
+| `959742e` | 24 | packing.py: "on Windows the scanner is started without CREATE_NO_WINDOW" |
+| `80de7f7` | 26 | boots.py: "a name from a save ran as script in the report (probe 1)" |
+| `e575b25` | 26 | sharing.py: "the token was handed to the address a redirect named"; "GitHub stalling mid-answer: raised TimeoutError" |
+| `90000a8` | handoff | window.py: "the keeper's Open the folder showed an error here: ... no attribute 'startfile'" |
+| `811e2bd` | handoff | modcache.py: "['v2parse'] != [] -- these files decide what a cached mod holds" |
+| `af1de71` | 25, handoff | staleness.py: "min_pop is left out of the report stamp, and nothing says it may be" |
+
+`b4c0f41` and `428bb1b` removed dead code: the discarded walk in
+`--check-inventions` and `report.merge_wars`. They are pure restructuring, so
+there is no new check, and everything came out byte-identical.
+
+**One of the new checks passed for the wrong reason at first.** The
+same-date case in `edges.py` asked whether the output mentioned both file
+names and the date. With the fix taken out it still passed, because a verbose
+run prints every file name and date anyway. Running the mutation by hand
+showed it, and the case now asks for one line naming both files and the date
+they share. Nothing else would have noticed.
+
+**Output changes.** The nine outputs and four diagnostics of this campaign are
+byte-identical from `26f3680` to `af1de71`. `report.stamp` changes at
+`af1de71`, because a list setting is now a tuple, so each report on disk is
+rebuilt once on its next run. Output changes only where the bug was:
+- a damaged save is now refused instead of read;
+- a second save with the same date is now left out of the tables, with a note;
+- an empty table is written as a heading;
+- a war's "at war" set now follows its current sides, which moves a number
+  only under a mod with a war-triggered modifier.
+
+**Speed.** The no-change run was 82 ms at `26f3680` and 83 ms at `af1de71`,
+median of nine interleaved rounds. That is within noise: the two load the same
+modules, in the same import time. The cold run with the mod was 5.75 s and
+5.71 s, median of three interleaved rounds, each run from an empty private
+cache. An unchanged `--cross` run now answers before reading any campaign;
+it used to read all of them first.
+
+**Left, and why.**
+- §13, the Wars tab lists: the maintainer explained the cause (a hand merge by the
+  game's host) and asked for no change.
+- §18, the cap arithmetic: the maintainer said leave it.
+- The three "what is a folder of saves" walkers: they differ on purpose.
+  One walks a tree of campaigns, one lists one folder, and one watches the
+  game's own folder for autosaves. What they share is a single `.v2` test.
+  Folding `main`'s into `cross` would also import the mod reader on the path
+  of a run with nothing to do, which is kept to 80 ms on purpose.
+- Everything in §27 is still unproven: `replace_path`, float comparisons in
+  the brigade count, the stale mod facts in a long-running window, the
+  host's delete by GET, and Pages serving `.gz`.
+- Cosmetic items from §5 and §7, and `walk_campaign` still reading
+  `v2parse.POP_TYPES` for its columns.
