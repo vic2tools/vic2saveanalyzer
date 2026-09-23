@@ -509,6 +509,17 @@ def m41():
           "    except ZeroDivisionError as err:\n        # Once connected")
 
 
+# ---- the keeper's "Open the folder" worked on Windows alone
+
+@mutation("keeper-folder-windows-only",
+          "the keeper's Open the folder calls os.startfile, which exists only "
+          "on Windows", "window.py", "saves")
+def m42():
+    patch("keeper_gui.py",
+          "            keeper.open_with_system(where)\n        except OSError as err:",
+          "            os.startfile(where)\n        except (OSError, AttributeError) as err:")
+
+
 # ---- a save cut short was read as a whole one
 
 @mutation("cut-save-read-as-whole",

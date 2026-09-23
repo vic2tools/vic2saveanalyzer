@@ -195,8 +195,8 @@ class Keeper:
         where = self.out.get()
         try:
             os.makedirs(where, exist_ok=True)
-            os.startfile(where)     # Windows only, which is where the game is
-        except (OSError, AttributeError) as err:
+            keeper.open_with_system(where)
+        except OSError as err:
             messagebox.showerror(APP, "Cannot open %s\n\n%s" % (where, err))
 
     def write(self, line):

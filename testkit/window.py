@@ -223,6 +223,48 @@ def a_start_keeps_other_settings(app, holding):
     return wrong
 
 
+def the_keeper_opens_its_folder(root, holding):
+    """
+    [what went wrong] when the keeper's "Open the folder" is pressed here.
+
+    It called `os.startfile` alone, which exists only on Windows, so on
+    any other machine the button showed an error dialog and opened
+    nothing -- the copy of the three-way choice that nobody updated when
+    the analyzer's was fixed. Launching is stubbed, as it is above.
+    """
+    import subprocess
+    from tkinter import messagebox, ttk
+    import keeper_gui
+
+    launched, errors = [], []
+    frame = ttk.Frame(root)
+    keeping = keeper_gui.Keeper(root, parent=frame)
+    keeping.out.set(os.path.join(holding, "kept"))
+    real_popen, real_start = subprocess.Popen, getattr(os, "startfile", None)
+    real_error = messagebox.showerror
+    subprocess.Popen = lambda *a, **k: (launched.append(a[0]),
+                                        type("P", (), {})())[1]
+    if real_start is not None:
+        os.startfile = lambda path: launched.append(["startfile", path])
+    messagebox.showerror = lambda *a, **k: errors.append(a)
+    try:
+        keeping.reveal()
+    finally:
+        subprocess.Popen = real_popen
+        if real_start is not None:
+            os.startfile = real_start
+        messagebox.showerror = real_error
+    wrong = []
+    if errors:
+        wrong.append("the keeper's Open the folder showed an error here: %s"
+                     % str(errors[0][-1]).replace("\n", " ")[:90])
+    elif not launched:
+        wrong.append("the keeper's Open the folder launched nothing")
+    print("  the keeper's Open the folder runs: %s"
+          % (" ".join(launched[0]) if launched else "(nothing)"))
+    return wrong
+
+
 def main():
     saves = sys.argv[1] if len(sys.argv) > 1 else ""
     if not saves or not os.path.isdir(saves):
@@ -242,6 +284,7 @@ def main():
         wrong += opens_on_this_machine(app, os.path.join(out, "report.html"))
         wrong += a_stopped_run(root, app, saves, os.path.join(holding, "two"))
         wrong += a_start_keeps_other_settings(app, holding)
+        wrong += the_keeper_opens_its_folder(root, holding)
     finally:
         shutil.rmtree(holding, ignore_errors=True)
         try:

@@ -21,7 +21,6 @@ Packaged as vic2saveanalyzer.exe by build_exe.py.
 import json
 import os
 import queue
-import subprocess
 import sys
 import threading
 import time
@@ -32,7 +31,7 @@ import vic2_analyzer
 # `human_size` lives in `keeper`, which is the lower of the two and imports
 # nothing but the standard library, so taking it from there costs this
 # module nothing and keeps one definition of how a byte count is said.
-from keeper import human_size
+from keeper import human_size, open_with_system
 
 APP = "Victoria 2 Save Analyzer"
 AUTO = "(work it out from the saves)"
@@ -810,19 +809,14 @@ class App:
 
         `os.startfile` exists only on Windows, and the fallback behind it was
         `cmd /c start`, which is Windows too -- so on Linux and macOS the
-        report was built, announced in the log, and never opened. The same
-        three-way choice `open_folder` makes in app.py.
+        report was built, announced in the log, and never opened.
+        `keeper.open_with_system` makes the choice for every window.
         """
         if self.opened or not os.path.isfile(path):
             return
         self.opened = True
         try:
-            if sys.platform == "win32":
-                os.startfile(path)              # noqa: S606  (Windows only)
-            elif sys.platform == "darwin":
-                subprocess.Popen(["open", path])
-            else:
-                subprocess.Popen(["xdg-open", path])
+            open_with_system(path)
         except Exception:
             self.log_queue.put(f"\nCould not open {path} — open it yourself.\n")
 

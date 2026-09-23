@@ -27,13 +27,13 @@ Packaged as vic2saveanalyzer.exe by build_exe.py.
 """
 
 import os
-import subprocess
 import sys
 import threading
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
 import gui
+import keeper
 import keeper_gui
 import publish
 
@@ -178,12 +178,7 @@ class Tools:
     def open_folder(self, where):
         """Show a folder in whatever this machine uses to look at folders."""
         try:
-            if sys.platform == "win32":
-                os.startfile(where)               # noqa: S606  (Windows only)
-            elif sys.platform == "darwin":
-                subprocess.Popen(["open", where])
-            else:
-                subprocess.Popen(["xdg-open", where])
+            keeper.open_with_system(where)
         except OSError:
             pass                                  # the dialog still says where
 

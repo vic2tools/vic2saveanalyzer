@@ -42,6 +42,7 @@ import argparse
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 
@@ -376,6 +377,24 @@ class Changes:
         if self.handle is not None:
             self.api.FindCloseChangeNotification(self.handle)
             self.api = self.handle = None
+
+
+def open_with_system(path):
+    """
+    Open a file or a folder in whatever this machine opens it with.
+
+    `os.startfile` exists only on Windows, so each window had to choose
+    between it, `open` and `xdg-open` -- and there were three copies of that
+    choice, one of which, the keeper's "Open the folder", had only the first
+    and showed an error dialog everywhere else. Raises OSError when nothing
+    could be started; what to say about it is the caller's business.
+    """
+    if sys.platform == "win32":
+        os.startfile(path)                  # noqa: S606  (Windows only)
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", path])
+    else:
+        subprocess.Popen(["xdg-open", path])
 
 
 def human_size(count):
