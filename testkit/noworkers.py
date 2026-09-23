@@ -125,6 +125,70 @@ def same_answer(saves, a, b):
     return wrong
 
 
+def dying_pool(saves, out):
+    """
+    [what went wrong] when a worker dies part-way through the campaign.
+
+    A worker killed mid-save -- out of memory, or by something else on the
+    machine -- breaks the pool, and the save it had comes back as a
+    `BrokenProcessPool`. That ended the run in a stack trace. The pool
+    here hands back the second save that way, as a real one does, and
+    reads the others normally; the run has to finish, say why it slowed
+    down, and write the same tables as a run where nothing died.
+    """
+    import readsave
+    import vic2_analyzer as va
+    from concurrent.futures import Future
+    from concurrent.futures.process import BrokenProcessPool
+    readsave.PLAIN.apply()
+
+    import concurrent.futures as cf
+    real = cf.ProcessPoolExecutor
+
+    class OneDies(real):
+        handed = 0
+
+        def submit(self, *a, **kw):
+            OneDies.handed += 1
+            if OneDies.handed == 2:
+                gone = Future()
+                gone.set_exception(BrokenProcessPool(
+                    "A process in the process pool was terminated abruptly"))
+                return gone
+            return super().submit(*a, **kw)
+
+    said = io.StringIO()
+    old_argv = sys.argv
+    cf.ProcessPoolExecutor = OneDies
+    try:
+        sys.argv = [old_argv[0], saves, "--out", out, "--rebuild",
+                    "--no-cache"]
+        with contextlib.redirect_stdout(said), \
+                contextlib.redirect_stderr(said):
+            try:
+                code = va.main()
+            except SystemExit as stop:
+                code = stop.code
+    except BaseException:                                # noqa: BLE001
+        return (["a worker dying took the run down:\n%s"
+                 % traceback.format_exc().strip().splitlines()[-1]],
+                said.getvalue())
+    finally:
+        cf.ProcessPoolExecutor = real
+        sys.argv = old_argv
+
+    out_text = said.getvalue()
+    wrong = []
+    if OneDies.handed < 2:
+        wrong.append("the pool was handed %d save(s), so no worker died and "
+                     "this tested nothing" % OneDies.handed)
+    if code:
+        wrong.append("the run refused with %r" % (code,))
+    if "one at a time" not in out_text:
+        wrong.append("nothing was said about a worker stopping")
+    return wrong, out_text
+
+
 def main():
     given = sys.argv[1] if len(sys.argv) > 1 else ""
     holding = tempfile.mkdtemp(prefix="vic2noworkers")
@@ -157,6 +221,17 @@ def main():
             print("  %-44s %s" % ("and it says the same thing",
                                   "FAILED" if same else "ok"))
             wrong += same
+
+        died = os.path.join(holding, "died")
+        broke, _said = dying_pool(saves, died)
+        print("  %-44s %s" % ("a worker that dies part-way",
+                              "FAILED" if broke else "ok (read serially)"))
+        if not broke:
+            same = same_answer(saves, normal, died)
+            print("  %-44s %s" % ("and it says the same thing",
+                                  "FAILED" if same else "ok"))
+            broke += same
+        wrong += broke
     finally:
         shutil.rmtree(holding, ignore_errors=True)
 

@@ -419,6 +419,18 @@ def m33():
           "    files = in_date_order(files)")
 
 
+# ---- one worker dying took the whole run down
+
+@mutation("dead-worker-ends-run",
+          "a worker killed part-way breaks the pool, and the run ends in a "
+          "stack trace instead of reading the rest one at a time",
+          "noworkers.py")
+def m34():
+    patch("readfolder.py",
+          "                except (BrokenProcessPool, MemoryError) as exc:",
+          "                except (ZeroDivisionError,) as exc:")
+
+
 # ---- a save cut short was read as a whole one
 
 @mutation("cut-save-read-as-whole",

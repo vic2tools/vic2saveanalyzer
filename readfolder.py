@@ -365,6 +365,7 @@ def parse_saves_stream(files, verbose=True, use_cache=True, reading=PLAIN,
     does. Cached saves are read one at a time for the same reason.
     """
     from concurrent.futures import ProcessPoolExecutor
+    from concurrent.futures.process import BrokenProcessPool
     fingerprint = parser_fingerprint() if use_cache else ""
     world = reading.fingerprint()
     slots = [_cache_slot(p, fingerprint, world) if fingerprint else None
@@ -449,10 +450,24 @@ def parse_saves_stream(files, verbose=True, use_cache=True, reading=PLAIN,
                     print(f"  skipped {os.path.basename(path)}: {exc}",
                           file=sys.stderr)
                     continue
-                got = (meta, nations)      # cached and finished in the worker
-                if verbose:
-                    print(f"  [{done + 1}/{total}] {os.path.basename(path)} "
-                          f"... {meta['date']}")
+                except (BrokenProcessPool, MemoryError) as exc:
+                    # A worker that died -- killed for memory, or by
+                    # something on the machine -- breaks the whole pool,
+                    # and every save still out with it fails the same way.
+                    # That ended the run in a stack trace, where a pool that
+                    # would not start has always been read one at a time.
+                    # So is this: the pool is dropped, and this save and
+                    # every one after it are read here.
+                    print(f"  a worker stopped ({exc}); reading the rest "
+                          f"one at a time", file=sys.stderr)
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    pool = None
+                    futures.clear()
+                else:
+                    got = (meta, nations)  # cached and finished in the worker
+                    if verbose:
+                        print(f"  [{done + 1}/{total}] "
+                              f"{os.path.basename(path)} ... {meta['date']}")
             elif ready[i]:
                 got = _cache_read(slots[i])
                 if got is not None:
