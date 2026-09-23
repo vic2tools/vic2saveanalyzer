@@ -40,6 +40,10 @@ so the previous run's settings, asked for again, were answered with this
 run's report. `--no-html` did the same without dying. Both have to leave
 nothing for the next run to skip on, and the locked table has to be named
 in a sentence.
+
+And a table has to be from this run even when this run has nothing to put
+in it: an empty one used to be skipped, and the last run's copy stayed in
+the folder beside the new ones.
 """
 
 import os
@@ -232,6 +236,52 @@ def unfinished_runs():
         shutil.rmtree(holding, ignore_errors=True)
 
 
+def leftover_tables():
+    """[what went wrong] when a table in the folder is from an earlier run."""
+    import csv
+    sys.path.insert(0, os.path.join(HERE, "testkit"))
+    import savefmt
+
+    holding = tempfile.mkdtemp(prefix="vic2lstale")
+    try:
+        saves = os.path.join(holding, "saves")
+        os.makedirs(saves)
+        fleet = ('navy', ['\t\tname="Home Fleet"'] + savefmt.nest(
+            "ship", ['\t\t\tname="Vasa"', "\t\t\ttype=frigate",
+                     "\t\t\tstrength=100.000"], 2))
+        for n in range(2):
+            savefmt.write(
+                os.path.join(saves, "s%d.v2" % n),
+                savefmt.head("%d.1.1" % (1840 + n)),
+                savefmt.province(1, "ENG", [savefmt.pop("farmers", 10, 20000)]),
+                savefmt.province(2, "FRA", [savefmt.pop("farmers", 20, 20000,
+                                                        culture="french")]),
+                savefmt.country("ENG", blocks=[fleet]),
+                savefmt.country("FRA", culture="french", capital=2))
+        out = os.path.join(holding, "out")
+        env = dict(os.environ, TMPDIR=holding)
+        for extra in ([], ["--tags", "FRA"]):
+            subprocess.run([sys.executable, os.path.join(HERE, "vic2_analyzer.py"),
+                            saves, "--out", out, "--no-cache", "-q"] + extra,
+                           capture_output=True, text=True, cwd=HERE, env=env)
+        wrong = []
+        for name in sorted(os.listdir(out)):
+            if not name.endswith(".csv"):
+                continue
+            with open(os.path.join(out, name), newline="") as fh:
+                rows = list(csv.DictReader(fh))
+            others = sorted({r["tag"] for r in rows if r.get("tag") not in
+                             (None, "FRA")})
+            if others:
+                wrong.append("%s still holds %s from the run before, beside "
+                             "tables of FRA alone" % (name, " ".join(others)))
+        print("  %-48s %s" % ("a rerun with nothing for one of the tables",
+                              "FAILED" if wrong else "all from this run"))
+        return wrong
+    finally:
+        shutil.rmtree(holding, ignore_errors=True)
+
+
 def main():
     holding = tempfile.mkdtemp(prefix="vic2stale")
     copy = os.path.join(holding, "program")
@@ -281,6 +331,7 @@ def main():
 
     deaf += cross_campaigns()
     deaf += unfinished_runs()
+    deaf += leftover_tables()
     print()
     if deaf:
         print("PROBLEMS:")

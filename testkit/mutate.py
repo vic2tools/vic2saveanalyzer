@@ -395,6 +395,19 @@ def m31():
           "        meta[\"wars\"] = ()\n")
 
 
+# ---- an empty table was skipped, and the last run's copy stayed
+
+@mutation("empty-table-left-stale",
+          "a table with nothing in it this run is not written, so the last "
+          "run's copy stays in the folder", "staleness.py")
+def m32():
+    patch("vic2_analyzer.py",
+          "    for name, data, cols in tables:\n        path = os.path.join(outdir, name)",
+          "    for name, data, cols in tables:\n        if not data and name != "
+          "\"nations_timeseries.csv\":\n            continue\n"
+          "        path = os.path.join(outdir, name)")
+
+
 # ---- a save cut short was read as a whole one
 
 @mutation("cut-save-read-as-whole",

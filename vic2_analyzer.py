@@ -502,9 +502,12 @@ def write_outputs(rows, ship_rows, pop_rows, culture_rows, price_rows,
         ("pops_by_culture.csv", culture_rows,
          ["date", "year", "tag", "culture", "size", "accepted"]),
     ]
+    # Every table, even one with nothing in it this run. A table skipped for
+    # being empty left the last run's copy standing in the folder -- ships
+    # of forty nations beside a main table of the one `--tags` asked for,
+    # and "Wrote:" not mentioning it -- so everything in the folder is
+    # written by this run, a heading alone where there is nothing to say.
     for name, data, cols in tables:
-        if not data and name != "nations_timeseries.csv":
-            continue
         path = os.path.join(outdir, name)
         try:
             _write_csv(path, data, cols)
