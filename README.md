@@ -45,12 +45,14 @@ folder — that folder belongs to the game.
 Then press **Analyze**. The report opens in your browser.
 
 Pressing it again when nothing has changed does not build anything: the run
-records what each report was made from -- every save and its timestamp, the
-mod, the settings, the code that reads saves and the code that writes
-reports -- and if all of that is the same, the report already on disk is the
-one this run would write. That takes about a hundredth of a second instead of
-a few seconds. `--rebuild` forces it anyway, and any real change -- a save
-added, a save touched, a setting moved -- rebuilds on its own.
+records what each report was made from -- every save and its timestamp (in
+every campaign, when the folder holds several), the mod, the settings, the
+code that reads saves and the code that writes reports -- and if all of that
+is the same, the report already on disk is the one this run would write.
+That takes under a tenth of a second instead of a few seconds. `--rebuild`
+forces it anyway, and any real change -- a save added, a save touched, a
+setting moved -- rebuilds on its own. A run that could not finish, such as
+one that found a table open in Excel, leaves nothing behind to skip on.
 
 On a first run the saves box is already filled in with
 `Documents/Paradox Interactive/Victoria II/save games` if that folder exists,

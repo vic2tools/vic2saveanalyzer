@@ -353,6 +353,26 @@ def m27():
           '    read = [max(survey, key=lambda entry: len(entry["files"]))]\n')
 
 
+# ---- a run that rewrote the files and did not finish left the old stamp
+
+@mutation("stamp-outlives-unfinished-run",
+          "the stamp is not taken away before the files it describes are "
+          "rewritten, so a run that dies -- or --no-html -- leaves it vouching "
+          "for files it never saw", "staleness.py")
+def m28():
+    patch("vic2_analyzer.py",
+          "    # Everything from here on writes the report, the tables or both.\n"
+          "    forget_stamp(args.out)\n", "")
+
+
+@mutation("locked-table-stack-trace",
+          "a table open in Excel ends the run in a stack trace", "staleness.py")
+def m29():
+    patch("vic2_analyzer.py",
+          "        except PermissionError:\n            refused.append(path)",
+          "        except ZeroDivisionError:\n            refused.append(path)")
+
+
 # ---- a save cut short was read as a whole one
 
 @mutation("cut-save-read-as-whole",

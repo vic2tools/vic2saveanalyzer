@@ -32,6 +32,14 @@ one: a new save in any other campaign was read, and then answered "nothing
 has changed" with the old comparison. So two small campaigns are built, each
 under its own mod, and the smaller one is given a save, and then its mod is
 edited -- and each time the report has to be built again.
+
+And last, a run that rewrites the files and does not finish. A table open
+in Excel cannot be written on Windows, and that run used to die in a stack
+trace after rewriting the report, leaving the previous run's stamp behind --
+so the previous run's settings, asked for again, were answered with this
+run's report. `--no-html` did the same without dying. Both have to leave
+nothing for the next run to skip on, and the locked table has to be named
+in a sentence.
 """
 
 import os
@@ -156,6 +164,74 @@ def cross_campaigns():
         shutil.rmtree(holding, ignore_errors=True)
 
 
+def unfinished_runs():
+    """[what went wrong] when a run rewrites the files and does not finish."""
+    sys.path.insert(0, os.path.join(HERE, "testkit"))
+    import savefmt
+
+    holding = tempfile.mkdtemp(prefix="vic2ustale")
+    try:
+        saves = os.path.join(holding, "saves")
+        os.makedirs(saves)
+        for n in range(2):
+            savefmt.write(
+                os.path.join(saves, "s%d.v2" % n),
+                savefmt.head("%d.1.1" % (1840 + n)),
+                savefmt.province(1, "ENG", [savefmt.pop("farmers", 10, 20000)]),
+                savefmt.province(2, "FRA", [savefmt.pop("farmers", 20, 20000,
+                                                        culture="french")]),
+                savefmt.country("ENG"),
+                savefmt.country("FRA", culture="french", capital=2))
+        out = os.path.join(holding, "out")
+        table = os.path.join(out, "nations_timeseries.csv")
+        env = dict(os.environ, TMPDIR=holding)
+
+        def run(*extra):
+            return subprocess.run(
+                [sys.executable, os.path.join(HERE, "vic2_analyzer.py"), saves,
+                 "--out", out, "--no-cache"] + list(extra),
+                capture_output=True, text=True, cwd=HERE, env=env)
+
+        wrong = []
+        run("--tags", "ENG")
+        # The lock, as far as this machine can make one: a table that cannot
+        # be opened for writing, which is what Excel's lock is to Python.
+        os.chmod(table, 0o444)
+        if os.access(table, os.W_OK):
+            os.chmod(table, 0o644)
+            print("  a locked table: cannot make one here (running as root?)")
+        else:
+            try:
+                locked = run()
+            finally:
+                os.chmod(table, 0o644)
+            said = locked.stdout + locked.stderr
+            if "Traceback" in said:
+                wrong.append("a locked table ended the run in a stack trace")
+            elif locked.returncode == 0 or "nations_timeseries.csv" not in said:
+                wrong.append("a locked table was not named: %s"
+                             % said.strip()[-120:])
+            again = run("--tags", "ENG")
+            fine = "Nothing has changed" not in again.stdout
+            print("  %-48s %s" % ("a locked table, then the run before it again",
+                                  "rebuilt" if fine else "FAILED"))
+            if not fine:
+                wrong.append("after a run that could not write a table, the "
+                             "run before it was answered with that run's "
+                             "report")
+        run("--no-html")
+        again = run("--tags", "ENG")
+        fine = "Nothing has changed" not in again.stdout
+        print("  %-48s %s" % ("--no-html, then the run before it again",
+                              "rebuilt" if fine else "FAILED"))
+        if not fine:
+            wrong.append("after --no-html rewrote the tables, the run before "
+                         "it was answered as if they were its own")
+        return wrong
+    finally:
+        shutil.rmtree(holding, ignore_errors=True)
+
+
 def main():
     holding = tempfile.mkdtemp(prefix="vic2stale")
     copy = os.path.join(holding, "program")
@@ -204,6 +280,7 @@ def main():
         shutil.rmtree(holding, ignore_errors=True)
 
     deaf += cross_campaigns()
+    deaf += unfinished_runs()
     print()
     if deaf:
         print("PROBLEMS:")

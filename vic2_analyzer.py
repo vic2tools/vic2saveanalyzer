@@ -471,15 +471,23 @@ def _write_csv(path, rows, columns):
 def write_outputs(rows, ship_rows, pop_rows, culture_rows, price_rows,
                   snapshot_rows, brigade_rows, tech_rows, outdir,
                   pop_columns=None):
+    """
+    Every CSV table. Returns (the paths written, the paths it could not
+    open for writing).
+
+    A table open in Excel cannot be written on Windows, and nobody reading
+    a campaign's numbers is unusual for having one open. That used to end
+    the run in a stack trace after the report had already been rewritten;
+    now the rest of the tables are written and the ones that could not be
+    are handed back, for `main` to name.
+    """
     os.makedirs(outdir, exist_ok=True)
     columns = (BASE_COLUMNS + [f"pop_{t}" for t in (pop_columns or POP_TYPE_LIST)]
                + ["accepted_cultures"])
 
-    main_path = os.path.join(outdir, "nations_timeseries.csv")
-    _write_csv(main_path, rows, columns)
-
-    paths = [main_path]
+    paths, refused = [], []
     tables = [
+        ("nations_timeseries.csv", rows, columns),
         ("prices.csv", price_rows, ["date", "year", "good", "category", "price"]),
         ("market_snapshot.csv", snapshot_rows,
          ["date", "year", "good", "category", "price", "world_pool", "supply",
@@ -495,12 +503,35 @@ def write_outputs(rows, ship_rows, pop_rows, culture_rows, price_rows,
          ["date", "year", "tag", "culture", "size", "accepted"]),
     ]
     for name, data, cols in tables:
-        if not data:
+        if not data and name != "nations_timeseries.csv":
             continue
         path = os.path.join(outdir, name)
-        _write_csv(path, data, cols)
+        try:
+            _write_csv(path, data, cols)
+        except PermissionError:
+            refused.append(path)
+            continue
         paths.append(path)
-    return paths
+    return paths, refused
+
+
+def forget_stamp(outdir):
+    """
+    Take the stamp away before anything it describes is rewritten.
+
+    It says what the files beside it were made from. A run that rewrites
+    them and then dies -- a table open in Excel, a full disk -- used to
+    leave the last run's stamp describing this run's report, and the next
+    run with the last run's settings matched it and served that report as
+    its own. `--no-html` did the same without dying: it rewrites the tables
+    and writes no stamp, so the old one went on vouching for tables it had
+    never seen. Gone first and written last, a stamp only ever sits beside
+    the files it was written for.
+    """
+    try:
+        os.remove(os.path.join(outdir, STAMP_FILE))
+    except OSError:
+        pass
 
 
 # A province block opens with its number; anything else opening at the left
@@ -1674,6 +1705,9 @@ def main():
     if explain(args, mod, live, parsed):
         return
 
+    # Everything from here on writes the report, the tables or both.
+    forget_stamp(args.out)
+
     # `war_book` was folded save by save on the way past, above: each save
     # carries the whole war history up to its date, so collecting them first
     # and merging afterwards meant holding one overlapping copy per save --
@@ -1707,12 +1741,13 @@ def main():
         _tell_report_ready(html_path)
     # Started at the compression if a report was built, and simply done
     # here if one was not.
-    paths = tables.result()
+    paths, refused = tables.result()
     if html_path:
         paths.insert(0, html_path)
-        # Last, so a run that died writing the tables is not recorded as one
-        # with nothing left to do.
-        write_stamp(args.out, stamp)
+        # Last, and only when every table was written, so a run that could
+        # not finish is not recorded as one with nothing left to do.
+        if not refused:
+            write_stamp(args.out, stamp)
 
     if verbose:
         print(f"\n{len(rows)} nation-rows across {len(parsed)} saves.")
@@ -1744,6 +1779,12 @@ def main():
         print("\nWrote:")
         for path in paths:
             print(f"  {path}")
+    if refused:
+        sys.exit("\nCould not write %s: open in another program -- on "
+                 "Windows a table open in Excel is locked -- or not "
+                 "writable here. Close it and run again.%s"
+                 % (", ".join(os.path.basename(p) for p in refused),
+                    " The report itself was written." if html_path else ""))
 
 
 if __name__ == "__main__":
