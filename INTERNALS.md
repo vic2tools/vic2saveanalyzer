@@ -502,6 +502,128 @@ occupied; only that third one took anything.
 
 ## Speed
 
+### What was done about it, 2026-09-24
+
+The tree the session started from (`9ee3aeb`, with the scanner it was built
+with) against the tree it ended at (`cc75f60`), run in alternation at the
+end, each run from a private `TMPDIR`:
+
+| run | `9ee3aeb` | `cc75f60` | rounds |
+|---|---:|---:|---|
+| cold, a new empty `TMPDIR` each time | 5.81 s (5.46-5.87) | **3.67 s** (3.63-4.28) | 3, all won |
+| rebuild from a warm cache | 2.57 s (2.53-2.60) | **1.13 s** (1.13-1.14) | 5, all won |
+| nothing changed | 84.0 ms (82.9-87.5) | **77.1 ms** (75.0-78.4) | 9, all won |
+| one new autosave beside 102 reported | 2.89 s (2.85-2.91) | **1.41 s** (1.41-1.42) | 5, all won |
+| cold on four cores (`taskset`, `--jobs 3`) | 7.93 s (7.92-7.99) | **5.86 s** (5.84-5.87) | 3, all won |
+| warm, workers started the Windows way (spawn) | 2.78 s (2.78-2.79) | **1.20 s** (1.20-1.24) | 3, all won |
+
+A first attempt at this table ran while the machine was in use and read 165
+ms for the run with nothing to do; the one above was run again on a quiet
+machine.
+
+One commit per change, each through the whole contract on its own -- the
+nine outputs and four diagnostics byte-identical with `--no-cache` on both
+sides, every check, every mutation caught -- and each measured against the
+commit before it. In the order they went in:
+
+- **The report's flags.** `government_flag_types` re-read governments.txt
+  for every flag (953 times, 0.1 s); it is read once. A flag is converted
+  by slices rather than pixel by pixel, 1.56 ms to 0.15: nothing here, where
+  the mod has no game beneath it and six flags are found, but 2.33 s to
+  2.15 on a stand-in install of 1,385 flags.
+- **Workers are handed the mod through a file.** A worker is started by
+  writing what it is started with down a pipe, 64 KB at a time; with the
+  mod in it the parent waited at each worker until it had imported the mod
+  reader and unpickled a third of a megabyte, so fifteen started one after
+  another. Warm 2.46 s to 2.36; under spawn, the way Windows starts every
+  worker, 2.69 s to 2.38.
+- **The cycle collector is off for the length of a run**, and on again after
+  it for the window. A run makes next to no cycles (285 unreachable objects
+  at the end of a warm rebuild; none in a worker over eighteen saves) and
+  peak memory did not move, but the collector kept walking a heap of
+  millions of objects. Warm 2.35 s to 2.14, cold 5.49 to 5.11.
+- **Saves are read while the mod loads** when it is not cached. Reading a
+  save needs four things of the mod (`ModHead`) that take 3 ms; the other
+  0.86 s loads on a thread. Cold 5.11 s to 4.70.
+- **`_block_text` finds a block with `str.find`**, not a regex built from
+  its name, which the regex cache could not keep and which stepped through
+  the file a character at a time: a mod read from its files 0.6 s to 0.25.
+  In an ordinary cold run that is hidden behind the saves; with the saves
+  cached and the mod not, as after any change to the mod reader, 2.71 s to
+  2.41.
+- **One scanner per worker** (`vic2scan --serve`), reused for every save it
+  reads: a new process was handed its 34 MB buffer as fresh pages, and ten
+  saves cost the scanner 0.92 s one process each against 0.75 s in one
+  process. No change at fifteen workers; with `--jobs 4` 5.88 s to 5.65;
+  and one process start fewer per save on Windows, which was not measured.
+- **Each save is spent in the worker that read it** (`spending.py`): its
+  rows, and the CSV text of the six tables every save writes into. Warm
+  2.13 s to 1.68, cold 4.61 to 4.14.
+- **Only the wars that changed are folded.** Every save carries every war
+  there has been; a record whose bytes match the last one folded under its
+  identity is skipped, which is exact because every merge in `fold_wars` is
+  an earliest, a latest, a union or a replacement by an equal value. 15,884
+  of 16,074 records are repeats; the book is identical. Warm 1.68 s to 1.38,
+  cold 4.13 to 3.84. `testkit/warfold.py` folds ten saves both ways.
+- **The invention indices are judged per distinct holding**: 4,271
+  nation-saves are 865 holdings. 82 ms to 27; warm 1.37 s to 1.32.
+- **The forkserver starts as soon as a run has work**, with the mod reader,
+  `spending` and `report` preloaded. Warm 1.33 s to 1.28, cold 3.81 to 3.71.
+- **Prices are tuples**, as the other big tables are. Warm 1.27 s to 1.21.
+- **The mod is signed from the folder listing** (`os.scandir`) instead of an
+  `os.stat` a file, which on Windows opens every file. Here 19.5 ms to 12.3
+  a signature, and the run with nothing to do 83 ms to 75. And the signature
+  the stamp takes is reused to find the cached mod (warm 1,193 ms to 1,186,
+  13 of 15 rounds).
+- **Saves that need reading go to the workers first** when they are few, so
+  the new autosave's reading overlaps the others' cache. One save added to
+  102: 1.495 s to 1.458.
+- **The narrow tables are grouped by nation in the worker**
+  (`report.save_tables`), not regrouped from a quarter of a million tuples
+  in `build_report`. Warm 1.184 s to 1.128, one save added 1.462 to 1.398.
+- The scanner's five compiler warnings are gone; it answers byte for byte
+  as before.
+
+**What did not help, or did not show:**
+
+- Pre-sizing the scanner's read buffer: 31.4, 30.5 and 31.3 ms for the
+  three ways of reading 34 MB. The cost is the fresh pages, which only a
+  process that stays alive avoids.
+- The serving scanner at full width: 4.61 s either way over nine rounds.
+  Past eight workers reading saves here is bound by memory, not by any one
+  process's CPU (cold at 4 / 8 / 15 workers: 4.78, 3.70, 3.57 s), so CPU
+  taken out of reading a save shows on smaller machines and not on this one.
+- The 75 ms "names" phase in the first timeline was the timing harness
+  writing a line per call, not the program.
+- What is left after `main` returns and every exit handler has run
+  (0.3 ms) is the process being torn down: about 30 ms, nothing to do but
+  hold less.
+- The payload's JSON and gzip, 190 ms of a warm rebuild, are fixed by what
+  the report is: the same bytes cannot come out of anything cheaper.
+- **Ending a command-line run with `os._exit`**, to skip freeing its
+  objects one at a time: 48 ms of a warm rebuild, and reverted. The pool is
+  let go with `shutdown(wait=False)`, and it is the pool's own thread, still
+  running, that tells each worker to stop; ending the process at once killed
+  that thread first, so every run left fifteen workers, their scanners and
+  the forkserver running, and a caller reading the output through a pipe
+  waited for ever. `testkit/mobrate.py` hung on it in the contract. The
+  checks made by hand had written the output to files. A version that works
+  has to see the pool shut down first, which gives back part of the gain.
+- **Reading the wars, the market and the great power list with one
+  `findall`** instead of a token at a time (`parse_span`): 2.49 s of worker
+  time over the campaign to 1.66, the same trees on all 16,280 blocks and on
+  100,000 random token streams. Finished and checked but not committed when
+  the session ended; the diff is `~/.cache/vic2speed/parsespan.diff`.
+- Not done, with reasons in `HANDOFF.md`: the wars and the market in Rust,
+  the series and facts in the workers, one pool for both passes.
+
+**Where the time goes now**, a warm rebuild timed in phases (1.05 s inside
+the process): start, stamp, cached mod and decode 0.11 s; the walk 0.39 s,
+of which the parent unpickling what the workers send is about half; the
+prices 0.09 s; the report 0.42 s, of which JSON and gzip 0.19 s. With one
+new save the invention pass adds about 0.26 s, most of it that save being
+read. Cold, the reading of the saves is 2.2 s of 3.6.
+
 ### Where the time goes, 2026-09-24
 
 Measured before changing anything, at `9ee3aeb`. 103 saves (3.3 GB), Modus

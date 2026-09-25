@@ -1,4 +1,4 @@
-# Next session: the review's fixes are in; here is what is left
+# Next session: the speed session is done; here is what is left
 
 Paste this whole file as the first message of a new session.
 
@@ -6,16 +6,13 @@ Paste this whole file as the first message of a new session.
 
 You are picking up `~/vic2saveanalyzer`, a Victoria 2 save-file
 analyzer. It has a GitHub remote, `origin` (github.com/vic2tools/vic2saveanalyzer),
-but its `main` is still `a78b1c3` from 2 September: **none of the ninety-odd
+but its `main` is still `a78b1c3` from 2 September: **none of the hundred-odd
 commits since has been pushed**, and nothing should be without the maintainer saying
-so. The code is as of `af1de71`; the two commits after it only write
-`REVIEW.md` §31 and this file. The working tree is clean, all 24 checks
-pass, and the mutation harness catches 45 of 45. Backup bundles sit in `~`,
-one per session: `vic2saveanalyzer-backup.bundle` (`403dcc4`),
-`vic2saveanalyzer-backup-f09e2f4.bundle`,
-`vic2saveanalyzer-backup-f1a4d82.bundle`, and the newest,
-`vic2saveanalyzer-backup-af1de71.bundle`, which also holds the two commits
-after it.
+so. The code is as of `cc75f60`; the commit after it only writes
+`INTERNALS.md` and this file. The working tree is clean, all 25 checks pass,
+and the mutation harness catches 46 of 46. Backup bundles sit in `~`, one
+per session, never overwritten; the newest is
+`vic2saveanalyzer-backup-cc75f60.bundle`, which also holds the commit after.
 
 The maintainer develops on Fedora and ships on Windows as `dist/vic2saveanalyzer.exe`,
 so anything platform-specific gets written on the machine that cannot test it.
@@ -25,24 +22,21 @@ wants verified work, not check-ins. Ask him only what is genuinely his, such
 as a fix that would change a number the program shows.
 
 **`dist/vic2saveanalyzer.exe` is out of date with the source** and has to be
-rebuilt on Windows (`python build_exe.py`). Do not try to build it here. **It
-also carries no Rust scanner** -- the 20 September build's archive has no
-`vic2scan` in it -- so Windows users read every save in Python, about four
-times slower. `build_exe.py` bundles the scanner only if
-`scanner/target/release/vic2scan.exe` exists, so on the Windows machine run
-`cargo build --release --manifest-path scanner/Cargo.toml` first. Rust *is*
-installed on this machine -- rustup's stable 1.98.1 in `~/.cargo/bin`, which is
-not on the PATH (`export PATH="$HOME/.cargo/bin:$PATH"`); an earlier note here
-said there was none. A release build of the scanner takes about 4 s, and one
-built on 24 September gave byte-identical output to the binary in
-`scanner/target/release/` on a real save, so that binary matches its source.
-Only the Linux target is installed, and there is no Wine, so a Windows build of
-the scanner can be neither made nor run here.
+rebuilt on Windows. **It also carries no Rust scanner**, so Windows users read
+every save in Python: on this machine a cold run is 10.7 s without the scanner
+and 3.6 s with it, and on a smaller machine the gap is wider. `build_exe.py`
+bundles the scanner only if `scanner/target/release/vic2scan.exe` exists, so on
+Windows run `cargo build --release --manifest-path scanner/Cargo.toml` first,
+then `python build_exe.py`. Whether `build_exe.py` should refuse to build
+without the scanner is the maintainer's call; it has been put to him and not decided.
+Rust is installed here (rustup stable 1.98.1 in `~/.cargo/bin`, not on the
+PATH: `export PATH="$HOME/.cargo/bin:$PATH"`), Linux target only, no Wine.
+The scanner builds with no warnings.
 
-Read `REVIEW.md` before changing anything it covers. §12-§31 are the
-thermonuclear review of `26f3680` and what was done about it. Do not re-open
-what it marks decided. `INTERNALS.md` is the project's decision record, dense
-with "we tried X, it was wrong, here is the measurement".
+Read `INTERNALS.md`, the **Speed** section, before changing anything for
+speed: the two entries dated 2026-09-24 are where the time went and what was
+done about it, dead ends included. `REVIEW.md` §12-§31 is the last review and
+what it decided; do not reopen what it marks decided.
 
 ## The contract. Nothing is done without all four.
 
@@ -50,12 +44,14 @@ with "we tried X, it was wrong, here is the measurement".
 cd ~/vic2saveanalyzer
 S="/path/to/saves/1870s"                  # 103 saves, 3.3 GB
 M="/path/to/mod/Modus Omnino Demens 1.6"
+export PATH="$HOME/.cargo/bin:$PATH"
 
-# Clean worktrees of the previous commit and of this one, WITH the scanner.
+# Clean worktrees of the previous commit and of this one, each with a
+# scanner built from its OWN source -- copying one binary into both makes
+# step 1 compare a scanner change with itself.
 for t in base:HEAD~1 head:HEAD; do
   git worktree add --detach /tmp/${t%%:*} ${t#*:}
-  mkdir -p /tmp/${t%%:*}/scanner/target/release
-  cp scanner/target/release/vic2scan /tmp/${t%%:*}/scanner/target/release/
+  cargo build --release -q --manifest-path /tmp/${t%%:*}/scanner/Cargo.toml
 done
 
 # 1. the nine outputs, byte-identical -- --no-cache ON BOTH SIDES
@@ -67,132 +63,103 @@ for t in base head; do (cd /tmp/$t && python3 vic2_analyzer.py "$S" \
 #    capture stdout): --explain-mob-pool NET / --explain-mob NET /
 #    --inventions NET / --check-inventions
 
-# 3. all the checks, from the repository itself
+# 3. all the checks, from the repository itself -- after a scanner change,
+#    rebuild the repository's own scanner/target first
 python3 testkit/all.py "$S" --mod "$M"
 
 # 4. the mutation harness, against a COMMITTED worktree: every mutation
 #    caught -- none BLIND, none NOAPPLY, none UNTESTED -- and exit 0
 git worktree add --detach /tmp/mut HEAD
-mkdir -p /tmp/mut/scanner/target/release
-cp scanner/target/release/vic2scan /tmp/mut/scanner/target/release/
+cargo build --release -q --manifest-path /tmp/mut/scanner/Cargo.toml
 python3 testkit/mutate.py --tree /tmp/mut --saves "$S"
 ```
 
-All four take about six minutes; step 3 is two and a half of them, step 4
-about three. Commit first, then run the contract comparing `HEAD~1` with
-`HEAD`, and amend if it fails; every commit has to pass on its own. Run step
-1 on the same commit twice once, and see it flag a byte you changed by hand,
-before trusting it.
+About ten minutes in all. Commit first, then run the contract comparing
+`HEAD~1` with `HEAD`, and amend if it fails; every commit has to pass on its
+own. `~/.cache/vic2speed/contract.sh` does all four exactly this way, and
+`land.sh` beside it applies a diff, commits it, runs the contract and then the
+benchmarks only if it passed.
 
 **Every bug fix brings a check that fails without it, and a mutation in
-`testkit/mutate.py` that proves it** -- run by hand once, with the failure
-message read. `mutate.py` counts any failure as caught, so reading the message
-is the only thing that tells a right failure from a wrong one. This session it
-caught a new check of its own passing for the wrong reason (`REVIEW.md` §31).
-`mutate.py` hands a check `"saves"` (the folder), `"one-save"` (the first save
-and a round count of one), or any fixed arguments.
+`testkit/mutate.py` that proves it**, run by hand once with the failure
+message read -- `mutate.py` counts any failure as caught. A change that moves
+code a mutation patches has to move the mutation with it: two did this
+session (`explain-without-wars`, `empty-table-left-stale`), and one of them
+went BLIND rather than failing to apply, which only the harness noticed.
+
+## Measuring
+
+`~/.cache/vic2speed/` holds the harness this session used; keep it outside
+`/tmp`, which does not survive the reboots this machine has.
+
+- `bench.py MODE ROUNDS name=/tree name=/tree [-- args]` runs trees in
+  alternation and prints medians, ranges and how many paired rounds each
+  won. Modes: `cold` (a new empty `TMPDIR` every run), `warm` (`--rebuild`
+  over a full cache), `nochange`, `newsave` (102 saves cached and reported,
+  the 103rd appears -- the everyday run), `modcold` (saves cached, the mod
+  not). `START=spawn` starts workers the Windows way; `CPUS=0,2,4,6` with
+  `-- --jobs 3` imitates a four-core machine (siblings here are 0/1, 2/3...);
+  `MOD=/tmp/fakegame/mod/...` uses a stand-in game install that
+  `fakegame.py` builds, with 1,385 flags, because this mod has no game
+  beneath it and so draws six.
+- `phases.py` + `timeline.py` time the parent's phases and every worker job
+  on one clock, without touching the tree.
+- Seven warm rounds cannot tell 10 ms apart: identical code has read 6 ms
+  apart. For small differences use fifteen rounds and the paired count.
 
 ## Traps that have cost real time
 
-1. **Never edit the tree while `testkit/all.py` is running.** It reads files
-   at exec time; a mid-run edit once produced an entirely fictitious failure.
-2. **A fresh `git worktree` has no Rust scanner.** `scanner/target/` is
-   untracked, so without the `cp` above everything is read in Python -- four
-   times slower, and `parity.py` compares Python with Python.
-3. **This is a desktop.** Don't wait for idle; interleave before and after
-   runs in one loop, three to nine rounds. The no-change run is about 82 ms
-   and jumps to 120 on a busy moment; one round proves nothing.
-4. **Keep `TMPDIR` short or unset.** Python 3.14 starts workers through a
-   forkserver whose socket path lives there and cannot exceed 108 bytes.
-   `TMPDIR=/tmp/nc` works for a private cache.
-5. **`mutate.py` refuses a worktree with uncommitted changes.** Commit first.
-6. **`caching.py` and `modcache.py` are `unittest` scripts and take no
-   arguments.**
-7. **A check that fails is not evidence either.** Read why it failed.
-8. **`/tmp` is memory, and the machine reboots.** A reboot mid-session took
-   every worktree, every test folder, the real cache and the notes kept in
-   the session scratchpad. Keep anything you cannot rebuild outside `/tmp`
-   (this session used `~/.cache/vic2review/`, since removed), and run
-   `git worktree prune` after one.
-9. **Reviewers started in parallel all stop at the same usage limit.** Five
-   were started at once and all five stopped before reporting anything. They
-   also wrote into the same scratchpad as the session that started them, and
-   one overwrote a file there with its own of the same name. Start fewer,
-   and give each a folder of its own.
-10. **A script piped in on stdin cannot start workers.** The forkserver
-    re-imports `__main__` by path, and `<stdin>` has none, so each worker
-    prints a `FileNotFoundError` and the analyzer reads one save at a time.
-    That is the harness, not the program; write the script to a file.
-
-## What was done this session
-
-A review of every file, `REVIEW.md` §12-§30, reproduced finding by finding,
-then eighteen commits. §31 has the table: each commit, what its check says
-with the fix taken out. In plain terms:
-
-- A save cut short is refused instead of read as 34 nations with no army.
-- `--cross` (the window's path for a folder of campaigns) no longer serves
-  the old comparison when a smaller campaign gains a save, and no longer
-  reads every campaign to find that nothing changed.
-- A table open in Excel no longer ends the run in a stack trace, and a run
-  that dies, or `--no-html`, no longer leaves a stamp that serves the wrong
-  report later.
-- `war = yes` is judged on who the war lists now, and `--explain-mob` sees
-  the wars.
-- Every table is written every run; one save per in-game date is read,
-  with a note naming the rest.
-- A dead worker drops the run to one save at a time instead of ending it.
-- Pressing Analyze no longer erases the GitHub token and the report host,
-  and a token GitHub refuses is forgotten so the next press asks again.
-- A mod file named in other case replaces the game's, as on Windows; the
-  scanner opens no console window on Windows; names from saves and mods
-  cannot become script in the report; the GitHub token does not follow a
-  redirect off GitHub, and publishing failures come out as sentences.
-- The keeper's "Open the folder" works off Windows; the mod cache key is
-  derived rather than listed; two pieces of dead code are gone.
-- **Candidate 3 is done.** `vic2_analyzer.Run` declares every setting and
-  whether it changes the report; the stamp hashes exactly those, and
-  `staleness.py` holds the declaration to account. The window builds a `Run`
-  and calls `vic2_analyzer.analyze(run, cancel=, progress=, ready=)` instead
-  of rewriting `sys.argv`. `main(run=None)` still reads the command line when
-  given nothing, so every check that drives it through `sys.argv` still does.
-
-Speed: the no-change run 82 → 83 ms (noise), cold 5.75 → 5.71 s.
+1. **Never edit the tree while `testkit/all.py` is running.**
+2. **A fresh `git worktree` has no Rust scanner**; build it in the worktree.
+3. **This is a desktop.** Interleave, three to nine rounds at least.
+4. **Keep `TMPDIR` short or unset** (the forkserver's socket path).
+5. **`mutate.py` refuses a worktree with uncommitted changes.**
+6. **`caching.py` and `modcache.py` take no arguments.**
+7. **A check that fails is not evidence either.** Read why.
+8. **`/tmp` is memory, and the machine reboots** -- it did twice this
+   session, taking worktrees and uncommitted work with it. Keep scratch
+   worktrees and anything unrebuildable elsewhere (`~/.cache/vic2speed/`).
+9. **Do not start many subagents at once.**
+10. **A script piped in on stdin cannot start workers.** Write it to a file.
+11. **`python3 -m cProfile vic2_analyzer.py` breaks the workers.** Profile a
+    worker's job in one process, and time the parent in phases.
+12. **A background job does not stop because you stopped watching it.** A
+    benchmark left running from a failed contract ran against worktrees the
+    next contract was recreating.
+13. **Pickle bytes are not a fair comparison across processes**: sets come
+    out in a different order under each hash seed. Compare values, or fix
+    `PYTHONHASHSEED`.
+14. **Check a change to how the program ends with its output on a pipe**,
+    not only redirected to a file. A fast `os._exit` passed every hand check
+    written to files, and left workers holding the pipe open for ever: the
+    contract caught it, and it was reverted (`INTERNALS.md`).
 
 ## What is left
 
-In rough order of value.
-
-1. **Two things the maintainer decided to leave**, `REVIEW.md` §30: the Wars tab's
-   belligerent lists (§13 -- the missing seven were a hand merge by the game's
-   host), and the mobilisation cap's float arithmetic (§18). Don't redo either
-   without asking him.
-2. **The leads in `REVIEW.md` §27**, none reproduced: a mod's `.mod`
-   `replace_path` is never read; `brigades_from_clusters` compares floats
-   against the regiment cost (could it be the one measured miss, Japan 1908,
-   467 against 468?); `cross._MOD_FACTS` is never cleared in a long-running
-   window; `host/worker.js` deletes a report on a GET; GitHub Pages and
-   `.data.gz`. The first two need a second mod or a base game install, which
-   this machine does not have -- worth asking the maintainer for one, as the previous
-   handoff suggested for `--cross` too (an IGoR or GFM campaign).
-3. **Small and cosmetic, all still true**: `walk_campaign` reads
-   `v2parse.POP_TYPES` for its columns instead of being handed the reading's
-   pop types; `REVIEW.md` §5 (`keep_pools` and `in_workers` held together by
-   line order) and §7 (the fold table's redundant field column); "world"
-   names two different things in the analyzer; `testkit/parity.py` builds one
-   synthetic save when given no folder and could build the awkward shapes too.
-4. **Looked at and declined**, with the reason in §31: folding the three
-   "what is a folder of saves" walkers into one.
-
-## Leave these alone, with reasons (all recorded in the repo)
-
-- `template.py` -- one big string, deliberately; splitting it means
-  PyInstaller data files and `sys._MEIPASS` on a platform nobody here can test.
-- The report stamp hashing every `.py` -- deliberately over-eager. Do not turn
-  it into a list of filenames; that list was wrong within a day.
-- `Mod.__getstate__`/`__setstate__` -- `REVIEW.md` §6, decided.
-- The seventeen fold rules in `nation.py` -- `REVIEW.md` §7, decided.
-- `readfolder.py` must not import the finishing, or anything else that only
-  uses a save: its parse cache key is everything it reaches, and
-  `testkit/caching.py` will fail if that grows. `mod_reader.py`'s key is
-  derived the same way now, and `testkit/modcache.py` holds it.
+0. **A finished, checked change not yet committed**:
+   `~/.cache/vic2speed/parsespan.diff` reads the wars, the market and the
+   great power list with one `findall` instead of a token at a time -- the
+   same trees on all 16,280 such blocks in the campaign and on 100,000
+   random token streams, 2.49 s of worker time to 1.66 over the campaign,
+   and it helps the Python-only reading Windows users get today. Its commit
+   message is `msg-parsespan.txt` beside it. It needs the contract, and a
+   benchmark with `CPUS=0,2,4,6 -- --jobs 3`, where it should show.
+1. **The wars, the market and the great power list in Rust** -- Python's
+   whole remaining share of reading a save, about 25 ms of every save's CPU
+   after this session. It barely shows here: past eight workers reading is
+   bound by memory (4 / 8 / 15 workers: 4.78 / 3.70 / 3.57 s cold). On a
+   four-core machine it would be worth about half a second of a 5.8 s cold
+   run. Two things to settle first, both in `scanner/src/country.rs`, which
+   has a Rust `parse_block` already: it folds a repeated key into an earlier
+   bare-value list where Python keeps the two apart (`_MultiList`), and its
+   tokenizer's whitespace is not Python's `\s` (NBSP, `\x1c`-`\x1f`). And
+   `read_war` calls `str()` on whatever it finds, so a block where a name
+   should be has to make the scanner refuse the save, not guess at repr.
+2. **The payload's series and facts built in the workers**, as the narrow
+   tables now are (`report.save_tables`). About 40 ms of a warm rebuild, but
+   only if the main table's rows stop travelling too, and the verbose
+   summary reads them.
+3. **One pool for both passes**, and started before it is needed: 35-80 ms
+   of every run with a mod.
+4. **Two things the maintainer decided to leave** (`REVIEW.md` §30), and the leads in
+   `REVIEW.md` §27, as before.
