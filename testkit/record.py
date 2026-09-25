@@ -50,11 +50,11 @@ TABLES = (("the province totals", nation.SCANNED_PROVINCES,
 
 
 def rust_source():
-    """Both scanner files as one string."""
+    """Every scanner source file as one string, whichever file a key is in."""
     where = os.path.join(HERE, "scanner", "src")
     return "".join(
         io.open(os.path.join(where, name), encoding="utf-8").read()
-        for name in ("main.rs", "country.rs"))
+        for name in sorted(os.listdir(where)) if name.endswith(".rs"))
 
 
 def rust_const(text, name):

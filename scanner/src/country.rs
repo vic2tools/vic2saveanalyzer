@@ -17,6 +17,7 @@
 // repeated keys collapse into a list, a block of bare values is a list, and
 // bare values mixed with keys are kept under `_items`.
 
+use crate::text::{find, unquote};
 use std::collections::HashMap;
 
 /// A token cursor over the save's own grammar: `"quoted"`, `{`, `}`, `=`, or
@@ -90,15 +91,6 @@ impl<'a> Tokens<'a> {
                 _ => {}
             }
         }
-    }
-}
-
-fn unquote(s: &str) -> &str {
-    let b = s.as_bytes();
-    if b.len() >= 2 && b[0] == b'"' && b[b.len() - 1] == b'"' {
-        &s[1..s.len() - 1]
-    } else {
-        s
     }
 }
 
@@ -662,18 +654,4 @@ pub fn read_country(text: &str, at: usize, stop: usize, tag: &str,
     out.units_at = units.at.iter().map(|(p, t)| (*p, t.ints())).collect();
     out.men_at = units.men.iter().map(|(p, t)| (*p, t.ints())).collect();
     out
-}
-
-fn find(hay: &[u8], needle: &[u8], from: usize, stop: usize) -> Option<usize> {
-    if from >= hay.len() {
-        return None;
-    }
-    let end = stop.min(hay.len());
-    if from >= end {
-        return None;
-    }
-    hay[from..end]
-        .windows(needle.len())
-        .position(|w| w == needle)
-        .map(|i| i + from)
 }
