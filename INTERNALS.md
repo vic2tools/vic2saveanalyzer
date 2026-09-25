@@ -502,6 +502,73 @@ occupied; only that third one took anything.
 
 ## Speed
 
+### Where the time goes, 2026-09-24
+
+Measured before changing anything, at `9ee3aeb`. 103 saves (3.3 GB), Modus
+Omnino Demens 1.6, Python 3.14, a Ryzen 7 6800H: eight cores, sixteen
+threads. Two identical trees run in alternation, to see the noise:
+
+| run | tree A | tree B |
+|---|---:|---:|
+| nothing changed, nine rounds | 85 ms (82-86) | 85 ms (83-87) |
+| rebuild from a warm cache, five rounds | 2.57 s (2.54-2.62) | 2.59 s (2.57-2.60) |
+| cold, a new empty `TMPDIR` each time, three rounds | 5.76 s (5.71-5.78) | 5.75 s (5.71-5.75) |
+
+The phases were timed by wrapping functions from outside the tree, with each
+worker logging its own jobs, so parent and workers line up on one clock. The
+cold run, 5.75 s:
+
+| phase | wall | who is working |
+|---|---:|---|
+| start, imports, the stamp | 0.09 s | parent |
+| load the mod, empty cache | 0.89 s | parent alone |
+| read the 103 saves | 2.27 s | 15 workers, 95% busy; the parent waits |
+| decode invention indices | 0.09 s | parent |
+| finish each save and build its rows | 1.15 s | parent; workers 10% busy |
+| merge the prices | 0.17 s | parent |
+| names, flags, wars, succession | 0.29 s | parent |
+| assemble the payload | 0.29 s | parent |
+| gzip and write the page | 0.25 s | parent, CSV thread beside it |
+| wait for the CSV thread | 0.21 s | the thread (0.45 s in all) |
+| exit | 0.06 s | |
+
+**Everything but the reading of the saves runs on one core: 3.5 s of 5.75.**
+The warm rebuild is that same tail and nothing else -- the mod comes out of
+its cache in 0.03 s and the invention pass out of its own in 0.02 s -- so
+2.6 s of it is one process with fifteen idle workers behind it.
+
+The 1.15 s of finishing breaks down further. The first finished save reaches
+the parent 0.3 to 0.45 s after the walk starts, although the first worker is
+done with it in 90 ms: the parent is still submitting the first 28 jobs and
+starting a worker for each. Another 0.4 s goes on waiting for results the
+pool's own thread is unpickling (0.31 s of `pickle.loads`, taking turns with
+the main thread for the lock). The row building itself is 0.53 s.
+
+In the report, `government_flag_types` re-reads and re-parses the same mod
+file on every call, and `flag_images` calls it once per flag: 953 times, 0.2 s.
+
+**A save in a worker**, under full load in the cold run, median of 103: 307
+ms, of which 62 until the scanner sends its block table, 86 reading the wars,
+the market and the great power list in Python, 81 waiting for the scanner to
+finish, 34 folding its answer in, 9 after that, 15 writing the cache entry
+and 4 making the invention summary. Read alone, one save at a time in one
+process, the same save is 124 ms: 69 ms of Python CPU and 92 ms of scanner
+CPU. The whole cold run is 38.8 CPU seconds (32.9 user, 5.8 kernel), 3.2 of
+them the parent's, so a save costs about 345 ms of CPU when every thread is
+busy against 161 ms alone -- two threads share a core, and they share its
+memory bandwidth. Reading the saves is bound by CPU, all sixteen threads of
+it.
+
+`vic2scan --bench` on a 34 MB save: reading the file 32 ms, finding the
+blocks 12, the provinces and countries 58, building the answer 3. Python's
+share, profiled in one process: the war, market and great power parse is
+most of it (`parse_block`, `Tokens.next`, `unquote`), and decoding the
+scanner's JSON is about a fifth.
+
+**The run with nothing to do**, 85 ms: 10 ms for the interpreter, about 35
+importing, 30 in `mod_signature` statting the mod's 6,371 files, and 5
+hashing the source into the stamp.
+
 ### Finishing a mod campaign in the workers, 2026-09-21
 
 Same campaign and machine as the entry below: 103 saves (3.51 GB), Modus
