@@ -34,6 +34,7 @@ sys.path.insert(0, HERE)
 import fastscan                                            # noqa: E402
 import readsave                                            # noqa: E402
 import savefmt                                             # noqa: E402
+from readboth import both_ways, differences                # noqa: E402
 import vic2_analyzer as va                                 # noqa: E402
 
 
@@ -41,40 +42,6 @@ import vic2_analyzer as va                                 # noqa: E402
 # readers have to be told the same answer or half the country block is dark
 # on both sides -- which is agreement about nothing.
 REFORMS = ("vote_franschise", "war_policy")
-
-
-def normalise(o):
-    """
-    Sets and defaultdicts compare as their plain equivalents.
-
-    Dictionaries keep their order. Sorting them here is the obvious thing to
-    do and it is wrong: several tables downstream sort by a value with a
-    stable sort, so two entries of equal size come out in the order the file
-    first mentioned them. Sorted away, a scanner that emitted its counts
-    alphabetically looked identical here and changed a real report.
-
-    A number carries the kind of number it is, because `0 == 0.0` in Python
-    and the CSV does not agree. `nation._add_if` exists for exactly this: a
-    province with no naval base leaves `naval_base_levels` the int 0 it
-    started as, rather than adding a float nought to it and making it 0.0.
-    Changing that one rule moves `nations_timeseries.csv` on 114 lines --
-    and with a plain `==` here, this check and all 23 others went on
-    passing. `True` is an int in Python too, and `True` and `1` are two
-    different things in a CSV, so a bool is a third kind.
-    """
-    if isinstance(o, dict):
-        return [(k, normalise(v)) for k, v in o.items()]
-    if isinstance(o, set):
-        return sorted(o)
-    if isinstance(o, (list, tuple)):
-        return [normalise(v) for v in o]
-    if isinstance(o, bool):
-        return ("bool", o)
-    if isinstance(o, int):
-        return ("int", o)
-    if isinstance(o, float):
-        return ("float", o)
-    return o
 
 
 def really_used(path):
@@ -107,58 +74,11 @@ def really_used(path):
     return bool(seen) and seen[0]
 
 
-def both_ways(path):
-    """
-    One save, parsed with the scanner and without it.
-
-    Switched off by the argument `analyze_save` has for it, and then checked
-    to have stayed off. It used to be switched off by replacing
-    `fastscan.scan` -- which `analyze_save` does not call. It calls `start`,
-    `head` and `collect`, because it works between the scanner's two halves
-    rather than waiting for both. So the "slow" read ran the scanner as well,
-    this compared the scanner against itself, and it had been reporting
-    "identical across 41 nations" for free.
-
-    That is the failure this whole check exists to notice -- a comparison
-    that has quietly stopped comparing -- so the guard below is not
-    belt-and-braces. It is the check on the check.
-    """
-    readsave.PLAIN._replace(reform_keys=REFORMS).apply()
-    fast = va.analyze_save(path, verbose=False)
-
-    started = []
-    real_start = fastscan.start
-
-    def watched(*a, **k):
-        started.append(1)
-        return real_start(*a, **k)
-
-    fastscan.start = watched
-    try:
-        slow = va.analyze_save(path, verbose=False, use_scanner=False)
-    finally:
-        fastscan.start = real_start
-    if started:
-        raise AssertionError(
-            "the Python-only read started the scanner %d time(s), so this "
-            "would have compared the scanner against itself" % len(started))
-    return fast, slow
-
-
 def compare(path):
     """Every difference between the two readings of one save."""
-    (fast_meta, fast_nat), (slow_meta, slow_nat) = both_ways(path)
-    bad = []
-    for key in sorted(set(fast_meta) | set(slow_meta)):
-        if normalise(fast_meta.get(key)) != normalise(slow_meta.get(key)):
-            bad.append("meta[%s]" % key)
-    tags = sorted(set(fast_nat) | set(slow_nat))
-    for tag in tags:
-        a, b = fast_nat.get(tag, {}), slow_nat.get(tag, {})
-        for key in sorted(set(a) | set(b)):
-            if normalise(a.get(key)) != normalise(b.get(key)):
-                bad.append("%s.%s" % (tag, key))
-    return bad, len(tags)
+    fast, slow = both_ways(path)
+    return ([where for where, _a, _b in differences(fast, slow)],
+            len(set(fast[1]) | set(slow[1])))
 
 
 def main():

@@ -83,6 +83,10 @@ there are any, since they carry shapes nobody thought to write on purpose.
 **`awkward.py`** and **`countries.py`** write saves with the layouts that
 are legal but rare — a pop with a mod's own block nested inside it, an army
 loaded onto a transport, a province with no owner — and read them both ways.
+All three read a save both ways through `readboth.py`. The two smaller ones
+had kept the old `fastscan.scan` switch after `parity.py` lost it, so until
+they shared it they too compared the scanner with itself: either would
+pass with the Python reader raising on every call.
 
 **`edges.py`** builds the campaigns nobody has: an empty folder, one save, a
 first-month save with nothing researched, a save with no pops, a truncated

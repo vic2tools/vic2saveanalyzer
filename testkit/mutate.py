@@ -583,8 +583,30 @@ def m26():
 @mutation("parity-scanner-on-both-sides", "the 'slow' read quietly uses the Rust scanner too",
           "parity.py")
 def m19():
-    patch("testkit/parity.py",
+    patch("testkit/readboth.py",
           "use_scanner=False", "use_scanner=True")
+
+
+# ---- the two smaller parity checks, which compared the scanner with itself
+
+@mutation("countries-python-reader-unseen",
+          "the Python country reader doubles every country number, where "
+          "countries.py never ran the Python reader at all", "countries.py")
+def m47():
+    # Prestige, infamy and the treasury are in no expectation of the check,
+    # so only the comparison with the scanner can see this.
+    patch("readsave.py", "                nat[numerics[key]] = to_float(clean)",
+          "                nat[numerics[key]] = to_float(clean) * 2")
+
+
+@mutation("awkward-python-reader-unseen",
+          "the Python province reader doubles every pop's literacy, where "
+          "awkward.py never ran the Python reader at all", "awkward.py")
+def m48():
+    # Literacy is in no expectation of the check, so only the comparison
+    # with the scanner can see this.
+    patch("readsave.py", "        literate = to_float(pop[_POP_LITERACY]) * size",
+          "        literate = to_float(pop[_POP_LITERACY]) * size * 2")
 
 
 def main():

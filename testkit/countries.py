@@ -203,9 +203,8 @@ ENG=
 
 
 def main():
-    import fastscan
     import readsave
-    import vic2_analyzer as va
+    from readboth import both_ways, differences
 
     out = os.path.join(HERE, "testkit", "_countries.v2")
     with open(out, "w", encoding="latin-1", newline="\r\n") as fh:
@@ -215,26 +214,12 @@ def main():
     # the way the program sets them: one profile, applied.
     readsave.PLAIN._replace(reform_keys=("slavery", "voting_system")).apply()
 
-    fast = va.analyze_save(out, verbose=False)
-    real = fastscan.scan
-    fastscan.scan = lambda *a, **k: None
-    try:
-        slow = va.analyze_save(out, verbose=False)
-    finally:
-        fastscan.scan = real
+    fast, slow = both_ways(out)
 
     problems = []
-    for tag in sorted(set(fast[1]) | set(slow[1])):
-        a, b = fast[1].get(tag, {}), slow[1].get(tag, {})
-        for key in sorted(set(a) | set(b)):
-            x, y = a.get(key), b.get(key)
-            if isinstance(x, set) or isinstance(y, set):
-                x, y = sorted(x or ()), sorted(y or ())
-            if isinstance(x, dict) or isinstance(y, dict):
-                x, y = dict(x or {}), dict(y or {})
-            if x != y:
-                problems.append("%s.%s\n      rust  : %r\n      python: %r"
-                                % (tag, key, x, y))
+    for where, x, y in differences(fast, slow):
+        problems.append("%s\n      rust  : %r\n      python: %r"
+                        % (where, x, y))
 
     eng = slow[1]["ENG"]
     def want(what, got, expected):
