@@ -1690,9 +1690,11 @@ def _main(run=None):
     # answered in seventy milliseconds, and loading this module costs ten of
     # them whether or not there is a mod to read.
     # A `--cross` run was stamped above, before its campaigns were read.
+    signature = None
     if stamp is None:
         from mod_reader import mod_signature
-        stamp = report_stamp(files, args, mod_signature(args.mod_path))
+        signature = mod_signature(args.mod_path)
+        stamp = report_stamp(files, args, signature)
     if already_built(args, stamp):
         return 0
     start_forkserver()
@@ -1714,7 +1716,7 @@ def _main(run=None):
     if args.mod_path:
         from mod_reader import cached_mod, has_rules, load_mod, mod_head
         try:
-            known = mod = cached_mod(args.mod_path)
+            known = mod = cached_mod(args.mod_path, signature)
             if mod is None and has_rules(args.mod_path):
                 from report import Aside
                 known = mod_head(args.mod_path)

@@ -1936,14 +1936,16 @@ class Mod:
         self._index_base = base
 
 
-def _mod_slot(path):
+def _mod_slot(path, signature=None):
     """Where this mod's loaded form lives, keyed by every file in it and by
-    the code that reads them."""
+    the code that reads them. `signature` is its `mod_signature`, when the
+    caller has just worked it out."""
     version = _reader_fingerprint()
     if not version:
         return None
-    key = hashlib.md5(("%s|%s|%s" % (os.path.abspath(path),
-                                     mod_signature(path), version))
+    if signature is None:
+        signature = mod_signature(path)
+    key = hashlib.md5(("%s|%s|%s" % (os.path.abspath(path), signature, version))
                       .encode("utf-8")).hexdigest()
     return os.path.join(tempfile.gettempdir(), "vic2_analyzer_cache",
                         "mod_" + key + ".pkl")
@@ -1953,9 +1955,15 @@ def _mod_root(path):
     return os.path.abspath(os.path.expanduser(os.path.expandvars(path)))
 
 
-def cached_mod(path):
-    """The mod as its cache holds it, or None when it would have to be read."""
-    return cacheio.load(_mod_slot(_mod_root(path)))
+def cached_mod(path, signature=None):
+    """
+    The mod as its cache holds it, or None when it would have to be read.
+
+    `signature` is the mod's `mod_signature`, which `main` has already
+    worked out for the report stamp a moment before. Worked out again here
+    it was a second walk of every file in the mod.
+    """
+    return cacheio.load(_mod_slot(_mod_root(path), signature))
 
 
 def has_rules(path):
