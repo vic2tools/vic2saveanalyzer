@@ -27,7 +27,7 @@ mod country;
 
 use country::{read_country, Country, Tables};
 use std::collections::HashMap;
-use std::io::{self, Read, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::time::Instant;
 
 // The fields a pop can hold other than its culture line. A field not in here,
@@ -612,18 +612,35 @@ fn num(v: f64) -> String {
     }
 }
 
+/// What every save is read against, as the command line gives it.
+struct Lists {
+    pop_types: Vec<Vec<u8>>,
+    mob_types: Vec<Vec<u8>>,
+    army_techs: Vec<String>,
+    navy_techs: Vec<String>,
+    reform_keys: Vec<String>,
+}
+
+/// A file turned down: the code a one-save run exits with, and why.
+struct Refusal {
+    code: i32,
+    why: String,
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        eprintln!("usage: vic2scan <save.v2> [--pop-types a,b] [--mob-types a,b]");
+        eprintln!("usage: vic2scan <save.v2> [--pop-types a,b] [--mob-types a,b]\n\
+                   \x20      vic2scan --serve [--pop-types a,b] [--mob-types a,b]");
         std::process::exit(2);
     }
-    let path = &args[1];
-    let mut pop_types: Vec<Vec<u8>> = Vec::new();
-    let mut mob_types: Vec<Vec<u8>> = Vec::new();
-    let mut army_techs: Vec<String> = Vec::new();
-    let mut navy_techs: Vec<String> = Vec::new();
-    let mut reform_keys: Vec<String> = Vec::new();
+    let mut lists = Lists {
+        pop_types: Vec::new(),
+        mob_types: Vec::new(),
+        army_techs: Vec::new(),
+        navy_techs: Vec::new(),
+        reform_keys: Vec::new(),
+    };
     let mut k = 2;
     while k + 1 < args.len() {
         let list: Vec<String> = args[k + 1]
@@ -634,17 +651,69 @@ fn main() {
         let as_bytes: Vec<Vec<u8>> =
             list.iter().map(|s| s.as_bytes().to_vec()).collect();
         match args[k].as_str() {
-            "--pop-types" => pop_types = as_bytes,
-            "--mob-types" => mob_types = as_bytes,
-            "--army-techs" => army_techs = list,
-            "--navy-techs" => navy_techs = list,
-            "--reform-keys" => reform_keys = list,
+            "--pop-types" => lists.pop_types = as_bytes,
+            "--mob-types" => lists.mob_types = as_bytes,
+            "--army-techs" => lists.army_techs = list,
+            "--navy-techs" => lists.navy_techs = list,
+            "--reform-keys" => lists.reform_keys = list,
             _ => {}
         }
         k += 2;
     }
+    if args[1] == "--serve" {
+        serve(&lists);
+    }
 
     let bench = args.iter().any(|a| a == "--bench");
+    let mut raw = Vec::new();
+    let stdout = io::stdout();
+    let mut sink = stdout.lock();
+    if let Err(no) = scan_one(&args[1], &lists, bench, &mut raw, &mut sink, false) {
+        eprintln!("{}", no.why);
+        std::process::exit(no.code);
+    }
+}
+
+/// One process for many saves: a path a line on stdin, and each answered
+/// on stdout exactly as a one-save run answers -- the block table on one
+/// line, then the rest on one more -- or with one `{"refused":...}` line
+/// for a file a one-save run would have exited over. It ends when stdin
+/// does, which is when the worker that started it has gone.
+///
+/// A worker reads a dozen saves or more, and starting a scanner for each
+/// cost more than the start: a new process is handed its 34 MB buffer as
+/// fresh pages, each faulted in and zeroed by the kernel, and reading a
+/// save into memory that way took 32 ms. Into the same buffer a second
+/// time it takes 14. On Windows a process is also much slower to start.
+fn serve(lists: &Lists) -> ! {
+    let stdin = io::stdin();
+    let mut asked = stdin.lock();
+    let stdout = io::stdout();
+    let mut sink = stdout.lock();
+    let mut raw = Vec::new();
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match asked.read_line(&mut line) {
+            Ok(0) | Err(_) => std::process::exit(0),
+            Ok(_) => {}
+        }
+        let path = line.strip_suffix('\n').unwrap_or(&line);
+        if let Err(no) = scan_one(path, lists, false, &mut raw, &mut sink, true) {
+            // The code alone: why it was turned down is Python's to say,
+            // when it reads the file itself and meets the same thing.
+            let said = format!("{{\"refused\":{}}}\n", no.code);
+            if sink.write_all(said.as_bytes()).is_err() || sink.flush().is_err() {
+                std::process::exit(5);    // nobody listening
+            }
+        }
+    }
+}
+
+/// One save, answered on `sink`. `raw` is the buffer it is read into, kept
+/// by the caller so that a scanner serving many saves reuses it.
+fn scan_one(path: &str, lists: &Lists, bench: bool, raw: &mut Vec<u8>,
+            sink: &mut impl Write, serving: bool) -> Result<(), Refusal> {
     let clock = Instant::now();
     let mut mark = |what: &str, since: &mut Instant| {
         if bench {
@@ -655,30 +724,27 @@ fn main() {
     };
     let mut last = clock;
 
-    let mut raw = Vec::new();
-    match std::fs::File::open(path).and_then(|mut f| f.read_to_end(&mut raw)) {
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("cannot read {}: {}", path, e);
-            std::process::exit(1);
-        }
+    raw.clear();
+    if let Err(e) = std::fs::File::open(path).and_then(|mut f| f.read_to_end(raw)) {
+        return Err(Refusal { code: 1, why: format!("cannot read {}: {}", path, e) });
     }
     mark("read the file", &mut last);
     if raw.starts_with(b"PK") {
-        eprintln!("{} is a zip archive, not a plaintext save", path);
-        std::process::exit(3);
+        return Err(Refusal {
+            code: 3,
+            why: format!("{} is a zip archive, not a plaintext save", path),
+        });
     }
     // The file stays bytes from here. Decoding all 31 MB of it to read the
     // 8 MB of country blocks cost 23 ms a save and, worse on a machine bound
     // by memory traffic, a 31 MB allocation per worker.
-    let text: &[u8] = &raw;
+    let text: &[u8] = &raw[..];
 
     let blocks = match top_level_blocks(text) {
         Some(b) => b,
         None => {
             // Not the layout the game writes; let Python's slower reader have it.
-            eprintln!("not a flat save");
-            std::process::exit(4);
+            return Err(Refusal { code: 4, why: "not a flat save".to_string() });
         }
     };
 
@@ -732,9 +798,7 @@ fn main() {
             head.push_str(&format!(",{},{}]", at, stop));
         }
         head.push_str("]}\n");
-        let stdout = io::stdout();
-        let mut lock = stdout.lock();
-        if lock.write_all(head.as_bytes()).is_err() || lock.flush().is_err() {
+        if sink.write_all(head.as_bytes()).is_err() || sink.flush().is_err() {
             std::process::exit(5);    // nobody listening
         }
     }
@@ -749,16 +813,16 @@ fn main() {
         seen: Vec::new(),
     };
     let tables = Tables {
-        army_techs: &army_techs,
-        navy_techs: &navy_techs,
-        reform_keys: &reform_keys,
+        army_techs: &lists.army_techs,
+        navy_techs: &lists.navy_techs,
+        reform_keys: &lists.reform_keys,
     };
     let mut countries: Vec<Country> = Vec::new();
     for (key, at, stop) in &blocks {
         if !key.is_empty() && key.iter().all(|c| c.is_ascii_digit()) {
             let pid = to_int_b(key);
-            read_province(text, *at, *stop, pid, &pop_types, &mob_types,
-                          &mut scan);
+            read_province(text, *at, *stop, pid, &lists.pop_types,
+                          &lists.mob_types, &mut scan);
         } else if tag_bytes(key) {
             // Decoded here and nowhere else: this block, and only this one.
             let chunk = latin1(&text[*at..(*stop).min(text.len())]);
@@ -1051,10 +1115,14 @@ fn main() {
         out.push_str("]}");
     }
     out.push_str("]}");
+    if serving {
+        out.push('\n');              // the end of this save's answer
+    }
 
     mark("build the output", &mut last);
-    let stdout = io::stdout();
-    let mut lock = stdout.lock();
-    let _ = lock.write_all(out.as_bytes());
-    let _ = lock.flush();
+    let sent = sink.write_all(out.as_bytes()).and_then(|_| sink.flush());
+    if sent.is_err() && serving {
+        std::process::exit(5);        // nobody listening
+    }
+    Ok(())
 }

@@ -473,9 +473,8 @@ def m37():
           "packing.py")
 def m38():
     patch("fastscan.py",
-          "            stdout=subprocess.PIPE, stderr=subprocess.PIPE,\n"
-          "            creationflags=_no_window()), timeout)",
-          "            stdout=subprocess.PIPE, stderr=subprocess.PIPE), timeout)")
+          "                            stderr=stderr, creationflags=_no_window())",
+          "                            stderr=stderr)")
 
 
 # ---- a name out of a save ran as script in the report

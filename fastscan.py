@@ -39,6 +39,9 @@ BINARY = "vic2scan.exe" if sys.platform == "win32" else "vic2scan"
 # program, and reading saves in Python is always allowed where guessing what
 # a missing field meant is not.
 HEAD_NEEDED = frozenset(("date", "player", "blocks"))
+# The whole answer of a serving scanner to a file it turns down, in place of
+# the first line. See `Served`.
+REFUSED = "refused"
 NEEDED = frozenset(("world_pop", "owners", "pop_ids", "pop_kinds",
                     "kind_names", "nations"))
 _FOUND = None
@@ -130,6 +133,10 @@ class Running:
         except Exception:
             pass
 
+    @property
+    def returncode(self):
+        return self.proc.returncode
+
     def refused(self):
         """
         Whether the scanner turned the file down, rather than mis-answering.
@@ -170,6 +177,193 @@ def _no_window():
     return getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 
 
+def _launch(argv, stdin=None, stderr=subprocess.PIPE):
+    """
+    The scanner started, for one save or to serve many. One place, so that
+    both are started without a window of their own (see `_no_window`).
+    """
+    return subprocess.Popen(argv, stdin=stdin, stdout=subprocess.PIPE,
+                            stderr=stderr, creationflags=_no_window())
+
+
+class _Server:
+    """
+    One scanner that reads save after save for this process: `--serve`.
+
+    A worker reads a dozen saves or more, and starting a scanner for each
+    was dearer than the start. The new process was handed its 34 MB
+    buffer as fresh pages, every one faulted in and zeroed by the kernel,
+    so reading a save into memory took 32 ms where reading one into a
+    buffer already in use takes 14 -- and on Windows starting a process is
+    slow in itself. So a worker keeps one, tells it a path a line, and
+    reads its answer the way it reads a scanner of its own (`Served`).
+
+    It is told what to read for once, when it starts; a run asking for
+    something else gets a new one. It ends when its stdin closes, which
+    happens when this process lets it go or ends.
+    """
+
+    __slots__ = ("proc", "told", "answered")
+
+    def __init__(self, binary, told):
+        self.told = told
+        self.answered = 0
+        # Nothing reads its stderr, so nothing is let fill it: a pipe
+        # nobody drains would stop it a few hundred saves in.
+        self.proc = _launch([binary, "--serve"] + told,
+                            stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+    def ask(self, line):
+        self.proc.stdin.write(line)
+        self.proc.stdin.flush()
+
+    def kill(self):
+        _kill(self.proc)
+
+    def close(self):
+        """Let it go: it exits when its stdin closes. Killed if it will not."""
+        try:
+            self.proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _kill(self.proc)
+            self.proc.wait()
+        self.proc.stdout.close()
+
+
+_SERVER = None
+# Whether the binary here has shown it can serve. One that cannot -- built
+# before `--serve` existed -- is asked one save at a time instead, the way
+# it always was.
+_SERVES = True
+
+
+def stop_serving():
+    """Let this process's scanner go, if it has one."""
+    global _SERVER
+    if _SERVER is not None:
+        server, _SERVER = _SERVER, None
+        server.close()
+
+
+class Served:
+    """
+    One save's answer from this process's `_Server`, read as `Running`
+    reads a scanner of its own: `line`, then `remainder`.
+
+    What a one-save scanner says by exiting, a serving one says in a line:
+    `{"refused": code}` for a file it turns down, which is then the whole
+    answer. A server that stops mid-answer, or is stopped by the watchdog,
+    is let go, and the next save starts another.
+    """
+
+    __slots__ = ("server", "_guard", "_open", "returncode")
+
+    def __init__(self, server, timeout):
+        self.server = server
+        self._open = True
+        self.returncode = None
+        self._guard = threading.Timer(timeout, server.kill)
+        self._guard.daemon = True
+        self._guard.start()
+
+    def _read(self):
+        try:
+            return self.server.proc.stdout.readline()
+        except (OSError, ValueError):
+            return b""
+
+    def line(self):
+        got = self._read()
+        if got.startswith(b'{"%s":' % REFUSED.encode()):
+            try:
+                self.returncode = int(json.loads(got)[REFUSED]) or 1
+            except (ValueError, KeyError, TypeError):
+                self.returncode = 1
+            self._done()
+            return b""
+        if not got:
+            self._lost()
+        return got.rstrip(b"\n")
+
+    def remainder(self):
+        if not self._open:
+            return None
+        got = self._read()
+        if not got.endswith(b"\n"):
+            self._lost()
+            return None
+        self.returncode = 0
+        self._done()
+        return got[:-1]
+
+    def refused(self):
+        return bool(self.returncode)
+
+    def _done(self):
+        self._guard.cancel()
+        self._open = False
+        self.server.answered += 1
+
+    def _lost(self):
+        """The server went, or was stopped, mid-answer. So is it forgotten."""
+        global _SERVER, _SERVES
+        self._guard.cancel()
+        self._open = False
+        if self.returncode is None:
+            self.returncode = -1
+        if not self.server.answered:
+            # Never answered anything: a binary that cannot serve.
+            _SERVES = False
+        if _SERVER is self.server:
+            _SERVER = None
+        self.server.kill()
+        try:
+            self.server.close()
+        except OSError:
+            pass
+
+    def abandon(self):
+        """Leave this answer. Half-read, the server is let go with it."""
+        if self._open:
+            self._lost()
+
+    def __del__(self):
+        try:
+            self.abandon()
+        except Exception:
+            pass
+
+
+def _serve(binary, path, told, timeout):
+    """This save asked of this process's server, or None to start one of its own."""
+    global _SERVER
+    if not _SERVES:
+        return None
+    try:
+        line = path.encode("utf-8") + b"\n"
+    except UnicodeEncodeError:
+        return None               # a name the line protocol cannot carry
+    if b"\n" in line[:-1] or b"\r" in line:
+        return None
+    if _SERVER is not None and (_SERVER.told != told
+                                or _SERVER.proc.poll() is not None):
+        stop_serving()
+    try:
+        if _SERVER is None:
+            _SERVER = _Server(binary, told)
+        _SERVER.ask(line)
+    except OSError:
+        if _SERVER is not None:
+            _SERVER.kill()
+        _SERVER = None
+        return None
+    return Served(_SERVER, timeout)
+
+
 def start(path, pop_types, mob_types, army_techs=(), navy_techs=(),
           reform_keys=(), timeout=600):
     """
@@ -177,20 +371,23 @@ def start(path, pop_types, mob_types, army_techs=(), navy_techs=(),
 
     Started before anything is read, because the caller has a share of the
     same save to do and the two are meant to happen at once. See `head`.
+
+    Asked of this process's serving scanner when there is one to ask (see
+    `_Server`), and otherwise of a scanner started for this save alone.
     """
     binary = available()
     if binary is None:
         return None
+    told = ["--pop-types", ",".join(sorted(pop_types)),
+            "--mob-types", ",".join(sorted(mob_types)),
+            "--army-techs", ",".join(sorted(army_techs)),
+            "--navy-techs", ",".join(sorted(navy_techs)),
+            "--reform-keys", ",".join(sorted(reform_keys))]
+    served = _serve(binary, path, told, timeout)
+    if served is not None:
+        return served
     try:
-        return Running(subprocess.Popen(
-            [binary, path,
-             "--pop-types", ",".join(sorted(pop_types)),
-             "--mob-types", ",".join(sorted(mob_types)),
-             "--army-techs", ",".join(sorted(army_techs)),
-             "--navy-techs", ",".join(sorted(navy_techs)),
-             "--reform-keys", ",".join(sorted(reform_keys))],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            creationflags=_no_window()), timeout)
+        return Running(_launch([binary, path] + told), timeout)
     except OSError:
         return None
 
@@ -237,7 +434,7 @@ def collect(running):
     if running is None:
         return None
     out = running.remainder()
-    if out is None or running.proc.returncode != 0 or not out:
+    if out is None or running.returncode != 0 or not out:
         return None
     try:
         got = json.loads(out)

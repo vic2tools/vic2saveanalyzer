@@ -41,6 +41,7 @@ import tempfile
 
 import cacheio
 from cacheio import load as _cache_read
+import fastscan
 from readsave import PLAIN, analyze_save
 
 
@@ -411,6 +412,7 @@ def parse_saves(files, verbose=True, use_cache=True, reading=PLAIN,
         out[i] = (meta, nations)
         done += 1
         tell_progress(done, len(files))
+    fastscan.stop_serving()
     return [item for item in out if item is not None]
 
 
@@ -567,6 +569,10 @@ def parse_saves_stream(files, verbose=True, use_cache=True, reading=PLAIN,
         if pool is not None:
             pool.shutdown(wait=False, cancel_futures=True)
         _let_go(handed)
+        # Any save read here rather than in a worker was read by a scanner
+        # this process keeps (`fastscan._Server`), and the window goes on
+        # living after a run: it should not keep an idle scanner with it.
+        fastscan.stop_serving()
 
 
 def _parse_parallel(files, out, todo, slots, workers, verbose, reading,

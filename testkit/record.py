@@ -174,7 +174,9 @@ def neither_side_knows_more():
                 "patterns in `rust_keys` no longer find it" % len(sent)]
     # `fastscan` keeps the save's own bookkeeping -- who owns which province,
     # what type each pop was -- because it belongs to no one nation.
-    top = set(fastscan.HEAD_NEEDED) | set(fastscan.NEEDED) | {"countries"}
+    # A serving scanner's answer for a file it turns down is one key too.
+    top = (set(fastscan.HEAD_NEEDED) | set(fastscan.NEEDED)
+           | {"countries", fastscan.REFUSED})
     known = set()
     for _what, table, extras in TABLES:
         known |= {key for key, _f, _r in table} | set(extras)
