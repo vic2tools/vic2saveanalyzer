@@ -1269,7 +1269,8 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
                     # a flagType and still fly different flags.
                     key = tag + "|" + (flag_suffixes(gov, styles)[0] or "base")
                     if key not in flags:
-                        got = flag_images(mod.path, [tag], {tag: gov})
+                        got = flag_images(mod.path, [tag], {tag: gov},
+                                          styles=styles)
                         if tag in got:
                             flags[key] = got[tag]
                     row.append([tag, key])
@@ -1287,7 +1288,7 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
                             fighters.add(who["country"])
             for tag in sorted(t for t in fighters if t and t != "---"):
                 if tag + "|" not in flags:
-                    got = flag_images(mod.path, [tag], {})
+                    got = flag_images(mod.path, [tag], {}, styles=styles)
                     if tag in got:
                         flags[tag + "|"] = got[tag]
         try:

@@ -1345,7 +1345,7 @@ def _shrink(width, height, rgb, target):
     return out_w, out_h, bytes(out)
 
 
-def flag_images(path, wanted, governments=None, width=46):
+def flag_images(path, wanted, governments=None, width=46, styles=None):
     """
     {tag: PNG data URI} for the tags asked for, converted from the mod's TGAs.
 
@@ -1353,9 +1353,13 @@ def flag_images(path, wanted, governments=None, width=46):
     governments.txt names it -- so a communist Russia gets the communist flag.
     The mod's own folder wins over the base game's, which is how a mod replaces
     a flag without shipping all 1,300.
+
+    `styles` is `government_flag_types(path)`, for a caller asking about one
+    tag at a time. The report asks once per flag, nine hundred times a run,
+    and reading governments.txt again for each was a tenth of a second.
     """
     governments = governments or {}
-    types = government_flag_types(path)
+    types = styles if styles is not None else government_flag_types(path)
     roots = _flag_roots(path)
     out = {}
     for tag in wanted:
