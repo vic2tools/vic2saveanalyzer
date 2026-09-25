@@ -91,30 +91,6 @@ import finishing
 
 _REPORT_READY = None
 
-# Set only when this file is run as a program, by the block at its foot.
-# See `_left_standing`.
-_ENDS_AFTER = False
-_LEFT = []
-
-
-def _left_standing(done):
-    """
-    Keep a finished run's working set alive until the process ends, when
-    it is run as a program and the process ends the moment `main` returns.
-
-    A run holds a few million objects by the end -- every row of every
-    table, every save's remains. Letting `main` return freed them one at a
-    time, 40 ms of a warm rebuild, and then the interpreter's own shutdown
-    tore down every module it had imported, only for the process to hand
-    all of that memory back to the system at once. So the program's entry
-    point leaves with `os._exit` instead, after flushing what it printed,
-    and this keeps the run's objects from being freed on the way out. The
-    window, the checks and anything else that calls `main` and carries on
-    set nothing here, and free the run as before.
-    """
-    if _ENDS_AFTER:
-        _LEFT.append(done)
-
 
 def set_report_ready(fn):
     """
@@ -1994,7 +1970,6 @@ def _main(run=None):
         print("\nWrote:")
         for path in paths:
             print(f"  {path}")
-    _left_standing(locals())
     if refused:
         sys.exit("\nCould not write %s: open in another program -- on "
                  "Windows a table open in Excel is locked -- or not "
@@ -2008,12 +1983,4 @@ if __name__ == "__main__":
     # would run the whole analysis again instead of waiting for a job.
     import multiprocessing
     multiprocessing.freeze_support()
-    # The process ends here, so it ends at once: every file the run wrote is
-    # closed, and every thread it started has been waited for, by the time
-    # `main` returns. See `_left_standing`. A run that stops with a message
-    # does so through `sys.exit`, and ends the ordinary way.
-    _ENDS_AFTER = True
-    code = main()
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(code if isinstance(code, int) else 0)
+    main()
