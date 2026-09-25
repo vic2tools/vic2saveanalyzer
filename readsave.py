@@ -54,6 +54,7 @@ from v2parse import (
     unquote,
     walk_entries,
 )
+from dates import date_key
 from tech_groups import ARMY_TECHS, NAVY_TECHS
 
 
@@ -1041,30 +1042,3 @@ def analyze_save(path, reading, verbose=True, use_scanner=True, again=False):
         extra = f", {months} months of prices" if months else ""
         print(f" {meta['date']}, {len(live)} nations{extra}")
     return meta, live
-
-
-
-
-_DATE_KEYS = {}
-
-
-def date_key(date):
-    """
-    Sortable tuple for a `YYYY.M.D` string.
-
-    Remembered, because a campaign holds a few hundred distinct dates and asks
-    for their keys a few million times -- once per price reading, per sort
-    comparison, per row. Twelve hundred entries is nothing to keep.
-    """
-    try:
-        got = _DATE_KEYS.get(date)
-    except TypeError:
-        return (0, 0, 0)              # not even hashable, let alone a date
-    if got is not None:
-        return got
-    try:
-        got = tuple(int(p) for p in date.split("."))
-    except (ValueError, AttributeError):
-        got = (0, 0, 0)
-    _DATE_KEYS[date] = got
-    return got

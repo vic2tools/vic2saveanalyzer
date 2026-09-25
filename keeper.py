@@ -48,7 +48,8 @@ import time
 
 # What a save's first few hundred kilobytes say, and the measured rule for
 # telling one campaign's history from another's.
-from savehead import FLAG_GAP, flags_lost, header, ymd
+from dates import ymd
+from savehead import FLAG_GAP, flags_lost, header
 
 HOME = os.path.expanduser("~")
 SAVES = os.path.join(

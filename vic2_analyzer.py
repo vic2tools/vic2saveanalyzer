@@ -60,9 +60,9 @@ from nation import (
 from readsave import (
     PLAIN,
     analyze_save,
-    date_key,
     reading_for,
 )
+from dates import date_key
 # The front of a save, read without the rest: its date, for the order.
 from savehead import in_date_order, one_per_date, sort_key
 # Reading a folder of saves in parallel, and the cache behind it.

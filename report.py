@@ -27,6 +27,7 @@ import threading
 from collections import namedtuple
 from html import escape as _escape
 
+from dates import year_fraction
 from tech_groups import ARMY_LINES, NAVY_LINES
 from template import TEMPLATE
 
@@ -163,31 +164,6 @@ CATEGORY_LABELS = {
 # Cultures per nation per save, beyond which the tail is negligible and only
 # inflates the file.
 MAX_CULTURES = 30
-
-
-_YEAR_FRACTIONS = {}
-
-
-def year_fraction(date):
-    """
-    A date as a position on a year axis, remembered between calls.
-
-    Every chart asks for this once per point, so a campaign asks for the same
-    few hundred answers hundreds of thousands of times.
-    """
-    try:
-        got = _YEAR_FRACTIONS.get(date)
-    except TypeError:
-        return 0.0
-    if got is not None:
-        return got
-    try:
-        y, m, d = (int(p) for p in date.split("."))
-        got = y + (m - 1) / 12.0 + (d - 1) / 365.0
-    except (ValueError, AttributeError):
-        got = 0.0
-    _YEAR_FRACTIONS[date] = got
-    return got
 
 
 INFINITY = float("inf")

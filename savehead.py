@@ -23,6 +23,8 @@ import os
 import re
 import sys
 
+from dates import ymd
+
 # Everything the game writes above the first province block, with room to
 # spare: the date, the player, the start date and the event flags.
 HEADER_BYTES = 400_000
@@ -105,17 +107,6 @@ def flags_lost(earlier, later):
     if len(earlier) < FLAG_FLOOR or len(later) < FLAG_FLOOR:
         return None
     return len(earlier - later)
-
-
-def ymd(stamp):
-    """`1847.1.1` as (1847, 1, 1), or None."""
-    parts = (stamp or "").split(".")
-    if len(parts) != 3:
-        return None
-    try:
-        return tuple(int(p) for p in parts)
-    except ValueError:
-        return None
 
 
 def date_of(path):

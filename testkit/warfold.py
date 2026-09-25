@@ -28,6 +28,7 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
 import readsave                                              # noqa: E402
+from dates import date_key                                   # noqa: E402
 import report                                                # noqa: E402
 
 
@@ -36,7 +37,7 @@ def wars_in_order(paths):
     read = []
     for path in paths:
         meta, _nations = readsave.analyze_save(path, readsave.PLAIN, verbose=False)
-        read.append((readsave.date_key(meta["date"]), meta["wars"]))
+        read.append((date_key(meta["date"]), meta["wars"]))
     read.sort(key=lambda got: got[0])
     return [wars for _key, wars in read]
 

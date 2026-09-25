@@ -26,7 +26,7 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
 from outcome import SKIPPED                                 # noqa: E402
-from report import year_fraction                            # noqa: E402
+from dates import year_fraction                             # noqa: E402
 
 # Floating point: literacy and money are accumulated in a different order
 # from the totals they are checked against, so an identity can miss by a few

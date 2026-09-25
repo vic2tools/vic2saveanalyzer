@@ -47,7 +47,8 @@ from collections import Counter
 
 from mod_reader import (country_entries, invention_sequence, read_clausewitz,
                         read_poptypes, resolved_file, resolved_files)
-from savehead import FLAG_FLOOR, FLAG_GAP, fields, flags_in, head_of, ymd
+from dates import ymd
+from savehead import FLAG_FLOOR, FLAG_GAP, fields, flags_in, head_of
 
 # The country blocks sit after the province data, near the end of the file, so
 # identifying a save means reading all of it. Only the last save or two of a
@@ -363,8 +364,9 @@ def series_payload(results, names=None, floor=2):
     or run the same length, and which of the two is honest depends on the
     question being asked.
     """
+    from dates import year_fraction
     from report import (METRICS, GAIN_METRICS, GROWTH_METRICS, gain_series,
-                        growth_series, year_fraction)
+                        growth_series)
 
     names = names or {}
     seen = {}
