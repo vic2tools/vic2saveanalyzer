@@ -75,6 +75,8 @@ fn to_float_b(s: &[u8]) -> f64 {
     }
 }
 
+/// `int(float(s))`: truncation toward zero, which is what the analyzer does
+/// to every size in the file. `"12345.000"` is 12345, not an error.
 fn to_int_b(s: &[u8]) -> i64 {
     let v = to_float_b(s);
     if v.is_finite() { v.trunc() as i64 } else { 0 }
@@ -92,31 +94,6 @@ fn is_number_b(s: &[u8]) -> bool {
     std::str::from_utf8(s).ok().and_then(|t| t.parse::<f64>().ok()).is_some()
 }
 
-/// `float(s)` as Python reads it, with Python's fallback to a default.
-fn to_float(s: &str) -> f64 {
-    s.trim().parse::<f64>().unwrap_or(0.0)
-}
-
-/// `int(float(s))`: truncation toward zero, which is what the analyzer does
-/// to every size in the file. `"12345.000"` is 12345, not an error.
-fn to_int(s: &str) -> i64 {
-    let v = s.trim().parse::<f64>().unwrap_or(0.0);
-    if v.is_finite() {
-        v.trunc() as i64
-    } else {
-        0
-    }
-}
-
-/// Vic2 tags are three characters: ENG, FRA, and dynamic ones like D01.
-fn looks_like_country_tag(key: &str) -> bool {
-    let b = key.as_bytes();
-    b.len() == 3
-        && b[0].is_ascii_alphabetic()
-        && b[0].is_ascii_uppercase()
-        && b.iter().all(|c| c.is_ascii_alphanumeric())
-        && !b.iter().all(|c| c.is_ascii_digit())
-}
 
 /// Windows-1252 bytes as a Rust string, the way Python's latin-1 decode
 /// reads them: byte value is code point, and nothing can fail.
@@ -152,15 +129,6 @@ fn tag_bytes(key: &[u8]) -> bool {
         && !key.iter().all(|c| c.is_ascii_digit())
 }
 
-
-fn unquote(s: &str) -> &str {
-    let b = s.as_bytes();
-    if b.len() >= 2 && b[0] == b'"' && b[b.len() - 1] == b'"' {
-        &s[1..s.len() - 1]
-    } else {
-        s
-    }
-}
 
 /// Names stored once, referred to by number.
 #[derive(Default)]
@@ -715,7 +683,7 @@ fn serve(lists: &Lists) -> ! {
 fn scan_one(path: &str, lists: &Lists, bench: bool, raw: &mut Vec<u8>,
             sink: &mut impl Write, serving: bool) -> Result<(), Refusal> {
     let clock = Instant::now();
-    let mut mark = |what: &str, since: &mut Instant| {
+    let mark = |what: &str, since: &mut Instant| {
         if bench {
             eprintln!("  {:<22} {:>6.1} ms", what,
                       since.elapsed().as_secs_f64() * 1000.0);
