@@ -176,6 +176,31 @@ def a_stopped_run(root, app, saves, out):
     return wrong
 
 
+def a_refused_run(root, app, holding):
+    """
+    [what went wrong] when the analyzer refuses the run: here, a saves
+    folder that is not there. It says so in a sentence, and the window has
+    to put that sentence in its log rather than a traceback.
+    """
+    app.show_report = lambda path: None
+    app.open_after.set(False)
+    gone = os.path.join(holding, "no such folder")
+    app.work(gone, "", os.path.join(holding, "three"))
+    for _ in range(20):
+        root.update()
+        time.sleep(0.02)
+    log = app.log.get("1.0", "end")
+
+    wrong = []
+    if "Traceback" in log:
+        wrong.append("a refused run left a traceback in the log")
+    if "Path not found" not in log:
+        wrong.append("a refused run did not say why in the log")
+    print("  a refused run says: %s"
+          % next((l for l in log.splitlines() if "Path not found" in l),
+                 "(nothing)")[:70])
+    return wrong
+
 def a_start_keeps_other_settings(app, holding):
     """
     [what went wrong] when pressing Analyze forgets what the share menu keeps.
@@ -286,6 +311,7 @@ def main():
         app.show_report = gui.App.show_report.__get__(app)   # the real one
         wrong += opens_on_this_machine(app, os.path.join(out, "report.html"))
         wrong += a_stopped_run(root, app, saves, os.path.join(holding, "two"))
+        wrong += a_refused_run(root, app, holding)
         wrong += a_start_keeps_other_settings(app, holding)
         wrong += the_keeper_opens_its_folder(root, holding)
     finally:

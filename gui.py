@@ -29,6 +29,7 @@ from tkinter import filedialog, messagebox, ttk
 import readfolder
 import settings
 import vic2_analyzer
+from run import RunError
 # `human_size` lives in `keeper`, which is the lower of the two and imports
 # nothing but the standard library, so taking it from there costs this
 # module nothing and keeps one definition of how a byte count is said.
@@ -713,10 +714,11 @@ class App:
             stopped = True
             self.log_queue.put("\nStopped. Every save read so far is cached, so "
                                "starting again picks up where this left off.\n")
-        except SystemExit as stop:          # sys.exit on a path it cannot read
-            ok = not stop.code
-            if stop.code:
-                self.log_queue.put(f"\n{stop.code}\n")
+        except RunError as refused:
+            # A path it cannot read, a mod folder that is not one, a table
+            # open in Excel: said in a sentence, not a traceback.
+            ok = False
+            self.log_queue.put(f"\n{refused}\n")
         except Exception:
             ok = False
             import traceback

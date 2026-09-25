@@ -15,9 +15,21 @@ fills them in.
 """
 
 import argparse
-import sys
 from dataclasses import dataclass, field as _field, fields
 
+
+
+class RunError(Exception):
+    """
+    A run refused, in a sentence the person running it can act on: a path
+    that is not there, a mod folder that is not one, a table open in Excel.
+
+    The analyzer is a library to the window as much as a program to the
+    command line, so it says no by raising this rather than by ending the
+    process. `vic2_analyzer.main` turns it into the message and the exit
+    status the command line has always given; the window puts it in its
+    log.
+    """
 
 def _number(read, least, most=None):
     """
@@ -122,7 +134,7 @@ class Run:
         for pair in values.get("campaign_mod") or ():
             name, sep, path = pair.partition("=")
             if not sep or not name.strip():
-                sys.exit("--campaign-mod wants NAME=PATH, as in "
+                raise RunError("--campaign-mod wants NAME=PATH, as in "
                          '--campaign-mod "NeoMgame=C:\\...\\mod\\IGoR_puir '
                          '13.0.5". Got: %r' % pair)
             pairs.append((name.strip(), path.strip()))

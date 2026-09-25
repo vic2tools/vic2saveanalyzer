@@ -43,7 +43,6 @@ Being told outright still beats all of it: `--mod-path` skips this entirely.
 import io
 import os
 import re
-import sys
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -55,6 +54,7 @@ from mod_reader import (country_entries, invention_sequence, read_clausewitz,
                         settle_campaign)
 from readfolder import parse_saves
 from readsave import PLAIN, reading_for
+from run import RunError
 from savehead import (FLAG_FLOOR, FLAG_GAP, fields, flags_in, head_of,
                       in_date_order, one_per_date, sort_key)
 from stamp import report_stamp
@@ -514,7 +514,7 @@ def survey_cross(parent, game_root, args, verbose=True):
     for name, path in args.campaign_mod or ():
         path = os.path.expanduser(os.path.expandvars(path))
         if not os.path.isdir(os.path.join(path, "common")):
-            sys.exit("--campaign-mod %s: %s has no common/ inside it, so it is "
+            raise RunError("--campaign-mod %s: %s has no common/ inside it, so it is "
                      "not a mod folder." % (name, path))
         chosen[name.lower()] = path
 
@@ -544,7 +544,7 @@ def survey_cross(parent, game_root, args, verbose=True):
                          "  ->  %s   (as told)" % entry.mod_label
                          if entry.told else ""))
     elif not game_root and not chosen:
-        sys.exit("--cross needs --game-root (the Victoria 2 install folder, the "
+        raise RunError("--cross needs --game-root (the Victoria 2 install folder, the "
                  "one with mod/ inside) to work each campaign's mod out, "
                  "--mod-path to read them all under one mod, or "
                  "--campaign-mod to name them one at a time.")
@@ -702,7 +702,7 @@ def run_cross(parent, found, args, verbose=True):
 
     if args.primary and primary is None and results:
         known = ", ".join(name for name, _m, _p in results)
-        sys.exit("No campaign called %r under %s. There is: %s"
+        raise RunError("No campaign called %r under %s. There is: %s"
                  % (args.primary, parent, known))
     if not results or primary is None:
         return None, [], args.mod_path, PLAIN

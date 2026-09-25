@@ -21,6 +21,7 @@ from nation import (accepted_cultures_of, brigades_from_clusters,
                     mobilization_clusters)
 from readfolder import worker_count, worker_setup
 from readsave import analyze_save
+from run import RunError
 from v2parse import (TOKEN_RE, VANILLA_POP_TYPES, Tokens, looks_like_country_tag,
                      parse_block, pop_culture, read_save_text, skip_block,
                      to_int, unquote)
@@ -130,7 +131,7 @@ def explain(args, mod, live, parsed):
         meta, nations = parsed[-1]
         nat = nations.get(tag)
         if nat is None:
-            sys.exit(f"{tag} is not in {meta['file']}.")
+            raise RunError(f"{tag} is not in {meta['file']}.")
         from modrules import rate_for
         rate = rate_for(nat, mod, live=live,
                         world=save_world(meta, mod) if mod else None,
@@ -140,7 +141,7 @@ def explain(args, mod, live, parsed):
 
     if args.check_inventions:
         if not mod:
-            sys.exit("--check-inventions needs --mod-path.")
+            raise RunError("--check-inventions needs --mod-path.")
         from mod_reader import (alignment_score, index_holdings,
                                 ungated_inventions)
         holdings = index_holdings(parsed)
@@ -148,7 +149,7 @@ def explain(args, mod, live, parsed):
         seq = mod.invention_sequence
         print(f"\nChecking {len(seq)} inventions against {len(parsed)} saves.")
         if base is None:
-            sys.exit("  the indices did not decode at all, so there is "
+            raise RunError("  the indices did not decode at all, so there is "
                      "nothing to check.")
         if len(holdings) < 40:
             print(f"  only {len(holdings)} indices are held often enough to "
@@ -208,13 +209,13 @@ def explain(args, mod, live, parsed):
 
     if args.inventions:
         if not mod:
-            sys.exit("--inventions needs --mod-path.")
+            raise RunError("--inventions needs --mod-path.")
         from mod_reader import invention_files
         tag = args.inventions.upper()
         meta, nations = parsed[-1]
         nat = nations.get(tag)
         if nat is None:
-            sys.exit(f"{tag} is not in {meta['file']}.")
+            raise RunError(f"{tag} is not in {meta['file']}.")
         seq = mod.invention_sequence
         base = mod.index_base
         where = invention_files(args.mod_path)
@@ -224,7 +225,7 @@ def explain(args, mod, live, parsed):
               f"{len(held)} of them, indices {min(held, default=0)}"
               f"..{max(held, default=0)}")
         if base is None:
-            sys.exit("  indices could not be decoded for this install, so "
+            raise RunError("  indices could not be decoded for this install, so "
                      "there is nothing to print.")
         print(f"decoded with base {base}\n")
         shown = 0
@@ -251,13 +252,13 @@ def explain(args, mod, live, parsed):
 
     if args.explain_mob:
         if not mod:
-            sys.exit("--explain-mob needs --mod-path.")
+            raise RunError("--explain-mob needs --mod-path.")
         from modrules import breakdown
         tag = args.explain_mob.upper()
         meta, nations = parsed[-1]
         nat = nations.get(tag)
         if nat is None:
-            sys.exit(f"{tag} is not in {meta['file']}.")
+            raise RunError(f"{tag} is not in {meta['file']}.")
         parts = breakdown(nat, mod, live=live, world=save_world(meta, mod))
         print(f"\nMobilisation size for {tag} at {meta['date']}:")
         total = 0.0

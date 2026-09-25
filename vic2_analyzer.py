@@ -53,7 +53,7 @@ from readfolder import (
 # `analyze` hands a caller's Stop button and progress bar to these, and the
 # window catches `Cancelled` here, because the analyzer is the thing it runs.
 from readfolder import Cancelled, set_cancel_check, set_progress  # noqa: F401
-from run import Run, command_line
+from run import Run, RunError, command_line
 # The front of a save, read without the rest: its date, for the order.
 from savehead import in_date_order, one_per_date
 from stamp import already_built, forget_stamp, report_stamp, write_stamp
@@ -427,7 +427,7 @@ def _saves_in(args):
     """
     saves_path = os.path.expanduser(os.path.expandvars(args.saves))
     if not os.path.exists(saves_path):
-        sys.exit(
+        raise RunError(
             f"Path not found: {saves_path}\n"
             f"If you used ~ in PowerShell, try $HOME instead, or give the full "
             f"path starting with C:\\Users\\..."
@@ -440,7 +440,7 @@ def _saves_in(args):
     # With --cross the saves sit in subfolders, so a parent holding none of
     # its own is the ordinary case rather than a mistake.
     if not files and not args.cross:
-        sys.exit(
+        raise RunError(
             f"No .v2 files in {saves_path}\n"
             f"Point this at the folder that holds your saves, not at a "
             f"single save."
@@ -481,7 +481,7 @@ def _open_mod(args, signature):
         mod = load_mod(args.mod_path)
         return mod, mod, None
     except (OSError, ValueError) as exc:
-        sys.exit(str(exc))
+        raise RunError(str(exc)) from exc
 
 
 def _say_mod(mod, live, walked, every_nation):
@@ -574,12 +574,15 @@ def analyze(run, cancel=None, progress=None, ready=None):
     read back, and the three things it wants told -- whether to stop, how
     far along the saves are, and where the report landed -- as arguments,
     which are set for this run and cleared after it whatever happens.
+
+    A run refused comes back as the `RunError` it was refused with, for the
+    window to show, rather than as a request to end the process.
     """
     set_cancel_check(cancel)
     set_progress(progress)
     set_report_ready(ready)
     try:
-        return main(run)
+        return _run(run)
     finally:
         set_cancel_check(None)
         set_progress(None)
@@ -614,10 +617,20 @@ def start_forkserver():
 
 def main(run=None):
     """
-    One run, as `run` declares it, or as the command line does.
+    One run, as `run` declares it or as the command line does, for a
+    command line: a run refused ends the process with its sentence and a
+    non-zero status, which is how the command line has always said no.
+    """
+    try:
+        return _run(run)
+    except RunError as refused:
+        sys.exit(str(refused))
 
-    With Python's cycle collector switched off for the length of it, and
-    back on afterwards for the window, which goes on to run more.
+
+def _run(run=None):
+    """
+    One run, with Python's cycle collector switched off for the length of
+    it, and back on afterwards for the window, which goes on to run more.
 
     The collector exists for reference cycles, and a run makes next to none
     -- a warm rebuild with it off left 285 unreachable objects at the end,
@@ -671,7 +684,7 @@ def _main(run=None):
         # The rest of the report is the primary campaign's, under its mod.
         args = replace(args, mod_path=primary_mod)
         if not files:
-            sys.exit("--cross found no campaigns under %s" % saves_path)
+            raise RunError("--cross found no campaigns under %s" % saves_path)
 
     if args.verify:
         verify_all(files, verify_under, args.jobs)
@@ -684,7 +697,7 @@ def _main(run=None):
     try:
         os.makedirs(args.out, exist_ok=True)
     except OSError as exc:
-        sys.exit(f"Cannot write to {args.out}\n"
+        raise RunError(f"Cannot write to {args.out}\n"
                  f"{exc.strerror or exc}. Choose somewhere else with --out.")
 
     verbose = not args.quiet
@@ -774,7 +787,7 @@ def _main(run=None):
             try:
                 mod = loading.result()
             except (OSError, ValueError) as exc:
-                sys.exit(str(exc))
+                raise RunError(str(exc)) from exc
         # Saves name each nation's inventions by index. Decoding them is what
         # turns the mobilisation size from "every invention this nation could
         # have" into the ones it actually rolled.
@@ -821,7 +834,7 @@ def _main(run=None):
     rows, parsed = campaign.rows, campaign.parsed
 
     if not parsed:
-        sys.exit("No saves could be read.")
+        raise RunError("No saves could be read.")
 
     if explain(args, mod, live, parsed):
         return
@@ -871,7 +884,7 @@ def _main(run=None):
     if verbose:
         _say_summary(rows, parsed, price_rows, bool(mod), paths)
     if refused:
-        sys.exit("\nCould not write %s: open in another program -- on "
+        raise RunError("\nCould not write %s: open in another program -- on "
                  "Windows a table open in Excel is locked -- or not "
                  "writable here. Close it and run again.%s"
                  % (", ".join(os.path.basename(p) for p in refused),

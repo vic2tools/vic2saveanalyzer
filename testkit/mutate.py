@@ -479,6 +479,17 @@ def m53():
           "        return True\n")
 
 
+# ---- a run refused in a sentence, which the window has to show as one
+
+@mutation("window-shows-refusal-as-traceback",
+          "the window does not catch a refused run, so the sentence the "
+          "analyzer refused it with reaches the log as a traceback",
+          "window.py", "saves")
+def m54():
+    patch("gui.py", "        except RunError as refused:\n",
+          "        except ZeroDivisionError as refused:\n")
+
+
 # ---- the event-flag rule, which the keeper and --cross each had a copy of
 
 @mutation("flag-gap-too-wide",
