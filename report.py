@@ -1258,14 +1258,13 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
     # ---- market ----
     price_dates, pseen = [], set()
     goods_meta, prices = {}, {}
-    for row in price_rows:
-        date = row["date"]
+    # (date, year, good, category, price), in `write_outputs`'s order.
+    for date, _year, good, category, price in price_rows:
         if date not in pseen:
             pseen.add(date)
             price_dates.append(date)
-        good = row["good"]
-        goods_meta.setdefault(good, row.get("category", "other"))
-        prices.setdefault(good, {})[date] = float(row["price"])
+        goods_meta.setdefault(good, category)
+        prices.setdefault(good, {})[date] = float(price)
     price_dates.sort(key=year_fraction)
 
     # A good whose price never moves is undiscovered or untraded. Keep it out of

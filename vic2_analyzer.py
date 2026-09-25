@@ -418,16 +418,19 @@ def merge_prices(parsed):
             if key not in prices:
                 prices[key] = price
 
+    # Tuples in the column order `write_outputs` declares, like the other
+    # big tables: a campaign has ninety thousand of these, and a dict each
+    # was half the time this took and made the CSV writer name the same
+    # five columns ninety thousand times.
     rows = []
+    years = {}
     for (stamp, good), price in prices.items():
-        rows.append({
-            "date": stamp,
-            "year": stamp.split(".")[0],
-            "good": good,
-            "category": GOOD_CATEGORY.get(good, "other"),
-            "price": round(price, 5),
-        })
-    rows.sort(key=lambda r: (date_key(r["date"]), r["good"]))
+        year = years.get(stamp)
+        if year is None:
+            year = years[stamp] = stamp.split(".")[0]
+        rows.append((stamp, year, good, GOOD_CATEGORY.get(good, "other"),
+                     round(price, 5)))
+    rows.sort(key=lambda r: (date_key(r[0]), r[2]))
     return rows
 
 
@@ -1949,10 +1952,10 @@ def _main(run=None):
     if verbose:
         print(f"\n{len(rows)} nation-rows across {len(parsed)} saves.")
         if price_rows:
-            months = sorted({r["date"] for r in price_rows}, key=date_key)
+            months = sorted({r[0] for r in price_rows}, key=date_key)
             print(f"{len(months)} dated price points, "
                   f"{months[0]} to {months[-1]}, "
-                  f"{len({r['good'] for r in price_rows})} goods.")
+                  f"{len({r[2] for r in price_rows})} goods.")
         # Read back out of the rows this run just wrote, rather than
         # finalizing the last save a second time. It is quicker, it is what
         # lets a save be let go the moment its row exists -- and it settles
