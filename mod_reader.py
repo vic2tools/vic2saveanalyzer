@@ -2283,22 +2283,45 @@ def validate_indices(mod, nations, base=1):
     handful survive because events and decisions can grant an invention whose
     `limit` the nation does not meet. A wrong ordering leaves tens of percent.
     """
+    return _violations(mod, _holdings(nations), base)
+
+
+def _holdings(nations):
+    """
+    Each distinct (tag, technologies, invention ids) among these nations,
+    as (how many times it occurs, the technologies as a set, tag, ids).
+
+    A campaign's nations are the same nation save after save, and a
+    nation's technologies and inventions change a few times a decade: of
+    the 4,271 nation-saves in a hundred monthly saves, most repeat the one
+    before. Judged once each and counted as often as they occur, the
+    totals come out the same, for a fraction of the work.
+    """
+    seen = {}
+    for nat in nations:
+        key = (nat.get("tag", ""), tuple(nat.get("tech_list", ())),
+               tuple(nat.get("invention_ids", ())))
+        seen[key] = seen.get(key, 0) + 1
+    return [(count, set(techs), tag, ids)
+            for (tag, techs, ids), count in seen.items()]
+
+
+def _violations(mod, holdings, base):
+    """`validate_indices`, over `_holdings`."""
     seq = mod.invention_sequence or []
     bad = total = 0
-    for nat in nations:
-        techs = set(nat.get("tech_list", ()))
-        tag = nat.get("tag", "")
-        for idx in nat.get("invention_ids", ()):
-            total += 1
+    for count, techs, tag, ids in holdings:
+        for idx in ids:
+            total += count
             j = idx - base
             if j < 0 or j >= len(seq):
-                bad += 1
+                bad += count
                 continue
             rule = seq[j]
             if not rule["techs"] <= techs:
-                bad += 1
+                bad += count
             elif rule["tags"] and tag not in rule["tags"]:
-                bad += 1
+                bad += count
     return bad, total
 
 
@@ -2310,9 +2333,10 @@ def index_base_for(mod, nations):
     reconstructed load order is wrong for this install, and the caller should
     fall back to matching inventions by their requirements.
     """
+    holdings = _holdings(nations)
     best, best_rate = None, 1.0
     for base in (1, 0):
-        bad, total = validate_indices(mod, nations, base)
+        bad, total = _violations(mod, holdings, base)
         if not total:
             return None
         rate = bad / total
