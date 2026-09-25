@@ -34,6 +34,7 @@ parse cache alone.
 
 import hashlib
 import os
+import pickle
 import sys
 import tempfile
 
@@ -182,6 +183,9 @@ def campaign_slot(name, files, reading=PLAIN, use_cache=True):
 # A picklable callable applied after reading and caching a save. The parent
 # can request either invention summaries or finalized nations.
 _TRANSFORM = None
+# Where the transform waits when it was handed over as a file, until the
+# worker's first job reads it. See `_hand_over`.
+_HANDED = None
 
 
 def worker_setup(reading, transform=None):
@@ -192,10 +196,60 @@ def worker_setup(reading, transform=None):
     name, so nothing the parent set is set here. It used to be told three
     lists and had to put them back in the right three places; it is told the
     one profile and asks it to.
+
+    The transform comes either itself or as the path `_hand_over` wrote it
+    to, and in that case it is read with the first job rather than here.
     """
-    global _TRANSFORM
+    global _TRANSFORM, _HANDED
     reading.apply()
-    _TRANSFORM = transform
+    if isinstance(transform, str):
+        _TRANSFORM, _HANDED = None, transform
+    else:
+        _TRANSFORM, _HANDED = transform, None
+
+
+def _hand_over(transform):
+    """
+    The transform, as something a worker can be started with cheaply: the
+    path of a file holding it, or None when there is none to hand over.
+
+    Under a mod the transform carries the mod, a third of a megabyte, and
+    a worker is started by writing what it is started with down a pipe.
+    Python writes all of it before starting the next worker, and a pipe
+    holds 64 KB, so each write waited for that worker to come up, import
+    the mod reader and unpickle the mod: fifteen workers started one after
+    another, and the first finished save reached the parent 0.3 s after
+    the walk began though a worker was done with it in 90 ms. Written once
+    to a file, what goes down each pipe is a path, the workers come up
+    side by side and each reads the file itself.
+
+    Under spawn, which is how Windows starts every worker, the wait was
+    longer: there the pipe is read only after a fresh interpreter has
+    started and imported the whole analyzer. Measured with spawn here, a
+    warm rebuild went from 2.68 s to 2.39 s.
+
+    Pickled before the file is made, so a transform that cannot be sent --
+    a lambda, which has no name to be sent by -- fails here as it would
+    have failed at the pipe, and leaves nothing behind.
+    """
+    if transform is None:
+        return None
+    blob = pickle.dumps(transform, pickle.HIGHEST_PROTOCOL)
+    fd, path = tempfile.mkstemp(prefix="vic2_job_", suffix=".pkl")
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(blob)
+    return path
+
+
+def _let_go(path):
+    """Remove what `_hand_over` wrote, once no job can still ask for it."""
+    if path:
+        try:
+            os.remove(path)
+        except OSError:
+            # Windows will not remove a file a worker still has open, which
+            # only happens when a run is stopped part-way through a job.
+            pass
 
 
 def _worker_parse(job):
@@ -214,7 +268,12 @@ def _worker_parse(job):
 
     Plain dicts, because a defaultdict of lambdas will not pickle.
     """
+    global _TRANSFORM, _HANDED
     index, path, slot, cached = job
+    if _HANDED is not None:
+        with open(_HANDED, "rb") as fh:
+            _TRANSFORM = pickle.load(fh)
+        _HANDED = None
     meta = nations = None
     if cached:
         got = _cache_read(slot)
@@ -389,11 +448,13 @@ def parse_saves_stream(files, verbose=True, use_cache=True, reading=PLAIN,
         print(f"Reading {len(todo)} save(s) on {workers} cores.")
 
     pool = None
+    handed = None
     if workers > 1:
         try:
+            handed = _hand_over(transform)
             pool = ProcessPoolExecutor(
                 max_workers=workers, initializer=worker_setup,
-                initargs=(reading, transform))
+                initargs=(reading, handed))
         except Exception as exc:
             print(f"  reading one at a time ({exc})", file=sys.stderr)
 
@@ -498,6 +559,7 @@ def parse_saves_stream(files, verbose=True, use_cache=True, reading=PLAIN,
             future.cancel()
         if pool is not None:
             pool.shutdown(wait=False, cancel_futures=True)
+        _let_go(handed)
 
 
 def _parse_parallel(files, out, todo, slots, workers, verbose, reading,
