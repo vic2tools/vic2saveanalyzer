@@ -30,9 +30,14 @@ also carries no Rust scanner** -- the 20 September build's archive has no
 `vic2scan` in it -- so Windows users read every save in Python, about four
 times slower. `build_exe.py` bundles the scanner only if
 `scanner/target/release/vic2scan.exe` exists, so on the Windows machine run
-`cargo build --release --manifest-path scanner/Cargo.toml` first. There is no
-cargo on this machine; the Linux binary in `scanner/target/release/` cannot be
-rebuilt here either.
+`cargo build --release --manifest-path scanner/Cargo.toml` first. Rust *is*
+installed on this machine -- rustup's stable 1.98.1 in `~/.cargo/bin`, which is
+not on the PATH (`export PATH="$HOME/.cargo/bin:$PATH"`); an earlier note here
+said there was none. A release build of the scanner takes about 4 s, and one
+built on 24 September gave byte-identical output to the binary in
+`scanner/target/release/` on a real save, so that binary matches its source.
+Only the Linux target is installed, and there is no Wine, so a Windows build of
+the scanner can be neither made nor run here.
 
 Read `REVIEW.md` before changing anything it covers. §12-§31 are the
 thermonuclear review of `26f3680` and what was done about it. Do not re-open
