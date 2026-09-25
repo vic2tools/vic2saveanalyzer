@@ -131,14 +131,15 @@ def a_refused_token(holding, report):
 
         try:
             import app
-            import gui
+            import settings
         except Exception:                                # noqa: BLE001
             print("  a refused token is forgotten: no tkinter here, not tried")
             return wrong
-        real, gui.SETTINGS = gui.SETTINGS, os.path.join(holding, "settings.json")
+        real = settings.ANALYZER
+        settings.ANALYZER = os.path.join(holding, "settings.json")
         real_publish = publish.publish
         try:
-            gui.save_settings({"github_token": "ghp_expired", "saves": "x"})
+            settings.remember(github_token="ghp_expired", saves="x")
             publish.publish = lambda *a, **k: real_publish(*a, base=base,
                                                            **{n: v for n, v in k.items()
                                                               if n != "base"})
@@ -148,10 +149,10 @@ def a_refused_token(holding, report):
                 root=types.SimpleNamespace(after=lambda _ms, fn, *a: told.append(a)),
                 publish_failed=None, published=None)
             app.Tools._publish(window, report, "ghp_expired", "a campaign", [])
-            after = gui.load_settings()
+            after = settings.load()
         finally:
             publish.publish = real_publish
-            gui.SETTINGS = real
+            settings.ANALYZER = real
         if "github_token" in after:
             wrong.append("a token GitHub refused is still held, so the next "
                          "press hands it back again")

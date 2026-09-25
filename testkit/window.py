@@ -187,8 +187,9 @@ def a_start_keeps_other_settings(app, holding):
     analysis erased both. The file is pointed somewhere of this check's own
     first; the real one is never touched.
     """
-    import gui
-    real, gui.SETTINGS = gui.SETTINGS, os.path.join(holding, "settings.json")
+    import settings
+    real = settings.ANALYZER
+    settings.ANALYZER = os.path.join(holding, "settings.json")
     saves = os.path.join(holding, "keep-saves")
     mod = os.path.join(holding, "keep-mod")
     os.makedirs(saves)
@@ -197,7 +198,7 @@ def a_start_keeps_other_settings(app, holding):
     ran = []
     work, app.work = app.work, lambda *a, **k: ran.append(a)
     try:
-        gui.save_settings({"github_token": "ghp_kept", "report_host": "https://kept"})
+        settings.remember(github_token="ghp_kept", report_host="https://kept")
         app.saves.set(saves)
         app.mod.set(mod)
         app.out.set(os.path.join(holding, "keep-out"))
@@ -206,11 +207,11 @@ def a_start_keeps_other_settings(app, holding):
             if ran:
                 break
             time.sleep(0.02)
-        after = gui.load_settings()
+        after = settings.load()
     finally:
         app.work = work
         app.running = False
-        gui.SETTINGS = real
+        settings.ANALYZER = real
     wrong = []
     if not ran:
         wrong.append("pressing Analyze never started a run, so the settings "

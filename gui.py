@@ -18,7 +18,6 @@ line prints into a log box. Paths are remembered between runs.
 Packaged as vic2saveanalyzer.exe by build_exe.py.
 """
 
-import json
 import os
 import queue
 import sys
@@ -27,6 +26,7 @@ import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+import settings
 import vic2_analyzer
 # `human_size` lives in `keeper`, which is the lower of the two and imports
 # nothing but the standard library, so taking it from there costs this
@@ -108,43 +108,6 @@ def search_root(path):
     return None
 
 
-def _settings_path(app):
-    """
-    Where this machine keeps a program's settings.
-
-    Windows has APPDATA and that is the end of it. Everywhere else, falling
-    back to the home directory put the file at `~/<app>/settings.json`, which
-    on this machine is the checkout itself -- a test run wrote its settings
-    into the working tree and they were very nearly committed. The XDG
-    directory is where settings belong on those systems anyway.
-    """
-    roaming = os.environ.get("APPDATA")
-    if roaming:
-        return os.path.join(roaming, app, "settings.json")
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
-        os.path.expanduser("~"), ".config")
-    return os.path.join(base, app, "settings.json")
-
-
-SETTINGS = _settings_path("vic2saveanalyzer")
-
-
-def _documents():
-    """The user's Documents folder, OneDrive's copy included.
-
-    Windows moves Documents under OneDrive when that is switched on, and
-    Victoria II follows it there, so both are worth looking at. Neither is
-    guaranteed to exist; the caller checks.
-    """
-    home = os.path.expanduser("~")
-    out = []
-    for base in (os.environ.get("OneDrive"), os.environ.get("OneDriveConsumer"),
-                 home):
-        if base:
-            out.append(os.path.join(base, "Documents"))
-    return out
-
-
 def _first_folder(candidates):
     """The first of these that is actually there, or ""."""
     for path in candidates:
@@ -161,8 +124,7 @@ def default_saves():
     holding .v2 files -- a campaign kept in a subfolder of it is one Browse
     away, and the dialog opens there.
     """
-    roots = [os.path.join(d, "Paradox Interactive", "Victoria II")
-             for d in _documents()]
+    roots = settings.game_folders()
     return _first_folder([os.path.join(r, "save games") for r in roots] + roots)
 
 
@@ -212,25 +174,9 @@ def default_out():
     backed up as the game's, and a campaign folder that has quietly grown an
     `analysis` directory inside it is a folder someone has to tidy later.
     """
-    return os.path.join(_first_folder(_documents()) or os.path.expanduser("~"),
+    return os.path.join(_first_folder(settings.documents())
+                        or os.path.expanduser("~"),
                         "Victoria 2 Save Analyzer")
-
-
-def load_settings():
-    try:
-        with open(SETTINGS, encoding="utf-8") as fh:
-            return json.load(fh)
-    except Exception:
-        return {}
-
-
-def save_settings(data):
-    try:
-        os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
-        with open(SETTINGS, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=1)
-    except Exception:
-        pass                      # remembering paths is a convenience, not a duty
 
 
 class Pipe:
@@ -273,7 +219,7 @@ class App:
         # must not open a second copy of it.
         self.opened = False
         self.mod_paths = {}
-        saved = load_settings()
+        saved = settings.load()
 
         alone = parent is None
         if alone:
@@ -705,13 +651,10 @@ class App:
 
         out = self.out.get().strip() or default_out()
         self.out.set(out)
-        # Into what is there, not over it. The same file holds what the
-        # share menu remembers -- the GitHub token and the report host --
-        # and writing these four as the whole file erased both on every run.
-        remembered = load_settings()
-        remembered.update(saves=saves, mod=mod, out=out,
+        # Into what is there, not over it: the same file holds the GitHub
+        # token and the report host. See `settings`.
+        settings.remember(saves=saves, mod=mod, out=out,
                           open_after=self.open_after.get())
-        save_settings(remembered)
 
         self.running = True
         self.stop.clear()

@@ -19,7 +19,6 @@ Built as one tab of the campaign tools by app.py, and still
 runnable on its own.
 """
 
-import json
 import os
 import queue
 import sys
@@ -28,36 +27,14 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import keeper
-from gui import SETTINGS as _ANALYZER_SETTINGS
+import settings
 
 APP = "Victoria 2 Autosave Keeper"
 
-# One window now, so one settings file: the keeper's half of it lives beside
-# the analyzer's rather than in a directory of its own.
-SETTINGS = os.path.join(os.path.dirname(_ANALYZER_SETTINGS),
-                        "keeper.json")
-
-
-def _documents():
-    """The user's Documents folder, OneDrive's copy included.
-
-    Windows moves Documents under OneDrive when that is switched on, and
-    Victoria II follows it there, so both are worth looking at.
-    """
-    home = os.path.expanduser("~")
-    out = []
-    for base in (os.environ.get("OneDrive"), os.environ.get("OneDriveConsumer"),
-                 home):
-        if base:
-            out.append(os.path.join(base, "Documents"))
-    return out
-
-
 def default_saves():
     """Where Victoria II writes its saves, if this machine has that folder."""
-    for docs in _documents():
-        where = os.path.join(docs, "Paradox Interactive", "Victoria II",
-                             "save games")
+    for root in settings.game_folders():
+        where = os.path.join(root, "save games")
         if os.path.isdir(where):
             return os.path.normpath(where)
     return keeper.SAVES
@@ -65,38 +42,10 @@ def default_saves():
 
 def default_out():
     """Where to keep them: beside Documents, never inside the game's folder."""
-    for docs in _documents():
+    for docs in settings.documents():
         if os.path.isdir(docs):
             return os.path.join(docs, "Exportsaves")
     return keeper.EXPORT
-
-
-# Where the keeper kept its settings when it was a program of its own. Read
-# once, if there is nothing in the new place yet, so folders somebody picked
-# before these became one window are still there afterwards.
-FORMERLY = os.path.join(
-    os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"),
-                                              ".config"),
-    "vic2autosavekeeper", "settings.json")
-
-
-def load_settings():
-    for path in (SETTINGS, FORMERLY):
-        try:
-            with open(path, encoding="utf-8") as fh:
-                return json.load(fh)
-        except Exception:
-            continue
-    return {}
-
-
-def save_settings(data):
-    try:
-        os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
-        with open(SETTINGS, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=1)
-    except Exception:
-        pass                        # a forgotten path is not worth an error
 
 
 class Keeper:
@@ -112,7 +61,8 @@ class Keeper:
         self.stop = threading.Event()
         self.worker = None
         self.tally = [0, 0]
-        remembered = load_settings()
+        remembered = settings.load(settings.KEEPER,
+                                   formerly=settings.KEEPER_FORMERLY)
 
         alone = parent is None
         if alone:
@@ -225,8 +175,8 @@ class Keeper:
         if bad:
             messagebox.showerror(APP, bad)
             return
-        save_settings({"saves": args.saves, "out": args.out,
-                       "every": args.every, "all": args.all})
+        settings.remember(settings.KEEPER, saves=args.saves, out=args.out,
+                          every=args.every, all=args.all)
         self.tally = [0, 0]
         self.stop.clear()
         self.worker = threading.Thread(target=self.work, args=(args,),

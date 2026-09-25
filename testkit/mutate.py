@@ -494,23 +494,18 @@ def m52():
 # ---- pressing Analyze erased the token; a refused token could not be replaced
 
 @mutation("analyze-erases-share-settings",
-          "pressing Analyze writes its four paths as the whole settings file, "
-          "erasing the GitHub token and the report host", "window.py", "saves")
+          "remembering the window's paths writes them as the whole settings "
+          "file, erasing the GitHub token and the report host", "window.py",
+          "saves")
 def m35():
-    patch("gui.py",
-          """        remembered = load_settings()
-        remembered.update(saves=saves, mod=mod, out=out,
-                          open_after=self.open_after.get())
-        save_settings(remembered)""",
-          """        save_settings({"saves": saves, "mod": mod, "out": out,
-                       "open_after": self.open_after.get()})""")
+    patch("settings.py", "    held = load(path)\n", "    held = {}\n")
 
 
 @mutation("refused-token-kept",
           "a token GitHub refuses stays held and is handed back on every press",
           "sharing.py")
 def m36():
-    patch("app.py", "            forget_token()\n", "")
+    patch("app.py", "            settings.remember(github_token=None)\n", "")
 
 
 # ---- a mod file named in other case was read beside the game's

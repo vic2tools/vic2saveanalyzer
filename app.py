@@ -36,6 +36,7 @@ import gui
 import keeper
 import keeper_gui
 import publish
+import settings
 
 APP = "Victoria 2 campaign tools"
 
@@ -184,8 +185,7 @@ class Tools:
 
     def host(self):
         """The address of a report host, asked for once and remembered."""
-        saved = gui.load_settings()
-        held = saved.get("report_host", "")
+        held = settings.load().get("report_host", "")
         got = simpledialog.askstring(
             APP,
             "Address of a report host.\n\n"
@@ -198,15 +198,14 @@ class Tools:
         if got is None:
             return held                # cancelled: keep whatever was there
         got = got.strip().rstrip("/")
-        saved["report_host"] = got
-        gui.save_settings(saved)
+        settings.remember(report_host=got)
         return got
 
     def to_host(self):
         report = self.current_report()
         if not report:
             return
-        endpoint = gui.load_settings().get("report_host", "") or self.host()
+        endpoint = settings.load().get("report_host", "") or self.host()
         if not endpoint:
             return
         name = os.path.basename(os.path.dirname(os.path.abspath(report)))
@@ -230,8 +229,7 @@ class Tools:
 
     def token(self):
         """The GitHub token, asked for once and remembered after that."""
-        saved = gui.load_settings()
-        held = saved.get("github_token", "")
+        held = settings.load().get("github_token", "")
         if held:
             return held
         if not messagebox.askokcancel(
@@ -252,8 +250,7 @@ class Tools:
                                      show="•", parent=self.root)
         got = (got or "").strip()
         if got:
-            saved["github_token"] = got
-            gui.save_settings(saved)
+            settings.remember(github_token=got)
         return got
 
     def share(self):
@@ -290,7 +287,7 @@ class Tools:
             # handed straight back on every press, and the only way to a
             # new one was editing the settings file by hand -- which every
             # fine-grained token, expiring by default, comes to.
-            forget_token()
+            settings.remember(github_token=None)
             said = "%s It has been forgotten here, so the next publish " \
                    "asks for a new one." % err
             tell("Could not publish it: %s\n" % said)
@@ -339,13 +336,6 @@ class Tools:
         except tk.TclError:
             pass
         self.root.destroy()
-
-
-def forget_token():
-    """Drop the GitHub token from the settings file, and nothing else."""
-    saved = gui.load_settings()
-    if saved.pop("github_token", None) is not None:
-        gui.save_settings(saved)
 
 
 def main():
