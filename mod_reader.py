@@ -1905,6 +1905,10 @@ class Mod:
                 "for what reading it too early used to cost.")
         return self._index_base
 
+    def __bool__(self):
+        """False for `NO_MOD`, the run with no mod folder, and only for it."""
+        return self.path is not None
+
     def __eq__(self, other):
         if not isinstance(other, Mod):
             return NotImplemented
@@ -1914,6 +1918,8 @@ class Mod:
                 and self._index_base == other._index_base)
 
     def __repr__(self):
+        if not self:
+            return "<no mod>"
         return "<Mod %s, %d techs, %d inventions%s>" % (
             os.path.basename(self.path or "?"), self.tech_count,
             self.invention_count,
@@ -1935,6 +1941,20 @@ class Mod:
         self._indices_read = read
         self._index_base = base
 
+
+
+def _no_mod():
+    mod = Mod(**{name: None for name in MOD_FIELDS})
+    mod._indices_read = True          # asked, and there is nothing to decode
+    return mod
+
+
+# A run with no mod folder. Every field is None, the indices have nothing
+# to decode, and it is false, so `if mod:` means "is there a mod" whichever
+# of the two a caller holds. A run carries this from the start rather than
+# a None, so what it hands the report can be read off it field by field
+# instead of each field being asked whether there is a mod first.
+NO_MOD = _no_mod()
 
 def _mod_slot(path, signature=None):
     """Where this mod's loaded form lives, keyed by every file in it and by

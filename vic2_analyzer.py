@@ -386,21 +386,19 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
                 rows, campaign.tables, price_rows, snapshot_rows, args.out,
                 tag_names=report_names,
                 map_data=map_data,
-                base_prices=(mod.base_prices if mod else None),
+                base_prices=mod.base_prices,
                 great_powers=great_powers,
                 flags=flags,
                 cross=cross_payload,
-                technology=(mod.technology if mod else None),
-                wars=build_wars(parsed, (mod.province_names if mod else None),
-                                (mod.province_regions if mod else None),
-                                (mod.state_names if mod else None),
-                                (mod.unit_kinds if mod else None), book=war_book),
-                succession=build_succession(parsed,
-                                            (mod.formations if mod else None)),
-                culture_names=(mod.culture_names if mod else None),
-                display_names=(mod.display_names if mod else None),
+                technology=mod.technology,
+                wars=build_wars(parsed, mod.province_names,
+                                mod.province_regions, mod.state_names,
+                                mod.unit_kinds, book=war_book),
+                succession=build_succession(parsed, mod.formations),
+                culture_names=mod.culture_names,
+                display_names=mod.display_names,
                 naval={"profiles": naval_profiles, "of": naval_of,
-                       "exact": (mod.index_base if mod else None) is not None}
+                       "exact": mod.index_base is not None}
                       if naval_profiles else None,
                 supply=supply_by,
                 # One number a save rather than one a nation, so it is
@@ -463,13 +461,13 @@ def _open_mod(args, signature):
     saves, which then take 2.6 s to read instead of 2.3, but the two together
     took 3.2 s one after the other with fifteen cores idle for the first.
 
-    With no mod asked for, all three are None. A mod folder that has been
+    With no mod asked for, the first two are `NO_MOD`. A mod folder that has been
     renamed, moved or mistyped is refused in the words `mod_reader` gives,
     rather than as a stack trace.
     """
+    from mod_reader import NO_MOD, cached_mod, has_rules, load_mod, mod_head
     if not args.mod_path:
-        return None, None, None
-    from mod_reader import cached_mod, has_rules, load_mod, mod_head
+        return NO_MOD, NO_MOD, None
     try:
         mod = cached_mod(args.mod_path, signature)
         if mod is not None:
@@ -722,7 +720,7 @@ def _main(run=None):
     settled_size, settled_types = finishing.mod_defaults(args, known)
     args = replace(args, pop_per_regiment=settled_size,
                    mob_types=tuple(settled_types))
-    if known is not None and verbose:
+    if known and verbose:
         from v2parse import VANILLA_POP_TYPES
         extra = sorted(set(known.pop_types) - VANILLA_POP_TYPES)
         print("defines.lua: POP_SIZE_PER_REGIMENT="
@@ -767,7 +765,7 @@ def _main(run=None):
                          jobs=args.jobs)
 
     live = None
-    if known is not None:
+    if known:
         from mod_reader import settle_campaign
         # Decode invention indices from compact summaries. Population and
         # province data stay in the raw cache until the report needs them.
@@ -814,7 +812,7 @@ def _main(run=None):
     transform = (partial(spending.spend, spec=spec, keep_fields=keep_fields,
                          pop_columns=pop_columns) if in_workers else None)
     stream = parse_saves_stream(
-        files, verbose=verbose and mod is None, transform=transform,
+        files, verbose=verbose and not mod, transform=transform,
         **parse_options)
     campaign = walk_campaign(stream, spec, in_workers, pop_columns)
     # What is left in `main` is what `main` still uses: the tables it
@@ -871,7 +869,7 @@ def _main(run=None):
             write_stamp(args.out, stamp)
 
     if verbose:
-        _say_summary(rows, parsed, price_rows, mod is not None, paths)
+        _say_summary(rows, parsed, price_rows, bool(mod), paths)
     if refused:
         sys.exit("\nCould not write %s: open in another program -- on "
                  "Windows a table open in Excel is locked -- or not "

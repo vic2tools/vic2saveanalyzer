@@ -192,7 +192,7 @@ def save_rows(meta, nations, spec, pop_columns):
         # researched the same things have the same ships, so the parent keeps
         # each profile once and refers to it by number; the key it knows one
         # by is worked out here.
-        if spec.mod is not None and done["ships"]:
+        if spec.mod and done["ships"]:
             from mod_reader import naval_profile
             profile = naval_profile(done, spec.mod)
             naval.append((tag, json.dumps(profile, sort_keys=True), profile))

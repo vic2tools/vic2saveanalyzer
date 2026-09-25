@@ -139,7 +139,7 @@ def explain(args, mod, live, parsed):
         return True
 
     if args.check_inventions:
-        if mod is None:
+        if not mod:
             sys.exit("--check-inventions needs --mod-path.")
         from mod_reader import (alignment_score, index_holdings,
                                 ungated_inventions)
@@ -207,7 +207,7 @@ def explain(args, mod, live, parsed):
         return True
 
     if args.inventions:
-        if mod is None:
+        if not mod:
             sys.exit("--inventions needs --mod-path.")
         from mod_reader import invention_files
         tag = args.inventions.upper()
@@ -250,7 +250,7 @@ def explain(args, mod, live, parsed):
         return True
 
     if args.explain_mob:
-        if mod is None:
+        if not mod:
             sys.exit("--explain-mob needs --mod-path.")
         from modrules import breakdown
         tag = args.explain_mob.upper()

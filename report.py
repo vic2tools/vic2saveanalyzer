@@ -553,7 +553,7 @@ def nation_names(mod, parsed):
     nothing to read, and tags stand in for names.
     """
     names = {}
-    if mod is None or not mod.localisation:
+    if not mod or not mod.localisation:
         return names
     from mod_reader import name_for
     loc = mod.localisation
@@ -571,7 +571,7 @@ def flags_for(mod, parsed, war_book):
     indices back into tags and holds the flag images.
     """
     great_powers, flags = {}, {}
-    if mod is None or not mod.country_order:
+    if not mod or not mod.country_order:
         return great_powers, flags
     from mod_reader import flag_images, flag_suffixes, government_flag_types
     from modrules import great_powers as ranked

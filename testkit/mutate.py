@@ -468,6 +468,17 @@ def m49():
           "        except (ZeroDivisionError,) as exc:")
 
 
+# ---- a run with no mod carries NO_MOD, which has to read as no mod
+
+@mutation("no-mod-is-a-mod",
+          "NO_MOD answers true, so a run with no mod folder goes looking for "
+          "the rules, the inventions and the flags of a mod that is not there",
+          "edges.py")
+def m53():
+    patch("mod_reader.py", "        return self.path is not None\n",
+          "        return True\n")
+
+
 # ---- the event-flag rule, which the keeper and --cross each had a copy of
 
 @mutation("flag-gap-too-wide",

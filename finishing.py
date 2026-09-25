@@ -183,7 +183,7 @@ def finish_nations(meta, nations, spec):
     # modifiers ask about: the year, the great powers, who is at war and who
     # owns what. One per save rather than one per nation, and worked out
     # here rather than sent, because the worker has the save and the mod.
-    stage = save_world(meta, spec.mod) if spec.mod is not None else None
+    stage = save_world(meta, spec.mod) if spec.mod else None
     out = {}
     for tag, nat in nations.items():
         if not kept_by(spec, tag, nat):

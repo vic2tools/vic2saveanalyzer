@@ -383,7 +383,7 @@ def rate_for(nation, mod, live=None, world=None, fallback=0.0):
     of them -- `--explain-mob-pool` -- went on printing 100% for nations
     the report itself scored at 0.
     """
-    if mod is None:
+    if not mod:
         return fallback
     return max(0.0, sum(value for _kind, _name, value in
                         breakdown(nation, mod, live, world)))
