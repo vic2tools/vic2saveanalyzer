@@ -32,6 +32,7 @@ nothing here imports it -- which is also why editing the finishing leaves the
 parse cache alone.
 """
 
+import gc
 import hashlib
 import os
 import pickle
@@ -202,6 +203,12 @@ def worker_setup(reading, transform=None):
     """
     global _TRANSFORM, _HANDED
     reading.apply()
+    # Reading a save makes no reference cycles -- eighteen saves read with
+    # the cycle collector off left nothing for it to find -- so it is off
+    # here, as it is in the parent for the length of a run (see
+    # `vic2_analyzer.main`). It was 5 ms of every save. A worker lives
+    # only as long as its pool.
+    gc.disable()
     if isinstance(transform, str):
         _TRANSFORM, _HANDED = None, transform
     else:

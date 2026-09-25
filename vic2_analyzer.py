@@ -26,6 +26,7 @@ and re-save; the file gets about 10x bigger but becomes readable.
 
 import argparse
 import csv
+import gc
 import json
 import hashlib
 import os
@@ -1578,7 +1579,32 @@ def analyze(run, cancel=None, progress=None, ready=None):
 
 
 def main(run=None):
-    """One run, as `run` declares it, or as the command line does."""
+    """
+    One run, as `run` declares it, or as the command line does.
+
+    With Python's cycle collector switched off for the length of it, and
+    back on afterwards for the window, which goes on to run more.
+
+    The collector exists for reference cycles, and a run makes next to none
+    -- a warm rebuild with it off left 285 unreachable objects at the end,
+    and peak memory did not move -- but it cannot know that, so it keeps
+    walking everything the run is holding to find out. A run holds a great
+    deal by the end: every save's remains and every row of every table, a
+    few million objects, walked again and again as more arrive. That was a
+    quarter of a second of a 2.3 s warm rebuild. Ordinary reference counting
+    still frees everything the moment it is let go, as it always did.
+    """
+    was_on = gc.isenabled()
+    gc.disable()
+    try:
+        return _main(run)
+    finally:
+        if was_on:
+            gc.enable()
+
+
+def _main(run=None):
+    """`main`, with the collector already off."""
     args = run if run is not None else Run.from_command_line(command_line())
 
     saves_path = os.path.expanduser(os.path.expandvars(args.saves))
