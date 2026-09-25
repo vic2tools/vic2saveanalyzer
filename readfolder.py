@@ -471,6 +471,19 @@ def parse_saves_stream(files, verbose=True, use_cache=True, reading=PLAIN,
 
     futures = {}
     waiting = list(pooled)
+    # A save that has to be read is a hundred milliseconds or more, and a
+    # cached one ten. When only a few need reading -- the autosave or two
+    # that appeared since the last run -- they go to the workers first, so
+    # their reading overlaps everyone else's cache instead of starting
+    # after it: the newest save is the last in date order, and it used to
+    # be the last thing the run waited for. Only a few, because a save
+    # handed out early holds a place in the window until its turn comes,
+    # and a window full of saves waiting their turn would leave the cached
+    # ones to be read one by one here. A cold run reads everything and is
+    # handed out in order, as before.
+    unread = [i for i in pooled if not ready[i]]
+    if unread and len(unread) <= workers // 2:
+        waiting = unread + [i for i in pooled if ready[i]]
     done = 0
     try:
         for i, path in enumerate(files):
