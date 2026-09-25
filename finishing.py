@@ -217,11 +217,12 @@ def finish_and_pack(meta, nations, spec):
     than tables, so what the finishing has spent is dropped here, and the
     counters go over as the plain dicts they already are.
 
-    It is what `readfolder` is handed as the `transform`, wrapped in a
-    `partial` with the spec, and it has to stay a plain function at the top
-    of this file: Windows sends it to each worker by name, and something
-    without one -- a lambda, a function inside a function -- cannot be sent,
-    so no worker starts and every save is read on one core.
+    `spending.spend` calls it in the worker, before turning the save into
+    its rows. That is what `readfolder` is handed as the `transform`, and
+    it has to stay a plain function at the top of its module: Windows sends
+    it to each worker by name, and something without one -- a lambda, a
+    function inside a function -- cannot be sent, so no worker starts and
+    every save is read on one core.
     """
     out = finish_nations(meta, nations, spec)
     for done in out.values():

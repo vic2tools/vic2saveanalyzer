@@ -291,9 +291,11 @@ def _worker_parse(job):
         meta, nations = analyze_save(path, verbose=False)
         nations = dict(nations)
         _cache_write(slot, meta, nations)
+    # Whatever the transform makes of the save goes back as it made it: a
+    # pair for the invention summary, a spent save for the report.
     if _TRANSFORM is not None:
-        meta, nations = _TRANSFORM(meta, nations)
-    return index, slot, meta, nations
+        return index, slot, _TRANSFORM(meta, nations)
+    return index, slot, (meta, nations)
 
 
 def _spare_memory():
@@ -515,7 +517,7 @@ def parse_saves_stream(files, verbose=True, use_cache=True, reading=PLAIN,
                 # saves folder is an ordinary thing to have; the serial path
                 # below has always skipped it by name, and so does this.
                 try:
-                    _index, _slot, meta, nations = futures.pop(i).result()
+                    _index, _slot, got = futures.pop(i).result()
                 except (ValueError, OSError) as exc:
                     print(f"  skipped {os.path.basename(path)}: {exc}",
                           file=sys.stderr)
@@ -534,10 +536,10 @@ def parse_saves_stream(files, verbose=True, use_cache=True, reading=PLAIN,
                     pool = None
                     futures.clear()
                 else:
-                    got = (meta, nations)  # cached and finished in the worker
+                    # cached, and transformed if asked, in the worker
                     if verbose:
                         print(f"  [{done + 1}/{total}] "
-                              f"{os.path.basename(path)} ... {meta['date']}")
+                              f"{os.path.basename(path)} ... {got[0]['date']}")
             elif ready[i]:
                 got = _cache_read(slots[i])
                 if got is not None:
@@ -608,7 +610,7 @@ def _parse_parallel(files, out, todo, slots, workers, verbose, reading,
                 # the reader will not take is named and left out, not raised
                 # over the whole campaign.
                 try:
-                    index, _slot, meta, nations = future.result()
+                    index, _slot, (meta, nations) = future.result()
                 except (ValueError, OSError) as exc:
                     print(f"  skipped a save: {exc}", file=sys.stderr)
                     done += 1

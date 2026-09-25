@@ -314,8 +314,10 @@ def m25():
     # itself, and the files come out identical -- so a check comparing them
     # passed while Windows read a campaign on one core.
     patch("vic2_analyzer.py",
-          "        transform=partial(finishing.finish_and_pack, spec=spec) if in_workers else None,",
-          "        transform=(lambda m, n: finishing.finish_and_pack(m, n, spec)) if in_workers else None,")
+          "    transform = (partial(spending.spend, spec=spec, keep_fields=keep_fields,\n"
+          "                         pop_columns=pop_columns) if in_workers else None)",
+          "    transform = ((lambda m, n: spending.spend(m, n, spec, keep_fields,\n"
+          "                                              pop_columns)) if in_workers else None)")
 
 
 # ---- commit 8caa343: a mod refusing to guess what it has not read
@@ -391,8 +393,8 @@ def m30():
           "mobrate.py")
 def m31():
     patch("vic2_analyzer.py",
-          "        if not keep.whole:\n            meta[\"wars\"] = ()\n",
-          "        meta[\"wars\"] = ()\n")
+          "        fold_wars(war_book, wars)\n",
+          "        fold_wars(war_book, wars)\n        meta[\"wars\"] = ()\n")
 
 
 # ---- an empty table was skipped, and the last run's copy stayed
@@ -403,7 +405,8 @@ def m31():
 def m32():
     patch("vic2_analyzer.py",
           "    for name, data, cols in tables:\n        path = os.path.join(outdir, name)",
-          "    for name, data, cols in tables:\n        if not data and name != "
+          "    for name, data, cols in tables:\n"
+          "        if not (data or \"\".join(text.get(name, ()))) and name != "
           "\"nations_timeseries.csv\":\n            continue\n"
           "        path = os.path.join(outdir, name)")
 

@@ -40,6 +40,7 @@ import matching                                            # noqa: E402
 import savefmt                                             # noqa: E402
 import vic2_analyzer as vic2                               # noqa: E402
 import finishing                                            # noqa: E402
+import spending                                             # noqa: E402
 import nation                                               # noqa: E402
 from mod_reader import load_mod                             # noqa: E402
 
@@ -210,7 +211,7 @@ def plain(value):
 
 # Everything that reaches a chart or a CSV column. `date` and `year` are
 # built around a nation rather than held by one, so they are not here.
-COLUMNS = [c for c in vic2.BASE_COLUMNS
+COLUMNS = [c for c in spending.BASE_COLUMNS
            if c not in ("date", "year", "tag")] + ["pop_by_type",
                                                    "accepted_cultures"]
 

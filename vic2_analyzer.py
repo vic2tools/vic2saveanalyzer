@@ -27,7 +27,6 @@ and re-save; the file gets about 10x bigger but becomes readable.
 import argparse
 import csv
 import gc
-import json
 import hashlib
 import os
 import re
@@ -51,7 +50,6 @@ from v2parse import (
     to_int,
     unquote,
 )
-from tech_groups import TECH_GROUP
 # Reading a save is its own thing and lives in its own file: a path in, and
 # what the save says out. Nothing in it knows about caches, workers, reports
 # or the command line, which is why it could be lifted out whole.
@@ -59,11 +57,9 @@ from explain import asked, explain
 from nation import (
     KEEP_FOR_INVENTIONS,
     KEEP_NATION,
-    trim_save,
 )
 from readsave import (
     PLAIN,
-    POP_TYPE_LIST,
     analyze_save,
     date_key,
     reading_for,
@@ -87,7 +83,8 @@ from readfolder import Cancelled, set_cancel_check, set_progress  # noqa: F401
 # What a nation comes to once its save is read. Called through the module,
 # never imported by name: `testkit/crossrows.py` replaces
 # `finishing.finish_nations` to watch both of its callers -- `campaign_rows`
-# here and `finish_and_pack` in the workers -- and a copy of the name held
+# here and `finish_and_pack`, through `spending.spend`, in the workers -- and
+# a copy of the name held
 # here would go on calling the original, unwatched.
 import finishing
 
@@ -369,25 +366,6 @@ def save_sort_key(path, meta_date):
         return (1, 0, 0, 0)
 
 
-BASE_COLUMNS = [
-    "date", "year", "tag", "is_player", "primary_culture", "civilized",
-    "provinces", "states", "total_pop", "accepted_pop", "accepted_pct",
-    "primary_culture_pop", "avg_literacy", "avg_literacy_stated",
-    "pop_noncolonial", "avg_consciousness", "avg_militancy",
-    "brigades", "regular_brigades", "mobilized_brigades", "mobilizing",
-    "brigade_cap",
-    "is_mobilized", "armies", "ships", "navies",
-    "factory_count", "factory_levels", "ports", "naval_base_levels",
-    "max_naval_base", "railroad_levels", "fort_levels",
-    "mobilisation_size", "mobilization_pool", "mobilization_pops",
-    "mobilization_brigades", "mobilization_cap",
-    "mobilization_available", "mobilization_remaining", "war_policy",
-    "techs", "army_techs", "navy_techs", "prestige", "infamy", "treasury", "tax_base", "research_points",
-    "war_exhaustion", "plurality",
-    "pop_poor", "pop_middle", "pop_rich",
-    "soldiers_noncolonial", "soldiers_noncolonial_pct",
-    "life_unmet", "life_unmet_pct", "starving", "starving_pct",
-]
 
 
 GOOD_CATEGORIES = {
@@ -481,6 +459,14 @@ def market_snapshot_rows(parsed):
     return rows
 
 
+def _write_csv_text(path, chunks, columns):
+    """One CSV: its heading, then each save's rows as `spending` wrote them."""
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        csv.writer(fh).writerow(columns)
+        for chunk in chunks:
+            fh.write(chunk)
+
+
 def _write_csv(path, rows, columns):
     """One CSV, columns picked out of each row dict.
 
@@ -498,9 +484,7 @@ def _write_csv(path, rows, columns):
             writer.writerows(rows)
 
 
-def write_outputs(rows, ship_rows, pop_rows, culture_rows, price_rows,
-                  snapshot_rows, brigade_rows, tech_rows, outdir,
-                  pop_columns=None):
+def write_outputs(text, price_rows, snapshot_rows, outdir, pop_columns):
     """
     Every CSV table. Returns (the paths written, the paths it could not
     open for writing).
@@ -510,26 +494,31 @@ def write_outputs(rows, ship_rows, pop_rows, culture_rows, price_rows,
     the run in a stack trace after the report had already been rewritten;
     now the rest of the tables are written and the ones that could not be
     are handed back, for `main` to name.
+
+    `text` is the six tables every save writes its own rows into, as the
+    saves were spent into them (`spending.PER_SAVE`): only their headings
+    are written here. The prices and the market snapshot span saves, and
+    are written from their rows.
     """
+    import spending
     os.makedirs(outdir, exist_ok=True)
-    columns = (BASE_COLUMNS + [f"pop_{t}" for t in (pop_columns or POP_TYPE_LIST)]
-               + ["accepted_cultures"])
+    columns = spending.nation_columns(pop_columns)
 
     paths, refused = [], []
     tables = [
-        ("nations_timeseries.csv", rows, columns),
+        ("nations_timeseries.csv", None, columns),
         ("prices.csv", price_rows, ["date", "year", "good", "category", "price"]),
         ("market_snapshot.csv", snapshot_rows,
          ["date", "year", "good", "category", "price", "world_pool", "supply",
           "demand", "real_demand", "actual_sold", "discovered"]),
-        ("ships_by_type.csv", ship_rows,
+        ("ships_by_type.csv", None,
          ["date", "year", "tag", "ship_type", "count", "effective"]),
-        ("brigades_by_type.csv", brigade_rows,
+        ("brigades_by_type.csv", None,
          ["date", "year", "tag", "regiment_type", "count"]),
-        ("technologies.csv", tech_rows,
+        ("technologies.csv", None,
          ["date", "year", "tag", "technology", "branch", "line"]),
-        ("pops_by_type.csv", pop_rows, ["date", "year", "tag", "pop_type", "size"]),
-        ("pops_by_culture.csv", culture_rows,
+        ("pops_by_type.csv", None, ["date", "year", "tag", "pop_type", "size"]),
+        ("pops_by_culture.csv", None,
          ["date", "year", "tag", "culture", "size", "accepted"]),
     ]
     # Every table, even one with nothing in it this run. A table skipped for
@@ -540,7 +529,10 @@ def write_outputs(rows, ship_rows, pop_rows, culture_rows, price_rows,
     for name, data, cols in tables:
         path = os.path.join(outdir, name)
         try:
-            _write_csv(path, data, cols)
+            if data is None:
+                _write_csv_text(path, text[name], cols)
+            else:
+                _write_csv(path, data, cols)
         except PermissionError:
             refused.append(path)
             continue
@@ -1032,7 +1024,7 @@ def run_cross(parent, survey, args, verbose=True):
 Campaign = namedtuple(
     "Campaign", "rows ship_rows pop_rows culture_rows brigade_rows "
                 "tech_rows naval_profiles naval_of supply parsed war_book "
-                "pop_columns")
+                "pop_columns text")
 
 # Which of a save's fields survive it. `whole` keeps the save entire,
 # `fields` is what the trim keeps when it does not. See `keep_whole` in
@@ -1042,7 +1034,7 @@ Campaign = namedtuple(
 Keep = namedtuple("Keep", "whole fields")
 
 
-def walk_campaign(stream, spec, finished, keep):
+def walk_campaign(stream, spec, finished, keep, pop_columns):
     """
     Read the campaign once, oldest save first, spending each save as it
     passes.
@@ -1056,24 +1048,32 @@ def walk_campaign(stream, spec, finished, keep):
     middle of an eight-hundred-line function, holding a dozen accumulators
     that nothing above it touched and everything below it read.
 
-    `finished` says the stream already ran `finish_nations` out in the
-    workers. When it did not -- the two diagnostics keep their saves whole,
-    and finishing is what spends the tables they want to print -- it runs
-    here instead, the same function against the same spec. This loop used to
-    hold its own filter and its own call to a parent-side twin of the
-    worker's, and the comment promising they matched was the only thing
-    holding them together.
+    `finished` says the stream already spent each save out in the workers
+    (`spending.spend`): what arrives is its rows, its table text, its wars
+    and what is left of it. When it did not -- the two diagnostics keep
+    their saves whole, and finishing is what spends the tables they want to
+    print -- the same finishing and the same `spending.save_rows` run here
+    instead. This loop used to hold its own filter and its own call to a
+    parent-side twin of the worker's, and the comment promising they
+    matched was the only thing holding them together.
+
+    What is left here is what spans saves: the lists the report is built
+    from, the text of each table in save order, which ship profiles have
+    been seen, the supply by good, and the war book.
+
+    `pop_columns` is the pop types a row has a column for. Frozen at import
+    it was the vanilla twelve, so a mod's own type -- IGoR's bankers, GFM's
+    serfs -- was read out of the save, counted into the totals and then
+    dropped on the way to the table.
     """
+    import spending
+
     rows, ship_rows, pop_rows, culture_rows = [], [], [], []
     brigade_rows, tech_rows = [], []
+    text = {name: [] for name in spending.PER_SAVE}
     # Ship stats as each nation's own inventions leave them. Nations that
     # researched the same things have the same ships, so the profiles are kept
     # once each and referred to by number rather than repeated per save.
-    # The pop types a row has a column for. Frozen at import it was the
-    # vanilla twelve, so a mod's own type -- IGoR's bankers, GFM's serfs --
-    # was read out of the save, counted into the totals and then dropped on
-    # the way to the table.
-    pop_columns = sorted(v2parse.POP_TYPES)
     naval_profiles, naval_index, naval_of = [], {}, {}
     # good -> {date: {tag: what it put on the market}}, for the production view.
     supply_by = {}
@@ -1086,87 +1086,53 @@ def walk_campaign(stream, spec, finished, keep):
     parsed = []
     war_book = {"wars": {}, "order": []}
 
-    for meta, nations in stream:
+    for item in stream:
         stop_if_asked()
-        date = meta["date"]
-        year = date.split(".")[0] if date else ""
-        if not finished:
+        if finished:
+            meta, nations, wars, got = item
+        else:
             # Only the diagnostics reach this now. They asked for the
             # per-province tables to be kept, and finishing is what spends
             # them, so it waits for the parent.
+            meta, nations = item
             nations = finishing.finish_nations(meta, nations, spec)
-        for tag, done in nations.items():
-            # The same question the finishing asked, asked of the same spec,
-            # so a nation finished out in a worker and a nation finished just
-            # above are kept or dropped by one rule.
-            if not finishing.kept_by(spec, tag, done):
-                continue
-            accepted_set = set(done["accepted_cultures"]) | {done["primary_culture"]}
-
-            row = {
-                "date": date,
-                "year": year,
-                "tag": tag,
-                "is_player": int(done["is_player"]),
-                "accepted_cultures": ";".join(sorted(done["accepted_cultures"])),
-            }
-            for col in BASE_COLUMNS:
-                if col in done:
-                    row[col] = done[col]
-            for ptype in pop_columns:
-                row[f"pop_{ptype}"] = done["pop_by_type"].get(ptype, 0)
-            rows.append(row)
-
-            # These four tables are the ones a campaign has millions of rows
-            # of -- a hundred technologies per nation per save on its own -- so
-            # they are tuples in the column order declared in `write_outputs`
-            # rather than dicts. A dict per row costs about twice the memory
-            # and names the same six columns over and over.
-            for stype, count in sorted(done["ships_by_type"].items()):
-                ship_rows.append((date, year, tag, stype, count,
-                                  round(done["ship_crew"].get(stype, count), 3)))
-            if spec.mod is not None and done["ships"]:
-                from mod_reader import naval_profile
-                profile = naval_profile(done, spec.mod)
-                key = json.dumps(profile, sort_keys=True)
-                if key not in naval_index:
-                    naval_index[key] = len(naval_profiles)
-                    naval_profiles.append(profile)
-                naval_of.setdefault(tag, {})[date] = naval_index[key]
-            for good, amount in done["goods_supply"].items():
-                supply_by.setdefault(good, {}).setdefault(date, {})[tag] = amount
-            for rtype, count in sorted(done["regiments_by_type"].items()):
-                brigade_rows.append((date, year, tag, rtype, count))
-            for tech in sorted(done["tech_list"]):
-                branch, line, _pos = TECH_GROUP.get(tech, ("other", "Other", 0))
-                tech_rows.append((date, year, tag, tech, branch, line))
-            for ptype, size in sorted(done["pop_by_type"].items()):
-                pop_rows.append((date, year, tag, ptype, size))
-            for culture, size in sorted(done["pop_by_culture"].items(),
-                                        key=lambda kv: -kv[1]):
-                culture_rows.append((date, year, tag, culture, size,
-                                     int(culture in accepted_set)))
+            got = spending.save_rows(meta, nations, spec, pop_columns)
+            wars = meta.get("wars", ())
+        date = meta["date"]
+        rows += got.rows
+        ship_rows += got.ship_rows
+        brigade_rows += got.brigade_rows
+        tech_rows += got.tech_rows
+        pop_rows += got.pop_rows
+        culture_rows += got.culture_rows
+        for name, chunk in zip(spending.PER_SAVE, got.text):
+            text[name].append(chunk)
+        for tag, key, profile in got.naval:
+            if key not in naval_index:
+                naval_index[key] = len(naval_profiles)
+                naval_profiles.append(profile)
+            naval_of.setdefault(tag, {})[date] = naval_index[key]
+        for good, tag, amount in got.supply:
+            supply_by.setdefault(good, {}).setdefault(date, {})[tag] = amount
 
         # This save's wars, folded in as it passes. The book wants them oldest
         # first, which is the order the stream is in, so folding here costs
-        # nothing and means no save has to keep its own copy.
-        fold_wars(war_book, meta.get("wars", ()))
-        # A save kept whole keeps its wars too. The two diagnostics that
-        # keep saves whole judge a nation's triggered modifiers again, and
-        # `war = yes` is asked of these; emptied, `--explain-mob` explained
-        # a rate without the war modifier the report had counted in it.
-        if not keep.whole:
-            meta["wars"] = ()
-        # `--explain-mob-pool` prints a nation's raw pool back, so that one
-        # caller keeps the save whole.
-        parsed.append((meta, nations) if keep.whole
-                      else trim_save(meta, nations, keep.fields))
+        # nothing and means no save has to keep its own copy. A save spent
+        # in a worker sends them beside what is left of it; a save kept whole
+        # keeps them, because the two diagnostics that keep saves whole judge
+        # a nation's triggered modifiers again, and `war = yes` is asked of
+        # these -- emptied, `--explain-mob` explained a rate without the war
+        # modifier the report had counted in it.
+        fold_wars(war_book, wars)
+        # Kept whole only for the diagnostics, which print a nation's raw
+        # pool back; everyone else's save was trimmed where it was spent.
+        parsed.append((meta, nations))
 
     return Campaign(rows=rows, ship_rows=ship_rows, pop_rows=pop_rows,
                     culture_rows=culture_rows, brigade_rows=brigade_rows,
                     tech_rows=tech_rows, naval_profiles=naval_profiles,
                     naval_of=naval_of, supply=supply_by, parsed=parsed,
-                    war_book=war_book, pop_columns=pop_columns)
+                    war_book=war_book, pop_columns=pop_columns, text=text)
 
 
 def _number(read, least, most=None):
@@ -1882,20 +1848,24 @@ def _main(run=None):
     # run means by a finished nation cannot depend on where it was finished.
     spec = finishing.finish_spec(args, mod, live, wanted, keep_pools=keep_pools)
     in_workers = not keep_whole
+    # The pop types a row has a column for: the reading's, which the mod
+    # settled above. Worked out once, for the workers and the tables alike.
+    # `spending` is imported here, not at the top, for the same reason the
+    # mod reader is: a run with nothing to do never reaches it.
+    import spending
+    pop_columns = sorted(v2parse.POP_TYPES)
 
+    transform = (partial(spending.spend, spec=spec, keep_fields=keep_fields,
+                         pop_columns=pop_columns) if in_workers else None)
     stream = parse_saves_stream(
-        files, verbose=verbose and mod is None,
-        transform=partial(finishing.finish_and_pack, spec=spec) if in_workers else None,
+        files, verbose=verbose and mod is None, transform=transform,
         **parse_options)
     keep = Keep(whole=keep_whole, fields=keep_fields)
-    campaign = walk_campaign(stream, spec, in_workers, keep)
+    campaign = walk_campaign(stream, spec, in_workers, keep, pop_columns)
     # What is left in `main` is what `main` still uses: the tables it
     # starts, the two counts it prints and the saves it checks are there
     # at all. Everything the page needs travels as `campaign`.
     rows, parsed = campaign.rows, campaign.parsed
-    ship_rows, pop_rows = campaign.ship_rows, campaign.pop_rows
-    culture_rows, brigade_rows = campaign.culture_rows, campaign.brigade_rows
-    tech_rows, pop_columns = campaign.tech_rows, campaign.pop_columns
 
     if not parsed:
         sys.exit("No saves could be read.")
@@ -1930,8 +1900,7 @@ def _main(run=None):
     # measured, 1.80 s to 1.98 s, which is the wrong direction.
     from report import Aside
     tables = Aside(lambda: write_outputs(
-        rows, ship_rows, pop_rows, culture_rows, price_rows, snapshot_rows,
-        brigade_rows, tech_rows, args.out, pop_columns))
+        campaign.text, price_rows, snapshot_rows, args.out, pop_columns))
 
     html_path = build_html(args, mod, campaign, price_rows,
                            snapshot_rows, cross_payload, tables)
