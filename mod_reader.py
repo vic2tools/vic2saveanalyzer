@@ -42,6 +42,7 @@ import tempfile
 import zlib
 
 from itertools import groupby
+from operator import itemgetter
 
 import cacheio
 
@@ -1289,12 +1290,14 @@ def _read_tga(target):
         px = bytes(buf)
     if len(px) < want * step:
         return None
+    # Stored BGR(A). Each channel is every `step`-th byte, so it moves in one
+    # slice rather than one pixel at a time: 6,000 pixels a flag was most of
+    # what a flag cost, and a report with a game install beneath the mod
+    # draws about 140 of them.
     rgb = bytearray(want * 3)
-    for i in range(want):                       # stored BGR(A)
-        s = i * step
-        rgb[i * 3] = px[s + 2]
-        rgb[i * 3 + 1] = px[s + 1]
-        rgb[i * 3 + 2] = px[s]
+    rgb[0::3] = px[2:want * step:step]
+    rgb[1::3] = px[1:want * step:step]
+    rgb[2::3] = px[0:want * step:step]
     if not (descriptor & 0x20):                 # rows run bottom-up
         stride = width * 3
         rgb = bytearray(b"".join(
@@ -1327,22 +1330,33 @@ def _flag_roots(path):
     return [r for r in roots if os.path.isdir(r)]
 
 
+# Which source byte each byte of a shrunk flag comes from, per shape. Every
+# flag in the game is 93x64, so this is worked out once a run.
+_SHRINK_PICKS = {}
+
+
 def _shrink(width, height, rgb, target):
     """Nearest-neighbour downscale. Flags render about 34px wide, so the source
-    93x64 is four times more pixel than any of them needs."""
+    93x64 is four times more pixel than any of them needs.
+
+    The mapping from each output byte to the source byte it copies depends
+    only on the two shapes, so it is built once and applied with a single
+    `itemgetter`, rather than a slice per pixel per flag."""
     if width <= target:
         return width, height, rgb
     out_w = target
     out_h = max(1, round(height * target / width))
-    out = bytearray(out_w * out_h * 3)
-    for y in range(out_h):
-        sy = min(height - 1, y * height // out_h)
-        row = sy * width * 3
-        for x in range(out_w):
-            sx = min(width - 1, x * width // out_w)
-            i, j = (y * out_w + x) * 3, row + sx * 3
-            out[i:i + 3] = rgb[j:j + 3]
-    return out_w, out_h, bytes(out)
+    shape = (width, height, out_w, out_h)
+    pick = _SHRINK_PICKS.get(shape)
+    if pick is None:
+        cols = [min(width - 1, x * width // out_w) * 3 for x in range(out_w)]
+        at = []
+        for y in range(out_h):
+            row = min(height - 1, y * height // out_h) * width * 3
+            for col in cols:
+                at += (row + col, row + col + 1, row + col + 2)
+        pick = _SHRINK_PICKS[shape] = itemgetter(*at)
+    return out_w, out_h, bytes(pick(rgb))
 
 
 def flag_images(path, wanted, governments=None, width=46, styles=None):
