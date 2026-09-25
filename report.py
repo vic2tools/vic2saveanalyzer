@@ -24,6 +24,7 @@ import json
 import os
 import pickle
 import threading
+from collections import namedtuple
 from html import escape as _escape
 
 from tech_groups import ARMY_LINES, NAVY_LINES
@@ -647,6 +648,68 @@ def pack_wars(wars):
             for war in wars]
 
 
+# One save's share of the payload's per-nation tables, each {tag: what that
+# nation has in this save}: ship counts and, where they differ, what the
+# hulls are worth as they stand; brigades; technology names; pops by type;
+# and the largest cultures. See `save_tables`.
+PerNation = namedtuple("PerNation", "ships crews brigades techs pops cultures")
+
+
+def save_tables(ship_rows, brigade_rows, tech_rows, pop_rows, culture_rows):
+    """
+    One save's `PerNation`, from its rows of the five narrow tables.
+
+    Worked out in the worker that read the save (`spending.save_rows`), so
+    the parent is sent a few dicts a nation instead of three thousand tuples
+    a save, and does not walk a campaign's quarter of a million of them to
+    regroup them by nation. What each value is -- an int of a count, the
+    crews only where they differ from the hulls, the thirty largest
+    cultures -- is decided here and nowhere else.
+    """
+    ships, crews, brigades, techs, pops, cultures = {}, {}, {}, {}, {}, {}
+    for _date, _year, tag, stype, count, effective in ship_rows:
+        ships.setdefault(tag, {})[stype] = int(count)
+        # What those hulls are worth as they stand, when that is not simply
+        # the count: a fleet at half strength fights at half strength, and a
+        # veteran one above its paper figure. Only carried where it differs,
+        # since for most navies most of the time it does not.
+        if abs(effective - count) > 0.005:
+            crews.setdefault(tag, {})[stype] = round(effective, 2)
+    for _date, _year, tag, rtype, count in brigade_rows:
+        brigades.setdefault(tag, {})[rtype] = int(count)
+    for _date, _year, tag, tech, _branch, _line in tech_rows:
+        techs.setdefault(tag, []).append(tech)
+    for _date, _year, tag, ptype, size in pop_rows:
+        pops.setdefault(tag, {})[ptype] = int(size)
+    for _date, _year, tag, culture, size, accepted in culture_rows:
+        cultures.setdefault(tag, []).append([culture, int(size), int(accepted)])
+    for held in cultures.values():
+        held.sort(key=lambda c: -c[1])
+        del held[MAX_CULTURES:]
+    return PerNation(ships, crews, brigades, techs, pops, cultures)
+
+
+class NationTables:
+    """
+    The payload's per-nation tables for a whole campaign, each
+    {tag: {date: ...}}, filled one save's `PerNation` at a time, oldest
+    first -- so a nation appears in each in the order it first appeared in
+    the campaign, and its dates in date order.
+    """
+
+    __slots__ = PerNation._fields
+
+    def __init__(self):
+        for name in PerNation._fields:
+            setattr(self, name, {})
+
+    def add(self, date, one):
+        for name, by_tag in zip(PerNation._fields, one):
+            table = getattr(self, name)
+            for tag, value in by_tag.items():
+                table.setdefault(tag, {})[date] = value
+
+
 def build_wars(parsed, province_names=None, province_regions=None,
                state_names=None, unit_kinds=None, *, book):
     """
@@ -1143,8 +1206,7 @@ def _trim_supply(supply, dates):
     return out
 
 
-def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
-                 snapshot_rows, brigade_rows, tech_rows, outdir,
+def build_report(rows, tables, price_rows, snapshot_rows, outdir,
                  tag_names=None, map_data=None,
                  base_prices=None, great_powers=None, flags=None,
                  technology=None, wars=None, succession=None,
@@ -1197,24 +1259,15 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
             have = series[tag][source]
             series[tag][key] = gain_series((d, have.get(d)) for d in dates)
 
-    ships, ship_types = {}, set()
-    # What those hulls are worth as they stand, when that is not simply the
-    # count: a fleet at half strength fights at half strength, and a veteran
-    # one above its paper figure. Only carried where it differs, since for most
-    # navies most of the time it does not.
-    crews = {}
-    # The four big tables arrive as tuples in their CSV column order -- see
-    # `write_outputs` for the columns, and the row loop in `main` for why.
-    for date, _year, tag, stype, count, effective in ship_rows:
-        ship_types.add(stype)
-        ships.setdefault(tag, {}).setdefault(date, {})[stype] = int(count)
-        if abs(effective - count) > 0.005:
-            crews.setdefault(tag, {}).setdefault(date, {})[stype] = round(effective, 2)
-
-    brigades, regiment_types = {}, set()
-    for date, _year, tag, rtype, count in brigade_rows:
-        regiment_types.add(rtype)
-        brigades.setdefault(tag, {}).setdefault(date, {})[rtype] = int(count)
+    # The per-nation tables arrive already grouped by nation and date, one
+    # save's share at a time out of the worker that read it -- see
+    # `save_tables` -- so what is left here is what depends on all of them.
+    ships, crews = tables.ships, tables.crews
+    ship_types = {stype for by_date in ships.values()
+                  for held in by_date.values() for stype in held}
+    brigades = tables.brigades
+    regiment_types = {rtype for by_date in brigades.values()
+                      for held in by_date.values() for rtype in held}
 
     # Techs are referenced by index so the payload does not repeat 100+ names
     # once per nation per save.
@@ -1225,35 +1278,26 @@ def build_report(rows, ship_rows, pop_rows, culture_rows, price_rows,
                 tech_order.append(tech)
                 tech_meta.append([branch, line])
     seen_tech = set(tech_order)
-    extra = sorted({r[3] for r in tech_rows} - seen_tech)
+    extra = sorted({tech for by_date in tables.techs.values()
+                    for names in by_date.values() for tech in names}
+                   - seen_tech)
     for tech in extra:
         tech_order.append(tech)
         tech_meta.append(["other", "Other"])
     tech_index = {t: i for i, t in enumerate(tech_order)}
 
     techs_by = {}
-    for date, _year, tag, tech, _branch, _line in tech_rows:
-        idx = tech_index.get(tech)
-        if idx is None:
-            continue
-        techs_by.setdefault(tag, {}).setdefault(date, []).append(idx)
-    for tag in techs_by:
-        for date in techs_by[tag]:
-            techs_by[tag][date].sort()
+    for tag, by_date in tables.techs.items():
+        for date, names in by_date.items():
+            held = [tech_index[t] for t in names if t in tech_index]
+            if held:
+                held.sort()
+                techs_by.setdefault(tag, {})[date] = held
 
-    pops, pop_types = {}, set()
-    for date, _year, tag, ptype, size in pop_rows:
-        pop_types.add(ptype)
-        pops.setdefault(tag, {}).setdefault(date, {})[ptype] = int(size)
-
-    cultures = {}
-    for date, _year, tag, culture, size, accepted in culture_rows:
-        cultures.setdefault(tag, {}).setdefault(date, []).append(
-            [culture, int(size), int(accepted)])
-    for tag in cultures:
-        for date in cultures[tag]:
-            cultures[tag][date].sort(key=lambda c: -c[1])
-            del cultures[tag][date][MAX_CULTURES:]
+    pops = tables.pops
+    pop_types = {ptype for by_date in pops.values()
+                 for held in by_date.values() for ptype in held}
+    cultures = tables.cultures
 
     # ---- market ----
     price_dates, pseen = [], set()

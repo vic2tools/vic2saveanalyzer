@@ -1025,8 +1025,7 @@ def run_cross(parent, survey, args, verbose=True):
 # Named shapes because `main` carried all of this as loose locals, and every
 # one had to be handed by name to the things downstream that read it.
 Campaign = namedtuple(
-    "Campaign", "rows ship_rows pop_rows culture_rows brigade_rows "
-                "tech_rows naval_profiles naval_of supply parsed war_book "
+    "Campaign", "rows tables naval_profiles naval_of supply parsed war_book "
                 "pop_columns text")
 
 # Which of a save's fields survive it. `whole` keeps the save entire,
@@ -1071,8 +1070,9 @@ def walk_campaign(stream, spec, finished, keep, pop_columns):
     """
     import spending
 
-    rows, ship_rows, pop_rows, culture_rows = [], [], [], []
-    brigade_rows, tech_rows = [], []
+    from report import NationTables, fold_packed_wars, fold_wars
+    rows = []
+    tables = NationTables()
     text = {name: [] for name in spending.PER_SAVE}
     # Ship stats as each nation's own inventions leave them. Nations that
     # researched the same things have the same ships, so the profiles are kept
@@ -1085,7 +1085,6 @@ def walk_campaign(stream, spec, finished, keep, pop_columns):
     # its rows, gives up its wars and is then cut down to the few fields the
     # report still wants -- so what is alive at any moment is one save, not the
     # campaign. `parsed` below holds only those remains.
-    from report import fold_packed_wars, fold_wars
     parsed = []
     war_book = {"wars": {}, "order": []}
 
@@ -1103,11 +1102,7 @@ def walk_campaign(stream, spec, finished, keep, pop_columns):
             wars = meta.get("wars", ())
         date = meta["date"]
         rows += got.rows
-        ship_rows += got.ship_rows
-        brigade_rows += got.brigade_rows
-        tech_rows += got.tech_rows
-        pop_rows += got.pop_rows
-        culture_rows += got.culture_rows
+        tables.add(date, got.tables)
         for name, chunk in zip(spending.PER_SAVE, got.text):
             text[name].append(chunk)
         for tag, key, profile in got.naval:
@@ -1134,9 +1129,7 @@ def walk_campaign(stream, spec, finished, keep, pop_columns):
         # pool back; everyone else's save was trimmed where it was spent.
         parsed.append((meta, nations))
 
-    return Campaign(rows=rows, ship_rows=ship_rows, pop_rows=pop_rows,
-                    culture_rows=culture_rows, brigade_rows=brigade_rows,
-                    tech_rows=tech_rows, naval_profiles=naval_profiles,
+    return Campaign(rows=rows, tables=tables, naval_profiles=naval_profiles,
                     naval_of=naval_of, supply=supply_by, parsed=parsed,
                     war_book=war_book, pop_columns=pop_columns, text=text)
 
@@ -1185,10 +1178,7 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
     the interpreter lock is free, and it is drained here if the report
     throws, so a half-written CSV is not left behind a stack trace.
     """
-    rows, ship_rows, pop_rows = (campaign.rows, campaign.ship_rows,
-                                 campaign.pop_rows)
-    culture_rows, brigade_rows = campaign.culture_rows, campaign.brigade_rows
-    tech_rows, parsed = campaign.tech_rows, campaign.parsed
+    rows, parsed = campaign.rows, campaign.parsed
     naval_profiles, naval_of = campaign.naval_profiles, campaign.naval_of
     supply_by, war_book = campaign.supply, campaign.war_book
 
@@ -1266,8 +1256,7 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
                         flags[tag + "|"] = got[tag]
         try:
             html_path = build_report(
-                rows, ship_rows, pop_rows, culture_rows, price_rows,
-                snapshot_rows, brigade_rows, tech_rows, args.out,
+                rows, campaign.tables, price_rows, snapshot_rows, args.out,
                 tag_names=report_names,
                 map_data=map_data,
                 base_prices=(mod.base_prices if mod else None),

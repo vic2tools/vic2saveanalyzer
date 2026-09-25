@@ -35,6 +35,7 @@ from collections import namedtuple
 
 import finishing
 from nation import trim_save
+from report import pack_wars, save_tables
 from tech_groups import TECH_GROUP
 
 BASE_COLUMNS = [
@@ -70,11 +71,13 @@ def nation_columns(pop_columns):
             + ["accepted_cultures"])
 
 
-# One save's share of the tables. `naval` is (tag, key, profile) per nation
-# with ships, `supply` is (good, tag, amount), both in nation order, and
-# `text` is each of the `PER_SAVE` tables' rows as CSV, heading left out.
-SaveRows = namedtuple("SaveRows", "rows ship_rows brigade_rows tech_rows "
-                                  "pop_rows culture_rows naval supply text")
+# One save's share of the tables. `rows` is the main table's, a dict a
+# nation; `tables` is the five narrow ones as the report keeps them, a
+# `report.PerNation`; `naval` is (tag, key, profile) per nation with ships,
+# `supply` is (good, tag, amount), both in nation order; and `text` is each
+# of the `PER_SAVE` tables' rows as CSV, heading left out. The narrow
+# tables' own rows go no further than that text.
+SaveRows = namedtuple("SaveRows", "rows tables naval supply text")
 
 # What a worker sends back: the save cut down to what the run keeps, the
 # wars the parent folds into its book -- each packed on its own, see
@@ -153,8 +156,9 @@ def save_rows(meta, nations, spec, pop_columns):
         else:
             writer.writerows(data)
         text.append(out.getvalue())
-    return SaveRows(rows, ship_rows, brigade_rows, tech_rows, pop_rows,
-                    culture_rows, naval, supply, tuple(text))
+    tables = save_tables(ship_rows, brigade_rows, tech_rows, pop_rows,
+                         culture_rows)
+    return SaveRows(rows, tables, naval, supply, tuple(text))
 
 
 def spend(meta, nations, spec, keep_fields, pop_columns):
@@ -164,7 +168,6 @@ def spend(meta, nations, spec, keep_fields, pop_columns):
     `partial`, so it has to stay a plain function at the top of a module:
     Windows sends it to each worker by name.
     """
-    from report import pack_wars
     meta, finished = finishing.finish_and_pack(meta, nations, spec)
     rows = save_rows(meta, finished, spec, pop_columns)
     wars = pack_wars(meta.get("wars", ()))
