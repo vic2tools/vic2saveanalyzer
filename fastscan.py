@@ -493,10 +493,9 @@ def scan(path, pop_types, mob_types, timeout=600, army_techs=(),
     return rest
 
 
-def apply(got, nations, province_owner, pop_registry, world_sink,
-          province_counts):
+def apply(got, found):
     """
-    Fold a scan into the structures `analyze_save` is filling.
+    Fold a scan into what `analyze_save` is filling (`readsave._Found`).
 
     What belongs to a nation is handed to `nation.fold_provinces`, which is
     where the record and the rules for filling it live. What is left here is
@@ -510,18 +509,20 @@ def apply(got, nations, province_owner, pop_registry, world_sink,
     and lists Python expects is the price of not parsing the file twice, and
     it is about a twentieth of what parsing it costs.
     """
-    world_sink[0] += got["world_pop"]
+    found.world_pop += got["world_pop"]
+    province_owner = found.province_owner
     for pid, owner, held in got["owners"]:
         province_owner[pid] = (sys.intern(owner), sys.intern(held))
-        province_counts[owner] += 1
 
     # The one shared table of names, interned once here rather than once per
     # pop: a save has tens of thousands of pops and a few hundred names.
     names = [sys.intern(k) for k in got["kind_names"]]
     ids, kind_of = got["pop_ids"], got["pop_kinds"]
+    pop_registry = found.pop_registry
     for i, pop_id in enumerate(ids):
         pop_registry[pop_id] = names[kind_of[i]]
 
+    nations = found.nations
     for tag, block in got["nations"].items():
         fold_provinces(nations[sys.intern(tag)], block, names)
 

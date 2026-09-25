@@ -20,7 +20,7 @@ save whose wars were sent from a worker, which skips a war whose record
 has not changed since it was last folded; and `build_wars` turns the book
 into the Wars tab.
 
-Reading a war out of a save is `readsave.read_war`'s job. This is what the
+Reading a war out of a save is `readwar.read_war`'s job. This is what the
 campaign makes of them, so it is imported by the finishing in the workers,
 by the walk in `main`, and by the report -- and by none of the reading, so
 editing it leaves the parse cache alone.
