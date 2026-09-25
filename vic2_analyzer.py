@@ -63,6 +63,8 @@ from readsave import (
     date_key,
     reading_for,
 )
+# The front of a save, read without the rest: its date, for the order.
+from savehead import in_date_order, one_per_date, sort_key
 # Reading a folder of saves in parallel, and the cache behind it.
 from readfolder import (
     cache_dir,
@@ -294,71 +296,6 @@ def clear_cache():
         removed += 1
         freed += size
     return removed, freed
-
-
-DATE_IN_HEAD = re.compile(rb'date\s*=\s*"([\d.]+)"')
-
-
-def date_of(path):
-    """A save's in-game date, off the front of the file, without parsing it."""
-    try:
-        with open(path, "rb") as fh:
-            found = DATE_IN_HEAD.search(fh.read(4096))
-    except OSError:
-        return ""
-    return found.group(1).decode("ascii") if found else ""
-
-
-def in_date_order(files):
-    """
-    The saves sorted by the date inside them, read from their first line.
-
-    Worth the 4 KB a save: the campaign has to be walked oldest first -- war
-    histories fold that way -- and knowing the order up front is what lets
-    saves be handed over one at a time instead of collected and sorted.
-    """
-    return sorted(files, key=lambda p: (save_sort_key(p, date_of(p)), p))
-
-
-def one_per_date(files):
-    """
-    `files`, in date order, with one save per in-game date.
-
-    Two saves carrying the same date used to be read twice over: every
-    table held both, so a copy of one save doubled its rows, while the
-    report -- which keeps one reading a date -- showed the later of the two.
-    It happens for real. Every game's first save is 1836.1.1, so a folder
-    holding two games holds two of those, and a save made by hand can fall
-    on an autosave's day. The later-named file is kept, which is the one
-    the report already showed, and the rest are named on the way past.
-    """
-    kept, dates, clash = [], [], {}
-    for path in files:
-        date = date_of(path)
-        key = save_sort_key(path, date)
-        if kept and key[0] == 0 and key == dates[-1]:
-            clash.setdefault(date, [kept[-1]]).append(path)
-            kept[-1] = path
-            continue
-        kept.append(path)
-        dates.append(key)
-    for date, same in clash.items():
-        print("note: %s are all dated %s, so only %s is read. Saves from two "
-              "games in one folder? Keep each game in a folder of its own."
-              % (", ".join(os.path.basename(p) for p in same), date,
-                 os.path.basename(same[-1])), file=sys.stderr)
-    return kept
-
-
-def save_sort_key(path, meta_date):
-    """Sort by in-game date when we have it, filename otherwise."""
-    parts = meta_date.split(".")
-    try:
-        return (0, int(parts[0]), int(parts[1]), int(parts[2]))
-    except (IndexError, ValueError):
-        return (1, 0, 0, 0)
-
-
 
 
 GOOD_CATEGORIES = {
@@ -970,7 +907,7 @@ def run_cross(parent, survey, args, verbose=True):
                              jobs=args.jobs)
         if not parsed:
             continue
-        parsed.sort(key=lambda p: save_sort_key(p[0]["file"], p[0]["date"]))
+        parsed.sort(key=lambda p: sort_key(p[0]["date"]))
         results.append((entry["name"], entry["mod_label"],
                         campaign_rows(parsed, mod, args,
                                       set(args.tags) if args.tags else None)))

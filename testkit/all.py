@@ -72,6 +72,8 @@ def main():
         ("awkward save layouts", [os.path.join(KIT, "awkward.py")]),
         ("awkward country blocks", [os.path.join(KIT, "countries.py")]),
         ("the keeper", [os.path.join(KIT, "keeping.py")]),
+        ("one game's saves told from another's",
+         [os.path.join(KIT, "histories.py")]),
         ("campaigns nobody has", [os.path.join(KIT, "edges.py")]),
         ("sharing a report", [os.path.join(KIT, "sharing.py")]),
         ("what the executable carries", [os.path.join(KIT, "packing.py")]),

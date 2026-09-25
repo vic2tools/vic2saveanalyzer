@@ -31,20 +31,24 @@ FLAGS = ["the_great_trek", "liberal_revolution_somewhere", "MozartFest1838",
          "sonderbund_crisis", "risorgimento_started", "meiji_restoration"]
 
 # A real save carries a good handful of these within a few years, and the
-# keeper needs at least `FLOOR` of them on both sides before it can tell two
-# readings of one campaign from two campaigns. Granting only two, as this did
-# at first, made a formation look like a new game -- which is a true thing
-# about the keeper worth knowing, but not what this is here to demonstrate.
+# keeper needs at least `savehead.FLAG_FLOOR` of them on both sides before it
+# can tell two readings of one campaign from two campaigns. Granting only
+# two, as this did at first, made a formation look like a new game -- which
+# is a true thing about the keeper worth knowing, but not what this is here
+# to demonstrate.
 FLAGS_AT_START = 6
 
 
-def a_save(year, month, tag, size, n=0):
-    """A plausible save: a real-looking header, then filler to size."""
+def a_save(year, month, tag, size, n=0, flags=FLAGS):
+    """
+    A plausible save: a real-looking header, then filler to size. `flags` is
+    the history it grants from; another list is another game.
+    """
     head = ['date="%d.%d.1"' % (year, month), 'player="%s"' % tag,
             "government=3", "automate_trade=no", "rebel=0", "flags=", "{"]
     # Flags accumulate as a game runs, which is how two saves are recognised
     # as one campaign. So grant one more of them every few months.
-    for flag in FLAGS[:min(len(FLAGS), FLAGS_AT_START + n // 3)]:
+    for flag in flags[:min(len(flags), FLAGS_AT_START + n // 3)]:
         head.append("\t%s=yes" % flag)
     head += ["}", 'start_date="1836.1.1"', "start_pop_index=152437",
              "worldmarket=", "{", "\tworldmarket_pool=", "\t{"]

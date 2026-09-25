@@ -468,6 +468,29 @@ def m49():
           "        except (ZeroDivisionError,) as exc:")
 
 
+# ---- the event-flag rule, which the keeper and --cross each had a copy of
+
+@mutation("flag-gap-too-wide",
+          "the flag gap that tells two games apart is ten times too wide, so "
+          "a second game joins the first", "histories.py")
+def m50():
+    patch("savehead.py", "FLAG_GAP = 6\n", "FLAG_GAP = 60\n")
+
+
+@mutation("keeper-ignores-flag-gap",
+          "the keeper files a save with the campaign whatever its flags say",
+          "histories.py")
+def m51():
+    patch("keeper.py", "        elif gap < FLAG_GAP:\n", "        elif True:\n")
+
+
+@mutation("cross-names-no-stray",
+          "--cross never names a save from another game in a campaign folder",
+          "histories.py")
+def m52():
+    patch("cross.py", "        if worst >= FLAG_GAP:\n", "        if False:\n")
+
+
 # ---- pressing Analyze erased the token; a refused token could not be replaced
 
 @mutation("analyze-erases-share-settings",

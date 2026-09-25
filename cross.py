@@ -47,6 +47,7 @@ from collections import Counter
 
 from mod_reader import (country_entries, invention_sequence, read_clausewitz,
                         read_poptypes, resolved_file, resolved_files)
+from savehead import FLAG_FLOOR, FLAG_GAP, fields, flags_in, head_of, ymd
 
 # The country blocks sit after the province data, near the end of the file, so
 # identifying a save means reading all of it. Only the last save or two of a
@@ -60,9 +61,6 @@ _IDS = re.compile(r'active_inventions=\s*\{([^}]*)\}')
 _TECH_BLOCK = re.compile(r'\n\ttechnology=\r?\n\t\{(.*?)\n\t\}', re.S)
 _TECH_NAME = re.compile(r'\n\t\t(\w+)=\s*\{')
 _PROVINCE = re.compile(r'\n(\d+)=\r?\n\{\r?\n\tname=')
-_DATE = re.compile(r'^date="([\d.]+)"', re.M)
-_FLAGS = re.compile(r'^flags=\s*\{(.*?)^\}', re.M | re.S)
-_FLAG_NAME = re.compile(r'^\s*([A-Za-z_][\w]*)\s*=', re.M)
 
 # A pop type is real if provinces are full of it. A handful of matches is some
 # other nested block that happens to look the same.
@@ -299,38 +297,32 @@ def match_mod(files, candidates, sample=2):
     return label, root, rows
 
 
-def history_breaks(files, floor=3, width=6):
+def history_breaks(files):
     """
     Saves in this folder that cannot share a history with the ones after them.
 
-    Global event flags accumulate, so an earlier save's flags should be a subset
-    of a later save's. Flags do get cleared deliberately -- `money_setup_done`
-    and the rest are one-shot setup flags -- so contradicting a later save
-    proves nothing on its own. Measured across 2,850 pairs of real saves, two
-    from one campaign never disagreed by more than five flags, while two from
-    different campaigns disagreed by twelve at the median. `width` sits above
-    that first number: a save is only named when it contradicts *every* later
-    save by at least that much, which held no false alarms on those campaigns.
+    An earlier save's global event flags should all be in a later save of the
+    same game (`savehead`, where the rule and its measurement are). Flags do
+    get cleared on purpose, so contradicting one later save proves nothing on
+    its own: a save is only named when it loses at least `FLAG_GAP` flags
+    against *every* later save, which held no false alarms on the campaigns
+    it was measured on.
 
     Returns [(file, worst disagreement, later saves checked)].
     """
     heads = []
     for path in files:
-        try:
-            with io.open(path, 'rb') as fh:
-                blob = fh.read(400_000).decode('latin-1')
-        except OSError:
+        head = head_of(path)
+        if head is None:
             continue
-        date = _DATE.search(blob)
-        block = _FLAGS.search(blob)
         heads.append({
             "file": os.path.basename(path),
-            "key": tuple(int(x) for x in date.group(1).split(".")) if date else (0,),
-            "flags": set(_FLAG_NAME.findall(block.group(1))) if block else set(),
+            "key": ymd(fields(head).get("date")) or (0,),
+            "flags": flags_in(head),
         })
     out = []
     for h in heads:
-        if len(h["flags"]) < floor:
+        if len(h["flags"]) < FLAG_FLOOR:
             continue                  # too little evidence to accuse it
         later = [o for o in heads if o["key"] > h["key"]]
         if len(later) < 2:
@@ -338,7 +330,7 @@ def history_breaks(files, floor=3, width=6):
         # The weakest disagreement across every later save: one save that
         # happens to have cleared a flag cannot raise the alarm on its own.
         worst = min(len(h["flags"] - o["flags"]) for o in later)
-        if worst >= width:
+        if worst >= FLAG_GAP:
             out.append((h["file"], worst, len(later)))
     return out
 

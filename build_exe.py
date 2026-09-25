@@ -115,6 +115,7 @@ def build():
                # the window's two halves and the one thing that leaves the
                # machine, all reached from app.py
                "gui", "keeper", "keeper_gui", "publish", "fastscan",
+               "savehead",
                # reached only from inside functions, in both the window and the
                # analyzer, so the scan has nothing at module level to follow
                "cross",

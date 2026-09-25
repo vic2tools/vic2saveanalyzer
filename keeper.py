@@ -46,6 +46,10 @@ import subprocess
 import sys
 import time
 
+# What a save's first few hundred kilobytes say, and the measured rule for
+# telling one campaign's history from another's.
+from savehead import FLAG_GAP, flags_lost, header, ymd
+
 HOME = os.path.expanduser("~")
 SAVES = os.path.join(
     HOME, "Documents", "Paradox Interactive", "Victoria II", "save games")
@@ -55,28 +59,6 @@ EXPORT = os.path.join(HOME, "Documents", "Exportsaves")
 # save the player made deliberately, which the game is already keeping for them.
 AUTOSAVES = ("autosave.v2", "oldautosave.v2", "olderautosave.v2")
 
-# Enough of the front to hold the header and the flags block, which is as much
-# as this ever needs to read of a save.
-HEADER_BYTES = 400_000
-
-FIELD = re.compile(rb'(date|player|start_date)\s*=\s*"([^"]*)"')
-FLAGS = re.compile(rb'^flags=\s*\{(.*?)^\}', re.M | re.S)
-FLAG_NAME = re.compile(rb'^\s*([A-Za-z_]\w*)\s*=', re.M)
-
-# Two saves from one campaign never disagreed by more than five flags across the
-# 2,850 real pairs this was measured on; two from different
-# campaigns disagreed by twelve at the median. Six is that gap. Below `FLOOR`
-# flags there is nothing to measure -- an 1836 save has none at all -- and the
-# question falls back to the country and the start date.
-WIDTH = 6
-FLOOR = 3
-
-# What `FLOOR` costs, said plainly: in the opening year or two of a campaign
-# there are barely any flags, so a nation formed that early cannot be shown to
-# be the same campaign and starts a folder of its own. Nothing in the game
-# forms in 1836, so this has never come up in play -- it turned up against a
-# fake campaign written to test the keeper, whose saves carried two flags.
-
 # Our own naming, read back: `SAR1847_01_01.v2`, and `GFM SAR-ITA 1836`.
 SAVE_NAME = re.compile(r"^([A-Za-z0-9]{2,4})(\d{4})_(\d{2})_(\d{2})\.v2$")
 GENERATED = re.compile(r"^(?:.+ )?[A-Za-z0-9]{2,4}(?:-[A-Za-z0-9]{2,4})*"
@@ -85,45 +67,6 @@ GENERATED = re.compile(r"^(?:.+ )?[A-Za-z0-9]{2,4}(?:-[A-Za-z0-9]{2,4})*"
 # Only a safety net: the folder itself says when it changed, and this is how
 # long to wait before looking anyway.
 POLL = 5.0
-
-
-def header(path):
-    """
-    The date, the player's tag, the start date and the event flags of a save.
-
-    Returns None if the file cannot be read yet or does not look like a
-    plaintext save -- both of which mean "not now" rather than "never": the game
-    holds the file while it writes, and a save caught mid-write has no header.
-    """
-    try:
-        with open(path, "rb") as fh:
-            head = fh.read(HEADER_BYTES)
-    except OSError:
-        return None
-    if head[:2] == b"PK" or b"date=" not in head[:4096]:
-        return None
-    found = {}
-    for match in FIELD.finditer(head):
-        found.setdefault(match.group(1).decode(),
-                         match.group(2).decode("latin-1"))
-        if len(found) == 3:
-            break
-    if "date" not in found or "player" not in found:
-        return None
-    block = FLAGS.search(head)
-    found["flags"] = set(FLAG_NAME.findall(block.group(1))) if block else set()
-    return found
-
-
-def ymd(stamp):
-    """`1847.1.1` as (1847, 1, 1), or None."""
-    parts = stamp.split(".")
-    if len(parts) != 3:
-        return None
-    try:
-        return tuple(int(p) for p in parts)
-    except ValueError:
-        return None
 
 
 def folder_saves(folder):
@@ -179,12 +122,8 @@ def flag_gap(info, head, date):
     Returns None when either side is too thin to be evidence.
     """
     if date >= info["date"]:
-        earlier, later = info["flags"], head["flags"]
-    else:
-        earlier, later = head["flags"], info["flags"]
-    if len(earlier) < FLOOR or len(later) < FLOOR:
-        return None
-    return len(earlier - later)
+        return flags_lost(info["flags"], head["flags"])
+    return flags_lost(head["flags"], info["flags"])
 
 
 def mod_prefix(path, root):
@@ -230,7 +169,7 @@ def pick_campaign(path, args, head, cache):
         same_tag = info["tag"] == head["player"]
         if gap is None:
             rank = (2, 0) if same_tag else None   # nothing to go on but names
-        elif gap < WIDTH:
+        elif gap < FLAG_GAP:
             rank = (0 if same_tag else 1, gap)    # the same history either way
         else:
             rank = None                           # a different game entirely
