@@ -1547,6 +1547,32 @@ def analyze(run, cancel=None, progress=None, ready=None):
         set_report_ready(None)
 
 
+def start_forkserver():
+    """
+    Start the process workers are made from, now, with what they will need.
+
+    Python 3.14 makes workers on Linux by asking a forkserver to fork them,
+    and starts that forkserver when the first worker is wanted -- which
+    then waits while it imports the analyzer, before forking anything.
+    Each worker then imported the mod reader, `spending` and `report` for
+    itself on its first save. Started here, once a run knows it has work
+    to do, the forkserver does its importing while this process checks the
+    mod and decodes the inventions, and every worker is forked with those
+    modules already in it. Where workers are made another way -- Windows,
+    and anything that chose spawn or fork -- this does nothing.
+    """
+    import multiprocessing
+    if multiprocessing.get_start_method() != "forkserver":
+        return
+    from multiprocessing import forkserver
+    multiprocessing.set_forkserver_preload(
+        ["__main__", "mod_reader", "spending", "report"])
+    try:
+        forkserver.ensure_running()
+    except OSError:
+        pass              # the pool meets it again, and says so there
+
+
 def main(run=None):
     """
     One run, as `run` declares it, or as the command line does.
@@ -1666,6 +1692,7 @@ def _main(run=None):
         stamp = report_stamp(files, args, mod_signature(args.mod_path))
     if already_built(args, stamp):
         return 0
+    start_forkserver()
 
     mod = None
     # A mod that has to be read from its files takes most of a second, and
