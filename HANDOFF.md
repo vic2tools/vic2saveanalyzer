@@ -1,4 +1,4 @@
-# Next session: the speed session is done; here is what is left
+# Next session: the structure review is done; here is what is left
 
 Paste this whole file as the first message of a new session.
 
@@ -8,11 +8,11 @@ You are picking up `~/vic2saveanalyzer`, a Victoria 2 save-file
 analyzer. It has a GitHub remote, `origin` (github.com/vic2tools/vic2saveanalyzer),
 but its `main` is still `a78b1c3` from 2 September: **none of the hundred-odd
 commits since has been pushed**, and nothing should be without the maintainer saying
-so. The code is as of `cc75f60`; the commit after it only writes
-`INTERNALS.md` and this file. The working tree is clean, all 25 checks pass,
-and the mutation harness catches 46 of 46. Backup bundles sit in `~`, one
-per session, never overwritten; the newest is
-`vic2saveanalyzer-backup-cc75f60.bundle`, which also holds the commit after.
+so. The code is as of `67d6c69`; the commit after it only writes
+`REVIEW.md`, `INTERNALS.md`, `testkit/README.md` and this file. The working
+tree is clean, all 26 checks pass, and the mutation harness catches 54 of
+54. Backup bundles sit in `~`, one per session, never overwritten; the
+newest is named for the last commit of the 25 September structure session.
 
 The maintainer develops on Fedora and ships on Windows as `dist/vic2saveanalyzer.exe`,
 so anything platform-specific gets written on the machine that cannot test it.
@@ -35,8 +35,27 @@ The scanner builds with no warnings.
 
 Read `INTERNALS.md`, the **Speed** section, before changing anything for
 speed: the two entries dated 2026-09-24 are where the time went and what was
-done about it, dead ends included. `REVIEW.md` §12-§31 is the last review and
-what it decided; do not reopen what it marks decided.
+done about it, dead ends included. `REVIEW.md` §12-§31 is the last bug
+review and what it decided, and §32-§35 the structure review after it: what
+moved where, and what was left on purpose and why. Do not reopen what either
+marks decided.
+
+## Where things are now
+
+The 25 September session moved a good deal, so names in older notes may
+point at the wrong file. The run is `vic2_analyzer.py` (the walk, the
+tables, `_main`); its settings and command line are `run.py`, with
+`RunError`, which every refusal raises; the report stamp is `stamp.py`.
+Reading a save is `readsave.py` (`analyze_save(path, reading)` -- the
+reading is an argument now, there are no parser globals), with
+`readwar.py` for war blocks. The front of a save and the event-flag rule
+are `savehead.py`, dates `dates.py`, the war book `wars.py`, the market
+`market.py`, the tables' columns `spending.NARROW`. `--cross` lives whole
+in `cross.py`, `--verify` and `--peek` in `explain.py`, what the windows
+remember in `settings.py`. A run with no mod carries `mod_reader.NO_MOD`.
+The scanner is `scanner/src/{main,province,country,text}.rs`.
+`testkit/readboth.py` is the one way to read a save both ways, and a check
+that cannot run here exits 77 (`testkit/outcome.py`).
 
 ## The contract. Nothing is done without all four.
 
@@ -79,6 +98,16 @@ About ten minutes in all. Commit first, then run the contract comparing
 own. `~/.cache/vic2speed/contract.sh` does all four exactly this way, and
 `land.sh` beside it applies a diff, commits it, runs the contract and then the
 benchmarks only if it passed.
+
+The contract's third step runs the checks in the repository's own tree, so
+nothing can be edited there for ten minutes at a time. The 25 September
+session worked in a second worktree, `~/.cache/vic2speed/dev`, committed
+there, and fast-forwarded `main` to each commit in turn to run its
+contract while the next was being written. Two tools beside the contract
+helped: `mutdry.py TREE` says in a second whether every mutation still finds
+the text it patches, which is what moving code breaks; and `moveblocks.py`
+cuts named top-level definitions, with the comments above them, out of a
+file, so a move is a move and not a retyping.
 
 **Every bug fix brings a check that fails without it, and a mutation in
 `testkit/mutate.py` that proves it**, run by hand once with the failure
@@ -137,13 +166,17 @@ went BLIND rather than failing to apply, which only the harness noticed.
 ## What is left
 
 0. **A finished, checked change not yet committed**:
-   `~/.cache/vic2speed/parsespan.diff` reads the wars, the market and the
+   `~/.cache/vic2speed/parsespan-67d6c69.diff` reads the wars, the market and the
    great power list with one `findall` instead of a token at a time -- the
    same trees on all 16,280 such blocks in the campaign and on 100,000
    random token streams, 2.49 s of worker time to 1.66 over the campaign,
    and it helps the Python-only reading Windows users get today. Its commit
    message is `msg-parsespan.txt` beside it. It needs the contract, and a
-   benchmark with `CPUS=0,2,4,6 -- --jobs 3`, where it should show.
+   benchmark with `CPUS=0,2,4,6 -- --jobs 3`, where it should show. The
+   original `parsespan.diff` no longer applies after the reader was
+   restructured; the `-67d6c69` one is it ported to the new loop, and was
+   checked to apply, keep `parity.py` identical, and leave a twelve-save
+   run's outputs byte-identical with the scanner and without it.
 1. **The wars, the market and the great power list in Rust** -- Python's
    whole remaining share of reading a save, about 25 ms of every save's CPU
    after this session. It barely shows here: past eight workers reading is
@@ -156,10 +189,14 @@ went BLIND rather than failing to apply, which only the harness noticed.
    `read_war` calls `str()` on whatever it finds, so a block where a name
    should be has to make the scanner refuse the save, not guess at repr.
 2. **The payload's series and facts built in the workers**, as the narrow
-   tables now are (`report.save_tables`). About 40 ms of a warm rebuild, but
+   tables now are (`spending.save_rows`). About 40 ms of a warm rebuild, but
    only if the main table's rows stop travelling too, and the verbose
    summary reads them.
 3. **One pool for both passes**, and started before it is needed: 35-80 ms
    of every run with a mod.
 4. **Two things the maintainer decided to leave** (`REVIEW.md` §30), and the leads in
    `REVIEW.md` §27, as before.
+5. **What the structure review left on purpose** (`REVIEW.md` §35): the
+   window capturing `sys.stdout`, the three hook globals, and the Rust
+   country reader's own number parsing -- which trims Unicode whitespace as
+   Python does, and has to be settled before item 1 anyway.

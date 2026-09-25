@@ -581,7 +581,8 @@ commit before it. In the order they went in:
   the new autosave's reading overlaps the others' cache. One save added to
   102: 1.495 s to 1.458.
 - **The narrow tables are grouped by nation in the worker**
-  (`report.save_tables`), not regrouped from a quarter of a million tuples
+  (`spending.save_rows`, since 25 September in the same loop that makes the
+  tables' rows), not regrouped from a quarter of a million tuples
   in `build_report`. Warm 1.184 s to 1.128, one save added 1.462 to 1.398.
 - The scanner's five compiler warnings are gone; it answers byte for byte
   as before.
@@ -1518,14 +1519,18 @@ and unwinding a half-read one buys nothing.
 The parallel path had to change shape for it. `pool.map` gives no handle on the
 queue, so a cancellation would leave the executor's context manager waiting
 politely for every save still to come -- on a folder of hundreds, a Stop button
-that takes ten minutes to stop. Work is now submitted one future per save and
-collected with a short `wait` timeout, so the button is answered while the
-workers are busy, and cancelling calls `shutdown(cancel_futures=True)`: everything
-not yet started is dropped and only the saves actually in flight finish. Measured
-on the 38-save folder, Stop pressed at 1.5 s returned at 1.7 s and the process was
-gone at 4.5 s. `parse_saves` re-raises `Cancelled` rather than treating it as a
-machine that cannot start workers, which would otherwise quietly restart the
-whole folder one save at a time.
+that takes ten minutes to stop. Work is now submitted one future per save, a
+bounded window of them at a time, and stopping calls
+`shutdown(cancel_futures=True)`: everything not yet started is dropped and only
+the saves actually in flight finish. Measured on the 38-save folder, Stop
+pressed at 1.5 s returned at 1.7 s and the process was gone at 4.5 s. That was
+the collecting reader, which waited on its pool with a quarter-second timeout
+and so answered Stop in the middle of a save. Since 25 September there is one
+reader, `parse_saves_stream`, and `parse_saves` is it run to the end; Stop is
+answered between saves, as the paragraph above says it always was meant to be.
+`Cancelled` goes up rather than being treated as a machine that cannot start
+workers, which would otherwise quietly restart the whole folder one save at a
+time.
 
 Everything read before the stop is already in the cache, so starting again picks
 up where it left off.

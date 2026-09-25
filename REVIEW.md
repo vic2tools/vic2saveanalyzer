@@ -944,3 +944,138 @@ it used to read all of them first.
   host's delete by GET, and Pages serving `.gz`.
 - Cosmetic items from §5 and §7, and `walk_campaign` still reading
   `v2parse.POP_TYPES` for its columns.
+
+---
+
+# Thermonuclear review of `origin/main..55606ee`, and what was done
+
+## 32. How this one was done
+
+A code-quality review, not a bug hunt: the 116 commits since 2 September
+read for structure -- files grown past 1,000 lines, recipes written twice,
+logic in the wrong module, branching that a better shape would delete. It
+found one thing that was not about structure, and it was proven before
+anything was changed: two checks that did not check (§33). Everything
+below was then done one commit at a time, and every commit passed the
+contract in `HANDOFF.md` on its own, against the commit before it.
+
+## 33. What it found
+
+1. **Two checks compared the scanner with itself.** `awkward.py` and
+   `countries.py` switched the scanner off by replacing `fastscan.scan`,
+   which `analyze_save` had stopped calling -- the bug `parity.py` had
+   been fixed for in `2680ab2`. With the Python country reader, and then
+   the Python province reader, made to raise on any call, both still
+   printed "both readings agree".
+2. **`Reading` managed three module globals** (`v2parse.POP_TYPES`,
+   `readsave.MOB_CANDIDATES`, `readsave.REFORM_KEYS`) that had to be set
+   in `main`, in `run_cross` and in every worker, and read back for
+   `--verify`. The readers used them on four lines, and the scanner was
+   already handed the same lists as arguments.
+3. **Each subject was spread across the stages of a run.** Wars were read
+   in `readsave`, packed in `spending`, folded in `main` and in
+   `report.py`, and judged in `explain`; the market was read in
+   `readsave` and merged in `main`; the five narrow tables had their
+   column order written in three files and agreed by position.
+4. **`vic2_analyzer.py` held much more than the run**: `--cross` (230
+   lines), the stamp, `--verify` and `--peek`, cache administration, the
+   report's flags, and `Run` with its flags. 1,986 lines; `_main` 390.
+5. **Three worker pools**: `parse_saves`, `parse_saves_stream`, and
+   `--verify`'s own, which had no fall-back. The first two had drifted.
+6. **Recipes written twice**: the invention decode; the save header and
+   the event-flag rule in the keeper and `--cross`; four date parsers;
+   the settings file read and rewritten in five places; `find` and
+   `unquote` in both Rust files.
+7. **`analyze_save`** chose between three ways of reading with `head is
+   None` six times, and filled six loose accumulators, one of them read by
+   nothing.
+8. **"No mod" was None**, and the page asked every field whether there
+   was a mod first -- ten times in one call.
+9. **Smaller things**: `Keep`, built and never read; `ModHead`'s fields
+   worked out twice; `cross.py` importing `mod_reader`'s private helpers;
+   `all.py` finding a skipped check by the words it printed; library code
+   ending runs with `sys.exit`; six comments that had stopped saying what
+   the code does.
+10. **Two files were born over 1,000 lines**: `readsave.py` (1,116) and
+    `scanner/src/main.rs` (1,096). `report.py` grew from 1,110 to 1,481.
+
+## 34. What was done about it
+
+Fourteen commits. Each passed all four steps of the contract against the
+one before it: the nine outputs and four diagnostics byte-identical with
+`--no-cache` on both sides, every check, and every mutation caught. The
+mutation harness went from 46 mutations to 54, all caught; the suite from
+25 checks to 26.
+
+| commit | § | what |
+|---|---|---|
+| `ac319de` | 33.1 | `testkit/readboth.py`: one way to read a save both ways, with the guard; two mutations a Python-only drift that only the comparison can see |
+| `bdebe77` | 33.9 | `Keep` gone, `ModHead` once, public helpers for `cross`, skips by exit code 77, six comments corrected |
+| `282d976` | 33.2 | `analyze_save(path, reading)`; the globals, `apply`, `reading_now` and three setters gone; new tests of the rule, and two mutations in place of the two that guarded the globals |
+| `63daf9f` | 33.5 | `parse_saves` is the stream collected; `_parse_parallel` gone; `--verify` falls back to one save at a time, with a check and a mutation |
+| `0abfcd5` | 33.6 | `mod_reader.settle_campaign` |
+| `14a9513` | 33.6 | `savehead.py`; `testkit/histories.py`, the first check of the flag rule, passing before and after; three mutations |
+| `a7da6f9` | 33.6 | `settings.py`: `remember` merges and is the only way in |
+| `91772be` | 33.6 | `dates.py` |
+| `bf558a0` | 33.3 | `wars.py`, `market.py`, the tables declared once and filled in one loop, `save_world` to `modrules`; workers no longer import the report |
+| `a589db9` | 33.4 | `cross`, `stamp`, `run`, `explain`, `readfolder` and `report` take what is theirs; `_main` split into what decides and what prints |
+| `70f0247` | 33.7 | `_Scanned` and `_Whole`, one `_Found`; war reading to `readwar.py` |
+| `8b7249d` | 33.8 | `mod_reader.NO_MOD`, false, carried from the start |
+| `584c5c3` | 33.9 | `run.RunError`; `main` turns it into the same exit; the window shows it, with a check and a mutation |
+| `67d6c69` | 33.6, 33.10 | `scanner/src/` split into `text.rs`, `province.rs` and `main.rs` |
+
+**Sizes.** `vic2_analyzer.py` 1,986 to 899. `report.py` 1,481 to 889.
+`readsave.py` 1,116 to 930. `scanner/src/main.rs` 1,096 to 587. No file
+this range created is over 1,000 lines.
+
+**Output.** Besides the contract's comparison, every output of a
+twelve-save run was compared with the commit before each structural
+change -- with the mod and without, verbose as well as quiet, with the
+scanner and with it hidden -- and was byte-identical. The scanner's own
+output was compared byte for byte on six saves, in `--serve` mode, and
+on a refused file. Seven command-line refusals give the same message and
+exit status as before.
+
+**Speed.** Reading six saves in Python alone, old against new, median of
+five interleaved runs: 3.87 s and 3.89 s. That is noise; nothing on the
+path a save is read by got slower. No other speed was claimed or measured.
+
+**Behaviour changed on purpose, and only here:**
+- `--cross --verify` checks the saves under the reading of the campaign
+  the report is about, where it used to use whichever campaign was read
+  last.
+- `--verify` reads the rest one at a time when a worker dies, where it
+  used to end in a stack trace.
+- A pool that dies under `--cross` no longer reads again the saves it had
+  already finished.
+- The window answers Stop between saves on a `--cross` run, as it always
+  did on a single campaign, rather than within a quarter of a second.
+
+## 35. Left, and why
+
+- **The analyzer prints, and the window captures `sys.stdout`.** Routing
+  every `print` through something the window can hand in would touch
+  hundreds of lines for a program that runs one analysis at a time.
+  Likewise the three hook globals (`set_cancel_check`, `set_progress`,
+  `set_report_ready`): they are set and cleared around each run by
+  `analyze`, and making them arguments would add one to every reader.
+- **The country reader's number parsing in Rust stays its own.** It works
+  on decoded text and trims whitespace the way Python's `float()` does,
+  which is wider than the ASCII the province reader trims; the review
+  called them copies, and they are not. Folding them together would
+  change what the scanner accepts, which is the question `HANDOFF.md`
+  already says to settle before moving more of the reading into Rust.
+- **`NO_MOD` stops at the parse.** `readsave.reading_for` and the
+  finishing's own fallbacks still take None as well: importing the mod
+  reader into `readsave` would put all of it in the parse cache key, and
+  their fallbacks already answer both kinds of "no mod" alike.
+- **`mod_reader.py` (2,489 lines) and `template.py`** stay whole. The
+  first was over the line before this range began and was not grown by
+  it; the second is decided (§8).
+- **Comments.** The six that were wrong are corrected, and the ones on
+  code that moved were cut back to what the code does now. The rest keep
+  their history. There is a great deal of it -- 56 lines of comment for
+  every 100 of code across the main modules, and about 36 "it used to"
+  stories -- and it is the house style; it is recorded here as the thing
+  most likely to go wrong next, because a comment that tells a history is
+  one the code can walk away from.

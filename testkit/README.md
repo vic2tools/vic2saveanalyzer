@@ -14,7 +14,8 @@ python3 testkit/all.py "/path/to/saves" --quick     # skip the slow ones
 
 The suite includes parser parity, cache invalidation, worker startup, GUI,
 browser and CLI checks. Allow a few minutes for a full campaign run. A check that cannot run here — no Firefox, no display, no
-mod, no saves — says so and does not count against the total. One that
+mod, no saves — says so, exits 77 (`outcome.SKIPPED`), and does not count
+against the total. One that
 fails prints its own output in full, because the point of a suite is the
 one that broke.
 
@@ -32,6 +33,7 @@ python3 testkit/parity.py ["/path/to/saves"] [8]   # builds one if none
 python3 testkit/boots.py out/report.html
 python3 testkit/looks.py out/report.html shot.png   # for eyes, not for CI
 python3 testkit/keeping.py                        # no saves needed
+python3 testkit/histories.py                      # no saves needed
 python3 testkit/sharing.py                       # no saves needed
 python3 testkit/savefmt.py                       # no saves needed
 python3 testkit/packing.py                       # no saves needed
@@ -235,12 +237,13 @@ ways of drifting were each put in and each came out.
 **`caching.py`** checks that a cached answer is the answer the run would
 have computed, and that the key it is filed under says everything that
 changes it. Part of that is `readsave.Reading`, the one object that says how
-a run reads a save: applying it and then reading the three globals back the
-long way round has to give the same profile, because if it ever does not,
-the key names one parse and the parse is another. That is the shape of the
-worst bug this file has seen -- a pop-type set that only grew carried one
-mod's `bankers` into the next campaign, read one anyway, and cached it under
-a key that said it had not. Five ways of making the key and the state
+a run reads a save, handed to every read with the save: one save read under
+a mod, then plain, then under the mod again, with the scanner and without,
+has to come back with the mod's pops the first and third time and none of
+them the second, and a campaign read in workers has to come back under the
+run's reading. That is the shape of the worst bug this file has seen -- a
+pop-type set that only grew carried one mod's `bankers` into the next
+campaign, read one anyway, and cached it under a key that said it had not. Five ways of making the key and the state
 disagree were each put in and each came out.
 
 **`mobrate.py`** also holds the line a mod must not cross when nobody has
@@ -293,6 +296,14 @@ behind is still inside the game's three-deep rotation.
 Both halves were made to fail. A keeper reading only `autosave.v2` loses two
 of the three. A keeper that cannot match a campaign across a formation turns
 eighteen months into fifty-one folders.
+
+**`histories.py`** holds the rule that tells one game's saves from
+another's by their event flags (`savehead`), where the keeper and `--cross`
+both use it: two games played as the same nation from the same start must
+get two folders from the keeper, and a campaign folder whose first save is
+from another game must have that save, and only that one, named by
+`history_breaks`. Each used to carry its own copy of the rule, and neither
+copy had a check.
 
 **`window.py`** runs a real campaign through the window's own code path,
 with the window withdrawn. Everything else drives the analyzer through its
