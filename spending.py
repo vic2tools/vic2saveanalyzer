@@ -77,7 +77,8 @@ SaveRows = namedtuple("SaveRows", "rows ship_rows brigade_rows tech_rows "
                                   "pop_rows culture_rows naval supply text")
 
 # What a worker sends back: the save cut down to what the run keeps, the
-# wars the parent folds into its book, and the save's rows.
+# wars the parent folds into its book -- each packed on its own, see
+# `report.fold_packed_wars` -- and the save's rows.
 Spent = namedtuple("Spent", "meta nations wars rows")
 
 
@@ -163,8 +164,9 @@ def spend(meta, nations, spec, keep_fields, pop_columns):
     `partial`, so it has to stay a plain function at the top of a module:
     Windows sends it to each worker by name.
     """
+    from report import pack_wars
     meta, finished = finishing.finish_and_pack(meta, nations, spec)
     rows = save_rows(meta, finished, spec, pop_columns)
-    wars = meta.get("wars", ())
+    wars = pack_wars(meta.get("wars", ()))
     meta, finished = trim_save(meta, finished, keep_fields)
     return Spent(meta, finished, wars, rows)

@@ -1082,7 +1082,7 @@ def walk_campaign(stream, spec, finished, keep, pop_columns):
     # its rows, gives up its wars and is then cut down to the few fields the
     # report still wants -- so what is alive at any moment is one save, not the
     # campaign. `parsed` below holds only those remains.
-    from report import fold_wars
+    from report import fold_packed_wars, fold_wars
     parsed = []
     war_book = {"wars": {}, "order": []}
 
@@ -1123,7 +1123,10 @@ def walk_campaign(stream, spec, finished, keep, pop_columns):
         # a nation's triggered modifiers again, and `war = yes` is asked of
         # these -- emptied, `--explain-mob` explained a rate without the war
         # modifier the report had counted in it.
-        fold_wars(war_book, wars)
+        if finished:
+            fold_packed_wars(war_book, wars)
+        else:
+            fold_wars(war_book, wars)
         # Kept whole only for the diagnostics, which print a nation's raw
         # pool back; everyone else's save was trimmed where it was spent.
         parsed.append((meta, nations))

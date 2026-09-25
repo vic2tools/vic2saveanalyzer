@@ -22,6 +22,7 @@ import bisect
 import gzip
 import json
 import os
+import pickle
 import threading
 from html import escape as _escape
 
@@ -609,6 +610,41 @@ def fold_wars(book, war_list):
                 held["battles"][bkey] = battle
             elif battle["date"] and not there["date"]:
                 there["date"] = battle["date"]          # a save that still knew
+
+
+def fold_packed_wars(book, packed):
+    """
+    `fold_wars`, for one save's wars as a worker sends them: each war's
+    identity (`_war_key`) and the war pickled on its own.
+
+    A save carries every war there has ever been, and from one save to the
+    next almost all of them are the same records again: the war ended long
+    ago and nothing about it has changed. Unpickling them was half of what
+    the parent spent receiving a save, and folding them as much again.
+
+    A record whose bytes are exactly those of the last record folded under
+    its identity is not unpickled or folded. That is exact, not a guess:
+    folding a record keeps the earliest of its dates and the latest of its
+    endings, the union of its sides, each battle once under its key, and its
+    goals by replacement -- so folding the same record into the state it
+    left behind changes nothing. And nothing else has changed that state:
+    a record only ever touches the wars under its own identity, and any
+    record folded there since would now be the last one. Any other record
+    -- a war still being fought, a new battle, a second war of the same
+    name -- is unpickled and folded as it always was.
+    """
+    last = book.setdefault("last_folded", {})
+    for name, blob in packed:
+        if last.get(name) == blob:
+            continue
+        fold_wars(book, [pickle.loads(blob)])
+        last[name] = blob
+
+
+def pack_wars(wars):
+    """One save's wars as `fold_packed_wars` takes them."""
+    return [(_war_key(war), pickle.dumps(war, pickle.HIGHEST_PROTOCOL))
+            for war in wars]
 
 
 def build_wars(parsed, province_names=None, province_regions=None,

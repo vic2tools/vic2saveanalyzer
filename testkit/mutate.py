@@ -393,8 +393,20 @@ def m30():
           "mobrate.py")
 def m31():
     patch("vic2_analyzer.py",
-          "        fold_wars(war_book, wars)\n",
-          "        fold_wars(war_book, wars)\n        meta[\"wars\"] = ()\n")
+          "            fold_wars(war_book, wars)\n",
+          "            fold_wars(war_book, wars)\n            meta[\"wars\"] = ()\n")
+
+
+# ---- a war skipped as a repeat when it had changed
+
+@mutation("packed-fold-skips-by-war",
+          "a war already in the book is skipped whatever its record says, "
+          "so a war still being fought stops gaining battles",
+          "warfold.py", "saves")
+def m46():
+    patch("report.py",
+          "        if last.get(name) == blob:\n            continue\n",
+          "        if name in last:\n            continue\n")
 
 
 # ---- an empty table was skipped, and the last run's copy stayed

@@ -103,6 +103,8 @@ def main():
                 ("damaged saves", [os.path.join(KIT, "mangled.py"), one, "4"]),
                 ("the scanner against the parser",
                  [os.path.join(KIT, "parity.py"), args.saves, "8"]),
+                ("the war book, folded two ways",
+                 [os.path.join(KIT, "warfold.py"), args.saves]),
                 ("the numbers against each other",
                  [os.path.join(KIT, "invariants.py"), table, report]),
                 ("the payload split", [os.path.join(KIT, "facts.py"), report]),
