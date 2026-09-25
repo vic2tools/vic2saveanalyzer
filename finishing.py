@@ -336,16 +336,16 @@ def finalize(nat, rate=1.0, pop_per_regiment=POP_SIZE_PER_REGIMENT,
     brigades = brigades_from_clusters(buckets, rate, pop_per_regiment)
 
     out = dict(nat)
+    out["life_unmet_pct"] = round(100.0 * nat["life_unmet"] / total, 3) \
+        if total else 0.0
+    out["starving_pct"] = round(100.0 * nat["starving"] / total, 3) \
+        if total else 0.0
     # A nation can stand above what its pops now support, because a brigade is
     # not disbanded when the pop that raised it shrinks. Reported as the larger
     # of the two: a cap under the standing army is not a cap the nation is held
     # to, it is only a statement that it cannot recruit any more, and every
     # reading of it -- headroom, total potential, the head-to-head -- wants the
     # number the nation can actually field.
-    out["life_unmet_pct"] = round(100.0 * nat["life_unmet"] / total, 3) \
-        if total else 0.0
-    out["starving_pct"] = round(100.0 * nat["starving"] / total, 3) \
-        if total else 0.0
     out["brigade_cap"] = max(
         brigade_cap(nat, (mod.defines if mod else None) or {}, pop_per_regiment),
         nat["regular_brigades"])

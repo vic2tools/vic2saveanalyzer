@@ -45,8 +45,8 @@ import os
 import re
 from collections import Counter
 
-from mod_reader import (_country_entries, _read_clausewitz, _resolved_file,
-                        _resolved_files, invention_sequence, read_poptypes)
+from mod_reader import (country_entries, invention_sequence, read_clausewitz,
+                        read_poptypes, resolved_file, resolved_files)
 
 # The country blocks sit after the province data, near the end of the file, so
 # identifying a save means reading all of it. Only the last save or two of a
@@ -149,14 +149,14 @@ def _mod_facts(root):
     if root not in _MOD_FACTS:
         techs = set()
         try:
-            for target in _resolved_files(root, "technologies").values():
-                for name, _block in _read_clausewitz(target):
+            for target in resolved_files(root, "technologies").values():
+                for name, _block in read_clausewitz(target):
                     techs.add(name)
         except Exception:
             techs = set()
         provinces = set()
         try:
-            target = _resolved_file(root, "map", "definition.csv")
+            target = resolved_file(root, "map", "definition.csv")
             with io.open(target, encoding='latin-1') as fh:
                 for line in fh:
                     head = line.split(";")[0].strip()
@@ -165,7 +165,7 @@ def _mod_facts(root):
         except Exception:
             provinces = set()
         _MOD_FACTS[root] = {
-            "tags": {t for t, _f in _country_entries(root)},
+            "tags": {t for t, _f in country_entries(root)},
             "pops": set(read_poptypes(root)),
             "techs": techs,
             "inventions": _capacity(root),

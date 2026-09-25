@@ -363,7 +363,7 @@ What it was actually costing, across the seven mods installed here:
 | `decisions/` | CE 1v1 saw 1 file of 30, Ferrum Mare 44 of 73 -- no formations |
 | `common/issues.txt` and its neighbours | nothing yet, but one file away from it |
 
-`_resolved_files` does folders and `_resolved_file` does the single files, and
+`resolved_files` does folders and `resolved_file` does the single files, and
 between them every reader now goes through one of the two. Two of them are
 order-sensitive and were checked rather than assumed: no mod here borrows a
 single `technologies/` or `inventions/` file, so the invention array the save's

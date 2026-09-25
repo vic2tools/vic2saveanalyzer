@@ -34,6 +34,7 @@ sys.path.insert(0, HERE)
 import fastscan                                            # noqa: E402
 import readsave                                            # noqa: E402
 import savefmt                                             # noqa: E402
+from outcome import SKIPPED                                 # noqa: E402
 from readboth import both_ways, differences                # noqa: E402
 import vic2_analyzer as va                                 # noqa: E402
 
@@ -87,7 +88,7 @@ def main():
     if fastscan.available() is None:
         print("no scanner built, so nothing to compare; "
               "run `cargo build --release` in scanner/")
-        return 0
+        return SKIPPED
     # Which lines of a country block are reforms is told to both readers,
     # and a run that tells neither leaves that half of the country block dark
     # on both sides -- which is agreement about nothing.

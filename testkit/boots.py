@@ -25,6 +25,8 @@ import subprocess
 import sys
 import tempfile
 
+from outcome import SKIPPED
+
 # Dumped by the page, read back off Firefox's stdout. `dump()` rather than
 # `console.log` because console output is formatted and quoted and this is
 # meant to be parsed.
@@ -234,7 +236,7 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--hostile":
         if shutil.which("firefox") is None:
             print("no firefox here, so nothing was opened")
-            return 0
+            return SKIPPED
         wrong = hostile_names()
         for one in wrong:
             print("PROBLEMS:\n  %s" % one)
@@ -251,7 +253,7 @@ def main():
     if said is None:
         if shutil.which("firefox") is None:
             print("no firefox here, so nothing was opened")
-            return 0
+            return SKIPPED
         print("the browser never reported back -- it may have failed to "
               "start, or the page never finished loading")
         return 1

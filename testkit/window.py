@@ -31,6 +31,8 @@ import time
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
+from outcome import SKIPPED                                 # noqa: E402
+
 
 def a_window():
     """(root, app), or None if this machine cannot make one."""
@@ -273,7 +275,7 @@ def main():
     made = a_window()
     if made is None:
         print("no tkinter or no display here, so no window was built")
-        return 0
+        return SKIPPED
     root, app = made
     holding = tempfile.mkdtemp(prefix="vic2window")
     try:

@@ -33,6 +33,7 @@ import sys
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
+from outcome import SKIPPED                                 # noqa: E402
 from report import as_columns, rebuild_facts, thin_facts    # noqa: E402
 
 
@@ -151,6 +152,7 @@ def check(name, dates, facts, series):
 
 def main():
     bad = 0
+    payload = True
     for name, dates, facts, series in made_up():
         if check(name, dates, facts, series):
             print("  %-34s comes back the same" % name)
@@ -162,6 +164,7 @@ def main():
         got = from_report(path)
         if got is None:
             print("  %s carries no payload to check" % os.path.basename(path))
+            payload = False
         else:
             facts, series, keys, dates = got
             # The report on disk already has the thin `facts`, so rebuilding
@@ -206,7 +209,7 @@ def main():
         print("%d check(s) failed" % bad)
         return 1
     print("thinning and rebuilding `facts` is lossless")
-    return 0
+    return 0 if payload else SKIPPED
 
 
 if __name__ == "__main__":

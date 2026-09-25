@@ -33,6 +33,9 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from outcome import SKIPPED                                 # noqa: E402
+
 TREE = ""
 SAVES = ""
 
@@ -54,11 +57,24 @@ def patch(path, old, new, count=1):
     open(full, "w").write(src.replace(old, new))
 
 
+class Said(str):
+    """A check's output, and whether it said it could not all run here."""
+    skipped = False
+
+
 def check(script, args=()):
-    """Run a check. Returns (passed, output)."""
+    """
+    Run a check. Returns (passed, output).
+
+    A check that skips part of itself here (`outcome.SKIPPED`) has not
+    passed: a mutation it could not have seen would be counted as blind,
+    and its control run as good.
+    """
     done = subprocess.run([sys.executable, os.path.join("testkit", script)] + list(args),
                           capture_output=True, text=True, cwd=TREE, timeout=900)
-    return done.returncode == 0, (done.stdout + done.stderr)
+    said = Said(done.stdout + done.stderr)
+    said.skipped = done.returncode == SKIPPED
+    return done.returncode == 0, said
 
 
 def argv_for(extra):
@@ -646,9 +662,11 @@ def main():
             control[(catcher, extra)] = check(catcher, argv_for(extra))
     for (catcher, extra), (passed, out) in control.items():
         if not passed:
-            print("CONTROL FAILED: %s %s fails with no bug put back, so its "
-                  "mutations are not tried:\n%s\n"
+            print("CONTROL FAILED: %s %s %s, so its mutations are not "
+                  "tried:\n%s\n"
                   % (catcher, " ".join(argv_for(extra)),
+                     "cannot all run on this machine" if out.skipped
+                     else "fails with no bug put back",
                      "\n".join("      " + l for l in out.splitlines()[-25:])))
 
     print("%-34s %-10s %s" % ("MUTATION", "VERDICT", "BUG PUT BACK"))

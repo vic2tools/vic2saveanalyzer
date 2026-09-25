@@ -992,13 +992,14 @@ class Aside:
     """
     A job run on a thread, whose answer and whose failure both come back.
 
-    There is one thing in this program worth a thread, and it is only worth
-    it because of what it runs beside: gzipping the payload spends a quarter
-    of a second inside zlib, which releases the interpreter lock for all of
-    it, so something else can genuinely run at the same time. Writing the CSV
-    tables is that something else -- three tenths of a second, needed by
-    nothing the report contains -- and alongside the compression the two cost
-    the longer of the two rather than the sum.
+    Two things in this program are worth a thread, and each only because of
+    what it runs beside. Reading a mod that is not cached runs beside the
+    saves being read, which is the workers' time rather than this process's.
+    And writing the CSV tables runs beside the payload's compression: gzip
+    spends a quarter of a second inside zlib, which releases the interpreter
+    lock for all of it, so the tables -- three tenths of a second, needed by
+    nothing the report contains -- cost the longer of the two rather than
+    the sum.
 
     Started at the compression and not a line earlier. Assembling the payload
     is ordinary Python holding the lock the whole way, so a thread started

@@ -30,6 +30,9 @@ import time
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KIT = os.path.join(HERE, "testkit")
 
+sys.path.insert(0, KIT)
+from outcome import SKIPPED                                 # noqa: E402
+
 
 def run(name, argv, why=""):
     """One check. (name, ok, skipped, seconds, output)."""
@@ -38,12 +41,10 @@ def run(name, argv, why=""):
                           text=True, cwd=HERE)
     took = time.monotonic() - began
     out = done.stdout + done.stderr
-    # A check says so itself when it cannot run, and exits 0 for it.
-    skipped = done.returncode == 0 and any(
-        phrase in out for phrase in
-        ("no firefox here", "no tkinter or no display", "no scanner built",
-         "carries no payload"))
-    return name, done.returncode == 0, skipped, took, out, why
+    # A check that cannot run all of itself here says so with its exit
+    # status, not its words. See `outcome.py`.
+    skipped = done.returncode == SKIPPED
+    return name, done.returncode in (0, SKIPPED), skipped, took, out, why
 
 
 def main():

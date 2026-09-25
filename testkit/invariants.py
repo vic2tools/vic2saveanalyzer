@@ -25,6 +25,7 @@ import sys
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
+from outcome import SKIPPED                                 # noqa: E402
 from report import year_fraction                            # noqa: E402
 
 # Floating point: literacy and money are accumulated in a different order
@@ -320,11 +321,13 @@ def main():
              + len(NEVER_NEGATIVE)))
 
     shape = []
+    payload = True
     if len(sys.argv) > 2:
         data = payload_of(sys.argv[2])
         if data is None:
             print("  %s carries no payload to check"
                   % os.path.basename(sys.argv[2]))
+            payload = False
         else:
             shape = check_payload(data)
             print("  and the report's own shape: %d nations, %d saves, "
@@ -334,7 +337,7 @@ def main():
 
     if not broken and not shape:
         print("\nevery number agrees with every other number")
-        return 0
+        return 0 if payload else SKIPPED
 
     if shape:
         print("\nBROKEN, in the report's shape:")

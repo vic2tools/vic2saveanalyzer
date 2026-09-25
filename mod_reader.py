@@ -53,7 +53,7 @@ from v2parse import (Tokens, as_list, block_end, parse_block, to_float,
 _COMMENT = re.compile(r"#[^\r\n]*")
 
 
-def _read_clausewitz(path):
+def read_clausewitz(path):
     """Parse one game file into {top_level_key: block}."""
     with open(path, "rb") as fh:
         text = fh.read().decode("latin-1")
@@ -182,7 +182,7 @@ def _read_defines(path):
     the block parser: every key we want is a plain `NAME = number,` line.
     """
     out = {}
-    fname = _resolved_file(path, "common", "defines.lua")
+    fname = resolved_file(path, "common", "defines.lua")
     if not os.path.isfile(fname):
         return out
     with open(fname, "rb") as fh:
@@ -204,7 +204,7 @@ def read_poptypes(path):
     farmers/labourers/craftsmen only happens to be right for vanilla-like mods.
     """
     out = {}
-    for target in _resolved_files(path, "poptypes").values():
+    for target in resolved_files(path, "poptypes").values():
         with open(target, "rb") as fh:
             text = _COMMENT.sub("", fh.read().decode("latin-1"))
         m = re.search(r"(?<![\w.])strata\s*=\s*(\w+)", text)
@@ -250,7 +250,7 @@ def _plain(path):
         return _COMMENT.sub("", fh.read().decode("latin-1"))
 
 
-def _country_entries(path):
+def country_entries(path):
     """
     [(tag, its country file), ...] in the engine's own array order.
 
@@ -261,7 +261,7 @@ def _country_entries(path):
     Dropped, this list matches the order a save writes its country blocks in,
     tag for tag, which is the engine's array by definition.
     """
-    listing = _resolved_file(path, "common", "countries.txt")
+    listing = resolved_file(path, "common", "countries.txt")
     if not os.path.isfile(listing):
         return []
     entry = re.compile(r'^\s*([A-Z0-9]{3})\s*=\s*"?([^"\r\n]+?)"?\s*$', re.M)
@@ -291,8 +291,8 @@ def party_sequence(path):
     pro-military party and predicts 24, which the game does not show.
     """
     out = []
-    for tag, rel in _country_entries(path):
-        target = _resolved_file(path, "common", rel.replace("/", os.sep))
+    for tag, rel in country_entries(path):
+        target = resolved_file(path, "common", rel.replace("/", os.sep))
         if not os.path.isfile(target):
             continue
         for block in _named_blocks(_plain(target), "party"):
@@ -317,10 +317,10 @@ def _modifier_mob_impacts(path):
     """
     out = {}
     for name in ("event_modifiers.txt", "triggered_modifiers.txt"):
-        target = _resolved_file(path, "common", name)
+        target = resolved_file(path, "common", name)
         if not os.path.isfile(target):
             continue
-        for key, block in _read_clausewitz(target):
+        for key, block in read_clausewitz(target):
             if isinstance(block, dict) and "mobilization_impact" in block:
                 out[key] = to_float(block["mobilization_impact"], 0.0)
     return out
@@ -334,7 +334,7 @@ def _mobilization_impacts(path):
     vanilla names: a mod is free to add a fifth stance, and one that does
     would have read as no policy at all.
     """
-    target = _resolved_file(path, "common", "issues.txt")
+    target = resolved_file(path, "common", "issues.txt")
     if not os.path.isfile(target):
         return {}
     out = {}
@@ -365,11 +365,11 @@ def reform_mob(path):
     and a country's stance on them comes from its ruling party rather than from
     a line of its own.
     """
-    target = _resolved_file(path, "common", "issues.txt")
+    target = resolved_file(path, "common", "issues.txt")
     sizes, groups = {}, set()
     if not os.path.isfile(target):
         return sizes, frozenset()
-    for category, block in _read_clausewitz(target):
+    for category, block in read_clausewitz(target):
         if category == "party_issues" or not isinstance(block, dict):
             continue
         for reform, body in block.items():
@@ -393,11 +393,11 @@ def static_mob(path):
     -20% in Divergences of Darkness. The engine hands it to every uncivilized
     country, unconditionally, and nothing writes it into the save.
     """
-    target = _resolved_file(path, "common", "static_modifiers.txt")
+    target = resolved_file(path, "common", "static_modifiers.txt")
     out = {}
     if not os.path.isfile(target):
         return out
-    for name, block in _read_clausewitz(target):
+    for name, block in read_clausewitz(target):
         size = _find_mob_size(block)
         if size:
             out[name] = size
@@ -415,11 +415,11 @@ def triggered_mob(path):
     and judge it. `_trigger_ok` does that for the conditions these actually
     use, and says so rather than guessing when it meets one it cannot judge.
     """
-    target = _resolved_file(path, "common", "triggered_modifiers.txt")
+    target = resolved_file(path, "common", "triggered_modifiers.txt")
     out = []
     if not os.path.isfile(target):
         return out
-    for name, block in _read_clausewitz(target):
+    for name, block in read_clausewitz(target):
         if not isinstance(block, dict):
             continue
         size = _find_mob_size(block)
@@ -473,7 +473,7 @@ def culture_groups(path):
         target = os.path.join(root, "common", "cultures.txt")
         if not os.path.isfile(target):
             continue
-        for group, block in _read_clausewitz(target):
+        for group, block in read_clausewitz(target):
             if not isinstance(block, dict):
                 continue
             for name, body in block.items():
@@ -491,7 +491,7 @@ def continents(path):
     out = {}
     if not os.path.isfile(target):
         return out
-    for name, block in _read_clausewitz(target):
+    for name, block in read_clausewitz(target):
         if not isinstance(block, dict):
             continue
         for pid in as_list(block.get("provinces")):
@@ -577,11 +577,11 @@ def name_for(tag, government, localisation):
 
 def base_prices(path):
     """{good: base cost} from `common/goods.txt`, which nests goods in categories."""
-    target = _resolved_file(path, "common", "goods.txt")
+    target = resolved_file(path, "common", "goods.txt")
     if not os.path.isfile(target):
         return {}
     out = {}
-    for _category, block in _read_clausewitz(target):
+    for _category, block in read_clausewitz(target):
         if not isinstance(block, dict):
             continue
         for good, spec in block.items():
@@ -612,11 +612,11 @@ def _regions(path):
     return out
 
 
-def _resolved_file(path, *parts):
+def resolved_file(path, *parts):
     """
     The copy of one named file the game would actually read.
 
-    Same rule as `_resolved_files`, for the files there is only one of:
+    Same rule as `resolved_files`, for the files there is only one of:
     `common/issues.txt` and its neighbours. A mod that ships its own wins; a
     mod that ships none inherits the game's whole. Returns the mod's path
     either way when neither exists, so a caller's `isfile` check still fails
@@ -633,7 +633,7 @@ def _resolved_file(path, *parts):
     return own
 
 
-def _resolved_files(path, folder):
+def resolved_files(path, folder):
     """
     {file name: the copy the game would actually read}, in load order.
 
@@ -664,7 +664,7 @@ def _resolved_files(path, folder):
 def unit_kinds(path):
     """{unit type: 'land' or 'naval'} from `units/*.txt`."""
     out = {}
-    for target in _resolved_files(path, "units").values():
+    for target in resolved_files(path, "units").values():
         body = _plain(target)
         for m in re.finditer(r"^(\w+)\s*=\s*\{", body, re.M):
             kind = re.search(r"(?<![\w_])type\s*=\s*(\w+)", body[m.end():m.end() + 900])
@@ -692,7 +692,7 @@ def _naval_units(path):
     `big_ship`, which is the only kind torpedoes work against.
     """
     out = {}
-    for target in _resolved_files(path, "units").values():
+    for target in resolved_files(path, "units").values():
         body = _plain(target)
         for m in re.finditer(r"^(\w+)\s*=\s*\{", body, re.M):
             block = _block_text(body, m.group(1))
@@ -764,9 +764,9 @@ def _naval_tech_effects(path):
     look like the thing being searched for and are weightings, not effects.
     """
     out = {}
-    for target in _resolved_files(path, "technologies").values():
+    for target in resolved_files(path, "technologies").values():
         raw = _plain(target)
-        for name, _block in _read_clausewitz(target):
+        for name, _block in read_clausewitz(target):
             found = _ship_changes(_drop_block(_block_text(raw, name), "ai_chance"))
             if found:
                 out[name] = found
@@ -790,9 +790,9 @@ def _naval_invention_effects(path):
     invention.
     """
     out = {}
-    for target in _resolved_files(path, "inventions").values():
+    for target in resolved_files(path, "inventions").values():
         raw = _plain(target)
-        for name, _block in _read_clausewitz(target):
+        for name, _block in read_clausewitz(target):
             body = _block_text(raw, name)
             found = {}
             for effect in _named_blocks(body, "effect"):
@@ -906,7 +906,7 @@ def country_order(path):
     A save's `great_nations` list holds 1-based indices into it, so this is what
     turns "2 10 9 16 6 4 8 12" into a great power ranking.
     """
-    return [tag for tag, _file in _country_entries(path)]
+    return [tag for tag, _file in country_entries(path)]
 
 
 _COUNTRY_ENTRY = re.compile(r'^\s*([A-Z0-9]{3})\s*=\s*"?([^"\r\n]+?)"?\s*$', re.M)
@@ -1013,7 +1013,7 @@ def unit_positions(path):
     if not os.path.isfile(target):
         return {}
     out = {}
-    for key, block in _read_clausewitz(target):
+    for key, block in read_clausewitz(target):
         if not isinstance(block, dict):
             continue
         # A handful of provinces carry a positions block with no `unit` entry --
@@ -1234,11 +1234,11 @@ def government_flag_types(path):
     under a constitutional monarchy against the black-white-red empire flag
     under an absolute one.
     """
-    target = _resolved_file(path, "common", "governments.txt")
+    target = resolved_file(path, "common", "governments.txt")
     if not os.path.isfile(target):
         return {}
     out = {}
-    for name, block in _read_clausewitz(target):
+    for name, block in read_clausewitz(target):
         if not isinstance(block, dict):
             continue
         out[name] = (unquote(str(block.get("flagType", ""))),
@@ -1478,7 +1478,7 @@ def culture_names(path):
         target = os.path.join(root, "common", "cultures.txt")
         if not os.path.isfile(target):
             continue
-        for _group, block in _read_clausewitz(target):
+        for _group, block in read_clausewitz(target):
             if not isinstance(block, dict):
                 continue
             for name, body in block.items():
@@ -1495,7 +1495,7 @@ def culture_names(path):
 def _top_level_keys(path, folder):
     """Every `name = {` at the start of a line, across base game and mod."""
     out = set()
-    for target in _resolved_files(path, folder).values():
+    for target in resolved_files(path, folder).values():
         for m in re.finditer(r"^(\w+)\s*=\s*\{", _plain(target), re.M):
             out.add(m.group(1))
     return out
@@ -1521,7 +1521,7 @@ def display_names(path):
             continue
         target = os.path.join(root, "common", "goods.txt")
         if os.path.isfile(target):
-            for _category, block in _read_clausewitz(target):
+            for _category, block in read_clausewitz(target):
                 if isinstance(block, dict):
                     keys |= {g for g in block if not g.startswith("_")}
         folder = os.path.join(root, "poptypes")
@@ -1529,7 +1529,7 @@ def display_names(path):
             keys |= {f[:-4] for f in _files(folder)}
         target = os.path.join(root, "common", "cb_types.txt")
         if os.path.isfile(target):
-            for name, block in _read_clausewitz(target):
+            for name, block in read_clausewitz(target):
                 if isinstance(block, dict):
                     keys.add(name)
     keys |= _top_level_keys(path, "units")
@@ -1602,9 +1602,9 @@ def _invention_index(path):
     actually gate.
     """
     out = {}
-    for target in _resolved_files(path, "inventions").values():
+    for target in resolved_files(path, "inventions").values():
         raw = _plain(target)
-        for name, block in _read_clausewitz(target):
+        for name, block in read_clausewitz(target):
             reqs, _tags, _invs = _limit_of(_block_text(raw, name))
             if reqs:
                 out[name] = {"requires": reqs, "effects": _invention_effects(block)}
@@ -1624,7 +1624,7 @@ def _technology_tree(path, rules=None):
     behind it -- each with its own effects too -- which come from the
     invention `limit` and body already parsed by `invention_index`.
     """
-    files = _resolved_files(path, "technologies")
+    files = resolved_files(path, "technologies")
     if not files:
         return {}
 
@@ -1645,7 +1645,7 @@ def _technology_tree(path, rules=None):
         category = fname[:-4].replace("_tech", "")
         areas = []
         index = {}
-        for key, block in _read_clausewitz(files[fname]):
+        for key, block in read_clausewitz(files[fname]):
             if not isinstance(block, dict):
                 continue
             area = unquote(str(block.get("area", "other")))
@@ -1710,7 +1710,7 @@ def _formation_decisions(path):
     campaign it happened in still has to come off the province ledger.
     """
     out = {}
-    for target in _resolved_files(path, "decisions").values():
+    for target in resolved_files(path, "decisions").values():
         text = _plain(target)
         for block in _brace_blocks(text):
             made = re.search(r"change_tag(?:_no_core_switch)?\s*=\s*([A-Z0-9]{3})\b",
@@ -1974,8 +1974,8 @@ def has_rules(path):
     still answered at once rather than after every save has been read.
     """
     path = _mod_root(path)
-    return bool(_resolved_files(path, "technologies")
-                or _resolved_files(path, "inventions"))
+    return bool(resolved_files(path, "technologies")
+                or resolved_files(path, "inventions"))
 
 
 class ModHead(namedtuple("ModHead",
@@ -1991,29 +1991,33 @@ class ModHead(namedtuple("ModHead",
     So a run with no cached mod reads its saves on the strength of these,
     while the rest loads beside them. See `vic2_analyzer.main`.
 
-    `_load_mod` fills the same four fields from `_head_parts`, so what is
-    read here and what the whole mod says cannot be worked out two ways.
+    `_load_mod` takes its four fields from `_head`, so what is read here
+    and what the whole mod says cannot be worked out two ways.
     """
 
     __slots__ = ()
 
 
-def _head_parts(path):
-    """(strata, reform sizes, reform groups, triggered modifiers)."""
+def _head(path):
+    """
+    (this mod's `ModHead`, its strata, its reform sizes, its triggered
+    modifiers): the head, and the three things read on the way to it that
+    the whole mod keeps as well.
+    """
     strata = read_poptypes(path)
     reform_sizes, reform_groups = reform_mob(path)
-    return strata, reform_sizes, reform_groups, triggered_mob(path)
-
-
-def mod_head(path):
-    """This mod's `ModHead`."""
-    path = _mod_root(path)
-    strata, reform_sizes, reform_groups, triggers = _head_parts(path)
-    return ModHead(
+    triggers = triggered_mob(path)
+    head = ModHead(
         pop_types=frozenset(strata),
         mob_types=_mobilizable_types(strata),
         reform_names=_watched_reforms(reform_sizes, reform_groups, triggers),
         defines=_read_defines(path))
+    return head, strata, reform_sizes, triggers
+
+
+def mod_head(path):
+    """This mod's `ModHead`."""
+    return _head(_mod_root(path))[0]
 
 
 def load_mod(path):
@@ -2044,14 +2048,14 @@ def _load_mod(path):
     # Both folders resolve file by file against the game underneath, the way
     # the engine does: a mod that ships one invention file still runs on the
     # game's other four, and reading only the mod folder lost them.
-    tech_files = _resolved_files(path, "technologies")
-    inv_files = _resolved_files(path, "inventions")
-    nv_file = _resolved_file(path, "common", "nationalvalues.txt")
+    tech_files = resolved_files(path, "technologies")
+    inv_files = resolved_files(path, "inventions")
+    nv_file = resolved_file(path, "common", "nationalvalues.txt")
 
     tech_mob, tech_count = {}, 0
     tech_names = set()
     for fname in sorted(tech_files, key=str.lower):
-        for name, block in _read_clausewitz(tech_files[fname]):
+        for name, block in read_clausewitz(tech_files[fname]):
             tech_count += 1
             tech_names.add(name)
             size = _find_mob_size(block)
@@ -2065,7 +2069,7 @@ def _load_mod(path):
     invention_rules = {}
     for fname in sorted(inv_files, key=str.lower):
         raw = _plain(inv_files[fname])
-        for name, block in _read_clausewitz(inv_files[fname]):
+        for name, block in read_clausewitz(inv_files[fname]):
             size = _find_mob_size(block)
             if not size:
                 continue
@@ -2079,16 +2083,16 @@ def _load_mod(path):
     inventions = [(n, r["size"]) for n, r in invention_rules.items()]
 
     event_mob = {}
-    ev_file = _resolved_file(path, "common", "event_modifiers.txt")
+    ev_file = resolved_file(path, "common", "event_modifiers.txt")
     if os.path.isfile(ev_file):
-        for name, block in _read_clausewitz(ev_file):
+        for name, block in read_clausewitz(ev_file):
             size = _find_mob_size(block)
             if size:
                 event_mob[name] = size
 
     nv_mob = {}
     if os.path.isfile(nv_file):
-        for name, block in _read_clausewitz(nv_file):
+        for name, block in read_clausewitz(nv_file):
             size = _find_mob_size(block)
             if size:
                 nv_mob[name] = size
@@ -2100,8 +2104,7 @@ def _load_mod(path):
             f"the Victoria 2 install folder for vanilla)."
         )
 
-    strata, reform_sizes, reform_groups, triggers = _head_parts(path)
-    reform_names = _watched_reforms(reform_sizes, reform_groups, triggers)
+    head, strata, reform_sizes, triggers = _head(path)
 
     # A modifier is either looked up by name in the country's own list or
     # judged from its trigger. Names that are both are judged, so that the two
@@ -2132,7 +2135,7 @@ def _load_mod(path):
         "mob_impacts": _mobilization_impacts(path),
         "modifier_impacts": modifier_impacts,
         "reform_mob": reform_sizes,
-        "reform_names": reform_names,
+        "reform_names": head.reform_names,
         "static_mob": static_mob(path),
         "triggered_mob": triggers,
         "culture_groups": culture_groups(path),
@@ -2140,10 +2143,10 @@ def _load_mod(path):
         # Every technology the mod defines, so an invention gated on one it
         # does not can be told from one a nation simply has not researched.
         "technologies": frozenset(tech_names),
-        "defines": _read_defines(path),
+        "defines": head.defines,
         "strata": strata,
-        "pop_types": frozenset(strata),
-        "mob_types": _mobilizable_types(strata),
+        "pop_types": head.pop_types,
+        "mob_types": head.mob_types,
         "invention_rules": invention_rules,
         "event_mob": event_mob,
         "tech_mob": tech_mob,
@@ -2168,7 +2171,7 @@ def invention_sequence(path):
     the save before anything trusts it: an invention a nation holds must be one
     whose `limit` that nation actually meets.
     """
-    files = _resolved_files(path, "inventions")
+    files = resolved_files(path, "inventions")
     if not files:
         return []
     seq = []
@@ -2176,7 +2179,7 @@ def invention_sequence(path):
         full = files[fname]
         with open(full, "rb") as fh:
             raw = _COMMENT.sub("", fh.read().decode("latin-1"))
-        for name, block in _read_clausewitz(full):
+        for name, block in read_clausewitz(full):
             reqs, tags, _invs = _limit_of(_block_text(raw, name))
             seq.append({"name": name, "size": _find_mob_size(block),
                         "techs": reqs, "tags": tags})
@@ -2309,8 +2312,8 @@ def index_coverage(mod, parsed, base=1):
 def invention_files(path):
     """{invention: the file it is defined in}, for reading a decode back."""
     out = {}
-    for fname, target in _resolved_files(path, "inventions").items():
-        for name, _block in _read_clausewitz(target):
+    for fname, target in resolved_files(path, "inventions").items():
+        for name, _block in read_clausewitz(target):
             out.setdefault(name, fname)
     return out
 

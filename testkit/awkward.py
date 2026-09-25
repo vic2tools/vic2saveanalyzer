@@ -108,6 +108,7 @@ FRA=
 def main():
     import fastscan
     import readsave
+    from outcome import SKIPPED
     from readboth import both_ways, differences
 
     out = os.path.join(HERE, "testkit", "_awkward.v2")
@@ -118,7 +119,8 @@ def main():
     fast, slow = both_ways(out)
 
     problems = []
-    if fastscan.available() is None:
+    scanner = fastscan.available() is not None
+    if not scanner:
         print("no scanner built; only the Python reading is checked")
     for where, x, y in differences(fast, slow):
         problems.append("%s\n      rust  : %r\n      python: %r"
@@ -155,7 +157,7 @@ def main():
             print("   " + p)
         return 1
     print("awkward save: both readings agree, and every expectation holds")
-    return 0
+    return 0 if scanner else SKIPPED
 
 
 if __name__ == "__main__":

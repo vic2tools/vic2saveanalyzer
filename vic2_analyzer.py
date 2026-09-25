@@ -50,14 +50,14 @@ from v2parse import (
     to_int,
     unquote,
 )
-# Reading a save is its own thing and lives in its own file: a path in, and
-# what the save says out. Nothing in it knows about caches, workers, reports
-# or the command line, which is why it could be lifted out whole.
 from explain import asked, explain
 from nation import (
     KEEP_FOR_INVENTIONS,
     KEEP_NATION,
 )
+# Reading a save is its own thing and lives in its own file: a path in, and
+# what the save says out. Nothing in it knows about caches, workers, reports
+# or the command line, which is why it could be lifted out whole.
 from readsave import (
     PLAIN,
     analyze_save,
@@ -483,7 +483,7 @@ def _write_csv(path, rows, columns):
         if rows and isinstance(rows[0], dict):
             writer.writerows([row.get(c, "") for c in columns] for row in rows)
         else:
-            # already in column order -- see the row loop in `main`
+            # already in column order -- see `spending.save_rows`
             writer.writerows(rows)
 
 
@@ -1028,15 +1028,8 @@ Campaign = namedtuple(
     "Campaign", "rows tables naval_profiles naval_of supply parsed war_book "
                 "pop_columns text")
 
-# Which of a save's fields survive it. `whole` keeps the save entire,
-# `fields` is what the trim keeps when it does not. See `keep_whole` in
-# `main` for who asks. Whether the raw mobilizable pops survive is the
-# finishing's business and travels in the spec, because the finishing is
-# what spends them.
-Keep = namedtuple("Keep", "whole fields")
 
-
-def walk_campaign(stream, spec, finished, keep, pop_columns):
+def walk_campaign(stream, spec, finished, pop_columns):
     """
     Read the campaign once, oldest save first, spending each save as it
     passes.
@@ -1045,10 +1038,6 @@ def walk_campaign(stream, spec, finished, keep, pop_columns):
     cut down to the handful of fields the rest of the run still asks for,
     so what is alive at any moment is one save rather than the campaign.
     `parsed` holds only those remains.
-
-    Lifted out of `main` unchanged: it was a hundred and ten lines in the
-    middle of an eight-hundred-line function, holding a dozen accumulators
-    that nothing above it touched and everything below it read.
 
     `finished` says the stream already spent each save out in the workers
     (`spending.spend`): what arrives is its rows, its table text, its wars
@@ -1081,10 +1070,6 @@ def walk_campaign(stream, spec, finished, keep, pop_columns):
     # good -> {date: {tag: what it put on the market}}, for the production view.
     supply_by = {}
 
-    # The campaign is walked once, oldest save first. Each save is read, spends
-    # its rows, gives up its wars and is then cut down to the few fields the
-    # report still wants -- so what is alive at any moment is one save, not the
-    # campaign. `parsed` below holds only those remains.
     parsed = []
     war_book = {"wars": {}, "order": []}
 
@@ -1665,20 +1650,13 @@ def _main(run=None):
     if verbose:
         print(f"Found {len(files)} save(s).")
 
-    # The mod is read before any save, because both the pop types read_province
-    # keeps and the defines the counting uses have to be settled up front.
-    #
-    # Both are set from scratch rather than added to, because the window runs
-    # one campaign after another in the same process: a set that only grew
-    # carried the last mod's pop types and reform names into the next
-    # campaign, which then read them out of saves that have none.
-    # Asked before the mod is loaded, not after. The mod's own state is read
-    # from its files rather than from the loaded mod, so a run with nothing
-    # to do never pays the second it takes to read one.
-    # Imported here rather than at the top: a run with nothing to do is
-    # answered in seventy milliseconds, and loading this module costs ten of
-    # them whether or not there is a mod to read.
-    # A `--cross` run was stamped above, before its campaigns were read.
+    # Whether there is anything to do is asked before the mod is loaded. The
+    # stamp signs the mod's files rather than reading them, so a run with
+    # nothing to do never pays the second it takes to read one -- and the
+    # mod reader is imported here rather than at the top for the same
+    # reason: a run with nothing to do is answered in seventy milliseconds,
+    # and loading that module costs ten of them. A `--cross` run was stamped
+    # above, before its campaigns were read.
     signature = None
     if stamp is None:
         from mod_reader import mod_signature
@@ -1884,8 +1862,7 @@ def _main(run=None):
     stream = parse_saves_stream(
         files, verbose=verbose and mod is None, transform=transform,
         **parse_options)
-    keep = Keep(whole=keep_whole, fields=keep_fields)
-    campaign = walk_campaign(stream, spec, in_workers, keep, pop_columns)
+    campaign = walk_campaign(stream, spec, in_workers, pop_columns)
     # What is left in `main` is what `main` still uses: the tables it
     # starts, the two counts it prints and the saves it checks are there
     # at all. Everything the page needs travels as `campaign`.
