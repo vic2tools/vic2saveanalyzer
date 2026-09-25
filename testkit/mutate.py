@@ -459,6 +459,15 @@ def m34():
           "                except (ZeroDivisionError,) as exc:")
 
 
+@mutation("verify-dies-with-worker",
+          "a worker that dies during --verify ends the check in a stack "
+          "trace instead of checking the rest one at a time", "noworkers.py")
+def m49():
+    patch("vic2_analyzer.py",
+          "        except (BrokenProcessPool, OSError, RuntimeError) as exc:",
+          "        except (ZeroDivisionError,) as exc:")
+
+
 # ---- pressing Analyze erased the token; a refused token could not be replaced
 
 @mutation("analyze-erases-share-settings",

@@ -185,6 +185,59 @@ def dying_pool(saves, out):
     return wrong, out_text
 
 
+def dying_verify(saves):
+    """
+    [what went wrong] when a worker dies part-way through `--verify`.
+
+    `--verify` has a pool of its own, and it had no fall-back at all: a
+    worker that died, or a machine that would not start one, ended the check
+    in a stack trace. The pool here answers the first save and then breaks,
+    as a real one does when a worker is killed; every save must still be
+    checked, and the run must say why it slowed down.
+    """
+    import glob
+    import readsave
+    import vic2_analyzer as va
+    from concurrent.futures.process import BrokenProcessPool
+
+    import concurrent.futures as cf
+    real = cf.ProcessPoolExecutor
+
+    class BreaksAfterOne:
+        def __init__(self, *a, **kw):
+            pass
+
+        def map(self, fn, items):
+            items = list(items)
+            yield fn(items[0])
+            raise BrokenProcessPool(
+                "A process in the process pool was terminated abruptly")
+
+        def shutdown(self, **kw):
+            pass
+
+    files = sorted(glob.glob(os.path.join(saves, "*.v2")))[:3]
+    said = io.StringIO()
+    cf.ProcessPoolExecutor = BreaksAfterOne
+    try:
+        with contextlib.redirect_stdout(said), \
+                contextlib.redirect_stderr(said):
+            va.verify_all(files, readsave.PLAIN, jobs=len(files))
+    except BaseException:                                # noqa: BLE001
+        return ["a worker dying took --verify down:\n%s"
+                % traceback.format_exc().strip().splitlines()[-1]]
+    finally:
+        cf.ProcessPoolExecutor = real
+    out_text = said.getvalue()
+    wrong = []
+    checked = out_text.count("\n=== ")
+    if checked != len(files):
+        wrong.append("--verify checked %d of %d saves" % (checked, len(files)))
+    if "one at a time" not in out_text:
+        wrong.append("--verify said nothing about a worker stopping")
+    return wrong
+
+
 def main():
     given = sys.argv[1] if len(sys.argv) > 1 else ""
     holding = tempfile.mkdtemp(prefix="vic2noworkers")
@@ -226,6 +279,11 @@ def main():
                                   "FAILED" if same else "ok"))
             broke += same
         wrong += broke
+
+        checking = dying_verify(saves)
+        print("  %-44s %s" % ("a worker that dies during --verify",
+                              "FAILED" if checking else "ok (checked serially)"))
+        wrong += checking
     finally:
         shutil.rmtree(holding, ignore_errors=True)
 

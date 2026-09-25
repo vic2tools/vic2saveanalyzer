@@ -56,7 +56,7 @@ class SaveCacheTests(unittest.TestCase):
     def test_summary_reuse_and_changed_campaign(self):
         first = analyzer.campaign_inventions(self.files, **self.options)
         self.assertEqual([p[1]["ENG"]["invention_ids"] for p in first], [[1], [2]])
-        with patch.object(analyzer, "parse_saves_stream", side_effect=AssertionError("re-read")):
+        with patch.object(analyzer, "parse_saves", side_effect=AssertionError("re-read")):
             self.assertEqual(first, analyzer.campaign_inventions(self.files, **self.options))
         self.write_save(1, 3)
         changed = analyzer.campaign_inventions(self.files, **self.options)
@@ -86,7 +86,7 @@ class SaveCacheTests(unittest.TestCase):
         slot, = (self.root / "vic2_analyzer_cache").glob("inventions_*.pkl")
         slot.write_bytes(b"broken")
         self.assertEqual(first, analyzer.campaign_inventions(self.files, **self.options))
-        with patch.object(analyzer, "parse_saves_stream", wraps=analyzer.parse_saves_stream) as read:
+        with patch.object(analyzer, "parse_saves", wraps=analyzer.parse_saves) as read:
             self.assertEqual(first, analyzer.campaign_inventions(
                 self.files, use_cache=False, **self.options))
             read.assert_called_once()

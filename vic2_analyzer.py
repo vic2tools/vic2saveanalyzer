@@ -236,11 +236,7 @@ def campaign_inventions(files, **options):
     if held is not None:
         tell_progress(len(files), len(files))
         return held
-    stream = parse_saves_stream(files, transform=invention_summary, **options)
-    try:
-        made = list(stream)
-    finally:
-        stream.close()
+    made = parse_saves(files, transform=invention_summary, **options)
     cacheio.store(slot, made)
     return made
 
@@ -670,22 +666,32 @@ def verify_all(files, reading, jobs=None):
     first.
     """
     from concurrent.futures import ProcessPoolExecutor
+    from concurrent.futures.process import BrokenProcessPool
     workers = worker_count(len(files),
                            max((os.path.getsize(f) for f in files), default=0),
                            jobs)
-    if workers <= 1 or len(files) < 2:
-        for path in files:
-            text, _bad = verify_save(path, reading)
-            print(text)
-        return
-    print("Checking %d save(s) on %d cores." % (len(files), workers))
-    pool = ProcessPoolExecutor(max_workers=workers, initializer=worker_setup)
-    try:
-        for text, _bad in pool.map(partial(verify_save, reading=reading),
-                                   files):
-            print(text)
-    finally:
-        pool.shutdown()
+    done = 0
+    if workers > 1 and len(files) > 1:
+        print("Checking %d save(s) on %d cores." % (len(files), workers))
+        pool = None
+        try:
+            pool = ProcessPoolExecutor(max_workers=workers,
+                                       initializer=worker_setup)
+            for text, _bad in pool.map(partial(verify_save, reading=reading),
+                                       files):
+                print(text)
+                done += 1
+        except (BrokenProcessPool, OSError, RuntimeError) as exc:
+            # The same answer the readers give a machine that will not
+            # start workers, or a worker that dies: the rest one at a time.
+            print(f"  checking the rest one at a time ({exc})",
+                  file=sys.stderr)
+        finally:
+            if pool is not None:
+                pool.shutdown(cancel_futures=True)
+    for path in files[done:]:
+        text, _bad = verify_save(path, reading)
+        print(text)
 
 
 def peek_save(path):

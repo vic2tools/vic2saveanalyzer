@@ -20,8 +20,8 @@ before -- and hands them over in the order they were asked for.
 a time, so a campaign of monthly autosaves never has to be in memory at
 once. Behind those two: a process pool fed through a bounded window; workers
 that start through a forkserver whose socket path must stay under 108 bytes,
-and a fall-back to one at a time when they will not start at all; a Stop
-button answered while the workers are busy; a disk cache keyed on the
+and a fall-back to one at a time when they will not start or one dies; a
+Stop button answered between saves; a disk cache keyed on the
 reader's own source; and Windows, which starts each worker as a fresh
 interpreter that inherits nothing and has to import this file by name to
 find its job.
@@ -354,65 +354,21 @@ def worker_count(jobs, biggest_save, asked=None):
     return max(1, min(cores, jobs, room))
 
 
-def parse_saves(files, *, reading, verbose=True, use_cache=True, jobs=None):
+def parse_saves(files, **options):
     """
-    Every save in the folder, read in parallel when that is worth doing.
+    Every save, collected: `parse_saves_stream` run to the end, with the
+    same options.
 
-    Cached saves are loaded here rather than in a worker: it costs a few
-    milliseconds each and a process started to do it would cost more than it
-    saves. Only what is left over is worth spreading out.
+    It used to be a second reader beside the stream -- its own pool, its own
+    fall-back to one at a time, its own way of naming a file it skipped --
+    and the two had drifted: when a worker died, this one read again every
+    save the pool had already finished.
     """
-    fingerprint = parser_fingerprint() if use_cache else ""
-    world = reading.fingerprint()
-    slots = [_cache_slot(p, fingerprint, world) if fingerprint else None
-             for p in files]
-
-    out = [None] * len(files)
-    todo = []
-    done = 0
-    tell_progress(0, len(files))
-    for i, path in enumerate(files):
-        stop_if_asked()
-        held = _cache_read(slots[i])
-        if held is not None:
-            out[i] = held
-            done += 1
-            tell_progress(done, len(files))
-            if verbose:
-                print(f"  {os.path.basename(path)} ... cached, "
-                      f"{held[0].get('date', '?')}")
-        else:
-            todo.append(i)
-
-    if not todo:
-        return [item for item in out if item is not None]
-
-    biggest = max((os.path.getsize(files[i]) for i in todo), default=0)
-    workers = worker_count(len(todo), biggest, jobs)
-    if workers > 1:
-        try:
-            return _parse_parallel(files, out, todo, slots, workers, verbose,
-                                   reading, already=done)
-        except Cancelled:
-            raise                     # asked to stop, not a machine that cannot
-        except Exception as exc:
-            # A machine that will not start workers still has to read its saves.
-            print(f"  reading one at a time ({exc})", file=sys.stderr)
-
-    for i in todo:
-        stop_if_asked()
-        try:
-            meta, nations = analyze_save(files[i], reading, verbose=verbose)
-        except (ValueError, OSError) as exc:
-            print(f"  skipped {os.path.basename(files[i])}: {exc}",
-                  file=sys.stderr)
-            continue
-        _cache_write(slots[i], meta, nations)
-        out[i] = (meta, nations)
-        done += 1
-        tell_progress(done, len(files))
-    fastscan.stop_serving()
-    return [item for item in out if item is not None]
+    stream = parse_saves_stream(files, **options)
+    try:
+        return list(stream)
+    finally:
+        stream.close()
 
 
 def parse_saves_stream(files, *, reading, verbose=True, use_cache=True,
@@ -585,54 +541,3 @@ def parse_saves_stream(files, *, reading, verbose=True, use_cache=True,
         # this process keeps (`fastscan._Server`), and the window goes on
         # living after a run: it should not keep an idle scanner with it.
         fastscan.stop_serving()
-
-
-def _parse_parallel(files, out, todo, slots, workers, verbose, reading,
-                    already=0):
-    """
-    Read the outstanding saves across several processes.
-
-    Work is submitted one future per save rather than handed to `pool.map`, so
-    a cancellation can drop everything that has not started yet. `map` gives no
-    handle on the queue, and leaving the pool's context manager would then wait
-    politely for all of it -- on a folder of hundreds of saves, a Stop button
-    that takes ten minutes to stop.
-    """
-    from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
-    if verbose:
-        print(f"Reading {len(todo)} save(s) on {workers} cores.")
-    done = 0
-    pool = ProcessPoolExecutor(max_workers=workers, initializer=worker_setup)
-    try:
-        # `todo` is the saves with no cache entry, so none of these is
-        # cached, and no finishing was asked of this pool.
-        pending = {pool.submit(_worker_parse,
-                               (i, files[i], slots[i], False, reading))
-                   for i in todo}
-        while pending:
-            stop_if_asked()
-            # A short wait rather than a blocking one, so the Stop button is
-            # answered while the workers are busy rather than after.
-            ready, pending = wait(pending, timeout=0.25,
-                                  return_when=FIRST_COMPLETED)
-            for future in ready:
-                # Same refusal, same answer as the streaming path: a file
-                # the reader will not take is named and left out, not raised
-                # over the whole campaign.
-                try:
-                    index, _slot, (meta, nations) = future.result()
-                except (ValueError, OSError) as exc:
-                    print(f"  skipped a save: {exc}", file=sys.stderr)
-                    done += 1
-                    continue
-                out[index] = (meta, nations)   # cached in the worker
-                done += 1
-                tell_progress(already + done, len(files))
-                if verbose:
-                    print(f"  [{done}/{len(todo)}] "
-                          f"{os.path.basename(files[index])} ... {meta['date']}")
-    except BaseException:
-        pool.shutdown(wait=False, cancel_futures=True)
-        raise
-    pool.shutdown()
-    return [item for item in out if item is not None]
