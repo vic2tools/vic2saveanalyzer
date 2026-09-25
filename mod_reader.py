@@ -41,6 +41,7 @@ import struct
 import tempfile
 import zlib
 
+from collections import namedtuple
 from itertools import groupby
 from operator import itemgetter
 
@@ -1900,6 +1901,65 @@ def _mod_slot(path):
                         "mod_" + key + ".pkl")
 
 
+def _mod_root(path):
+    return os.path.abspath(os.path.expanduser(os.path.expandvars(path)))
+
+
+def cached_mod(path):
+    """The mod as its cache holds it, or None when it would have to be read."""
+    return cacheio.load(_mod_slot(_mod_root(path)))
+
+
+def has_rules(path):
+    """
+    Whether the folder has any technology or invention files, which is what
+    `load_mod` refuses a folder for lacking. Asked first by a caller about
+    to start other work while the mod loads, so that a mistyped path is
+    still answered at once rather than after every save has been read.
+    """
+    path = _mod_root(path)
+    return bool(_resolved_files(path, "technologies")
+                or _resolved_files(path, "inventions"))
+
+
+class ModHead(namedtuple("ModHead",
+                         "pop_types mob_types reform_names defines")):
+    """
+    What reading a save needs of a mod, and the fields of `Mod` it fills.
+
+    The mod decides which pop types a save's provinces are read for, which
+    of those can mobilize, and which reforms a country block is read for;
+    `defines` settles the regiment size printed beside them. Those four take
+    a few milliseconds to read, where the whole mod takes most of a second
+    -- and nothing else in it is needed until every save has been read once.
+    So a run with no cached mod reads its saves on the strength of these,
+    while the rest loads beside them. See `vic2_analyzer.main`.
+
+    `_load_mod` fills the same four fields from `_head_parts`, so what is
+    read here and what the whole mod says cannot be worked out two ways.
+    """
+
+    __slots__ = ()
+
+
+def _head_parts(path):
+    """(strata, reform sizes, reform groups, triggered modifiers)."""
+    strata = read_poptypes(path)
+    reform_sizes, reform_groups = reform_mob(path)
+    return strata, reform_sizes, reform_groups, triggered_mob(path)
+
+
+def mod_head(path):
+    """This mod's `ModHead`."""
+    path = _mod_root(path)
+    strata, reform_sizes, reform_groups, triggers = _head_parts(path)
+    return ModHead(
+        pop_types=frozenset(strata),
+        mob_types=_mobilizable_types(strata),
+        reform_names=_watched_reforms(reform_sizes, reform_groups, triggers),
+        defines=_read_defines(path))
+
+
 def load_mod(path):
     """
     One mod folder as a `Mod`, read once and remembered between runs.
@@ -1910,7 +1970,7 @@ def load_mod(path):
 
     Raises FileNotFoundError if the folder has neither techs nor inventions.
     """
-    path = os.path.abspath(os.path.expanduser(os.path.expandvars(path)))
+    path = _mod_root(path)
     slot = _mod_slot(path)
     cached = cacheio.load(slot)
     if cached is not None:
@@ -1984,9 +2044,7 @@ def _load_mod(path):
             f"the Victoria 2 install folder for vanilla)."
         )
 
-    strata = read_poptypes(path)
-    reform_sizes, reform_groups = reform_mob(path)
-    triggers = triggered_mob(path)
+    strata, reform_sizes, reform_groups, triggers = _head_parts(path)
     reform_names = _watched_reforms(reform_sizes, reform_groups, triggers)
 
     # A modifier is either looked up by name in the country's own list or

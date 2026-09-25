@@ -1699,18 +1699,39 @@ def _main(run=None):
         return 0
 
     mod = None
+    # A mod that has to be read from its files takes most of a second, and
+    # reading a save needs four things of it that take a few milliseconds:
+    # its `ModHead`. Nothing else in it is wanted until every save has been
+    # read once, for the inventions below. So when the mod is not cached,
+    # the saves are read on the strength of the head, and the rest of the
+    # mod is read on a thread beside them. It takes a core from the saves,
+    # which then take 2.6 s to read instead of 2.3, but the two together
+    # took 3.2 s one after the other with fifteen cores idle for the first.
+    # `known` is whichever of the two this run has before then: the mod
+    # itself, or its head.
+    known = None
+    loading = None
     from v2parse import VANILLA_POP_TYPES
     if args.mod_path:
-        from mod_reader import load_mod
+        from mod_reader import cached_mod, has_rules, load_mod, mod_head
         try:
-            mod = load_mod(args.mod_path)
+            known = mod = cached_mod(args.mod_path)
+            if mod is None and has_rules(args.mod_path):
+                from report import Aside
+                known = mod_head(args.mod_path)
+                loading = Aside(partial(load_mod, args.mod_path))
+                loading.start()
+            elif mod is None:
+                # Nothing it could be read from, so this refuses it now,
+                # in the words below, rather than after every save.
+                known = mod = load_mod(args.mod_path)
         except (OSError, ValueError) as exc:
             # A mod folder that has been renamed, moved or mistyped is an
             # ordinary mistake and the message already says what to do
             # about it. Wrapped in a stack trace it reads like a crash in
             # the program, which is what the window used to show.
             sys.exit(str(exc))
-        extra = set(mod.pop_types) - VANILLA_POP_TYPES
+        extra = set(known.pop_types) - VANILLA_POP_TYPES
     # The run as the mod settles it, because the rest of a single-campaign
     # run reads these two off it -- the finishing spec, the reading below,
     # the two printed lines, and `explain.py`. `run_cross` asks the same
@@ -1720,10 +1741,10 @@ def _main(run=None):
     # Outside the `if` above: with no mod this is what turns the two "nothing
     # was asked for" Nones into the vanilla numbers, and everything after here
     # expects to find those rather than a None.
-    settled_size, settled_types = finishing.mod_defaults(args, mod)
+    settled_size, settled_types = finishing.mod_defaults(args, known)
     args = replace(args, pop_per_regiment=settled_size,
                    mob_types=tuple(settled_types))
-    if mod is not None and verbose:
+    if known is not None and verbose:
         print("defines.lua: POP_SIZE_PER_REGIMENT="
               f"{args.pop_per_regiment}")
         print(f"poptypes/: mobilizable = {' '.join(args.mob_types)}"
@@ -1737,7 +1758,7 @@ def _main(run=None):
     # two campaigns on two mods no longer share cache entries; and the key
     # cannot be worked out from a state different from the one the parse is
     # in, because there is only one state.
-    reading = reading_for(args.mod_path, mod, args.mob_types)
+    reading = reading_for(args.mod_path, known, args.mob_types)
     reading.apply()
 
     # Oldest first, decided from each save's own first line rather than by
@@ -1770,13 +1791,18 @@ def _main(run=None):
                          jobs=args.jobs)
 
     live = None
-    if mod is not None:
+    if known is not None:
         from mod_reader import (attainable_inventions, index_coverage,
                                 validate_indices)
         from modrules import unjudged_triggers
         # Decode invention indices from compact summaries. Population and
         # province data stay in the raw cache until the report needs them.
         walked = campaign_inventions(files, verbose=verbose, **parse_options)
+        if loading is not None:
+            try:
+                mod = loading.result()
+            except (OSError, ValueError) as exc:
+                sys.exit(str(exc))
         every_nation = []
         all_techs = {}
         for _meta, nations in walked:
