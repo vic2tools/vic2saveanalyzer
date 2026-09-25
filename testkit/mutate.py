@@ -241,29 +241,26 @@ def m21():
           '    ("naval_base_levels", "naval_base_levels", _add),')
 
 
-# ---- commit 8b9f243: the reading profile and the cache key
+# ---- the reading a save is read under, and the cache key it makes
 
-@mutation("reading-apply-forgets-global", "apply() forgets to set REFORM_KEYS",
+@mutation("python-reader-ignores-reading",
+          "the Python reader keeps the plain pop types whatever the reading "
+          "says, so a mod's own pop type vanishes from every total",
           "caching.py")
 def m12():
-    patch("readsave.py",
-          """        v2parse.register_pop_types(self.pop_types)
-        set_mob_candidates(self.mob_types)
-        set_reform_keys(self.reform_keys)""",
-          """        v2parse.register_pop_types(self.pop_types)
-        set_mob_candidates(self.mob_types)""")
+    patch("readsave.py", "    pop_types = frozenset(reading.pop_types)\n",
+          "    pop_types = frozenset(PLAIN.pop_types)\n")
 
 
-@mutation("reading-pop-types-accumulate", "register_pop_types grows instead of replacing",
-          "caching.py")
+@mutation("worker-reads-plain",
+          "a worker reads its save under the plain reading instead of the "
+          "run's, so a campaign read in parallel loses the mod's pops and "
+          "reforms", "caching.py")
 def m13():
-    src = open(os.path.join(TREE, "v2parse.py")).read()
-    import re
-    m = re.search(r"def register_pop_types\(.*?\n(?=\n\ndef |\n\n[A-Z_]+ =)", src, re.S)
-    body = m.group(0)
-    if "clear()" not in body:
-        raise SystemExit("register_pop_types has no clear() to remove:\n" + body)
-    patch("v2parse.py", body, body.replace("POP_TYPES.clear()", "pass"))
+    patch("readfolder.py",
+          "        meta, nations = analyze_save(path, reading, verbose=False)\n",
+          "        from readsave import PLAIN\n"
+          "        meta, nations = analyze_save(path, PLAIN, verbose=False)\n")
 
 
 @mutation("reading-key-drops-mod", "the cache key stops naming the mod",

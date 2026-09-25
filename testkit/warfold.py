@@ -33,10 +33,9 @@ import report                                                # noqa: E402
 
 def wars_in_order(paths):
     """Each save's war list, oldest save first."""
-    readsave.PLAIN.apply()
     read = []
     for path in paths:
-        meta, _nations = readsave.analyze_save(path, verbose=False)
+        meta, _nations = readsave.analyze_save(path, readsave.PLAIN, verbose=False)
         read.append((readsave.date_key(meta["date"]), meta["wars"]))
     read.sort(key=lambda got: got[0])
     return [wars for _key, wars in read]

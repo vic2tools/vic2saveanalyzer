@@ -62,9 +62,7 @@ def refusing_pool(saves, out):
     constructor returns an object, and the first piece of work is where
     it falls over.
     """
-    import readsave
     import vic2_analyzer as va
-    readsave.PLAIN.apply()
 
     # Patched on `concurrent.futures` rather than on `readfolder`,
     # because the pool is imported inside the function that uses it and so
@@ -136,11 +134,9 @@ def dying_pool(saves, out):
     reads the others normally; the run has to finish, say why it slowed
     down, and write the same tables as a run where nothing died.
     """
-    import readsave
     import vic2_analyzer as va
     from concurrent.futures import Future
     from concurrent.futures.process import BrokenProcessPool
-    readsave.PLAIN.apply()
 
     import concurrent.futures as cf
     real = cf.ProcessPoolExecutor
@@ -198,9 +194,7 @@ def main():
             saves = a_campaign(os.path.join(holding, "saves"))
 
         # The ordinary run first, so there is something to compare against.
-        import readsave
         import vic2_analyzer as va
-        readsave.PLAIN.apply()
         normal = os.path.join(holding, "normal")
         old = sys.argv
         quiet = io.StringIO()

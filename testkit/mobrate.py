@@ -37,8 +37,6 @@ sys.path.insert(0, HERE)
 def a_nation(**over):
     """A blank nation with whatever the case needs written over it."""
     import nation
-    import readsave
-    readsave.PLAIN.apply()
     nat = nation.blank_nation()
     nat.update(tag="ZUL", tech_list=[], invention_ids=[], civilized="no",
                primary_culture="zulu", government="absolute_monarchy",
@@ -218,7 +216,6 @@ def at_war_is_who_is_fighting():
     import readsave
     import savefmt
 
-    readsave.PLAIN.apply()
     holding = tempfile.mkdtemp(prefix="vic2atwar")
     try:
         path = savefmt.write(
@@ -235,7 +232,7 @@ def at_war_is_who_is_fighting():
              '\tattacker="ENG"', '\tattacker="SPA"', '\tdefender="FRA"',
              '\toriginal_attacker="ENG"', '\toriginal_defender="GER"',
              '\taction="1869.5.1"', "}"])
-        meta, _nations = readsave.analyze_save(path, verbose=False)
+        meta, _nations = readsave.analyze_save(path, readsave.PLAIN, verbose=False)
     finally:
         shutil.rmtree(holding, ignore_errors=True)
     got = sorted(explain.save_world(meta, a_mod())["at_war"])

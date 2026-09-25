@@ -114,9 +114,7 @@ def main():
     out = os.path.join(HERE, "testkit", "_awkward.v2")
     with open(out, "w", encoding="latin-1", newline="\r\n") as fh:
         fh.write(SAVE)
-    readsave.PLAIN.apply()
-
-    fast, slow = both_ways(out)
+    fast, slow = both_ways(out, readsave.PLAIN)
 
     problems = []
     scanner = fastscan.available() is not None

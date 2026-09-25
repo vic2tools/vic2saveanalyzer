@@ -100,7 +100,7 @@ def while_being_written(raw, path):
 
     threading.Thread(target=keep_touching, daemon=True).start()
     try:
-        readsave.analyze_save(path, verbose=False)
+        readsave.analyze_save(path, readsave.PLAIN, verbose=False)
         return ["a save rewritten all through the read was read anyway"]
     except ValueError as said:
         if "changed while it was being read" not in str(said):
@@ -142,7 +142,7 @@ def cut_short(raw, path):
         for use_scanner in (True, False):
             who = "the scanner" if use_scanner else "Python"
             try:
-                readsave.analyze_save(path, verbose=False,
+                readsave.analyze_save(path, readsave.PLAIN, verbose=False,
                                       use_scanner=use_scanner)
                 wrong.append("%d%% of a save was read as a whole one by %s"
                              % (share * 100, who))
@@ -167,7 +167,6 @@ def main():
         return 2
 
     import readsave
-    readsave.PLAIN.apply()
 
     raw = open(source, "rb").read()
     rng = random.Random(SEED)
@@ -180,7 +179,7 @@ def main():
                 with open(path, "wb") as fh:
                     fh.write(damage(raw, how, rng))
                 try:
-                    readsave.analyze_save(path, verbose=False)
+                    readsave.analyze_save(path, readsave.PLAIN, verbose=False)
                     read += 1
                 except (ValueError, OSError):
                     refused += 1            # a sentence, which is allowed

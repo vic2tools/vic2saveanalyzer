@@ -211,10 +211,10 @@ def main():
         fh.write(SAVE)
     # Reforms are the mod's business, and without one nothing here would
     # exercise them. These two are real IGoR reform keys, and they are set
-    # the way the program sets them: one profile, applied.
-    readsave.PLAIN._replace(reform_keys=("slavery", "voting_system")).apply()
+    # the way the program gives them: one reading, handed over with the save.
+    reading = readsave.PLAIN._replace(reform_keys=("slavery", "voting_system"))
 
-    fast, slow = both_ways(out)
+    fast, slow = both_ways(out, reading)
 
     problems = []
     for where, x, y in differences(fast, slow):

@@ -40,7 +40,6 @@ from v2parse import (
     BLOCK,
     HEAD_SCALAR,
     POP_KNOWN_FIELDS,
-    POP_TYPES,
     PROVINCE_FIELDS,
     Tokens,
     as_list,
@@ -58,9 +57,6 @@ from v2parse import (
 from tech_groups import ARMY_TECHS, NAVY_TECHS
 
 
-
-POP_TYPE_LIST = sorted(POP_TYPES)
-
 # Strata, for the "who actually holds the wealth" view.
 STRATA = {
     "poor": ["farmers", "labourers", "slaves", "soldiers", "craftsmen"],
@@ -69,40 +65,15 @@ STRATA = {
 }
 
 
-# The set read_province actually collects pops for. main() narrows or widens it
-# from the mod's strata table (or --mob-types) before any save is parsed,
-# because a pop type that is not collected here can never be counted later.
-MOB_CANDIDATES = set(MOBILIZABLE_TYPES)
-
-# Reform groups, as `common/issues.txt` names them. A country block writes its
-# choice as a plain `conscription=mandatory_service` line, indistinguishable
-# from any other scalar until you know that `conscription` is a reform -- which
-# only the mod can say, and which some of them hang mobilisation size off. Set
-# before any save is read, the same way the pop types are.
-REFORM_KEYS = set()
-
-
-def set_reform_keys(names):
-    """Choose which country scalars read_country keeps as reform choices."""
-    REFORM_KEYS.clear()
-    REFORM_KEYS.update(names)
-
-
-def set_mob_candidates(types):
-    """Choose which pop types read_province keeps for the mobilization pool."""
-    MOB_CANDIDATES.clear()
-    MOB_CANDIDATES.update(types)
-
-
 def mod_fingerprint(mod_path, pop_types, reform_keys=(), mob_types=()):
     """
     What the mod changes about parsing, as a short string.
 
-    A save is not read the same way under every mod. `register_pop_types`
-    adds the mod's own pop types to the set the province reader keeps, so
-    the same file parsed under two mods yields two different results -- and
-    the cache, keyed only by the file, would hand the second run the first
-    one's answer. Naming the mod and what it registered keeps those apart.
+    A save is not read the same way under every mod. A mod's own pop types
+    are read out of the provinces, so the same file read under two mods
+    yields two different results -- and the cache, keyed only by the file,
+    would hand the second run the first one's answer. Naming the mod and
+    everything its reading keeps apart keeps those apart.
     """
     return hashlib.md5(
         ((os.path.abspath(mod_path) if mod_path else "no-mod")
@@ -114,38 +85,26 @@ def mod_fingerprint(mod_path, pop_types, reform_keys=(), mob_types=()):
 
 class Reading(namedtuple("Reading", "mod_path pop_types mob_types reform_keys")):
     """
-    How this run reads a save, as one thing rather than six agreements.
+    How a save is read under a mod, handed to `analyze_save` with the save.
 
-    Three module globals decide what comes out of a save file:
-    `v2parse.POP_TYPES`, which pop blocks the province reader keeps;
-    `MOB_CANDIDATES`, which of those it keeps for a mobilization pool; and
-    `REFORM_KEYS`, which country scalars are a reform choice rather than an
-    ordinary number. All three come from the mod, none is an argument to
-    anything, and each one changes what a parsed save says.
+    Three things decide what comes out of a save file, and all three are the
+    mod's to say: `pop_types`, which pop blocks the province reader keeps;
+    `mob_types`, which of those it keeps for a mobilization pool; and
+    `reform_keys`, which country scalars are a reform choice rather than an
+    ordinary number. A country block writes its choice as a plain
+    `conscription=mandatory_service` line, indistinguishable from any other
+    scalar until the mod says `conscription` is a reform.
 
-    They had to be set in `main`, again in `run_cross` for every campaign,
-    and again in every worker -- Windows starts a worker as a fresh
-    interpreter, so a global set in the parent is not set in it -- and then
-    derived twice more: into the cache key, and into the arguments the pool
-    is started with. Six places agreeing about one thing, and the worst way
-    for them to disagree is quiet. `register_pop_types` records what that
-    looked like: a set that only ever grew carried one mod's `bankers` into
-    the next campaign, which read one anyway "and then cached it under a key
-    that said it had not".
-
-    So there is one object. `apply` sets the three globals, here or in a
-    worker; `fingerprint` is the cache key. The key can no longer be
-    computed from a state different from the one the parse will use, because
-    there is only the one state to compute it from.
+    They were three module globals, set in `main`, again in `run_cross` for
+    every campaign, again in every worker, and read back out to make the
+    cache key -- and a set that only ever grew once carried one mod's
+    `bankers` into the next campaign, which then cached what it read under
+    a key that said it had not. As an argument there is nothing to set,
+    nothing to forget to set, and nothing left over from the last campaign:
+    the key and the parse are made from the same object.
     """
 
     __slots__ = ()
-
-    def apply(self):
-        """Set the three globals in this interpreter, replacing what was there."""
-        v2parse.register_pop_types(self.pop_types)
-        set_mob_candidates(self.mob_types)
-        set_reform_keys(self.reform_keys)
 
     def fingerprint(self):
         """The cache key for a save read this way."""
@@ -171,24 +130,8 @@ def reading_for(mod_path, mod, mob_types):
 
 
 # No mod: the twelve pop types the game ships and the three that can
-# mobilize. What a run with no --mod-path reads a save under, and the
-# default every reader here starts at.
+# mobilize. What a run with no --mod-path reads a save under.
 PLAIN = reading_for(None, None, MOBILIZABLE_TYPES)
-
-
-def reading_now(mod_path=None):
-    """
-    A profile of whatever the globals hold at this moment.
-
-    For the one caller that has no mod to build one from. `--verify` runs
-    before a mod is chosen and asks only whether the saves parse at all, so
-    what it reads them under is whatever the run has already settled on:
-    nothing for a plain run, the last campaign's mod after `--cross`.
-    Everywhere else the profile comes first and the globals come from it,
-    which is the whole point of having one.
-    """
-    return Reading(mod_path, tuple(sorted(v2parse.POP_TYPES)),
-                   tuple(sorted(MOB_CANDIDATES)), tuple(sorted(REFORM_KEYS)))
 
 
 # Below this share of its life needs a pop is losing people, and not slowly.
@@ -321,8 +264,11 @@ def _pop_fields(poptype, pop):
 
 def read_province(text, at, stop, nations, province_owner_sink,
                   pop_registry=None, province_id=None, owner_map=None,
-                  flat=True, world_sink=None):
-    """One province block, attributing its pops to the owner."""
+                  flat=True, world_sink=None, *, pop_types, mob_types):
+    """
+    One province block, attributing its pops to the owner. `pop_types` and
+    `mob_types` are the reading's, as sets.
+    """
     owner = None
     controller = None
     colonial_flag = 0
@@ -374,7 +320,7 @@ def read_province(text, at, stop, nations, province_owner_sink,
                     cores.add(unquote(value))
                 elif key == "colonial":
                     colonial_flag = to_int(value, 0)
-            elif key in POP_TYPES:
+            elif key in pop_types:
                 current = [key, None, None, None, None, None, None, None, None]
                 pops.append(current)
             else:
@@ -394,7 +340,7 @@ def read_province(text, at, stop, nations, province_owner_sink,
                     cores.add(value)
                 elif key == "colonial":
                     colonial_flag = to_int(value, 0)
-            elif key in POP_TYPES:
+            elif key in pop_types:
                 pops.append(_pop_fields(key, read_pop(Tokens(text, block_at))))
             elif key in ("naval_base", "fort", "railroad"):
                 buildings[key] = parse_block(Tokens(text, block_at))
@@ -457,7 +403,7 @@ def read_province(text, at, stop, nations, province_owner_sink,
                 nat["starving"] += size
         if culture:
             nat["pop_by_culture"][culture] += size
-            if poptype in MOB_CANDIDATES:
+            if poptype in mob_types:
                 nat["mobilizable_pops"].append(
                     (poptype, culture, size, province_id))
         literate = to_float(pop[_POP_LITERACY]) * size
@@ -706,8 +652,8 @@ _STATE_SKIP = frozenset(("employment", "stockpile", "id"))
 _UNIT_SKIP = frozenset(("id", "leader"))
 
 
-def read_country(text, at, stop, tag, nations, flat=True):
-    """One country block."""
+def read_country(text, at, stop, tag, nations, flat=True, *, reform_keys):
+    """One country block. `reform_keys` is the reading's, as a set."""
     nat = nations[tag]
     nat["tag"] = tag
     # Declared beside the record in `nation`, and bound to a local because
@@ -803,7 +749,7 @@ def read_country(text, at, stop, tag, nations, flat=True):
                 nat["is_mobilized"] = int(clean.lower() == "yes")
             elif key == "human":
                 nat["human"] = clean.lower() == "yes"
-            elif key in REFORM_KEYS:
+            elif key in reform_keys:
                 nat["reforms"][key] = unquote(clean)
             elif key in scalars:
                 nat[scalars[key]] = clean
@@ -851,9 +797,10 @@ class _Spans:
         self._fh.close()
 
 
-def analyze_save(path, verbose=True, use_scanner=True, again=False):
+def analyze_save(path, reading, verbose=True, use_scanner=True, again=False):
     """
-    Parse one save. Returns (meta, {tag: nation_stats}).
+    Parse one save, read the way `reading` says. Returns
+    (meta, {tag: nation_stats}).
 
     `use_scanner=False` reads it entirely in Python, which is the fallback
     for a save the scanner half-read. `again=True` marks the one retry
@@ -879,13 +826,18 @@ def analyze_save(path, verbose=True, use_scanner=True, again=False):
     # file, and they need only the first part -- so they are read while the
     # scanner is still working rather than after it has finished.
     import fastscan
-    running = (fastscan.start(path, v2parse.POP_TYPES, MOB_CANDIDATES,
+    running = (fastscan.start(path, reading.pop_types, reading.mob_types,
                               army_techs=ARMY_TECHS, navy_techs=NAVY_TECHS,
-                              reform_keys=REFORM_KEYS)
+                              reform_keys=reading.reform_keys)
                if use_scanner else None)
     head = fastscan.head(running)
 
     nations = defaultdict(blank_nation)
+    # The reading's three lists as sets, for the readers below to test
+    # every key against.
+    pop_types = frozenset(reading.pop_types)
+    mob_types = frozenset(reading.mob_types)
+    reform_keys = frozenset(reading.reform_keys)
     province_counts = defaultdict(int)
     pop_registry = {}
     meta = {"file": os.path.basename(path), "date": "", "player": "", "market": None}
@@ -952,7 +904,8 @@ def analyze_save(path, verbose=True, use_scanner=True, again=False):
             read_province(text, at, stop, nations, province_counts,
                           pop_registry, province_id=int(key),
                           owner_map=province_owner, flat=flat,
-                          world_sink=world_pop)
+                          world_sink=world_pop, pop_types=pop_types,
+                          mob_types=mob_types)
             continue
 
         country = looks_like_country_tag(key)
@@ -972,7 +925,8 @@ def analyze_save(path, verbose=True, use_scanner=True, again=False):
             first, last = 0, len(body)
 
         if country:
-            read_country(body, first, last, key, nations, flat=flat)
+            read_country(body, first, last, key, nations, flat=flat,
+                         reform_keys=reform_keys)
         elif key in ("active_war", "previous_war"):
             war = read_war(parse_block(Tokens(body, first)),
                            key == "active_war")
@@ -1006,8 +960,8 @@ def analyze_save(path, verbose=True, use_scanner=True, again=False):
             # to rebuild a binary that was working perfectly.
             if not running.refused():
                 fastscan.note_unusable()
-            return analyze_save(path, verbose=verbose, use_scanner=False,
-                                again=again)
+            return analyze_save(path, reading, verbose=verbose,
+                                use_scanner=False, again=again)
         fastscan.apply(scanned, nations, province_owner, pop_registry,
                        world_pop, province_counts)
         fastscan.apply_countries(scanned, nations)
@@ -1079,7 +1033,7 @@ def analyze_save(path, verbose=True, use_scanner=True, again=False):
                     "%s changed while it was being read. It is probably the "
                     "file the game is writing to right now; read the copies "
                     "the keeper makes instead." % path)
-            return analyze_save(path, verbose=verbose,
+            return analyze_save(path, reading, verbose=verbose,
                                 use_scanner=use_scanner, again=True)
 
     if verbose:

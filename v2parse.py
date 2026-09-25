@@ -26,32 +26,15 @@ TOKEN_RE = re.compile(r'"[^"]*"|[{}=]|[^\s{}=]+')
 # The vanilla pop types. Inside a province block these appear as sub-blocks,
 # and the same key can repeat (one block per culture/religion combination).
 #
-# Mods add their own -- IGoR has `bankers` -- and a pop type missing from this
-# set is skipped by `read_province`, so its people vanish from every total.
-# `register_pop_types` lets the caller fold in whatever the mod's `poptypes/`
-# folder declares before any save is read.
+# Mods add their own -- IGoR has `bankers` -- and a pop type missing from the
+# reading is skipped by `read_province`, so its people vanish from every
+# total. `readsave.reading_for` adds whatever the mod's `poptypes/` folder
+# declares to these.
 VANILLA_POP_TYPES = frozenset((
     "aristocrats", "artisans", "bureaucrats", "capitalists", "clergymen",
     "clerks", "craftsmen", "farmers", "labourers", "officers", "slaves",
     "soldiers",
 ))
-POP_TYPES = set(VANILLA_POP_TYPES)
-
-
-def register_pop_types(names):
-    """
-    The pop types to read, as the twelve the game ships plus the mod's own.
-
-    This *replaces* rather than adds. The GUI runs one campaign after another
-    inside a single process, and a set that only ever grew carried IGoR's
-    `bankers` into the next campaign: Divergences of Darkness, which has no
-    such pop type, read one anyway and then cached it under a key that said it
-    had not. Which pop types exist is a property of the mod in hand, so it is
-    set from scratch each time.
-    """
-    POP_TYPES.clear()
-    POP_TYPES.update(VANILLA_POP_TYPES)
-    POP_TYPES.update(n for n in names if n)
 
 
 # Everything a pop block can hold *other* than the culture=religion line.

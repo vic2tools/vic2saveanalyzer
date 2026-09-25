@@ -166,7 +166,6 @@ def selfcheck(path):
     """
     import cross
     import readsave
-    readsave.PLAIN.apply()
 
     techs = ["flintlock_rifles", "clipper_design"]
     write(path,
@@ -178,7 +177,7 @@ def selfcheck(path):
           country("FRA", culture="french", capital=2),
           war("A Test War", "ENG", "FRA"))
 
-    meta, nations = readsave.analyze_save(path, verbose=False)
+    meta, nations = readsave.analyze_save(path, readsave.PLAIN, verbose=False)
     wrong = []
     if meta.get("date") != "1850.6.1":
         wrong.append("the date came back as %r" % meta.get("date"))
@@ -263,7 +262,7 @@ def rich(path):
                                            "\t\t\tcount=2000",
                                            "\t\t\tstrength=1.000"], 2))]))
 
-    meta, nations = readsave.analyze_save(path, verbose=False)
+    meta, nations = readsave.analyze_save(path, readsave.PLAIN, verbose=False)
     swe = nations.get("SWE")
     if swe is None:
         return ["a fully furnished nation did not come back at all"]
@@ -424,11 +423,11 @@ def furnished_check(path):
     nation in it had a population of nought. Nothing said so.
     """
     import readsave
-    readsave.PLAIN._replace(
-        reform_keys=("vote_franschise", "war_policy")).apply()
     furnished(path)
-    meta, nations = readsave.analyze_save(path, verbose=False,
-                                          use_scanner=False)
+    meta, nations = readsave.analyze_save(
+        path, readsave.PLAIN._replace(
+            reform_keys=("vote_franschise", "war_policy")),
+        verbose=False, use_scanner=False)
 
     wrong = []
     if sorted(nations) != ["DEN", "SWE"]:

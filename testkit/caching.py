@@ -23,7 +23,6 @@ from packing import reached
 import readfolder
 import readsave
 import savefmt
-import v2parse
 import vic2_analyzer as analyzer
 
 
@@ -204,46 +203,77 @@ class ParserKeyTests(unittest.TestCase):
                          "edit to them throws every cached save away")
 
 
-class ReadingProfileTests(unittest.TestCase):
+class ReadingTests(unittest.TestCase):
     """
-    The cache key has to describe the state the parse is actually in.
+    What a save yields is decided by the reading it is read under, and by
+    nothing a previous read left behind.
 
-    Three module globals decide what comes out of a save -- which pop types
-    exist, which of them can mobilize, which country scalars are reform
-    choices -- and all three used to be set in one place and read back in
-    another to make the key. `v2parse.register_pop_types` records what that
-    cost: a set that only ever grew carried one mod's `bankers` into the
-    next campaign, which read one anyway "and then cached it under a key
-    that said it had not", and served the wrong numbers with nothing wrong
-    to see.
+    Which pop types exist, which of them can mobilize and which country
+    scalars are reform choices are the mod's to say. They were three module
+    globals that every run, every campaign and every worker had to set, and
+    read back out to make the cache key; a set that only ever grew once
+    carried one mod's `bankers` into the next campaign, which read one
+    anyway "and then cached it under a key that said it had not". They are
+    an argument to `analyze_save` now. These hold both readers to it, here
+    and in the workers.
     """
 
     def setUp(self):
-        self.addCleanup(readsave.PLAIN.apply)
+        self.temp = tempfile.TemporaryDirectory(prefix="vic2reading")
+        self.addCleanup(self.temp.cleanup)
+        self.files = [os.path.join(self.temp.name, "%d.v2" % i)
+                      for i in range(2)]
+        for i, path in enumerate(self.files):
+            savefmt.write(
+                path, savefmt.head("1880.%d.1" % (i + 1)),
+                savefmt.province(1, "ENG", [
+                    savefmt.pop("farmers", 1, 1000),
+                    savefmt.pop("bankers", 2, 2000)]),
+                savefmt.country("ENG", extra=["slavery=yes_slavery"]))
+        self.modded = readsave.reading_for(
+            "/some/mod", a_mod(pop_types=["bankers"], reform_names=["slavery"]),
+            ("farmers", "bankers"))
 
-    def test_applying_a_profile_is_the_state_the_key_describes(self):
-        mod = a_mod(pop_types=["bankers", "serfs"],
-                    reform_names=["slavery", "voting_system"])
-        reading = readsave.reading_for("/some/mod", mod,
-                                       ("farmers", "bankers"))
-        reading.apply()
-        # What the globals now hold, read back the long way round. If this
-        # ever differs from what was applied, the key names one parse and
-        # the parse is another.
-        self.assertEqual(readsave.reading_now("/some/mod"), reading)
+    def read(self, reading, use_scanner):
+        _meta, nations = readsave.analyze_save(
+            self.files[0], reading, verbose=False, use_scanner=use_scanner)
+        return nations["ENG"]
 
-    def test_a_profile_replaces_rather_than_adds(self):
-        readsave.reading_for("/a", a_mod(pop_types=["bankers"],
-                                         reform_names=["slavery"]),
-                             ("farmers",)).apply()
-        second = readsave.reading_for("/b", a_mod(pop_types=["serfs"],
-                                                  reform_names=["voting"]),
-                                      ("labourers",))
-        second.apply()
-        self.assertEqual(readsave.reading_now("/b"), second)
-        self.assertNotIn("bankers", v2parse.POP_TYPES)
-        self.assertNotIn("slavery", readsave.REFORM_KEYS)
-        self.assertNotIn("farmers", readsave.MOB_CANDIDATES)
+    def test_the_reading_decides_and_nothing_is_left_over(self):
+        for use_scanner in (True, False):
+            with self.subTest(scanner=use_scanner):
+                first = self.read(self.modded, use_scanner)
+                plain = self.read(readsave.PLAIN, use_scanner)
+                again = self.read(self.modded, use_scanner)
+                self.assertEqual(dict(first["pop_by_type"]),
+                                 {"farmers": 1000, "bankers": 2000})
+                self.assertEqual(dict(first["reforms"]),
+                                 {"slavery": "yes_slavery"})
+                self.assertEqual(sorted(p[0] for p in first["mobilizable_pops"]),
+                                 ["bankers", "farmers"])
+                self.assertEqual(dict(plain["pop_by_type"]), {"farmers": 1000},
+                                 "the plain reading kept the mod's pop type")
+                self.assertEqual(dict(plain["reforms"]), {},
+                                 "the plain reading kept the mod's reform")
+                self.assertEqual(first, again,
+                                 "reading under another mod in between "
+                                 "changed what this reading makes of the save")
+
+    def test_workers_read_under_the_run_reading(self):
+        # Refused in this process, so a save read here rather than in a
+        # worker fails the test instead of passing it for the wrong reason.
+        refuse = patch.object(readfolder, "analyze_save",
+                              side_effect=AssertionError("read in the parent"))
+        with refuse:
+            got = list(readfolder.parse_saves_stream(
+                self.files, reading=self.modded, jobs=2, use_cache=False,
+                verbose=False))
+        self.assertEqual(len(got), 2)
+        for _meta, nations in got:
+            self.assertEqual(dict(nations["ENG"]["pop_by_type"]),
+                             {"farmers": 1000, "bankers": 2000})
+            self.assertEqual(dict(nations["ENG"]["reforms"]),
+                             {"slavery": "yes_slavery"})
 
     def test_every_part_of_the_reading_moves_the_key(self):
         base = readsave.reading_for("/a", a_mod(pop_types=["bankers"],
@@ -261,8 +291,6 @@ class ReadingProfileTests(unittest.TestCase):
         self.assertEqual(readsave.reading_for(None, None,
                                               readsave.MOBILIZABLE_TYPES),
                          readsave.PLAIN)
-        readsave.PLAIN.apply()
-        self.assertEqual(readsave.reading_now(), readsave.PLAIN)
 
 
 class ScannerLifetimeTests(unittest.TestCase):

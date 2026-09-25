@@ -37,10 +37,9 @@ from functools import partial
 
 import cacheio
 
-import v2parse
 from v2parse import (
-    POP_TYPES,
     TOKEN_RE,
+    VANILLA_POP_TYPES,
     Tokens,
     looks_like_country_tag,
     parse_block,
@@ -63,7 +62,6 @@ from readsave import (
     analyze_save,
     date_key,
     reading_for,
-    reading_now,
 )
 # Reading a folder of saves in parallel, and the cache behind it.
 from readfolder import (
@@ -232,8 +230,7 @@ def campaign_inventions(files, **options):
     Raw parses remain cached for the report pass. On a miss only the fields
     needed for decoding cross the worker boundary, preserving input order.
     """
-    slot = campaign_slot("inventions", files,
-                         options.get("reading", PLAIN),
+    slot = campaign_slot("inventions", files, options["reading"],
                          options.get("use_cache", True))
     held = cacheio.load(slot)
     if held is not None:
@@ -570,7 +567,7 @@ PROVINCE_HEAD = re.compile(r"^\d+=\s*$")
 TOP_KEY = re.compile(r"^\w+=\s*$")
 
 
-def verify_save(path):
+def verify_save(path, reading):
     """
     Cross-check the counts against an independent brace-tracking scan.
 
@@ -628,7 +625,7 @@ def verify_save(path):
                 truth_pop[owner] += to_int(bare.split("=", 1)[1])
         depth += line.count("{") - line.count("}")
 
-    _meta, nations = analyze_save(path, verbose=False)
+    _meta, nations = analyze_save(path, reading, verbose=False)
 
     say = ["\n=== %s ===" % os.path.basename(path),
            f"{'tag':<6}{'brigades':>10}{'scan':>8}{'diff':>7}"
@@ -661,7 +658,7 @@ def verify_save(path):
     return "\n".join(say), mismatches
 
 
-def verify_all(files, jobs=None):
+def verify_all(files, reading, jobs=None):
     """
     Every save checked, on every core, printed in the order given.
 
@@ -678,17 +675,14 @@ def verify_all(files, jobs=None):
                            jobs)
     if workers <= 1 or len(files) < 2:
         for path in files:
-            text, _bad = verify_save(path)
+            text, _bad = verify_save(path, reading)
             print(text)
         return
     print("Checking %d save(s) on %d cores." % (len(files), workers))
-    # `--verify` runs before a mod is chosen, so what it reads the saves
-    # under is whatever the run has settled on by now. See `reading_now`.
-    pool = ProcessPoolExecutor(
-        max_workers=workers, initializer=worker_setup,
-        initargs=(reading_now(),))
+    pool = ProcessPoolExecutor(max_workers=workers, initializer=worker_setup)
     try:
-        for text, _bad in pool.map(verify_save, files):
+        for text, _bad in pool.map(partial(verify_save, reading=reading),
+                                   files):
             print(text)
     finally:
         pool.shutdown()
@@ -759,7 +753,7 @@ def peek_save(path):
                 kind = ("block" if isinstance(v, dict)
                         else "list" if isinstance(v, list) else "scalar")
                 extra = ""
-                if label == "province" and k in POP_TYPES:
+                if label == "province" and k in VANILLA_POP_TYPES:
                     pops = v if isinstance(v, list) else [v]
                     culture, religion = pop_culture(pops[0]) if isinstance(pops[0], dict) else (None, None)
                     extra = f"  <- pop, culture={culture}, religion={religion}"
@@ -937,13 +931,10 @@ def run_cross(parent, survey, args, verbose=True):
     """
     Read every campaign `survey_cross` found, each under its own mod.
 
-    Returns (cross payload, the largest campaign's files, its mod path). The
-    largest campaign becomes the subject of the ordinary report, so the
-    cross-campaign block is an addition rather than a replacement.
-
-    The globals the parser keeps are reset between campaigns for the same reason
-    `main` resets them between runs: a set that only grew would carry one mod's
-    pop types into the next campaign's saves, which have none.
+    Returns (cross payload, the largest campaign's files, its mod path, the
+    `Reading` its saves were read under). The largest campaign becomes the
+    subject of the ordinary report, so the cross-campaign block is an
+    addition rather than a replacement.
     """
     import cross as crossmod
     from mod_reader import load_mod, name_for
@@ -966,12 +957,9 @@ def run_cross(parent, survey, args, verbose=True):
         # here. The regiment size is read from the same function further
         # down, where `campaign_rows` builds the spec that finishes the save.
         _regiment_size, mob_types = finishing.mod_defaults(args, mod)
-        # One object for how this campaign's saves are read: it sets the
-        # globals and it is the cache key, so the key cannot describe a state
-        # the parse is not in. The three globals used to be cleared, set,
-        # and then read back out again to make the key.
-        reading = reading_for(entry["mod_path"], mod, mob_types)
-        reading.apply()
+        # How this campaign's saves are read, which is also their cache key.
+        reading = entry["reading"] = reading_for(entry["mod_path"], mod,
+                                                 mob_types)
         entry["files"] = one_per_date(in_date_order(entry["files"]))
         if verbose:
             print("Reading %s (%d saves) under %s"
@@ -1009,7 +997,7 @@ def run_cross(parent, survey, args, verbose=True):
         sys.exit("No campaign called %r under %s. There is: %s"
                  % (args.primary, parent, known))
     if not results or primary is None:
-        return None, [], args.mod_path
+        return None, [], args.mod_path, PLAIN
     payload = crossmod.series_payload(results, names=names)
     if verbose:
         print("Cross-campaign: %d campaigns, %d nations in two or more of them."
@@ -1018,7 +1006,7 @@ def run_cross(parent, survey, args, verbose=True):
               % (primary["name"],
                  "" if args.primary else " (the most saves; --primary picks "
                                          "another)"))
-    return payload, primary["files"], primary["mod_path"]
+    return payload, primary["files"], primary["mod_path"], primary["reading"]
 
 
 # What one walk of a campaign produces, and what it was allowed to keep.
@@ -1617,6 +1605,9 @@ def _main(run=None):
     # largest of them, so this adds a section rather than replacing anything.
     cross_payload = None
     stamp = None
+    # What `--verify` reads the saves under: before any mod is chosen,
+    # nothing but the game; after `--cross`, the campaign the report is about.
+    verify_under = PLAIN
     if args.cross:
         survey = survey_cross(saves_path, args.game_root, args,
                               verbose=not args.quiet)
@@ -1625,7 +1616,7 @@ def _main(run=None):
         stamp = cross_stamp(survey, args)
         if not args.verify and already_built(args, stamp):
             return 0
-        cross_payload, files, primary_mod = run_cross(
+        cross_payload, files, primary_mod, verify_under = run_cross(
             saves_path, survey, args, verbose=not args.quiet)
         # The rest of the report is the primary campaign's, under its mod.
         args = replace(args, mod_path=primary_mod)
@@ -1633,7 +1624,7 @@ def _main(run=None):
             sys.exit("--cross found no campaigns under %s" % saves_path)
 
     if args.verify:
-        verify_all(files, args.jobs)
+        verify_all(files, verify_under, args.jobs)
         return
 
     # Asked for now rather than after the campaign has been read. A folder
@@ -1679,7 +1670,6 @@ def _main(run=None):
     # itself, or its head.
     known = None
     loading = None
-    from v2parse import VANILLA_POP_TYPES
     if args.mod_path:
         from mod_reader import cached_mod, has_rules, load_mod, mod_head
         try:
@@ -1719,15 +1709,11 @@ def _main(run=None):
               + (f"; mod-only pop types read: {' '.join(sorted(extra))}"
                  if extra else ""))
 
-    # One object for how this run reads a save. It sets the three globals
-    # the parser keeps -- here, and again in every worker, which on Windows
-    # is a fresh interpreter that inherits nothing -- and it is the cache
-    # key. Which mod a save is read under changes what comes out of it, so
-    # two campaigns on two mods no longer share cache entries; and the key
-    # cannot be worked out from a state different from the one the parse is
-    # in, because there is only one state.
+    # How this run reads a save, handed to every read and every worker with
+    # the save, and the cache key besides. Which mod a save is read under
+    # changes what comes out of it, so two campaigns on two mods do not
+    # share cache entries.
     reading = reading_for(args.mod_path, known, args.mob_types)
-    reading.apply()
 
     # Oldest first, decided from each save's own first line rather than by
     # sorting them after the fact -- the campaign is now walked in one pass
@@ -1855,7 +1841,7 @@ def _main(run=None):
     # `spending` is imported here, not at the top, for the same reason the
     # mod reader is: a run with nothing to do never reaches it.
     import spending
-    pop_columns = sorted(v2parse.POP_TYPES)
+    pop_columns = list(reading.pop_types)
 
     transform = (partial(spending.spend, spec=spec, keep_fields=keep_fields,
                          pop_columns=pop_columns) if in_workers else None)

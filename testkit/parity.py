@@ -43,6 +43,7 @@ import vic2_analyzer as va                                 # noqa: E402
 # readers have to be told the same answer or half the country block is dark
 # on both sides -- which is agreement about nothing.
 REFORMS = ("vote_franschise", "war_policy")
+READING = readsave.PLAIN._replace(reform_keys=REFORMS)
 
 
 def really_used(path):
@@ -69,7 +70,7 @@ def really_used(path):
 
     fastscan.collect = watched
     try:
-        va.analyze_save(path, verbose=False)
+        va.analyze_save(path, READING, verbose=False)
     finally:
         fastscan.collect = real
     return bool(seen) and seen[0]
@@ -77,7 +78,7 @@ def really_used(path):
 
 def compare(path):
     """Every difference between the two readings of one save."""
-    fast, slow = both_ways(path)
+    fast, slow = both_ways(path, READING)
     return ([where for where, _a, _b in differences(fast, slow)],
             len(set(fast[1]) | set(slow[1])))
 
@@ -89,11 +90,6 @@ def main():
         print("no scanner built, so nothing to compare; "
               "run `cargo build --release` in scanner/")
         return SKIPPED
-    # Which lines of a country block are reforms is told to both readers,
-    # and a run that tells neither leaves that half of the country block dark
-    # on both sides -- which is agreement about nothing.
-    readsave.PLAIN._replace(reform_keys=REFORMS).apply()
-
     holding = None
     files = sorted(glob.glob(os.path.join(where, "*.v2")))[:limit]
     if not files:

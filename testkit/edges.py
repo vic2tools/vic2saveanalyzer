@@ -64,14 +64,7 @@ WAR = savefmt.war("The Test War", "ENG", "FRA")
 
 def run(saves, out, extra_argv=()):
     """The analyzer, in this process, with everything it printed."""
-    import readsave
     import vic2_analyzer as va
-    # No mod: the twelve pop types the game ships and nothing hung off a
-    # reform. One object says how a save is read, so a check sets it the
-    # same way the program does instead of reaching for the globals behind
-    # it -- which is how `REFORM_KEYS` came to be reset through a module
-    # that only imported it.
-    readsave.PLAIN.apply()
     argv = [sys.argv[0], saves, "--out", out] + list(extra_argv)
     old = sys.argv
     said = io.StringIO()

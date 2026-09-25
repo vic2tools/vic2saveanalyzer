@@ -20,16 +20,17 @@ import fastscan                                            # noqa: E402
 import readsave                                            # noqa: E402
 
 
-def both_ways(path):
+def both_ways(path, reading):
     """
-    (the scanner's reading, the Python reading) of one save.
+    (the scanner's reading, the Python reading) of one save, both read
+    the way `reading` says.
 
     The scanner is switched off with the argument `analyze_save` has for it,
     and then checked to have stayed off. That guard is what this module is
     for: a comparison that has quietly stopped comparing still says the two
     agree.
     """
-    fast = readsave.analyze_save(path, verbose=False)
+    fast = readsave.analyze_save(path, reading, verbose=False)
 
     started = []
     real_start = fastscan.start
@@ -40,7 +41,8 @@ def both_ways(path):
 
     fastscan.start = watched
     try:
-        slow = readsave.analyze_save(path, verbose=False, use_scanner=False)
+        slow = readsave.analyze_save(path, reading, verbose=False,
+                                     use_scanner=False)
     finally:
         fastscan.start = real_start
     if started:

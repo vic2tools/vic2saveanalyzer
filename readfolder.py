@@ -42,7 +42,7 @@ import tempfile
 import cacheio
 from cacheio import load as _cache_read
 import fastscan
-from readsave import PLAIN, analyze_save
+from readsave import analyze_save
 
 
 class Cancelled(Exception):
@@ -160,7 +160,7 @@ def _cache_write(slot, meta, nations):
     cacheio.store(slot, (meta, dict(nations)))
 
 
-def campaign_slot(name, files, reading=PLAIN, use_cache=True):
+def campaign_slot(name, files, reading, use_cache=True):
     """
     Where something worked out from a whole campaign is remembered, or None
     when caching is off or a save cannot be looked at.
@@ -190,20 +190,18 @@ _TRANSFORM = None
 _HANDED = None
 
 
-def worker_setup(reading, transform=None):
+def worker_setup(transform=None):
     """
-    What a fresh interpreter has to be told before it can read a save.
+    What a fresh interpreter has to be told before it starts on the saves.
 
     Windows starts a worker as a new interpreter that imports this file by
-    name, so nothing the parent set is set here. It used to be told three
-    lists and had to put them back in the right three places; it is told the
-    one profile and asks it to.
+    name, so nothing the parent set is set here. How to read a save is not
+    among it: that comes with each job, as the `Reading` it is read under.
 
     The transform comes either itself or as the path `_hand_over` wrote it
     to, and in that case it is read with the first job rather than here.
     """
     global _TRANSFORM, _HANDED
-    reading.apply()
     # Reading a save makes no reference cycles -- eighteen saves read with
     # the cycle collector off left nothing for it to find -- so it is off
     # here, as it is in the parent for the length of a run (see
@@ -277,7 +275,7 @@ def _worker_parse(job):
     Plain dicts, because a defaultdict of lambdas will not pickle.
     """
     global _TRANSFORM, _HANDED
-    index, path, slot, cached = job
+    index, path, slot, cached, reading = job
     if _HANDED is not None:
         with open(_HANDED, "rb") as fh:
             _TRANSFORM = pickle.load(fh)
@@ -288,7 +286,7 @@ def _worker_parse(job):
         if got is not None:
             meta, nations = got
     if nations is None:
-        meta, nations = analyze_save(path, verbose=False)
+        meta, nations = analyze_save(path, reading, verbose=False)
         nations = dict(nations)
         _cache_write(slot, meta, nations)
     # Whatever the transform makes of the save goes back as it made it: a
@@ -356,8 +354,7 @@ def worker_count(jobs, biggest_save, asked=None):
     return max(1, min(cores, jobs, room))
 
 
-def parse_saves(files, verbose=True, use_cache=True, reading=PLAIN,
-                jobs=None):
+def parse_saves(files, *, reading, verbose=True, use_cache=True, jobs=None):
     """
     Every save in the folder, read in parallel when that is worth doing.
 
@@ -405,7 +402,7 @@ def parse_saves(files, verbose=True, use_cache=True, reading=PLAIN,
     for i in todo:
         stop_if_asked()
         try:
-            meta, nations = analyze_save(files[i], verbose=verbose)
+            meta, nations = analyze_save(files[i], reading, verbose=verbose)
         except (ValueError, OSError) as exc:
             print(f"  skipped {os.path.basename(files[i])}: {exc}",
                   file=sys.stderr)
@@ -418,7 +415,7 @@ def parse_saves(files, verbose=True, use_cache=True, reading=PLAIN,
     return [item for item in out if item is not None]
 
 
-def parse_saves_stream(files, verbose=True, use_cache=True, reading=PLAIN,
+def parse_saves_stream(files, *, reading, verbose=True, use_cache=True,
                        jobs=None, window=None, transform=None):
     """
     Every save, handed over one at a time, in the order given.
@@ -465,7 +462,7 @@ def parse_saves_stream(files, verbose=True, use_cache=True, reading=PLAIN,
             handed = _hand_over(transform)
             pool = ProcessPoolExecutor(
                 max_workers=workers, initializer=worker_setup,
-                initargs=(reading, handed))
+                initargs=(handed,))
         except Exception as exc:
             print(f"  reading one at a time ({exc})", file=sys.stderr)
 
@@ -496,7 +493,7 @@ def parse_saves_stream(files, verbose=True, use_cache=True, reading=PLAIN,
                 try:
                     futures[nxt] = pool.submit(
                         _worker_parse,
-                        (nxt, files[nxt], slots[nxt], ready[nxt]))
+                        (nxt, files[nxt], slots[nxt], ready[nxt], reading))
                 except Exception as exc:
                     # A pool only really starts its workers on the first
                     # submit, so a machine that cannot start them fails
@@ -567,7 +564,7 @@ def parse_saves_stream(files, verbose=True, use_cache=True, reading=PLAIN,
                 # save came by, it leaves here in the same state, so the
                 # caller never has to ask which one it was.
                 try:
-                    got = analyze_save(path, verbose=verbose)
+                    got = analyze_save(path, reading, verbose=verbose)
                 except (ValueError, OSError) as exc:
                     print(f"  skipped {os.path.basename(path)}: {exc}",
                           file=sys.stderr)
@@ -605,12 +602,12 @@ def _parse_parallel(files, out, todo, slots, workers, verbose, reading,
     if verbose:
         print(f"Reading {len(todo)} save(s) on {workers} cores.")
     done = 0
-    pool = ProcessPoolExecutor(max_workers=workers, initializer=worker_setup,
-                               initargs=(reading,))
+    pool = ProcessPoolExecutor(max_workers=workers, initializer=worker_setup)
     try:
         # `todo` is the saves with no cache entry, so none of these is
         # cached, and no finishing was asked of this pool.
-        pending = {pool.submit(_worker_parse, (i, files[i], slots[i], False))
+        pending = {pool.submit(_worker_parse,
+                               (i, files[i], slots[i], False, reading))
                    for i in todo}
         while pending:
             stop_if_asked()
