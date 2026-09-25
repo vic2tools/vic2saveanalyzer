@@ -63,6 +63,7 @@ from readsave import (
     reading_for,
 )
 from dates import date_key
+import market
 # The front of a save, read without the rest: its date, for the order.
 from savehead import in_date_order, one_per_date, sort_key
 # Reading a folder of saves in parallel, and the cache behind it.
@@ -298,100 +299,6 @@ def clear_cache():
     return removed, freed
 
 
-GOOD_CATEGORIES = {
-    "military": ["ammunition", "small_arms", "artillery", "canned_food",
-                 "barrels", "tanks", "aeroplanes"],
-    "raw": ["cattle", "coal", "cotton", "dye", "fish", "fruit", "grain", "iron",
-            "oil", "opium", "precious_metal", "rubber", "silk", "sulphur", "tea",
-            "timber", "tobacco", "tropical_wood", "wool", "coffee"],
-    "industrial": ["cement", "clipper_convoy", "electric_gear", "explosives",
-                   "fabric", "fertilizer", "fuel", "glass", "lumber",
-                   "machine_parts", "paper", "steamer_convoy", "steel"],
-    "consumer": ["automobiles", "furniture", "liquor", "luxury_clothes",
-                 "luxury_furniture", "radio", "regular_clothes", "telephones",
-                 "wine"],
-}
-GOOD_CATEGORY = {g: cat for cat, goods in GOOD_CATEGORIES.items() for g in goods}
-
-
-def merge_prices(parsed):
-    """
-    Stitch every save's rolling price buffer into one series.
-
-    Buffers from consecutive saves overlap heavily; keyed on (date, good) the
-    duplicates collapse, and the result is continuous monthly coverage from the
-    earliest buffer to the last save.
-    """
-    prices = {}
-    # Newest save first, and the first answer for a month is the one that
-    # stands. Walked oldest first, every one of the hundred and twenty
-    # thousand entries a campaign has had to be weighed against which save
-    # had written it -- a second dictionary the same size as the first, and
-    # a lookup in it per entry -- to settle that a later save's buffer is
-    # the more settled record. Coming the other way the question does not
-    # arise: whatever is already there was written by a later save.
-    for meta, _ in reversed(parsed):
-        market = meta.get("market")
-        if not market:
-            continue
-        # The save's own date carries the live price, which its monthly
-        # buffer has not recorded yet -- so it goes in before this save's
-        # own history, and after every later save's, which is exactly the
-        # order it won in before.
-        stamp = meta["date"]
-        for good, price in market["current"].items():
-            key = (stamp, good)
-            if key not in prices:
-                prices[key] = price
-        for stamp, good, price in market["history"]:
-            key = (stamp, good)
-            if key not in prices:
-                prices[key] = price
-
-    # Tuples in the column order `write_outputs` declares, like the other
-    # big tables: a campaign has ninety thousand of these, and a dict each
-    # was half the time this took and made the CSV writer name the same
-    # five columns ninety thousand times.
-    rows = []
-    years = {}
-    for (stamp, good), price in prices.items():
-        year = years.get(stamp)
-        if year is None:
-            year = years[stamp] = stamp.split(".")[0]
-        rows.append((stamp, year, good, GOOD_CATEGORY.get(good, "other"),
-                     round(price, 5)))
-    rows.sort(key=lambda r: (date_key(r[0]), r[2]))
-    return rows
-
-
-def market_snapshot_rows(parsed):
-    """Per-save supply/demand context, which the save only stores for `now`."""
-    rows = []
-    for meta, _ in parsed:
-        market = meta.get("market")
-        if not market:
-            continue
-        snap = market["snapshot"]
-        goods = set(market["current"])
-        for field in snap.values():
-            goods |= set(field)
-        for good in sorted(goods):
-            rows.append({
-                "date": meta["date"],
-                "year": meta["date"].split(".")[0],
-                "good": good,
-                "category": GOOD_CATEGORY.get(good, "other"),
-                "price": round(market["current"].get(good, 0.0), 5),
-                "world_pool": round(snap["world_pool"].get(good, 0.0), 3),
-                "supply": round(snap["supply"].get(good, 0.0), 3),
-                "demand": round(snap["demand"].get(good, 0.0), 3),
-                "real_demand": round(snap["real_demand"].get(good, 0.0), 3),
-                "actual_sold": round(snap["actual_sold"].get(good, 0.0), 3),
-                "discovered": int(snap["discovered"].get(good, 0.0) > 0),
-            })
-    return rows
-
-
 def _write_csv_text(path, chunks, columns):
     """One CSV: its heading, then each save's rows as `spending` wrote them."""
     with open(path, "w", newline="", encoding="utf-8") as fh:
@@ -435,25 +342,15 @@ def write_outputs(text, price_rows, snapshot_rows, outdir, pop_columns):
     """
     import spending
     os.makedirs(outdir, exist_ok=True)
-    columns = spending.nation_columns(pop_columns)
 
     paths, refused = [], []
-    tables = [
-        ("nations_timeseries.csv", None, columns),
-        ("prices.csv", price_rows, ["date", "year", "good", "category", "price"]),
-        ("market_snapshot.csv", snapshot_rows,
-         ["date", "year", "good", "category", "price", "world_pool", "supply",
-          "demand", "real_demand", "actual_sold", "discovered"]),
-        ("ships_by_type.csv", None,
-         ["date", "year", "tag", "ship_type", "count", "effective"]),
-        ("brigades_by_type.csv", None,
-         ["date", "year", "tag", "regiment_type", "count"]),
-        ("technologies.csv", None,
-         ["date", "year", "tag", "technology", "branch", "line"]),
-        ("pops_by_type.csv", None, ["date", "year", "tag", "pop_type", "size"]),
-        ("pops_by_culture.csv", None,
-         ["date", "year", "tag", "culture", "size", "accepted"]),
-    ]
+    per_save = [(name, None, spending.columns_of(name, pop_columns))
+                for name in spending.PER_SAVE]
+    tables = (per_save[:1]
+              + [("prices.csv", price_rows, market.PRICE_COLUMNS),
+                 ("market_snapshot.csv", snapshot_rows,
+                  market.SNAPSHOT_COLUMNS)]
+              + per_save[1:])
     # Every table, even one with nothing in it this run. A table skipped for
     # being empty left the last run's copy standing in the folder -- ships
     # of forty nations beside a main table of the one `--tags` asked for,
@@ -985,9 +882,9 @@ def walk_campaign(stream, spec, finished, pop_columns):
     """
     import spending
 
-    from report import NationTables, fold_packed_wars, fold_wars
+    from wars import fold_packed_wars, fold_wars
     rows = []
-    tables = NationTables()
+    tables = spending.NationTables()
     text = {name: [] for name in spending.PER_SAVE}
     # Ship stats as each nation's own inventions leave them. Nations that
     # researched the same things have the same ships, so the profiles are kept
@@ -1014,7 +911,7 @@ def walk_campaign(stream, spec, finished, pop_columns):
         date = meta["date"]
         rows += got.rows
         tables.add(date, got.tables)
-        for name, chunk in zip(spending.PER_SAVE, got.text):
+        for name, chunk in got.text.items():
             text[name].append(chunk)
         for tag, key, profile in got.naval:
             if key not in naval_index:
@@ -1095,8 +992,8 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
 
     html_path = None
     if not args.no_html:
-        from report import (build_map, build_report, build_succession,
-                            build_wars)
+        from report import build_map, build_report, build_succession
+        from wars import build_wars
         # Country names come from the mod's own localisation, which is where the
         # game gets them: a bare TAG, overridden by TAG_<government> when one
         # exists -- IGoR's PBC is "Peru-Bolivia" but "Andine Federation" while
@@ -1127,10 +1024,10 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
         if order:
             from mod_reader import (flag_images, flag_suffixes,
                                     government_flag_types)
+            from modrules import great_powers as ranked
             styles = government_flag_types(mod.path)
             for meta_i, nations_i in parsed:
-                picks = [order[i - 1] for i in meta_i.get("great_nations", ())
-                         if 0 < i <= len(order)]
+                picks = ranked(meta_i, mod)
                 if not picks:
                     continue
                 row = []
@@ -1457,8 +1354,8 @@ def start_forkserver():
     Python 3.14 makes workers on Linux by asking a forkserver to fork them,
     and starts that forkserver when the first worker is wanted -- which
     then waits while it imports the analyzer, before forking anything.
-    Each worker then imported the mod reader, `spending` and `report` for
-    itself on its first save. Started here, once a run knows it has work
+    Each worker then imported the mod reader and `spending` for itself on
+    its first save. Started here, once a run knows it has work
     to do, the forkserver does its importing while this process checks the
     mod and decodes the inventions, and every worker is forked with those
     modules already in it. Where workers are made another way -- Windows,
@@ -1469,7 +1366,7 @@ def start_forkserver():
         return
     from multiprocessing import forkserver
     multiprocessing.set_forkserver_preload(
-        ["__main__", "mod_reader", "spending", "report"])
+        ["__main__", "mod_reader", "spending"])
     try:
         forkserver.ensure_running()
     except OSError:
@@ -1800,8 +1697,8 @@ def _main(run=None):
     # fifty megabytes over thirty-eight saves, near two gigabytes over twelve
     # hundred monthly ones.
 
-    price_rows = merge_prices(parsed)
-    snapshot_rows = market_snapshot_rows(parsed)
+    price_rows = market.merge_prices(parsed)
+    snapshot_rows = market.market_snapshot_rows(parsed)
 
     # The tables are written beside the report rather than before it.
     # Nothing in the report is read back out of them, they take about a third

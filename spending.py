@@ -35,8 +35,8 @@ from collections import namedtuple
 
 import finishing
 from nation import trim_save
-from report import pack_wars, save_tables
 from tech_groups import TECH_GROUP
+from wars import pack_wars
 
 BASE_COLUMNS = [
     "date", "year", "tag", "is_player", "primary_culture", "civilized",
@@ -58,11 +58,30 @@ BASE_COLUMNS = [
     "life_unmet", "life_unmet_pct", "starving", "starving_pct",
 ]
 
-# The tables a save writes its own rows into, in the order `SaveRows.text`
-# holds them. `vic2_analyzer.write_outputs` names their columns.
-PER_SAVE = ("nations_timeseries.csv", "ships_by_type.csv",
-            "brigades_by_type.csv", "technologies.csv", "pops_by_type.csv",
-            "pops_by_culture.csv")
+# The main table: a row per nation per save, its columns `nation_columns`.
+MAIN = "nations_timeseries.csv"
+
+# The five narrow tables, a row per nation per save per thing counted, and
+# their columns. The tuples `save_rows` builds for each are in this order,
+# and this is the only place the order is written down.
+NARROW = {
+    "ships_by_type.csv": ("date", "year", "tag", "ship_type", "count",
+                          "effective"),
+    "brigades_by_type.csv": ("date", "year", "tag", "regiment_type", "count"),
+    "technologies.csv": ("date", "year", "tag", "technology", "branch",
+                         "line"),
+    "pops_by_type.csv": ("date", "year", "tag", "pop_type", "size"),
+    "pops_by_culture.csv": ("date", "year", "tag", "culture", "size",
+                            "accepted"),
+}
+
+# Every table a save writes its own rows into: `SaveRows.text` is keyed by
+# these names.
+PER_SAVE = (MAIN,) + tuple(NARROW)
+
+# Cultures per nation per save the report keeps, beyond which the tail is
+# negligible and only inflates the file.
+MAX_CULTURES = 30
 
 
 def nation_columns(pop_columns):
@@ -71,17 +90,50 @@ def nation_columns(pop_columns):
             + ["accepted_cultures"])
 
 
+def columns_of(name, pop_columns):
+    """The columns of one of the `PER_SAVE` tables."""
+    return nation_columns(pop_columns) if name == MAIN else NARROW[name]
+
+
+# One save's share of the payload's per-nation tables, each {tag: what that
+# nation has in this save}: ship counts and, where they differ, what the
+# hulls are worth as they stand; brigades; technology names; pops by type;
+# and the largest cultures. A nation with nothing in one has no entry in it.
+PerNation = namedtuple("PerNation", "ships crews brigades techs pops cultures")
+
+
+class NationTables:
+    """
+    The payload's per-nation tables for a whole campaign, each
+    {tag: {date: ...}}, filled one save's `PerNation` at a time, oldest
+    first -- so a nation appears in each in the order it first appeared in
+    the campaign, and its dates in date order.
+    """
+
+    __slots__ = PerNation._fields
+
+    def __init__(self):
+        for name in PerNation._fields:
+            setattr(self, name, {})
+
+    def add(self, date, one):
+        for name, by_tag in zip(PerNation._fields, one):
+            table = getattr(self, name)
+            for tag, value in by_tag.items():
+                table.setdefault(tag, {})[date] = value
+
+
 # One save's share of the tables. `rows` is the main table's, a dict a
 # nation; `tables` is the five narrow ones as the report keeps them, a
-# `report.PerNation`; `naval` is (tag, key, profile) per nation with ships,
-# `supply` is (good, tag, amount), both in nation order; and `text` is each
-# of the `PER_SAVE` tables' rows as CSV, heading left out. The narrow
-# tables' own rows go no further than that text.
+# `PerNation`; `naval` is (tag, key, profile) per nation with ships,
+# `supply` is (good, tag, amount), both in nation order; and `text` is
+# {table name: its rows as CSV, heading left out} for every `PER_SAVE`
+# table. The narrow tables' own rows go no further than that text.
 SaveRows = namedtuple("SaveRows", "rows tables naval supply text")
 
 # What a worker sends back: the save cut down to what the run keeps, the
 # wars the parent folds into its book -- each packed on its own, see
-# `report.fold_packed_wars` -- and the save's rows.
+# `wars.fold_packed_wars` -- and the save's rows.
 Spent = namedtuple("Spent", "meta nations wars rows")
 
 
@@ -91,6 +143,7 @@ def save_rows(meta, nations, spec, pop_columns):
     year = date.split(".")[0] if date else ""
     rows, ship_rows, brigade_rows, tech_rows = [], [], [], []
     pop_rows, culture_rows, naval, supply = [], [], [], []
+    ships, crews, brigades, techs, pops, cultures = {}, {}, {}, {}, {}, {}
     for tag, done in nations.items():
         # The same question the finishing asked, asked of the same spec,
         # so a nation finished out in a worker and a nation finished in the
@@ -115,12 +168,26 @@ def save_rows(meta, nations, spec, pop_columns):
 
         # These tables are the ones a campaign has millions of rows of -- a
         # hundred technologies per nation per save on its own -- so they are
-        # tuples in the column order declared in `write_outputs` rather than
-        # dicts. A dict per row costs about twice the memory and names the
-        # same six columns over and over.
+        # tuples in `NARROW`'s column order rather than dicts. A dict per
+        # row costs about twice the memory and names the same six columns
+        # over and over. Each nation's share of the report's tables is kept
+        # on the way past, from the same numbers.
+        count_of, crew_of = {}, {}
         for stype, count in sorted(done["ships_by_type"].items()):
-            ship_rows.append((date, year, tag, stype, count,
-                              round(done["ship_crew"].get(stype, count), 3)))
+            effective = round(done["ship_crew"].get(stype, count), 3)
+            ship_rows.append((date, year, tag, stype, count, effective))
+            count_of[stype] = int(count)
+            # What those hulls are worth as they stand, when that is not
+            # simply the count: a fleet at half strength fights at half
+            # strength, and a veteran one above its paper figure. Only
+            # carried where it differs, since for most navies most of the
+            # time it does not.
+            if abs(effective - count) > 0.005:
+                crew_of[stype] = round(effective, 2)
+        if count_of:
+            ships[tag] = count_of
+        if crew_of:
+            crews[tag] = crew_of
         # Ship stats as each nation's own inventions leave them. Nations that
         # researched the same things have the same ships, so the parent keeps
         # each profile once and refers to it by number; the key it knows one
@@ -131,34 +198,49 @@ def save_rows(meta, nations, spec, pop_columns):
             naval.append((tag, json.dumps(profile, sort_keys=True), profile))
         for good, amount in done["goods_supply"].items():
             supply.append((good, tag, amount))
+        held = {}
         for rtype, count in sorted(done["regiments_by_type"].items()):
             brigade_rows.append((date, year, tag, rtype, count))
-        for tech in sorted(done["tech_list"]):
+            held[rtype] = int(count)
+        if held:
+            brigades[tag] = held
+        names = sorted(done["tech_list"])
+        for tech in names:
             branch, line, _pos = TECH_GROUP.get(tech, ("other", "Other", 0))
             tech_rows.append((date, year, tag, tech, branch, line))
+        if names:
+            techs[tag] = names
+        held = {}
         for ptype, size in sorted(done["pop_by_type"].items()):
             pop_rows.append((date, year, tag, ptype, size))
+            held[ptype] = int(size)
+        if held:
+            pops[tag] = held
+        largest = []
         for culture, size in sorted(done["pop_by_culture"].items(),
                                     key=lambda kv: -kv[1]):
-            culture_rows.append((date, year, tag, culture, size,
-                                 int(culture in accepted_set)))
+            accepted = int(culture in accepted_set)
+            culture_rows.append((date, year, tag, culture, size, accepted))
+            if len(largest) < MAX_CULTURES:
+                largest.append([culture, int(size), accepted])
+        if largest:
+            cultures[tag] = largest
 
     # The same writer the tables are opened with, so the text is what
     # writing these rows there would have written.
     columns = nation_columns(pop_columns)
-    text = []
-    for data in (rows, ship_rows, brigade_rows, tech_rows, pop_rows,
-                 culture_rows):
+    text = {}
+    for name, data in zip(PER_SAVE, (rows, ship_rows, brigade_rows, tech_rows,
+                                     pop_rows, culture_rows)):
         out = io.StringIO()
         writer = csv.writer(out)
         if data is rows:
             writer.writerows([row.get(c, "") for c in columns] for row in data)
         else:
             writer.writerows(data)
-        text.append(out.getvalue())
-    tables = save_tables(ship_rows, brigade_rows, tech_rows, pop_rows,
-                         culture_rows)
-    return SaveRows(rows, tables, naval, supply, tuple(text))
+        text[name] = out.getvalue()
+    tables = PerNation(ships, crews, brigades, techs, pops, cultures)
+    return SaveRows(rows, tables, naval, supply, text)
 
 
 def spend(meta, nations, spec, keep_fields, pop_columns):

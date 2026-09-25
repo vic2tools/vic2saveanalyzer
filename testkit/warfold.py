@@ -5,7 +5,7 @@ require the same war book from both.
 
 A worker sends each war packed on its own, and the parent skips a record
 whose bytes are exactly those of the last record folded under the same war
-(`report.fold_packed_wars`). That is right only while folding a record a
+(`wars.fold_packed_wars`). That is right only while folding a record a
 second time changes nothing -- while every merge in `fold_wars` is an
 earliest, a latest, a union or a replacement by an equal value. A change to
 `fold_wars` that is not -- a count, a list that grows, a date that moves the
@@ -29,7 +29,7 @@ sys.path.insert(0, HERE)
 
 import readsave                                              # noqa: E402
 from dates import date_key                                   # noqa: E402
-import report                                                # noqa: E402
+from wars import fold_packed_wars, fold_wars, pack_wars     # noqa: E402
 
 
 def wars_in_order(paths):
@@ -49,12 +49,12 @@ def fold_both_ways(campaign):
     skipped = total = 0
     for wars in campaign:
         # Each book its own copy: a fold keeps the records it is handed.
-        report.fold_wars(plain, pickle.loads(pickle.dumps(wars)))
-        packs = report.pack_wars(wars)
+        fold_wars(plain, pickle.loads(pickle.dumps(wars)))
+        packs = pack_wars(wars)
         last = packed.get("last_folded", {})
         skipped += sum(1 for name, blob in packs if last.get(name) == blob)
         total += len(packs)
-        report.fold_packed_wars(packed, packs)
+        fold_packed_wars(packed, packs)
     return plain, packed, skipped, total
 
 

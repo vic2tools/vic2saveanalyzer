@@ -411,3 +411,48 @@ def impact_for(nation, mod, world=None, inventions=None):
         if _trigger_ok(trigger, nation, mod, world, inventions):
             total += impact
     return total
+
+
+def great_powers(meta, mod):
+    """
+    The save's great powers, in the engine's rank order, as tags.
+
+    The save ranks them itself, as 1-based indices into the country array
+    `common/countries.txt` defines, so the mod is needed to turn them back
+    into tags. Without one there is nobody to name.
+    """
+    order = (mod.country_order if mod else None) or []
+    return [order[i - 1] for i in meta.get("great_nations", ())
+            if 0 < i <= len(order)]
+
+
+def save_world(meta, mod):
+    """
+    What one save says about everybody, for the triggers that ask.
+
+    A triggered modifier can turn on the year, on whether a country is a great
+    power, on whether it is at war, or on who owns a particular province --
+    none of which is a property of the country block itself. This gathers the
+    four of them once per save rather than once per nation.
+    """
+    powers = great_powers(meta, mod)
+    at_war = set()
+    for war in meta.get("wars", ()):
+        if not war.get("active"):
+            continue
+        # The war's own list of who is in it now. The history's joins keep
+        # a nation that has since made peace and miss one added by hand; a
+        # war that lists nobody, which the game never writes, falls back to
+        # them rather than to no one.
+        at_war.update(war.get("fighting") or (list(war.get("attackers", ()))
+                                              + list(war.get("defenders", ()))))
+    year = 0
+    date = meta.get("date") or ""
+    if date.split(".")[0].isdigit():
+        year = int(date.split(".")[0])
+    return {
+        "year": year,
+        "great_powers": frozenset(powers),
+        "at_war": frozenset(at_war),
+        "owner": meta.get("province_owner") or {},
+    }

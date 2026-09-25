@@ -394,7 +394,7 @@ def m29():
           "war = yes is answered from the history's joins, which keep a nation "
           "that made peace and miss one put into the war by hand", "mobrate.py")
 def m30():
-    patch("explain.py", 'at_war.update(war.get("fighting") or (list(',
+    patch("modrules.py", 'at_war.update(war.get("fighting") or (list(',
           'at_war.update((list(')
 
 
@@ -417,7 +417,7 @@ def m31():
           "so a war still being fought stops gaining battles",
           "warfold.py", "saves")
 def m46():
-    patch("report.py",
+    patch("wars.py",
           "        if last.get(name) == blob:\n            continue\n",
           "        if name in last:\n            continue\n")
 

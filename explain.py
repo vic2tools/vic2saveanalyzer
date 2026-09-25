@@ -9,8 +9,6 @@ of them touches the tables, and none of them is reached by a run that is
 building anything -- which is why a hundred and sixty lines of them sat at
 the bottom of `main` being skipped, and why they are here now.
 
-`save_world` is here too because two of them need it and it belongs to no
-particular one of them.
 """
 
 import os
@@ -19,6 +17,7 @@ from collections import defaultdict
 
 from nation import (accepted_cultures_of, brigades_from_clusters,
                     mobilization_clusters)
+from modrules import save_world
 
 
 def explain_mob_pool(tag, nat, meta, rate, args):
@@ -95,39 +94,6 @@ def explain_mob_pool(tag, nat, meta, rate, args):
             print(f"    {province_id:>6} {size * rate:>10,.0f} "
                   f"{int(size * rate // args.pop_per_regiment):>8}")
 
-
-def save_world(meta, mod):
-    """
-    What one save says about everybody, for the triggers that ask.
-
-    A triggered modifier can turn on the year, on whether a country is a great
-    power, on whether it is at war, or on who owns a particular province --
-    none of which is a property of the country block itself. This gathers the
-    four of them once per save rather than once per nation.
-    """
-    order = (mod.country_order if mod else None) or []
-    powers = {order[i - 1] for i in meta.get("great_nations", ())
-              if 0 < i <= len(order)}
-    at_war = set()
-    for war in meta.get("wars", ()):
-        if not war.get("active"):
-            continue
-        # The war's own list of who is in it now. The history's joins keep
-        # a nation that has since made peace and miss one added by hand; a
-        # war that lists nobody, which the game never writes, falls back to
-        # them rather than to no one.
-        at_war.update(war.get("fighting") or (list(war.get("attackers", ()))
-                                              + list(war.get("defenders", ()))))
-    year = 0
-    date = meta.get("date") or ""
-    if date.split(".")[0].isdigit():
-        year = int(date.split(".")[0])
-    return {
-        "year": year,
-        "great_powers": frozenset(powers),
-        "at_war": frozenset(at_war),
-        "owner": meta.get("province_owner") or {},
-    }
 
 def asked(args):
     """

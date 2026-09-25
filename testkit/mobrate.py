@@ -212,7 +212,7 @@ def at_war_is_who_is_fighting():
     import shutil
     import tempfile
     sys.path.insert(0, os.path.join(HERE, "testkit"))
-    import explain
+    import modrules
     import readsave
     import savefmt
 
@@ -235,7 +235,7 @@ def at_war_is_who_is_fighting():
         meta, _nations = readsave.analyze_save(path, readsave.PLAIN, verbose=False)
     finally:
         shutil.rmtree(holding, ignore_errors=True)
-    got = sorted(explain.save_world(meta, a_mod())["at_war"])
+    got = sorted(modrules.save_world(meta, a_mod())["at_war"])
     if got != ["ENG", "FRA", "SPA"]:
         return ["at war: %s, where the war lists ENG, SPA and FRA -- GER has "
                 "made peace and SPA was put in by hand" % " ".join(got)]

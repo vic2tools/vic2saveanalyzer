@@ -37,8 +37,7 @@ finish unwatched.
 
 from collections import namedtuple
 
-from explain import save_world
-from modrules import rate_for
+from modrules import rate_for, save_world
 from nation import (
     AS_PLAIN_DICTS,
     AS_PLAIN_DICTS_INSIDE,
