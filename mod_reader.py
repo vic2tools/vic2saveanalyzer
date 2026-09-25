@@ -80,13 +80,29 @@ def _read_clausewitz(path):
     return out
 
 
+_WORD_OR_DOT = re.compile(r"[\w.]")
+_OPENS = re.compile(r"\s*=\s*\{")
+
+
 def _block_text(raw, name):
-    """The raw text of one top-level block, for regex-level inspection."""
-    m = re.search(r"(?<![\w.])" + re.escape(name) + r"\s*=\s*\{", raw)
-    if not m:
-        return ""
-    end = block_end(raw, m.end())
-    return raw[m.end():end - 1] if end is not None else ""
+    """The raw text of one top-level block, for regex-level inspection.
+
+    The first `name = {` in the file whose name is not the tail of a longer
+    word. That was one `re.search` per call, with the name built into the
+    pattern: a new pattern for every block, too many for the regex cache to
+    keep, and each one run from the top of the file with a look-behind that
+    stops the engine skipping ahead -- a third of the time it took to read
+    a mod. `str.find` walks to each place the name occurs and the same two
+    tests are asked there, so the answer is the same match."""
+    at = raw.find(name)
+    while at != -1:
+        if not (at and _WORD_OR_DOT.match(raw, at - 1)):
+            m = _OPENS.match(raw, at + len(name))
+            if m:
+                end = block_end(raw, m.end())
+                return raw[m.end():end - 1] if end is not None else ""
+        at = raw.find(name, at + 1)
+    return ""
 
 
 def _find_mob_size(block):
