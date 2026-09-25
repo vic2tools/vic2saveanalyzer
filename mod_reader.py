@@ -1761,18 +1761,50 @@ def mod_signature(mod_path):
     digest = hashlib.md5()
     for source in roots:
         digest.update(source.encode("utf-8", "replace"))
-        for root, dirs, files in os.walk(source):
-            dirs.sort()
-            for name in sorted(files):
-                path = os.path.join(root, name)
-                try:
-                    stat = os.stat(path)
-                except OSError:
-                    continue
-                digest.update(("%s|%d|%d\n" % (os.path.relpath(path, source),
-                                               stat.st_size, stat.st_mtime_ns))
-                              .encode("utf-8", "replace"))
+        _sign_folder(digest, source, "")
     return digest.hexdigest()
+
+
+def _sign_folder(digest, folder, under):
+    """
+    Every file below `folder` into `digest`: its path under the root, its
+    size and its time, in the order `os.walk` with sorted names would give
+    -- this folder's files, then each folder in it, depth first.
+
+    It was `os.walk` and an `os.stat` of every file. Asked on every run,
+    the one with nothing to do included, of a mod and the game beneath it:
+    thousands of files. Windows answers `os.stat` by opening the file, and
+    `os.scandir` already has the size and the time from listing the
+    folder, so `DirEntry.stat` costs nothing there. Here it is the same
+    one call it was. What goes into the digest is unchanged: a folder that
+    cannot be listed adds nothing, a linked folder is not followed, and a
+    file is statted through a link and left out if that fails.
+    """
+    files, folders = [], []
+    try:
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                try:
+                    is_dir = entry.is_dir()
+                except OSError:
+                    is_dir = False
+                (folders if is_dir else files).append(entry)
+    except OSError:
+        return
+    files.sort(key=lambda entry: entry.name)
+    for entry in files:
+        try:
+            stat = entry.stat()
+        except OSError:
+            continue
+        digest.update(("%s|%d|%d\n" % (os.path.join(under, entry.name),
+                                       stat.st_size, stat.st_mtime_ns))
+                      .encode("utf-8", "replace"))
+    folders.sort(key=lambda entry: entry.name)
+    for entry in folders:
+        path = os.path.join(folder, entry.name)
+        if not os.path.islink(path):
+            _sign_folder(digest, path, os.path.join(under, entry.name))
 
 
 def _reader_fingerprint():
