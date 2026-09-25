@@ -781,20 +781,15 @@ def campaign_rows(parsed, mod, args, wanted=None):
     different one, and by the time the two were read side by side it had
     drifted in five places.
     """
-    from mod_reader import attainable_inventions
+    from mod_reader import settle_campaign
 
-    every, all_techs = [], {}
-    for _meta, nations in parsed:
-        for tag, nat in nations.items():
-            every.append(nat)
-            all_techs.setdefault(tag, set()).update(nat["tech_list"])
-    live = attainable_inventions(mod, all_techs) if mod else None
+    live = None
     if mod is not None:
-        # Which base decodes this campaign's invention indices. Until this
-        # has run the mod refuses to say, because "nobody looked" and "they
-        # do not decode" mean different things and only one of them is a
-        # reason to fall back to guessing what a nation holds.
-        mod.decode_indices(every)
+        # Until this has run the mod refuses to say which base decodes the
+        # campaign's invention indices, because "nobody looked" and "they do
+        # not decode" mean different things and only one of them is a reason
+        # to fall back to guessing what a nation holds.
+        live, _every = settle_campaign(mod, parsed)
 
     spec = finishing.finish_spec(args, mod, live, wanted)
     out = []
@@ -1752,7 +1747,7 @@ def _main(run=None):
 
     live = None
     if known is not None:
-        from mod_reader import (attainable_inventions, index_coverage,
+        from mod_reader import (index_coverage, settle_campaign,
                                 validate_indices)
         from modrules import unjudged_triggers
         # Decode invention indices from compact summaries. Population and
@@ -1763,17 +1758,10 @@ def _main(run=None):
                 mod = loading.result()
             except (OSError, ValueError) as exc:
                 sys.exit(str(exc))
-        every_nation = []
-        all_techs = {}
-        for _meta, nations in walked:
-            for tag, nat in nations.items():
-                every_nation.append(nat)
-                all_techs.setdefault(tag, set()).update(nat["tech_list"])
-        live = attainable_inventions(mod, all_techs)
         # Saves name each nation's inventions by index. Decoding them is what
         # turns the mobilisation size from "every invention this nation could
         # have" into the ones it actually rolled.
-        mod.decode_indices(every_nation)
+        live, every_nation = settle_campaign(mod, walked)
         if verbose:
             if mod.index_base is None:
                 print("\nInvention indices could not be decoded from "

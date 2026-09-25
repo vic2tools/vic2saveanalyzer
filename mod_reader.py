@@ -2444,3 +2444,26 @@ def attainable_inventions(mod, all_nations):
 
 
 
+
+
+def settle_campaign(mod, saves):
+    """
+    What a campaign's own saves settle about the mod it was played on, as
+    (the mobilisation inventions any nation could get, every nation in the
+    campaign).
+
+    Two things a mod folder cannot say by itself. Which of its inventions
+    are within anyone's reach depends on the technologies the campaign's
+    nations actually hold, and which base decodes the saves' invention
+    indices can only be checked against the saves (`Mod.decode_indices`).
+    The report and `--cross` both need the two answered, the same way, from
+    whatever part of each save they kept.
+    """
+    every, all_techs = [], {}
+    for _meta, nations in saves:
+        for tag, nat in nations.items():
+            every.append(nat)
+            all_techs.setdefault(tag, set()).update(nat["tech_list"])
+    live = attainable_inventions(mod, all_techs)
+    mod.decode_indices(every)
+    return live, every
