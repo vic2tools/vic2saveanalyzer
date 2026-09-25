@@ -66,7 +66,7 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INSIDE = r'''
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import vic2_analyzer as va
+import stamp
 
 
 class Settings:
@@ -81,7 +81,7 @@ with open(saves[0], "w") as fh:
     fh.write("date=\"1836.1.1\"\n")
 
 args = Settings()
-first = va.report_stamp(saves, args, "no-mod")
+first = stamp.report_stamp(saves, args, "no-mod")
 if not first:
     print("BLANK|the stamp came back empty, so nothing below means anything")
     raise SystemExit(0)
@@ -94,14 +94,14 @@ for name in sorted(os.listdir(here)):
     try:
         with open(path, "ab") as fh:
             fh.write(b"\n# touched\n")
-        now = va.report_stamp(saves, args, "no-mod")
+        now = stamp.report_stamp(saves, args, "no-mod")
     finally:
         with open(path, "wb") as fh:
             fh.write(was)
     print("%s|%s" % ("MOVED" if now != first else "SAME", name))
 
 # And the other direction: nothing touched, nothing moved.
-print("%s|%s" % ("MOVED" if va.report_stamp(saves, args, "no-mod") != first
+print("%s|%s" % ("MOVED" if stamp.report_stamp(saves, args, "no-mod") != first
                  else "SAME", "(nothing touched)"))
 '''
 
@@ -313,10 +313,11 @@ def the_settings_the_stamp_covers():
     """[what went wrong] in which settings the report stamp covers."""
     import dataclasses
     sys.path.insert(0, HERE)
-    import vic2_analyzer as va
+    import run as settings
+    import stamp
 
     wrong = []
-    declared = dataclasses.fields(va.Run)
+    declared = dataclasses.fields(settings.Run)
     for setting in declared:
         if "report" not in setting.metadata:
             wrong.append("%s does not say whether it changes the report"
@@ -340,21 +341,21 @@ def the_settings_the_stamp_covers():
     try:
         save = os.path.join(holding, "a.v2")
         open(save, "w").write('date="1836.1.1"\n')
-        base = va.Run(saves=holding)
-        first = va.report_stamp([save], base, "no-mod")
+        base = settings.Run(saves=holding)
+        first = stamp.report_stamp([save], base, "no-mod")
         for setting in declared:
             if not setting.metadata.get("report"):
                 continue
             moved = dataclasses.replace(
                 base, **{setting.name: other(getattr(base, setting.name))})
-            if va.report_stamp([save], moved, "no-mod") == first:
+            if stamp.report_stamp([save], moved, "no-mod") == first:
                 wrong.append("changing %s does not move the report stamp, so "
                              "a run that changes it is answered with the old "
                              "report" % setting.name)
         old = sys.argv
         try:
             sys.argv = [old[0], holding]
-            parsed = va.Run.from_command_line(va.command_line())
+            parsed = settings.Run.from_command_line(settings.command_line())
         finally:
             sys.argv = old
         if parsed != base:

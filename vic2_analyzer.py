@@ -24,69 +24,45 @@ Saves must be plaintext. If yours are binary, launch the game in debug mode
 and re-save; the file gets about 10x bigger but becomes readable.
 """
 
-import argparse
 import csv
 import gc
-import hashlib
 import os
-import re
 import sys
-from collections import defaultdict, namedtuple
-from dataclasses import dataclass, field as _field, fields, replace
+import threading
+from collections import namedtuple
+from dataclasses import replace
 from functools import partial
 
 import cacheio
-
-from v2parse import (
-    TOKEN_RE,
-    VANILLA_POP_TYPES,
-    Tokens,
-    looks_like_country_tag,
-    parse_block,
-    pop_culture,
-    read_save_text,
-    skip_block,
-    to_int,
-    unquote,
-)
-from explain import asked, explain
-from nation import (
-    KEEP_FOR_INVENTIONS,
-    KEEP_NATION,
-)
+import market
+from dates import date_key
+from explain import explain, peek_save, verify_all
+from nation import KEEP_FOR_INVENTIONS, KEEP_NATION
 # Reading a save is its own thing and lives in its own file: a path in, and
 # what the save says out. Nothing in it knows about caches, workers, reports
-# or the command line, which is why it could be lifted out whole.
-from readsave import (
-    PLAIN,
-    analyze_save,
-    reading_for,
-)
-from dates import date_key
-import market
-# The front of a save, read without the rest: its date, for the order.
-from savehead import in_date_order, one_per_date, sort_key
+# or the command line.
+from readsave import PLAIN, reading_for
 # Reading a folder of saves in parallel, and the cache behind it.
 from readfolder import (
-    cache_dir,
     campaign_slot,
     parse_saves,
     parse_saves_stream,
-    parser_fingerprint,
     stop_if_asked,
     tell_progress,
-    worker_count,
-    worker_setup,
 )
 # `analyze` hands a caller's Stop button and progress bar to these, and the
 # window catches `Cancelled` here, because the analyzer is the thing it runs.
 from readfolder import Cancelled, set_cancel_check, set_progress  # noqa: F401
+from run import Run, command_line
+# The front of a save, read without the rest: its date, for the order.
+from savehead import in_date_order, one_per_date
+from stamp import already_built, forget_stamp, report_stamp, write_stamp
 # What a nation comes to once its save is read. Called through the module,
 # never imported by name: `testkit/crossrows.py` replaces
 # `finishing.finish_nations` to watch both of its callers -- `campaign_rows`
-# here and `finish_and_pack`, through `spending.spend`, in the workers -- and
-# a copy of the name held
-# here would go on calling the original, unwatched.
+# in `cross` and `finish_and_pack`, through `spending.spend`, in the workers
+# -- and a copy of the name held here would go on calling the original,
+# unwatched.
 import finishing
 
 
@@ -114,110 +90,6 @@ def _tell_report_ready(path):
             pass
 
 
-# What a finished report was made from. If all of it is the same, the report
-# on disk is the report this run would write, byte for byte.
-STAMP_FILE = "report.stamp"
-
-
-def report_stamp(files, args, world):
-    """
-    A signature of everything that decides what the report says.
-
-    Every save it was built from and the state of each of them, the code that
-    reads saves, the code that writes reports, the mod, and the settings that
-    change any number in it. Anything here changing means the report has to be
-    built again; nothing here changing means it does not, and that is the
-    difference between pressing Analyze and waiting, and pressing Analyze and
-    reading.
-    """
-    digest = hashlib.md5()
-    for path in sorted(files):
-        try:
-            stat = os.stat(path)
-        except OSError:
-            return ""
-        digest.update(f"{os.path.abspath(path)}|{stat.st_size}|"
-                      f"{stat.st_mtime_ns}\n".encode("utf-8"))
-    digest.update(("parser=" + parser_fingerprint()).encode("utf-8"))
-    digest.update(("world=" + str(world)).encode("utf-8"))
-    # The report's own code, for the same reason the parse cache hashes the
-    # parser: a change to the template is a change to the report.
-    if getattr(sys, "frozen", False):
-        digest.update(("frozen=" + parser_fingerprint()).encode("utf-8"))
-    else:
-        # Every source file beside this one, rather than the handful that
-        # were thought of at the time. That list was wrong within a day:
-        # `modrules.py` was lifted out of `mod_reader.py`, which was on it,
-        # and did not inherit its place -- so doubling every nation's
-        # mobilisation size changed nothing the skip could see and the next
-        # run answered "nothing has changed since this was built" and served
-        # the old report. A list of names is a thing to forget; a folder is
-        # not. The file's name is hashed too, so renaming one counts.
-        here = os.path.dirname(os.path.abspath(__file__))
-        try:
-            for name in sorted(os.listdir(here)):
-                if not name.endswith(".py"):
-                    continue
-                with open(os.path.join(here, name), "rb") as fh:
-                    digest.update(name.encode("utf-8"))
-                    digest.update(fh.read())
-        except OSError:
-            return ""
-    # Every setting that reaches a number in the report. Not --jobs, not
-    # --quiet, not where it is written: those change how it is made, not what
-    # it says.
-    # Which those are is declared once, beside each setting in `Run`.
-    for name in REPORTED:
-        digest.update(("%s=%r\n" % (name, getattr(args, name, None)))
-                      .encode("utf-8"))
-    return digest.hexdigest()
-
-
-def stamp_matches(outdir, stamp, filename="report.html"):
-    """Whether the report already sitting there was made from exactly this."""
-    if not stamp:
-        return False
-    report = os.path.join(outdir, filename)
-    if not os.path.isfile(report) or os.path.getsize(report) == 0:
-        return False
-    try:
-        with open(os.path.join(outdir, STAMP_FILE), encoding="utf-8") as fh:
-            return fh.read().strip() == stamp
-    except OSError:
-        return False
-
-
-def write_stamp(outdir, stamp):
-    """Record what this report was made from, for the next run to compare."""
-    if not stamp:
-        return
-    try:
-        os.makedirs(outdir, exist_ok=True)
-        with open(os.path.join(outdir, STAMP_FILE), "w",
-                  encoding="utf-8") as fh:
-            fh.write(stamp)
-    except OSError:
-        pass                          # a report that cannot be skipped later
-
-
-def already_built(args, stamp):
-    """
-    Whether the report on disk is the one this run would write, said aloud.
-
-    Only a run whose whole job is the report can be answered with the
-    report that is already there. The four `explain` answers print
-    something about a nation instead, and are not in the stamp because they
-    change nothing the report says.
-    """
-    if (args.rebuild or args.no_html or asked(args)
-            or not stamp_matches(args.out, stamp)):
-        return False
-    if not args.quiet:
-        print(f"Nothing has changed since this was built. Opening it as it "
-              f"is.\n\nWrote:\n  {os.path.join(args.out, 'report.html')}")
-    return True
-
-
 def invention_summary(meta, nations):
     """The country fields needed to decode invention IDs across a campaign."""
     return ({"file": meta.get("file", "?"), "date": meta.get("date", "")},
@@ -242,61 +114,6 @@ def campaign_inventions(files, **options):
     made = parse_saves(files, transform=invention_summary, **options)
     cacheio.store(slot, made)
     return made
-
-
-def cache_stats():
-    """How many entries the cache holds and what they weigh, as (count, bytes).
-
-    Nothing here evicts anything. A slot is keyed by the save, the mod, and a
-    hash of the parser itself, so editing the parser does not replace the old
-    entries -- it stands a fresh generation up beside them, and the previous one
-    can never be read again. An install that has seen a few updates is therefore
-    mostly holding generations it has no use for, which is the case for offering
-    to empty it.
-    """
-    count = size = 0
-    try:
-        with os.scandir(cache_dir()) as entries:
-            for entry in entries:
-                if not entry.name.endswith(".pkl"):
-                    continue
-                try:
-                    size += entry.stat().st_size
-                except OSError:
-                    continue          # vanished under us; it is not in the total
-                count += 1
-    except OSError:
-        return 0, 0                   # no cache folder yet, which is not a fault
-    return count, size
-
-
-def clear_cache():
-    """Empty the cache. Returns (entries removed, bytes freed).
-
-    Only this program's own `.pkl` files go, and the folder itself stays: it
-    sits in the system temp directory, which belongs to everybody, so taking
-    the tree out wholesale is not this program's business. An entry another run
-    still has open is skipped rather than fought over -- it will be caught by
-    the next wipe.
-    """
-    removed = freed = 0
-    folder = cache_dir()
-    try:
-        names = os.listdir(folder)
-    except OSError:
-        return 0, 0
-    for name in names:
-        if not name.endswith(".pkl"):
-            continue
-        path = os.path.join(folder, name)
-        try:
-            size = os.path.getsize(path)
-            os.remove(path)
-        except OSError:
-            continue
-        removed += 1
-        freed += size
-    return removed, freed
 
 
 def _write_csv_text(path, chunks, columns):
@@ -368,480 +185,6 @@ def write_outputs(text, price_rows, snapshot_rows, outdir, pop_columns):
             continue
         paths.append(path)
     return paths, refused
-
-
-def forget_stamp(outdir):
-    """
-    Take the stamp away before anything it describes is rewritten.
-
-    It says what the files beside it were made from. A run that rewrites
-    them and then dies -- a table open in Excel, a full disk -- used to
-    leave the last run's stamp describing this run's report, and the next
-    run with the last run's settings matched it and served that report as
-    its own. `--no-html` did the same without dying: it rewrites the tables
-    and writes no stamp, so the old one went on vouching for tables it had
-    never seen. Gone first and written last, a stamp only ever sits beside
-    the files it was written for.
-    """
-    try:
-        os.remove(os.path.join(outdir, STAMP_FILE))
-    except OSError:
-        pass
-
-
-# A province block opens with its number; anything else opening at the left
-# margin is not one. Both are anchored, because the game writes an
-# ideology's entries at the left margin too and they must not be mistaken
-# for the start of a block.
-PROVINCE_HEAD = re.compile(r"^\d+=\s*$")
-TOP_KEY = re.compile(r"^\w+=\s*$")
-
-
-def verify_save(path, reading):
-    """
-    Cross-check the counts against an independent brace-tracking scan.
-
-    The analyzer walks structure; this counts `regiment` and `ship` blocks
-    by raw nesting and attributes them to whichever top-level country block
-    they fall in, and adds up every pop in every province by its owner. If
-    the two disagree, the structured reader is missing a nesting the save
-    actually uses.
-
-    Population is worth the second walk because everything else is derived
-    from it -- the accepted share, the literacy average, the mobilizable
-    pool, the strata -- so a pop read wrong is a page of numbers read wrong,
-    and nothing downstream could tell. It is counted by line rather than by
-    token because the game writes an ideology's entries hard against the
-    left margin, inside a pop, inside a province: anything that decides
-    where it is by indentation gets that wrong, and quietly.
-    """
-    text = read_save_text(path)
-    truth_reg, truth_ship = defaultdict(int), defaultdict(int)
-    depth, current, pending = 0, None, None
-
-    for match in TOKEN_RE.finditer(text):
-        tok = match.group()
-        if tok == "{":
-            depth += 1
-            if current:
-                if pending == "regiment":
-                    truth_reg[current] += 1
-                elif pending == "ship":
-                    truth_ship[current] += 1
-            pending = None
-        elif tok == "}":
-            depth -= 1
-            if depth == 0:
-                current = None
-        elif tok != "=":
-            pending = tok
-            if depth == 0 and looks_like_country_tag(unquote(tok)):
-                current = unquote(tok)
-
-    truth_pop = defaultdict(int)
-    depth, in_province, owner = 0, False, None
-    for line in text.split("\n"):
-        line = line.rstrip("\r")
-        bare = line.strip()
-        if depth == 0:
-            if PROVINCE_HEAD.match(line):
-                in_province, owner = True, None
-            elif TOP_KEY.match(line):
-                in_province, owner = False, None
-        if in_province and depth == 1 and bare.startswith("owner="):
-            owner = unquote(bare.split("=", 1)[1].strip())
-        elif in_province and depth == 2 and bare.startswith("size="):
-            if owner:
-                truth_pop[owner] += to_int(bare.split("=", 1)[1])
-        depth += line.count("{") - line.count("}")
-
-    _meta, nations = analyze_save(path, reading, verbose=False)
-
-    say = ["\n=== %s ===" % os.path.basename(path),
-           f"{'tag':<6}{'brigades':>10}{'scan':>8}{'diff':>7}"
-           f"{'ships':>10}{'scan':>8}{'diff':>7}"
-           f"{'people':>14}{'scan':>14}"]
-    mismatches = 0
-    for tag in sorted(set(truth_reg) | set(truth_ship) | set(truth_pop)
-                      | set(nations)):
-        nat = nations.get(tag)
-        if not nat:
-            continue
-        got_r, want_r = nat["brigades"], truth_reg.get(tag, 0)
-        got_s, want_s = nat["ships"], truth_ship.get(tag, 0)
-        got_p, want_p = nat["total_pop"], truth_pop.get(tag, 0)
-        if got_r != want_r or got_s != want_s or got_p != want_p:
-            mismatches += 1
-            say.append(f"{tag:<6}{got_r:>10}{want_r:>8}{got_r - want_r:>7}"
-                       f"{got_s:>10}{want_s:>8}{got_s - want_s:>7}"
-                       f"{got_p:>14,}{want_p:>14,}")
-    if mismatches:
-        say.append("\n%d nations disagree. Please report this with the save."
-                   % mismatches)
-    else:
-        total_r = sum(truth_reg.values())
-        total_s = sum(truth_ship.values())
-        total_p = sum(truth_pop.values())
-        say.append(f"All nations agree: {total_r:,} regiments, "
-                   f"{total_s:,} ships, {total_p:,} people.")
-    say.append("")
-    return "\n".join(say), mismatches
-
-
-def verify_all(files, reading, jobs=None):
-    """
-    Every save checked, on every core, printed in the order given.
-
-    Each save is checked twice over -- once by the structured reader and
-    once by a brace count over the whole file -- so this is the slowest
-    thing here by a wide margin: 167 s for 103 saves on one core. They do
-    not depend on each other, and the answers are collected rather than
-    printed as they arrive, so the output is the same whichever finishes
-    first.
-    """
-    from concurrent.futures import ProcessPoolExecutor
-    from concurrent.futures.process import BrokenProcessPool
-    workers = worker_count(len(files),
-                           max((os.path.getsize(f) for f in files), default=0),
-                           jobs)
-    done = 0
-    if workers > 1 and len(files) > 1:
-        print("Checking %d save(s) on %d cores." % (len(files), workers))
-        pool = None
-        try:
-            pool = ProcessPoolExecutor(max_workers=workers,
-                                       initializer=worker_setup)
-            for text, _bad in pool.map(partial(verify_save, reading=reading),
-                                       files):
-                print(text)
-                done += 1
-        except (BrokenProcessPool, OSError, RuntimeError) as exc:
-            # The same answer the readers give a machine that will not
-            # start workers, or a worker that dies: the rest one at a time.
-            print(f"  checking the rest one at a time ({exc})",
-                  file=sys.stderr)
-        finally:
-            if pool is not None:
-                pool.shutdown(cancel_futures=True)
-    for path in files[done:]:
-        text, _bad = verify_save(path, reading)
-        print(text)
-
-
-def peek_save(path):
-    """
-    Print the shape of a save: top-level keys, and the keys inside the first
-    province and country block. Useful when a mod moves things around and the
-    numbers come out wrong or zero.
-    """
-    text = read_save_text(path)
-    tok = Tokens(text)
-    top_scalars, top_blocks = [], []
-    first_province = first_country = None
-
-    while True:
-        t = tok.next()
-        if t is None:
-            break
-        if t in ("}", "{", "="):
-            continue
-        nxt = tok.next()
-        if nxt is None:
-            break
-        if nxt != "=":
-            tok.push(nxt)
-            continue
-        val = tok.next()
-        if val is None:
-            break
-        key = unquote(t)
-        if val == "{":
-            if key.isdigit() and first_province is None:
-                first_province = (key, parse_block(tok))
-            elif looks_like_country_tag(key) and first_country is None:
-                first_country = (key, parse_block(tok))
-            else:
-                if key.isdigit():
-                    top_blocks.append("<province>")
-                elif looks_like_country_tag(key):
-                    top_blocks.append("<country>")
-                else:
-                    top_blocks.append(key)
-                skip_block(tok)
-        else:
-            top_scalars.append(f"{key}={unquote(val)[:40]}")
-
-    print(f"\n=== {os.path.basename(path)} ===")
-    print("\nTop-level scalars:")
-    for item in top_scalars[:20]:
-        print(f"  {item}")
-    seen = []
-    for name in top_blocks:
-        if name not in seen:
-            seen.append(name)
-    print(f"\nTop-level blocks ({len(top_blocks)} total, distinct):")
-    print("  " + ", ".join(seen[:40]))
-
-    for label, found in (("province", first_province), ("country", first_country)):
-        if not found:
-            print(f"\nNo {label} block found -- the analyzer will report zeros.")
-            continue
-        key, block = found
-        print(f"\nFirst {label} block ({key}) keys:")
-        if isinstance(block, dict):
-            for k, v in list(block.items())[:40]:
-                kind = ("block" if isinstance(v, dict)
-                        else "list" if isinstance(v, list) else "scalar")
-                extra = ""
-                if label == "province" and k in VANILLA_POP_TYPES:
-                    pops = v if isinstance(v, list) else [v]
-                    culture, religion = pop_culture(pops[0]) if isinstance(pops[0], dict) else (None, None)
-                    extra = f"  <- pop, culture={culture}, religion={religion}"
-                print(f"  {k:<24} {kind}{extra}")
-    print()
-
-
-def campaign_rows(parsed, mod, args, wanted=None):
-    """
-    One campaign's saves as finalized rows: (date, tag, nation).
-
-    The same finishing the single-campaign path runs -- the same function
-    against a spec from the same builder -- so a measure means here exactly
-    what it means on the report's own charts.
-
-    It said that before and was not doing it. Building the cross block out
-    of fields read off the raw parse would have been an obviously different
-    definition of every number; a second copy of the recipe was a quietly
-    different one, and by the time the two were read side by side it had
-    drifted in five places.
-    """
-    from mod_reader import settle_campaign
-
-    live = None
-    if mod is not None:
-        # Until this has run the mod refuses to say which base decodes the
-        # campaign's invention indices, because "nobody looked" and "they do
-        # not decode" mean different things and only one of them is a reason
-        # to fall back to guessing what a nation holds.
-        live, _every = settle_campaign(mod, parsed)
-
-    spec = finishing.finish_spec(args, mod, live, wanted)
-    out = []
-    for meta, nations in parsed:
-        for tag, done in finishing.finish_nations(meta, nations, spec).items():
-            if finishing.kept_by(spec, tag, done):
-                out.append((meta["date"], tag, done))
-    return out
-
-
-def survey_cross(parent, game_root, args, verbose=True):
-    """
-    Every campaign under `parent`, and the mod each one will be read under.
-
-    Returns one dict per campaign -- its name, its saves, its mod -- and
-    reads no save whole: the mod is named, or worked out from the last save
-    or two. This is everything the report is made from, which is why it is
-    its own step. The report stamp has to cover every campaign in the
-    comparison, not just the one the rest of the report is about -- it
-    covered only that one, so a new save in any other campaign answered
-    "nothing has changed" with the old comparison -- and it has to be taken
-    before the campaigns are read, or a run with nothing to do reads all of
-    them first to find that out.
-    """
-    import cross as crossmod
-
-    # Told, rather than worked out: `--campaign-mod NAME=PATH` settles one
-    # campaign each. Two mods built on the same base can agree on their
-    # countries, their technologies and their whole invention array, so the
-    # search is a good guess and nothing more -- being told beats it every time.
-    chosen = {}
-    for name, path in args.campaign_mod or ():
-        path = os.path.expanduser(os.path.expandvars(path))
-        if not os.path.isdir(os.path.join(path, "common")):
-            sys.exit("--campaign-mod %s: %s has no common/ inside it, so it is "
-                     "not a mod folder." % (name, path))
-        chosen[name.lower()] = path
-
-    # Naming a mod is an answer, not a hint. Campaigns played on the same mod
-    # are the ordinary case, and being told which one is better evidence than
-    # anything that can be inferred, so the search is skipped entirely.
-    if args.mod_path:
-        label = os.path.basename(os.path.normpath(args.mod_path))
-        survey = []
-        for name, path, files in crossmod.campaigns_in(parent):
-            # One mod for all of them is the general instruction; a campaign
-            # named outright is the particular one, and the particular wins.
-            # They used to be read in the other order, so `--campaign-mod`
-            # went unread whenever `--mod-path` was there beside it.
-            told = chosen.get(name.lower())
-            survey.append({
-                "name": name, "path": path, "files": files,
-                "mod_label": os.path.basename(os.path.normpath(told))
-                             if told else label,
-                "mod_path": told or args.mod_path,
-                "candidates": [], "told": bool(told)})
-        if verbose:
-            odd = sum(1 for e in survey if e.get("told"))
-            print("Campaigns found under %s, read under %s%s:"
-                  % (parent, label,
-                     "" if not odd else " except where named"))
-            for entry in survey:
-                print("  %-22s %3d saves%s"
-                      % (entry["name"], len(entry["files"]),
-                         "  ->  %s   (as told)" % entry["mod_label"]
-                         if entry.get("told") else ""))
-    elif not game_root and not chosen:
-        sys.exit("--cross needs --game-root (the Victoria 2 install folder, the "
-                 "one with mod/ inside) to work each campaign's mod out, "
-                 "--mod-path to read them all under one mod, or "
-                 "--campaign-mod to name them one at a time.")
-    else:
-        # Every campaign named outright is settled before anything is searched
-        # for; only the rest go through `survey`, and if none are left the
-        # search does not run at all.
-        found = crossmod.campaigns_in(parent)
-        unsettled = [e for e in found if e[0].lower() not in chosen]
-        survey = crossmod.survey(parent, game_root) if (unsettled and game_root) \
-            else [{"name": n, "path": p, "files": f, "mod_label": None,
-                   "mod_path": None, "candidates": []} for n, p, f in found]
-        for entry in survey:
-            override = chosen.get(entry["name"].lower())
-            if override:
-                entry["mod_path"] = override
-                entry["mod_label"] = os.path.basename(os.path.normpath(override))
-                entry["candidates"] = []
-                entry["told"] = True
-        if verbose:
-            print("Campaigns found under %s:" % parent)
-            for entry in survey:
-                fits = sum(1 for _l, v, _d in entry["candidates"] if v == "fits")
-                print("  %-22s %3d saves  ->  %s%s"
-                      % (entry["name"], len(entry["files"]),
-                         entry["mod_label"] or "no mod in that folder fits",
-                         "   (as told)" if entry.get("told") else ""))
-                if entry.get("told"):
-                    continue
-                nearest = [r for r in entry["candidates"] if r[1] == "nearest"]
-                if nearest:
-                    print("      WARNING: nothing in %s explains these saves. "
-                          "The closest is %s, and it does not match: %s. The "
-                          "numbers below are computed against a mod this "
-                          "campaign was not played on -- name the right one "
-                          "with --mod-path."
-                          % (game_root, nearest[0][0], nearest[0][2]))
-                elif fits > 1:
-                    print("      note: %d mods fit these saves; picked the one "
-                            "the campaign leaves least of unused. Name it with "
-                            "--mod-path, or in the window pick the mod itself "
-                            "instead of the folder, to settle it." % fits)
-                elif not entry["mod_label"]:
-                    print("      note: nothing in %s explains these saves. If "
-                          "the mod is installed elsewhere, point the mod box "
-                          "at it directly." % game_root)
-    if verbose:
-        for entry in survey:
-            for stray, worst, of in crossmod.history_breaks(entry["files"]):
-                print("      note: %s disagrees with all %d later saves by at "
-                      "least %d event flags; it may be from another game"
-                      % (stray, of, worst))
-    return survey
-
-
-def cross_stamp(survey, args):
-    """
-    The report stamp of a `--cross` run: every campaign that will be read,
-    its saves, and the mod it is read under.
-    """
-    from mod_reader import mod_signature
-    read = [entry for entry in survey if entry["mod_path"]]
-    world = "\n".join("%s|%s|%s" % (entry["name"],
-                                    os.path.abspath(entry["mod_path"]),
-                                    mod_signature(entry["mod_path"]))
-                       for entry in read)
-    return report_stamp([f for entry in read for f in entry["files"]], args,
-                        world)
-
-
-def run_cross(parent, survey, args, verbose=True):
-    """
-    Read every campaign `survey_cross` found, each under its own mod.
-
-    Returns (cross payload, the largest campaign's files, its mod path, the
-    `Reading` its saves were read under). The largest campaign becomes the
-    subject of the ordinary report, so the cross-campaign block is an
-    addition rather than a replacement.
-    """
-    import cross as crossmod
-    from mod_reader import load_mod, name_for
-
-    results, names, primary = [], {}, None
-    for entry in survey:
-        if not entry["mod_path"]:
-            if verbose:
-                print("  skipping %s: no mod in %s explains its saves"
-                      % (entry["name"], args.game_root))
-            continue
-        mod = load_mod(entry["mod_path"])
-        # The defaults `main` applies, applied here too. The mod's list used
-        # to be taken unconditionally, so `--mob-types` was read on a
-        # single-campaign run and ignored on a cross one; and it was taken
-        # for the parse while the finishing below went on reading the command
-        # line's, which is two different lists deciding one number.
-        #
-        # Only the pop list is wanted here, because only the parse happens
-        # here. The regiment size is read from the same function further
-        # down, where `campaign_rows` builds the spec that finishes the save.
-        _regiment_size, mob_types = finishing.mod_defaults(args, mod)
-        # How this campaign's saves are read, which is also their cache key.
-        reading = entry["reading"] = reading_for(entry["mod_path"], mod,
-                                                 mob_types)
-        entry["files"] = one_per_date(in_date_order(entry["files"]))
-        if verbose:
-            print("Reading %s (%d saves) under %s"
-                  % (entry["name"], len(entry["files"]), entry["mod_label"]))
-        parsed = parse_saves(entry["files"], verbose=False,
-                             use_cache=not args.no_cache, reading=reading,
-                             jobs=args.jobs)
-        if not parsed:
-            continue
-        parsed.sort(key=lambda p: sort_key(p[0]["date"]))
-        results.append((entry["name"], entry["mod_label"],
-                        campaign_rows(parsed, mod, args,
-                                      set(args.tags) if args.tags else None)))
-        # Nation names come from whichever mod names them: a tag any mod names
-        # is better than the bare tag, and where two mods share a tag they were
-        # measured to agree on it. Country names live in the localisation, not
-        # in `display_names`, which is goods and unit types.
-        loc = mod.localisation or {}
-        for _meta, nations in parsed:
-            for tag, nat in nations.items():
-                if tag not in names:
-                    label = name_for(tag, str(nat.get("government") or ""), loc)
-                    if label and label != tag:
-                        names[tag] = label
-        # The report around the cross-campaign block has to be about one
-        # campaign. Whichever the caller named, else the one with most saves.
-        if args.primary:
-            if entry["name"].lower() == args.primary.lower():
-                primary = entry
-        elif primary is None or len(entry["files"]) > len(primary["files"]):
-            primary = entry
-
-    if args.primary and primary is None and results:
-        known = ", ".join(name for name, _m, _p in results)
-        sys.exit("No campaign called %r under %s. There is: %s"
-                 % (args.primary, parent, known))
-    if not results or primary is None:
-        return None, [], args.mod_path, PLAIN
-    payload = crossmod.series_payload(results, names=names)
-    if verbose:
-        print("Cross-campaign: %d campaigns, %d nations in two or more of them."
-              % (len(payload["campaigns"]), len(payload["tags"])))
-        print("The rest of the report is %s%s."
-              % (primary["name"],
-                 "" if args.primary else " (the most saves; --primary picks "
-                                         "another)"))
-    return payload, primary["files"], primary["mod_path"], primary["reading"]
 
 
 # What one walk of a campaign produces, and what it was allowed to keep.
@@ -942,32 +285,66 @@ def walk_campaign(stream, spec, finished, pop_columns):
                     war_book=war_book, pop_columns=pop_columns, text=text)
 
 
-def _number(read, least, most=None):
+class Aside:
     """
-    An argparse type that refuses what the rest of the program cannot use.
+    A job run on a thread, whose answer and whose failure both come back.
 
-    A regiment of nought people is a division by zero. A map scaled by
-    nought is another. A mobilisation size of minus one is neither -- it
-    goes all the way through and writes a report saying every nation in the
-    game can mobilize minus a hundred percent of itself.
+    Two things in this program are worth a thread, and each only because of
+    what it runs beside. Reading a mod that is not cached runs beside the
+    saves being read, which is the workers' time rather than this process's.
+    And writing the CSV tables runs beside the payload's compression: gzip
+    spends a quarter of a second inside zlib, which releases the interpreter
+    lock for all of it, so the tables -- three tenths of a second, needed by
+    nothing the report contains -- cost the longer of the two rather than
+    the sum.
 
-    All three were accepted: the first two came out as a stack trace from
-    somewhere deep in a worker, and the third came out as a report. A
-    number the program cannot use is worth refusing at the edge, where
-    argparse can say which option it was and what would have been allowed.
+    Started at the compression and not a line earlier. Assembling the payload
+    is ordinary Python holding the lock the whole way, so a thread started
+    before it only takes turns with it, and the report lands later rather
+    than sooner -- which is the opposite of the point.
+
+    A thread rather than a process because the tables are forty megabytes of
+    tuples and sending them anywhere costs more than writing them.
+
+    It is made ready and started separately, because the caller knows what
+    the job is long before it knows when to run it -- `build_report` says
+    when by calling `start`. One that is never started is not a special
+    case: `result` simply does the work where it stands, which is what the
+    runs that build no report want anyway.
     """
-    def take(text):
+
+    __slots__ = ("_fn", "_thread", "_value", "_error")
+
+    def __init__(self, fn):
+        self._fn = fn
+        self._value = self._error = None
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self):
         try:
-            value = read(text)
-        except (TypeError, ValueError):
-            raise argparse.ArgumentTypeError("%r is not a number" % text)
-        if value < least or (most is not None and value > most):
-            raise argparse.ArgumentTypeError(
-                "%s is not allowed here; it must be %s"
-                % (text, "at least %s" % least if most is None
-                   else "between %s and %s" % (least, most)))
-        return value
-    return take
+            self._value = self._fn()
+        except BaseException as exc:                     # noqa: BLE001
+            self._error = exc
+
+    def start(self):
+        """Begin, if it has not begun. Safe to call more than once."""
+        if self._thread.ident is None:
+            self._thread.start()
+
+    def result(self):
+        """
+        Its answer, raising whatever it raised.
+
+        Does the work here and now if nobody ever started it, so a caller
+        can always ask for the answer without first asking whether it ran.
+        """
+        if self._thread.ident is None:
+            self._run()
+        else:
+            self._thread.join()
+        if self._error is not None:
+            raise self._error
+        return self._value
 
 
 def build_html(args, mod, campaign, price_rows, snapshot_rows,
@@ -992,22 +369,10 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
 
     html_path = None
     if not args.no_html:
-        from report import build_map, build_report, build_succession
+        from report import (build_map, build_report, build_succession,
+                            flags_for, nation_names)
         from wars import build_wars
-        # Country names come from the mod's own localisation, which is where the
-        # game gets them: a bare TAG, overridden by TAG_<government> when one
-        # exists -- IGoR's PBC is "Peru-Bolivia" but "Andine Federation" while
-        # it is a democracy. Saves are walked in order so the name reflects the
-        # government the nation ended the series with. Without --mod-path there
-        # is nothing to read and tags stand in for names.
-        report_names = {}
-        if mod is not None and mod.localisation:
-            from mod_reader import name_for
-            loc = mod.localisation
-            for _meta, _nations in parsed:
-                for _tag, _nat in _nations.items():
-                    report_names[_tag] = name_for(
-                        _tag, str(_nat.get("government") or ""), loc)
+        report_names = nation_names(mod, parsed)
         # The map needs the mod's province bitmap; without --mod-path the tab
         # is dropped rather than shown empty.
         map_data = build_map(mod, parsed, args.map_scale) if mod else None
@@ -1015,53 +380,7 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
             print(f"map/positions.txt anchors no army counter for "
                   f"{map_data['derived']} of the provinces holding troops; "
                   f"those markers sit at the middle of the province instead.")
-        # The save ranks the great powers itself, as 1-based indices into the
-        # country array common/countries.txt defines, so the mod is needed to
-        # turn them back into tags.
-        order = (mod.country_order if mod else None) or []
-        great_powers = {}
-        flags = {}
-        if order:
-            from mod_reader import (flag_images, flag_suffixes,
-                                    government_flag_types)
-            from modrules import great_powers as ranked
-            styles = government_flag_types(mod.path)
-            for meta_i, nations_i in parsed:
-                picks = ranked(meta_i, mod)
-                if not picks:
-                    continue
-                row = []
-                for tag in picks:
-                    gov = str((nations_i.get(tag) or {}).get("government") or "")
-                    # One flag per tag and flag variant, so a nation that turns
-                    # communist mid-campaign flies both in turn without the
-                    # image being stored twice. The suffix that will actually be
-                    # used is the discriminator, since two governments can share
-                    # a flagType and still fly different flags.
-                    key = tag + "|" + (flag_suffixes(gov, styles)[0] or "base")
-                    if key not in flags:
-                        got = flag_images(mod.path, [tag], {tag: gov},
-                                          styles=styles)
-                        if tag in got:
-                            flags[key] = got[tag]
-                    row.append([tag, key])
-                great_powers[meta_i.get("date") or ""] = row
-            # Battle tables name a lot of nations that never made great power,
-            # and a flag beside the tag reads faster than a tag alone. These
-            # take the plain national flag rather than a government variant.
-            fighters = set()
-            for war in war_book["wars"].values():
-                fighters.update(war["attackers"])
-                fighters.update(war["defenders"])
-                for b in war["battles"].values():
-                    for who in (b.get("attacker"), b.get("defender")):
-                        if who and who.get("country"):
-                            fighters.add(who["country"])
-            for tag in sorted(t for t in fighters if t and t != "---"):
-                if tag + "|" not in flags:
-                    got = flag_images(mod.path, [tag], {}, styles=styles)
-                    if tag in got:
-                        flags[tag + "|"] = got[tag]
+        great_powers, flags = flags_for(mod, parsed, war_book)
         try:
             html_path = build_report(
                 rows, campaign.tables, price_rows, snapshot_rows, args.out,
@@ -1103,228 +422,150 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
     return html_path
 
 
-def _setting(default=None, *, report):
+def _saves_in(args):
     """
-    One setting of a run. `report` says whether it changes what the report
-    says, and so has to be in the report stamp. It has no default, so a
-    setting cannot be added without deciding which it is.
+    (the saves path, the .v2 files directly in it) -- or the one file, when
+    that is what was given -- refused in a sentence if there is nothing.
     """
-    return _field(default=default, metadata={"report": report})
+    saves_path = os.path.expanduser(os.path.expandvars(args.saves))
+    if not os.path.exists(saves_path):
+        sys.exit(
+            f"Path not found: {saves_path}\n"
+            f"If you used ~ in PowerShell, try $HOME instead, or give the full "
+            f"path starting with C:\\Users\\..."
+        )
+    if not os.path.isdir(saves_path):
+        return saves_path, [saves_path]
+    files = sorted(os.path.join(saves_path, f)
+                   for f in os.listdir(saves_path)
+                   if f.lower().endswith(".v2"))
+    # With --cross the saves sit in subfolders, so a parent holding none of
+    # its own is the ordinary case rather than a mistake.
+    if not files and not args.cross:
+        sys.exit(
+            f"No .v2 files in {saves_path}\n"
+            f"Point this at the folder that holds your saves, not at a "
+            f"single save."
+        )
+    return saves_path, files
 
 
-@dataclass(frozen=True)
-class Run:
+def _open_mod(args, signature):
     """
-    Everything one run of the analyzer was asked to do, declared once.
+    (the mod, what this run knows of it so far, the thread still reading it).
 
-    This was argparse's namespace, handed from file to file: twenty-seven
-    settings read across four modules, declared nowhere but the parser,
-    written back onto by `main` once the mod had had its say, and hashed
-    into the report stamp by fifteen names written out by hand -- so a new
-    setting that changed a number, and was not added to that list, would
-    have been answered "nothing has changed" with the old report, and no
-    check would have said so. And the window could only reach any of it by
-    rewriting `sys.argv`, building `"name=path"` strings for the parser to
-    take apart again.
+    A mod that has to be read from its files takes most of a second, and
+    reading a save needs four things of it that take a few milliseconds: its
+    `ModHead`. Nothing else in it is wanted until every save has been read
+    once, for the inventions. So when the mod is not cached, the saves are
+    read on the strength of the head, and the rest of the mod is read on a
+    thread beside them -- whose `result` is the mod. It takes a core from the
+    saves, which then take 2.6 s to read instead of 2.3, but the two together
+    took 3.2 s one after the other with fifteen cores idle for the first.
 
-    Now each setting is declared here with whether it changes the report,
-    the stamp hashes exactly those, the command line and the window each
-    build one of these, and what the mod settles is a new `Run` rather
-    than a write onto the old one. The model is `keeper.Options`.
+    With no mod asked for, all three are None. A mod folder that has been
+    renamed, moved or mistyped is refused in the words `mod_reader` gives,
+    rather than as a stack trace.
     """
-
-    saves: str = _field(metadata={"report": False})   # hashed file by file
-    out: str = _setting("vic2_report", report=False)
-    tags: tuple = _setting(report=True)
-    mod_path: str = _setting(report=True)
-    check_inventions: bool = _setting(False, report=False)
-    inventions: str = _setting(report=False)
-    explain_mob: str = _setting(report=False)
-    mob_rate: float = _setting(1.0, report=True)
-    pop_per_regiment: int = _setting(report=True)
-    mob_types: tuple = _setting(report=True)
-    mob_include_occupied: bool = _setting(False, report=True)
-    jobs: int = _setting(report=False)
-    no_cache: bool = _setting(False, report=False)
-    map_scale: int = _setting(1, report=True)
-    player_nations: tuple = _setting(report=True)
-    explain_mob_pool: str = _setting(report=False)
-    min_pop: int = _setting(0, report=True)
-    no_html: bool = _setting(False, report=True)
-    rebuild: bool = _setting(False, report=False)
-    split: bool = _setting(False, report=True)
-    peek: bool = _setting(False, report=False)
-    verify: bool = _setting(False, report=False)
-    cross: bool = _setting(False, report=True)
-    campaign_mod: tuple = _setting((), report=True)   # ((name, mod path), ...)
-    primary: str = _setting(report=True)
-    game_root: str = _setting(report=True)
-    quiet: bool = _setting(False, report=False)
-
-    @classmethod
-    def from_command_line(cls, ns):
-        """
-        A Run from what argparse made of the command line.
-
-        Lists become tuples, because a Run is frozen, and each
-        `--campaign-mod NAME=PATH` is taken apart here, once -- refused in
-        a sentence if it is not a pair -- rather than by whoever reads it.
-        """
-        values = dict(vars(ns))
-        for name in ("tags", "mob_types", "player_nations"):
-            if values.get(name) is not None:
-                values[name] = tuple(values[name])
-        pairs = []
-        for pair in values.get("campaign_mod") or ():
-            name, sep, path = pair.partition("=")
-            if not sep or not name.strip():
-                sys.exit("--campaign-mod wants NAME=PATH, as in "
-                         '--campaign-mod "NeoMgame=C:\\...\\mod\\IGoR_puir '
-                         '13.0.5". Got: %r' % pair)
-            pairs.append((name.strip(), path.strip()))
-        values["campaign_mod"] = tuple(pairs)
-        return cls(**values)
+    if not args.mod_path:
+        return None, None, None
+    from mod_reader import cached_mod, has_rules, load_mod, mod_head
+    try:
+        mod = cached_mod(args.mod_path, signature)
+        if mod is not None:
+            return mod, mod, None
+        if has_rules(args.mod_path):
+            loading = Aside(partial(load_mod, args.mod_path))
+            loading.start()
+            return None, mod_head(args.mod_path), loading
+        # Nothing it could be read from, so this refuses it now, in the
+        # words `load_mod` gives, rather than after every save.
+        mod = load_mod(args.mod_path)
+        return mod, mod, None
+    except (OSError, ValueError) as exc:
+        sys.exit(str(exc))
 
 
-REPORTED = tuple(f.name for f in fields(Run) if f.metadata["report"])
+def _say_mod(mod, live, walked, every_nation):
+    """What a verbose run says about the mod, once its inventions are decoded."""
+    from mod_reader import index_coverage, validate_indices
+    from modrules import unjudged_triggers
+    if mod.index_base is None:
+        print("\nInvention indices could not be decoded from "
+              f"{len(mod.invention_sequence)} inventions; falling back "
+              "to requirement matching, which overstates unlucky nations.")
+    else:
+        bad, total = validate_indices(mod, every_nation, mod.index_base)
+        print(f"\nInvention indices decoded against "
+              f"{len(mod.invention_sequence)} inventions "
+              f"(base {mod.index_base}): {bad} of {total} nation-invention "
+              f"pairs are unreachable ({bad / total * 100:.1f}%).")
+        odd, seen = index_coverage(mod, walked, mod.index_base)
+        if odd:
+            lost = sum(v[1] for v in odd.values())
+            print(
+                f"  {len(odd)} of {len(walked)} saves name inventions "
+                f"past the end of that array, so {lost} of {seen} "
+                f"holdings ({lost / seen * 100:.1f}%) cannot be read:")
+            for name in sorted(odd):
+                count, gone, lo, hi = odd[name]
+                print(f"    {name}: {count} indices, {lo}..{hi} "
+                      f"({gone} holdings)")
+            print(
+                "  Those saves were written by a different build than "
+                "--mod-path -- another version of the mod, or one over "
+                "the top of it. Their ship stats and mobilisation size "
+                "are short by whatever those inventions grant; the rest "
+                "of the campaign is unaffected.")
+    rules = mod.invention_rules
+    print(f"\nMod scan: {mod.tech_count} techs "
+          f"({len(mod.tech_mob)} grant mobilisation_size), "
+          f"{len(rules)} inventions grant it "
+          f"({len(live)} obtainable), "
+          f"{len(mod.event_mob)} event modifiers, "
+          f"{sum(1 for _n, size, _i, _t in mod.triggered_mob if size)} "
+          f"triggered modifiers.")
+    skipped = unjudged_triggers(mod)
+    if skipped:
+        print("  triggered modifiers left out, because their trigger "
+              "asks something this cannot answer: "
+              + ", ".join(skipped))
+    for t, v in sorted(mod.tech_mob.items()):
+        print(f"  tech       {t:<44} +{v:.3f}")
+    for n in sorted(rules):
+        mark = "" if n in live else "   (unobtainable)"
+        print(f"  invention  {n:<44} +{rules[n]['size']:.3f}{mark}")
 
 
-def command_line():
-    """
-    Every flag the program takes, and what each one is allowed to be.
-
-    A hundred and twenty lines of it, which is a hundred and twenty
-    lines a reader of `main` had to scroll past to reach the first
-    thing that happens. The numeric flags carry their own bounds
-    through `_number`, so a regiment of nought people is refused here
-    by name rather than dividing by zero inside a worker.
-    """
-    ap = argparse.ArgumentParser(
-        description="Aggregate Victoria 2 saves from one campaign into per-nation time series.",
-    )
-    ap.add_argument("saves", help="folder of .v2 saves, or a single .v2 file")
-    ap.add_argument("-o", "--out", default="vic2_report", help="output folder")
-    ap.add_argument("--tags", nargs="*", help="only keep these country tags")
-    ap.add_argument("--mod-path",
-                    help="game or mod folder containing technologies/ and "
-                         "inventions/. When given, each nation's mobilisation "
-                         "size is computed from the mod's own rules and "
-                         "--mobilisation-size becomes a fallback only.")
-    ap.add_argument("--check-inventions", action="store_true",
-                    dest="check_inventions",
-                    help="check the invention decode against the saves "
-                         "themselves rather than against the mod folder, and "
-                         "exit. Wants a folder of saves rather than one save. "
-                         "Needs --mod-path.")
-    ap.add_argument("--inventions", metavar="TAG",
-                    help="print every invention the last save says that nation "
-                         "holds, with the index it was decoded from and the "
-                         "file it lives in, then exit. Made for checking the "
-                         "decode against the game's own technology screen. "
-                         "Needs --mod-path.")
-    ap.add_argument("--explain-mob", metavar="TAG",
-                    help="print every tech and invention contributing to that "
-                         "nation's mobilisation size in the last save, then "
-                         "exit. Needs --mod-path.")
-    ap.add_argument("--mobilisation-size", type=_number(float, 0.0, 1.0),
-                    default=1.0,
-                    dest="mob_rate",
-                    help="mobilisation size modifier, e.g. 0.05 for 5%%. The save "
-                         "does not store it; read it off the in-game military "
-                         "panel. Default 1.0 reports the absolute ceiling.")
-    # Both default to None rather than to the value they fall back to, so
-    # `mod_defaults` can tell "the caller said nothing" from "the caller
-    # asked for exactly what vanilla does". `main` writes the settled answer
-    # back onto `args` below, so everything downstream still reads a number
-    # and a list here.
-    ap.add_argument("--pop-per-regiment", type=_number(int, 1), default=None,
-                    help="POP_SIZE_PER_REGIMENT from defines.lua (default 3000, "
-                         "or the mod's own where --mod-path gives one)")
-    ap.add_argument("--mob-types", nargs="*", default=None,
-                    help="pop types that can mobilize. With --mod-path this "
-                         "comes from the mod's poptypes/ strata; the default "
-                         "here is what vanilla works out to.")
-    ap.add_argument("--mob-include-occupied", action="store_true",
-                    help="count provinces the owner has lost control of. The "
-                         "engine excludes them, which is the default, but it "
-                         "moves nations under siege a lot -- Russia in 1908 "
-                         "reads 558 without them and 612 with -- so it is worth "
-                         "checking against the game when a nation is at war.")
-    ap.add_argument("-j", "--jobs", type=_number(int, 1), default=None,
-                    metavar="N",
-                    help="how many saves to read at once. The default sizes "
-                         "itself to the machine: one worker per core bar one, "
-                         "capped by how many saves are left to read and by how "
-                         "much memory is free. Pass 1 to read them one at a "
-                         "time.")
-    ap.add_argument("--no-cache", action="store_true",
-                    help="re-read every save instead of reusing what was parsed "
-                         "last time. The cache lives in the system temp folder, "
-                         "keyed by the save's size and timestamp and by a hash "
-                         "of the parsing code, so editing the parser expires it.")
-    ap.add_argument("--map-scale", type=_number(int, 1), default=1,
-                    metavar="N",
-                    help="how far to shrink the province bitmap for the map tab. "
-                         "Default 1, the full 5616x2160 map at about 1.4MB, "
-                         "which is the sharpest the tab gets and holds up when "
-                         "you zoom into a single theatre. 2 halves it to "
-                         "2808x1080 for about 660KB, 3 is 410KB, and 5 is 230KB "
-                         "and visibly blocky once you zoom.")
-    ap.add_argument("--player-nations", nargs="*", metavar="TAG", default=None,
-                    help="tags that were run by a human. Some triggered "
-                         "modifiers turn on it -- IGoR and GFM both hand a "
-                         "human-run UNCIVILIZED nation +2%% mobilisation size, "
-                         "and GFM pays a South American player differently "
-                         "from a South American AI. Every country a person is "
-                         "playing carries human=yes in its own block, so this "
-                         "is only needed for a save that does not, and it "
-                         "overrides what the save says when given. Pass it "
-                         "with no tags to treat everyone as AI.")
-    ap.add_argument("--explain-mob-pool", metavar="TAG",
-                    help="print the mobilization pool of that nation in the "
-                         "last save -- eligible pops, what colonial, occupied "
-                         "and non-accepted provinces cost it, and the ceiling "
-                         "under both grouping models -- then exit.")
-    ap.add_argument("--min-pop", type=_number(int, 0), default=0,
-                    help="drop nations below this population")
-    ap.add_argument("--no-html", action="store_true", help="skip the HTML report")
-    ap.add_argument("--rebuild", action="store_true",
-                    help="build the report again even when nothing has "
-                         "changed since the last one")
-    ap.add_argument("--split", action="store_true",
-                    help="write the data beside the page instead of inside "
-                         "it: a small report.html and a report.data.gz, about "
-                         "a quarter smaller together and quick to open, but "
-                         "both files have to be served rather than opened "
-                         "from a disk")
-    ap.add_argument("--peek", action="store_true",
-                    help="print the structure of the first save and exit")
-    ap.add_argument("--verify", action="store_true",
-                    help="cross-check unit counts against an independent scan")
-    ap.add_argument("--cross", action="store_true",
-                    help="treat the saves path as a folder OF campaign folders "
-                         "and compare the same nation across all of them. Each "
-                         "campaign's mod is worked out from its own saves, so "
-                         "--mod-path is not needed; --game-root says where the "
-                         "mods live. The rest of the report is built from "
-                         "whichever campaign has the most saves.")
-    ap.add_argument("--campaign-mod", metavar="NAME=PATH", action="append",
-                    default=[],
-                    help="with --cross, the mod one campaign was played on, "
-                         "given as its folder name then the mod path. Repeat "
-                         "for as many as you like. Campaigns not named this "
-                         "way are still worked out from their own saves, so "
-                         "you only have to settle the ones you care about. "
-                         "Beats --mod-path for the campaigns it names.")
-    ap.add_argument("--primary", metavar="NAME",
-                    help="with --cross, which campaign the rest of the report "
-                         "is built from. The folder's own name. Without it the "
-                         "one with the most saves is used.")
-    ap.add_argument("--game-root",
-                    help="the Victoria 2 install folder, the one with mod/ "
-                         "inside. Only used by --cross, to find candidates.")
-    ap.add_argument("-q", "--quiet", action="store_true")
-    return ap.parse_args()
+def _say_summary(rows, parsed, price_rows, modded, paths):
+    """What a verbose run says at the end: the campaign, and the files written."""
+    print(f"\n{len(rows)} nation-rows across {len(parsed)} saves.")
+    if price_rows:
+        months = sorted({r[0] for r in price_rows}, key=date_key)
+        print(f"{len(months)} dated price points, "
+              f"{months[0]} to {months[-1]}, "
+              f"{len({r[2] for r in price_rows})} goods.")
+    # Read back out of the rows this run just wrote, rather than finalizing
+    # the last save a second time: it is what lets a save be let go the
+    # moment its row exists, and it means the summary and the table beside
+    # it are the same numbers.
+    latest_date = parsed[-1][0]["date"]
+    latest_rows = sorted((r for r in rows if r["date"] == latest_date),
+                         key=lambda r: -r["total_pop"])
+    print(f"\nLargest nations at {latest_date}:")
+    print(f"  {'tag':<5}{'pop':>12}{'accept%':>9}{'lit':>7}{'brig':>7}{'ships':>7}")
+    for r in latest_rows[:8]:
+        print(f"  {r['tag']:<5}{r['total_pop']:>12,}{r['accepted_pct']:>9.1f}"
+              f"{r['avg_literacy'] * 100:>6.1f}%{r['brigades']:>7}"
+              f"{r['ships']:>7}")
+    if modded:
+        print(f"\nComputed mobilisation sizes at {latest_date} "
+              f"(check these against the in-game military panel):")
+        for r in latest_rows[:10]:
+            print(f"  {r['tag']}: {r['mobilisation_size'] * 100:.2f}%")
+    print("\nWrote:")
+    for path in paths:
+        print(f"  {path}")
 
 
 def analyze(run, cancel=None, progress=None, ready=None):
@@ -1401,34 +642,7 @@ def main(run=None):
 def _main(run=None):
     """`main`, with the collector already off."""
     args = run if run is not None else Run.from_command_line(command_line())
-
-    saves_path = os.path.expanduser(os.path.expandvars(args.saves))
-    if not os.path.exists(saves_path):
-        sys.exit(
-            f"Path not found: {saves_path}\n"
-            f"If you used ~ in PowerShell, try $HOME instead, or give the full "
-            f"path starting with C:\\Users\\..."
-        )
-
-    if os.path.isdir(saves_path):
-        files = sorted(
-            os.path.join(saves_path, f)
-            for f in os.listdir(saves_path)
-            if f.lower().endswith(".v2")
-        )
-        # With --cross the saves sit in subfolders, so a parent holding none of
-        # its own is the ordinary case rather than a mistake.
-        if not files and not args.cross:
-            sys.exit(
-                f"No .v2 files in {saves_path}\n"
-                f"Point this at the folder that holds your saves, not at a "
-                f"single save."
-            )
-    else:
-        files = [saves_path]
-
-    if not files and not args.cross:
-        sys.exit(f"No .v2 saves found in {args.saves}")
+    saves_path, files = _saves_in(args)
 
     if args.peek:
         peek_save(files[0])
@@ -1444,14 +658,17 @@ def _main(run=None):
     # nothing but the game; after `--cross`, the campaign the report is about.
     verify_under = PLAIN
     if args.cross:
-        survey = survey_cross(saves_path, args.game_root, args,
-                              verbose=not args.quiet)
+        # Imported here: it reads mods, and a run with nothing to do is kept
+        # clear of the mod reader.
+        import cross
+        survey = cross.survey_cross(saves_path, args.game_root, args,
+                                    verbose=not args.quiet)
         # Stamped before anything is read, and over every campaign rather
         # than the one the rest of the report is about.
-        stamp = cross_stamp(survey, args)
+        stamp = cross.cross_stamp(survey, args)
         if not args.verify and already_built(args, stamp):
             return 0
-        cross_payload, files, primary_mod, verify_under = run_cross(
+        cross_payload, files, primary_mod, verify_under = cross.run_cross(
             saves_path, survey, args, verbose=not args.quiet)
         # The rest of the report is the primary campaign's, under its mod.
         args = replace(args, mod_path=primary_mod)
@@ -1492,39 +709,7 @@ def _main(run=None):
         return 0
     start_forkserver()
 
-    mod = None
-    # A mod that has to be read from its files takes most of a second, and
-    # reading a save needs four things of it that take a few milliseconds:
-    # its `ModHead`. Nothing else in it is wanted until every save has been
-    # read once, for the inventions below. So when the mod is not cached,
-    # the saves are read on the strength of the head, and the rest of the
-    # mod is read on a thread beside them. It takes a core from the saves,
-    # which then take 2.6 s to read instead of 2.3, but the two together
-    # took 3.2 s one after the other with fifteen cores idle for the first.
-    # `known` is whichever of the two this run has before then: the mod
-    # itself, or its head.
-    known = None
-    loading = None
-    if args.mod_path:
-        from mod_reader import cached_mod, has_rules, load_mod, mod_head
-        try:
-            known = mod = cached_mod(args.mod_path, signature)
-            if mod is None and has_rules(args.mod_path):
-                from report import Aside
-                known = mod_head(args.mod_path)
-                loading = Aside(partial(load_mod, args.mod_path))
-                loading.start()
-            elif mod is None:
-                # Nothing it could be read from, so this refuses it now,
-                # in the words below, rather than after every save.
-                known = mod = load_mod(args.mod_path)
-        except (OSError, ValueError) as exc:
-            # A mod folder that has been renamed, moved or mistyped is an
-            # ordinary mistake and the message already says what to do
-            # about it. Wrapped in a stack trace it reads like a crash in
-            # the program, which is what the window used to show.
-            sys.exit(str(exc))
-        extra = set(known.pop_types) - VANILLA_POP_TYPES
+    mod, known, loading = _open_mod(args, signature)
     # The run as the mod settles it, because the rest of a single-campaign
     # run reads these two off it -- the finishing spec, the reading below,
     # the two printed lines, and `explain.py`. `run_cross` asks the same
@@ -1538,10 +723,12 @@ def _main(run=None):
     args = replace(args, pop_per_regiment=settled_size,
                    mob_types=tuple(settled_types))
     if known is not None and verbose:
+        from v2parse import VANILLA_POP_TYPES
+        extra = sorted(set(known.pop_types) - VANILLA_POP_TYPES)
         print("defines.lua: POP_SIZE_PER_REGIMENT="
               f"{args.pop_per_regiment}")
         print(f"poptypes/: mobilizable = {' '.join(args.mob_types)}"
-              + (f"; mod-only pop types read: {' '.join(sorted(extra))}"
+              + (f"; mod-only pop types read: {' '.join(extra)}"
                  if extra else ""))
 
     # How this run reads a save, handed to every read and every worker with
@@ -1581,9 +768,7 @@ def _main(run=None):
 
     live = None
     if known is not None:
-        from mod_reader import (index_coverage, settle_campaign,
-                                validate_indices)
-        from modrules import unjudged_triggers
+        from mod_reader import settle_campaign
         # Decode invention indices from compact summaries. Population and
         # province data stay in the raw cache until the report needs them.
         walked = campaign_inventions(files, verbose=verbose, **parse_options)
@@ -1597,52 +782,7 @@ def _main(run=None):
         # have" into the ones it actually rolled.
         live, every_nation = settle_campaign(mod, walked)
         if verbose:
-            if mod.index_base is None:
-                print("\nInvention indices could not be decoded from "
-                      f"{len(mod.invention_sequence)} inventions; falling back "
-                      "to requirement matching, which overstates unlucky nations.")
-            else:
-                bad, total = validate_indices(mod, every_nation, mod.index_base)
-                print(f"\nInvention indices decoded against "
-                      f"{len(mod.invention_sequence)} inventions "
-                      f"(base {mod.index_base}): {bad} of {total} nation-invention "
-                      f"pairs are unreachable ({bad / total * 100:.1f}%).")
-                odd, seen = index_coverage(mod, walked, mod.index_base)
-                if odd:
-                    lost = sum(v[1] for v in odd.values())
-                    print(
-                        f"  {len(odd)} of {len(walked)} saves name inventions "
-                        f"past the end of that array, so {lost} of {seen} "
-                        f"holdings ({lost / seen * 100:.1f}%) cannot be read:")
-                    for name in sorted(odd):
-                        count, gone, lo, hi = odd[name]
-                        print(f"    {name}: {count} indices, {lo}..{hi} "
-                              f"({gone} holdings)")
-                    print(
-                        "  Those saves were written by a different build than "
-                        "--mod-path -- another version of the mod, or one over "
-                        "the top of it. Their ship stats and mobilisation size "
-                        "are short by whatever those inventions grant; the rest "
-                        "of the campaign is unaffected.")
-        if verbose:
-            rules = mod.invention_rules
-            print(f"\nMod scan: {mod.tech_count} techs "
-                  f"({len(mod.tech_mob)} grant mobilisation_size), "
-                  f"{len(rules)} inventions grant it "
-                  f"({len(live)} obtainable), "
-                  f"{len(mod.event_mob)} event modifiers, "
-                  f"{sum(1 for _n, size, _i, _t in mod.triggered_mob if size)} "
-                  f"triggered modifiers.")
-            skipped = unjudged_triggers(mod)
-            if skipped:
-                print("  triggered modifiers left out, because their trigger "
-                      "asks something this cannot answer: "
-                      + ", ".join(skipped))
-            for t, v in sorted(mod.tech_mob.items()):
-                print(f"  tech       {t:<44} +{v:.3f}")
-            for n in sorted(rules):
-                mark = "" if n in live else "   (unobtainable)"
-                print(f"  invention  {n:<44} +{rules[n]['size']:.3f}{mark}")
+            _say_mod(mod, live, walked, every_nation)
 
 
     # Where `finalize` runs. It is the last step that reads a save whole --
@@ -1713,7 +853,6 @@ def _main(run=None):
     # is worth anything. Started any earlier it merely takes turns with the
     # payload assembly, and the report lands later instead of sooner:
     # measured, 1.80 s to 1.98 s, which is the wrong direction.
-    from report import Aside
     tables = Aside(lambda: write_outputs(
         campaign.text, price_rows, snapshot_rows, args.out, pop_columns))
 
@@ -1732,35 +871,7 @@ def _main(run=None):
             write_stamp(args.out, stamp)
 
     if verbose:
-        print(f"\n{len(rows)} nation-rows across {len(parsed)} saves.")
-        if price_rows:
-            months = sorted({r[0] for r in price_rows}, key=date_key)
-            print(f"{len(months)} dated price points, "
-                  f"{months[0]} to {months[-1]}, "
-                  f"{len({r[2] for r in price_rows})} goods.")
-        # Read back out of the rows this run just wrote, rather than
-        # finalizing the last save a second time. It is quicker, it is what
-        # lets a save be let go the moment its row exists -- and it settles
-        # an old worry in this block's own comments, that the summary could
-        # disagree with the table printed beside it. It cannot now: they are
-        # the same numbers.
-        latest_date = parsed[-1][0]["date"]
-        latest_rows = sorted((r for r in rows if r["date"] == latest_date),
-                             key=lambda r: -r["total_pop"])
-        print(f"\nLargest nations at {latest_date}:")
-        print(f"  {'tag':<5}{'pop':>12}{'accept%':>9}{'lit':>7}{'brig':>7}{'ships':>7}")
-        for r in latest_rows[:8]:
-            print(f"  {r['tag']:<5}{r['total_pop']:>12,}{r['accepted_pct']:>9.1f}"
-                  f"{r['avg_literacy'] * 100:>6.1f}%{r['brigades']:>7}"
-                  f"{r['ships']:>7}")
-        if mod is not None:
-            print(f"\nComputed mobilisation sizes at {latest_date} "
-                  f"(check these against the in-game military panel):")
-            for r in latest_rows[:10]:
-                print(f"  {r['tag']}: {r['mobilisation_size'] * 100:.2f}%")
-        print("\nWrote:")
-        for path in paths:
-            print(f"  {path}")
+        _say_summary(rows, parsed, price_rows, mod is not None, paths)
     if refused:
         sys.exit("\nCould not write %s: open in another program -- on "
                  "Windows a table open in Excel is locked -- or not "

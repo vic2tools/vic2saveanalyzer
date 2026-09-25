@@ -1,23 +1,29 @@
 #!/usr/bin/env python3
 """
-The four flags that print something about one nation and stop.
+The flags that print something and stop.
 
 `--explain-mob-pool`, `--check-inventions`, `--inventions` and
-`--explain-mob` each answer a question about a campaign that has already
-been read, print it, and end the run. None of them writes a report, none
-of them touches the tables, and none of them is reached by a run that is
-building anything -- which is why a hundred and sixty lines of them sat at
-the bottom of `main` being skipped, and why they are here now.
-
+`--explain-mob` each answer a question about one nation in a campaign that
+has already been read. `--verify` checks every save's counts against an
+independent scan of the file, and `--peek` prints the shape of the first
+save. None of them writes a report, none of them touches the tables, and
+none of them is reached by a run that is building anything.
 """
 
 import os
+import re
 import sys
 from collections import defaultdict
+from functools import partial
 
+from modrules import save_world
 from nation import (accepted_cultures_of, brigades_from_clusters,
                     mobilization_clusters)
-from modrules import save_world
+from readfolder import worker_count, worker_setup
+from readsave import analyze_save
+from v2parse import (TOKEN_RE, VANILLA_POP_TYPES, Tokens, looks_like_country_tag,
+                     parse_block, pop_culture, read_save_text, skip_block,
+                     to_int, unquote)
 
 
 def explain_mob_pool(tag, nat, meta, rate, args):
@@ -274,3 +280,216 @@ def explain(args, mod, live, parsed):
         return True
     return False
 
+
+# A province block opens with its number; anything else opening at the left
+# margin is not one. Both are anchored, because the game writes an
+# ideology's entries at the left margin too and they must not be mistaken
+# for the start of a block.
+PROVINCE_HEAD = re.compile(r"^\d+=\s*$")
+
+
+TOP_KEY = re.compile(r"^\w+=\s*$")
+
+
+def verify_save(path, reading):
+    """
+    Cross-check the counts against an independent brace-tracking scan.
+
+    The analyzer walks structure; this counts `regiment` and `ship` blocks
+    by raw nesting and attributes them to whichever top-level country block
+    they fall in, and adds up every pop in every province by its owner. If
+    the two disagree, the structured reader is missing a nesting the save
+    actually uses.
+
+    Population is worth the second walk because everything else is derived
+    from it -- the accepted share, the literacy average, the mobilizable
+    pool, the strata -- so a pop read wrong is a page of numbers read wrong,
+    and nothing downstream could tell. It is counted by line rather than by
+    token because the game writes an ideology's entries hard against the
+    left margin, inside a pop, inside a province: anything that decides
+    where it is by indentation gets that wrong, and quietly.
+    """
+    text = read_save_text(path)
+    truth_reg, truth_ship = defaultdict(int), defaultdict(int)
+    depth, current, pending = 0, None, None
+
+    for match in TOKEN_RE.finditer(text):
+        tok = match.group()
+        if tok == "{":
+            depth += 1
+            if current:
+                if pending == "regiment":
+                    truth_reg[current] += 1
+                elif pending == "ship":
+                    truth_ship[current] += 1
+            pending = None
+        elif tok == "}":
+            depth -= 1
+            if depth == 0:
+                current = None
+        elif tok != "=":
+            pending = tok
+            if depth == 0 and looks_like_country_tag(unquote(tok)):
+                current = unquote(tok)
+
+    truth_pop = defaultdict(int)
+    depth, in_province, owner = 0, False, None
+    for line in text.split("\n"):
+        line = line.rstrip("\r")
+        bare = line.strip()
+        if depth == 0:
+            if PROVINCE_HEAD.match(line):
+                in_province, owner = True, None
+            elif TOP_KEY.match(line):
+                in_province, owner = False, None
+        if in_province and depth == 1 and bare.startswith("owner="):
+            owner = unquote(bare.split("=", 1)[1].strip())
+        elif in_province and depth == 2 and bare.startswith("size="):
+            if owner:
+                truth_pop[owner] += to_int(bare.split("=", 1)[1])
+        depth += line.count("{") - line.count("}")
+
+    _meta, nations = analyze_save(path, reading, verbose=False)
+
+    say = ["\n=== %s ===" % os.path.basename(path),
+           f"{'tag':<6}{'brigades':>10}{'scan':>8}{'diff':>7}"
+           f"{'ships':>10}{'scan':>8}{'diff':>7}"
+           f"{'people':>14}{'scan':>14}"]
+    mismatches = 0
+    for tag in sorted(set(truth_reg) | set(truth_ship) | set(truth_pop)
+                      | set(nations)):
+        nat = nations.get(tag)
+        if not nat:
+            continue
+        got_r, want_r = nat["brigades"], truth_reg.get(tag, 0)
+        got_s, want_s = nat["ships"], truth_ship.get(tag, 0)
+        got_p, want_p = nat["total_pop"], truth_pop.get(tag, 0)
+        if got_r != want_r or got_s != want_s or got_p != want_p:
+            mismatches += 1
+            say.append(f"{tag:<6}{got_r:>10}{want_r:>8}{got_r - want_r:>7}"
+                       f"{got_s:>10}{want_s:>8}{got_s - want_s:>7}"
+                       f"{got_p:>14,}{want_p:>14,}")
+    if mismatches:
+        say.append("\n%d nations disagree. Please report this with the save."
+                   % mismatches)
+    else:
+        total_r = sum(truth_reg.values())
+        total_s = sum(truth_ship.values())
+        total_p = sum(truth_pop.values())
+        say.append(f"All nations agree: {total_r:,} regiments, "
+                   f"{total_s:,} ships, {total_p:,} people.")
+    say.append("")
+    return "\n".join(say), mismatches
+
+
+def verify_all(files, reading, jobs=None):
+    """
+    Every save checked, on every core, printed in the order given.
+
+    Each save is checked twice over -- once by the structured reader and
+    once by a brace count over the whole file -- so this is the slowest
+    thing here by a wide margin: 167 s for 103 saves on one core. They do
+    not depend on each other, and the answers are collected rather than
+    printed as they arrive, so the output is the same whichever finishes
+    first.
+    """
+    from concurrent.futures import ProcessPoolExecutor
+    from concurrent.futures.process import BrokenProcessPool
+    workers = worker_count(len(files),
+                           max((os.path.getsize(f) for f in files), default=0),
+                           jobs)
+    done = 0
+    if workers > 1 and len(files) > 1:
+        print("Checking %d save(s) on %d cores." % (len(files), workers))
+        pool = None
+        try:
+            pool = ProcessPoolExecutor(max_workers=workers,
+                                       initializer=worker_setup)
+            for text, _bad in pool.map(partial(verify_save, reading=reading),
+                                       files):
+                print(text)
+                done += 1
+        except (BrokenProcessPool, OSError, RuntimeError) as exc:
+            # The same answer the readers give a machine that will not
+            # start workers, or a worker that dies: the rest one at a time.
+            print(f"  checking the rest one at a time ({exc})",
+                  file=sys.stderr)
+        finally:
+            if pool is not None:
+                pool.shutdown(cancel_futures=True)
+    for path in files[done:]:
+        text, _bad = verify_save(path, reading)
+        print(text)
+
+
+def peek_save(path):
+    """
+    Print the shape of a save: top-level keys, and the keys inside the first
+    province and country block. Useful when a mod moves things around and the
+    numbers come out wrong or zero.
+    """
+    text = read_save_text(path)
+    tok = Tokens(text)
+    top_scalars, top_blocks = [], []
+    first_province = first_country = None
+
+    while True:
+        t = tok.next()
+        if t is None:
+            break
+        if t in ("}", "{", "="):
+            continue
+        nxt = tok.next()
+        if nxt is None:
+            break
+        if nxt != "=":
+            tok.push(nxt)
+            continue
+        val = tok.next()
+        if val is None:
+            break
+        key = unquote(t)
+        if val == "{":
+            if key.isdigit() and first_province is None:
+                first_province = (key, parse_block(tok))
+            elif looks_like_country_tag(key) and first_country is None:
+                first_country = (key, parse_block(tok))
+            else:
+                if key.isdigit():
+                    top_blocks.append("<province>")
+                elif looks_like_country_tag(key):
+                    top_blocks.append("<country>")
+                else:
+                    top_blocks.append(key)
+                skip_block(tok)
+        else:
+            top_scalars.append(f"{key}={unquote(val)[:40]}")
+
+    print(f"\n=== {os.path.basename(path)} ===")
+    print("\nTop-level scalars:")
+    for item in top_scalars[:20]:
+        print(f"  {item}")
+    seen = []
+    for name in top_blocks:
+        if name not in seen:
+            seen.append(name)
+    print(f"\nTop-level blocks ({len(top_blocks)} total, distinct):")
+    print("  " + ", ".join(seen[:40]))
+
+    for label, found in (("province", first_province), ("country", first_country)):
+        if not found:
+            print(f"\nNo {label} block found -- the analyzer will report zeros.")
+            continue
+        key, block = found
+        print(f"\nFirst {label} block ({key}) keys:")
+        if isinstance(block, dict):
+            for k, v in list(block.items())[:40]:
+                kind = ("block" if isinstance(v, dict)
+                        else "list" if isinstance(v, list) else "scalar")
+                extra = ""
+                if label == "province" and k in VANILLA_POP_TYPES:
+                    pops = v if isinstance(v, list) else [v]
+                    culture, religion = pop_culture(pops[0]) if isinstance(pops[0], dict) else (None, None)
+                    extra = f"  <- pop, culture={culture}, religion={religion}"
+                print(f"  {k:<24} {kind}{extra}")
+    print()

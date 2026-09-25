@@ -21,7 +21,6 @@ import base64
 import gzip
 import json
 import os
-import threading
 from html import escape as _escape
 
 from dates import year_fraction
@@ -291,11 +290,6 @@ def build_map(mod, parsed, scale=5):
     }
 
 
-
-
-
-
-
 def build_succession(parsed, formations=None):
     """
     Which nation a vanished one turned into.
@@ -390,68 +384,6 @@ def build_succession(parsed, formations=None):
 # nations at the top of this list; the ninetieth is noise, and naming all of
 # them for every good at every save is most of a megabyte of report.
 SUPPLY_NAMED = 14
-
-
-class Aside:
-    """
-    A job run on a thread, whose answer and whose failure both come back.
-
-    Two things in this program are worth a thread, and each only because of
-    what it runs beside. Reading a mod that is not cached runs beside the
-    saves being read, which is the workers' time rather than this process's.
-    And writing the CSV tables runs beside the payload's compression: gzip
-    spends a quarter of a second inside zlib, which releases the interpreter
-    lock for all of it, so the tables -- three tenths of a second, needed by
-    nothing the report contains -- cost the longer of the two rather than
-    the sum.
-
-    Started at the compression and not a line earlier. Assembling the payload
-    is ordinary Python holding the lock the whole way, so a thread started
-    before it only takes turns with it, and the report lands later rather
-    than sooner -- which is the opposite of the point.
-
-    A thread rather than a process because the tables are forty megabytes of
-    tuples and sending them anywhere costs more than writing them.
-
-    It is made ready and started separately, because the caller knows what
-    the job is long before it knows when to run it -- `build_report` says
-    when by calling `start`. One that is never started is not a special
-    case: `result` simply does the work where it stands, which is what the
-    runs that build no report want anyway.
-    """
-
-    __slots__ = ("_fn", "_thread", "_value", "_error")
-
-    def __init__(self, fn):
-        self._fn = fn
-        self._value = self._error = None
-        self._thread = threading.Thread(target=self._run, daemon=True)
-
-    def _run(self):
-        try:
-            self._value = self._fn()
-        except BaseException as exc:                     # noqa: BLE001
-            self._error = exc
-
-    def start(self):
-        """Begin, if it has not begun. Safe to call more than once."""
-        if self._thread.ident is None:
-            self._thread.start()
-
-    def result(self):
-        """
-        Its answer, raising whatever it raised.
-
-        Does the work here and now if nobody ever started it, so a caller
-        can always ask for the answer without first asking whether it ran.
-        """
-        if self._thread.ident is None:
-            self._run()
-        else:
-            self._thread.join()
-        if self._error is not None:
-            raise self._error
-        return self._value
 
 
 def thin_facts(facts, series):
@@ -609,6 +541,77 @@ def _trim_supply(supply, dates):
         if rows:
             out[good] = rows
     return out
+
+
+def nation_names(mod, parsed):
+    """
+    {tag: the name the report shows}, from the mod's own localisation, which
+    is where the game gets them: a bare TAG, overridden by TAG_<government>
+    when one exists -- IGoR's PBC is "Peru-Bolivia" but "Andine Federation"
+    while it is a democracy. Saves are walked in order so the name reflects
+    the government the nation ended the series with. Without a mod there is
+    nothing to read, and tags stand in for names.
+    """
+    names = {}
+    if mod is None or not mod.localisation:
+        return names
+    from mod_reader import name_for
+    loc = mod.localisation
+    for _meta, nations in parsed:
+        for tag, nat in nations.items():
+            names[tag] = name_for(tag, str(nat.get("government") or ""), loc)
+    return names
+
+
+def flags_for(mod, parsed, war_book):
+    """
+    ({date: [[tag, flag key], ...]}, {flag key: image}): each save's great
+    powers in rank order, and the flags the great-power and battle tables
+    fly. Nothing without a mod, which is what turns the save's great-power
+    indices back into tags and holds the flag images.
+    """
+    great_powers, flags = {}, {}
+    if mod is None or not mod.country_order:
+        return great_powers, flags
+    from mod_reader import flag_images, flag_suffixes, government_flag_types
+    from modrules import great_powers as ranked
+    styles = government_flag_types(mod.path)
+    for meta, nations in parsed:
+        picks = ranked(meta, mod)
+        if not picks:
+            continue
+        row = []
+        for tag in picks:
+            gov = str((nations.get(tag) or {}).get("government") or "")
+            # One flag per tag and flag variant, so a nation that turns
+            # communist mid-campaign flies both in turn without the image
+            # being stored twice. The suffix that will actually be used is
+            # the discriminator, since two governments can share a flagType
+            # and still fly different flags.
+            key = tag + "|" + (flag_suffixes(gov, styles)[0] or "base")
+            if key not in flags:
+                got = flag_images(mod.path, [tag], {tag: gov}, styles=styles)
+                if tag in got:
+                    flags[key] = got[tag]
+            row.append([tag, key])
+        great_powers[meta.get("date") or ""] = row
+    # Battle tables name a lot of nations that never made great power, and a
+    # flag beside the tag reads faster than a tag alone. These take the plain
+    # national flag rather than a government variant.
+    fighters = set()
+    for war in war_book["wars"].values():
+        fighters.update(war["attackers"])
+        fighters.update(war["defenders"])
+        for b in war["battles"].values():
+            for who in (b.get("attacker"), b.get("defender")):
+                if who and who.get("country"):
+                    fighters.add(who["country"])
+    for tag in sorted(t for t in fighters if t and t != "---"):
+        if tag + "|" not in flags:
+            got = flag_images(mod.path, [tag], {}, styles=styles)
+            if tag in got:
+                flags[tag + "|"] = got[tag]
+    return great_powers, flags
 
 
 def build_report(rows, tables, price_rows, snapshot_rows, outdir,

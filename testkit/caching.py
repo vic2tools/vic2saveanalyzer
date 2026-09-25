@@ -42,7 +42,7 @@ class SaveCacheTests(unittest.TestCase):
         # which of them can mobilize, which scalars are reforms -- and
         # it is the cache key, so a run cannot be keyed on settings it
         # is not using.
-        reading = analyzer.reading_for(None, None,
+        reading = readsave.reading_for(None, None,
                                        ("farmers", "craftsmen"))
         self.options = dict(jobs=1, verbose=False, reading=reading)
 

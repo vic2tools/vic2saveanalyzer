@@ -363,9 +363,9 @@ def m18():
           "the --cross stamp covers only the largest campaign, so a new save "
           "in another is answered with the old report", "staleness.py")
 def m27():
-    patch("vic2_analyzer.py",
-          '    read = [entry for entry in survey if entry["mod_path"]]\n',
-          '    read = [max(survey, key=lambda entry: len(entry["files"]))]\n')
+    patch("cross.py",
+          '    read = [entry for entry in found if entry.mod_path]\n',
+          '    read = [max(found, key=lambda entry: len(entry.files))]\n')
 
 
 # ---- a run that rewrote the files and did not finish left the old stamp
@@ -463,7 +463,7 @@ def m34():
           "a worker that dies during --verify ends the check in a stack "
           "trace instead of checking the rest one at a time", "noworkers.py")
 def m49():
-    patch("vic2_analyzer.py",
+    patch("explain.py",
           "        except (BrokenProcessPool, OSError, RuntimeError) as exc:",
           "        except (ZeroDivisionError,) as exc:")
 
@@ -594,14 +594,14 @@ def m44():
     # REVIEW.md §25, in the form it can take now: the declaration is wrong
     # rather than a list. Taken off the old hand-written list it passed
     # every check there was.
-    patch("vic2_analyzer.py", "    min_pop: int = _setting(0, report=True)",
+    patch("run.py", "    min_pop: int = _setting(0, report=True)",
           "    min_pop: int = _setting(0, report=False)")
 
 
 @mutation("stamp-ignores-declared-setting",
           "the stamp hashes fewer settings than Run declares", "staleness.py")
 def m45():
-    patch("vic2_analyzer.py", "    for name in REPORTED:\n",
+    patch("stamp.py", "    for name in REPORTED:\n",
           "    for name in REPORTED[:-2]:\n")
 
 

@@ -26,6 +26,7 @@ import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+import readfolder
 import settings
 import vic2_analyzer
 # `human_size` lives in `keeper`, which is the lower of the two and imports
@@ -459,7 +460,7 @@ class App:
 
     def refresh_cache(self):
         """Put what the cache currently weighs on the footer."""
-        count, size = vic2_analyzer.cache_stats()
+        count, size = readfolder.cache_stats()
         if not count:
             self.cache_label.configure(text="Parse cache: empty")
             self.cache_button.configure(state="disabled")
@@ -474,7 +475,7 @@ class App:
         """Empty the cache, having said plainly what that costs."""
         if self.running:
             return
-        count, size = vic2_analyzer.cache_stats()
+        count, size = readfolder.cache_stats()
         if not count:
             self.refresh_cache()
             return
@@ -491,7 +492,7 @@ class App:
                 "leaves the previous entries behind unread."
                 % human_size(size)):
             return
-        removed, freed = vic2_analyzer.clear_cache()
+        removed, freed = readfolder.clear_cache()
         self.say("\nWiped %s from the parse cache, freeing %s.\n"
                  % (_plural(removed, "entry", "entries"),
                     human_size(freed)))

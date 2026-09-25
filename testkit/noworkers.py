@@ -197,7 +197,7 @@ def dying_verify(saves):
     """
     import glob
     import readsave
-    import vic2_analyzer as va
+    import explain
     from concurrent.futures.process import BrokenProcessPool
 
     import concurrent.futures as cf
@@ -222,7 +222,7 @@ def dying_verify(saves):
     try:
         with contextlib.redirect_stdout(said), \
                 contextlib.redirect_stderr(said):
-            va.verify_all(files, readsave.PLAIN, jobs=len(files))
+            explain.verify_all(files, readsave.PLAIN, jobs=len(files))
     except BaseException:                                # noqa: BLE001
         return ["a worker dying took --verify down:\n%s"
                 % traceback.format_exc().strip().splitlines()[-1]]

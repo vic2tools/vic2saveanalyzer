@@ -36,7 +36,6 @@ import readsave                                            # noqa: E402
 import savefmt                                             # noqa: E402
 from outcome import SKIPPED                                 # noqa: E402
 from readboth import both_ways, differences                # noqa: E402
-import vic2_analyzer as va                                 # noqa: E402
 
 
 # Which country lines are reform choices. Only a mod can say, and both
@@ -70,7 +69,7 @@ def really_used(path):
 
     fastscan.collect = watched
     try:
-        va.analyze_save(path, READING, verbose=False)
+        readsave.analyze_save(path, READING, verbose=False)
     finally:
         fastscan.collect = real
     return bool(seen) and seen[0]

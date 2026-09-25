@@ -43,12 +43,21 @@ Being told outright still beats all of it: `--mod-path` skips this entirely.
 import io
 import os
 import re
+import sys
 from collections import Counter
+from dataclasses import dataclass, field
 
-from mod_reader import (country_entries, invention_sequence, read_clausewitz,
-                        read_poptypes, resolved_file, resolved_files)
+# Called through the module, so `testkit/crossrows.py` can watch it.
+import finishing
 from dates import ymd
-from savehead import FLAG_FLOOR, FLAG_GAP, fields, flags_in, head_of
+from mod_reader import (country_entries, invention_sequence, read_clausewitz,
+                        read_poptypes, resolved_file, resolved_files,
+                        settle_campaign)
+from readfolder import parse_saves
+from readsave import PLAIN, reading_for
+from savehead import (FLAG_FLOOR, FLAG_GAP, fields, flags_in, head_of,
+                      in_date_order, one_per_date, sort_key)
+from stamp import report_stamp
 
 # The country blocks sit after the province data, near the end of the file, so
 # identifying a save means reading all of it. Only the last save or two of a
@@ -453,23 +462,257 @@ def series_payload(results, names=None, floor=2):
     }
 
 
+@dataclass
+class Surveyed:
+    """
+    One campaign folder, and the mod its saves will be read under.
+
+    `candidates` is the working behind a mod found by search: (the mod's
+    label, "fits" or "nearest" or why not, the detail) per mod tried. `told`
+    says the mod was named rather than found.
+    """
+    name: str
+    path: str
+    files: list
+    mod_label: str = None
+    mod_path: str = None
+    candidates: list = field(default_factory=list)
+    told: bool = False
+
+
 def survey(parent, game_root):
     """
     Everything needed to read a folder of campaigns, worked out rather than asked.
 
-    Returns one dict per campaign: its name, its saves, the mod matched to it,
+    One `Surveyed` per campaign: its name, its saves, the mod matched to it,
     and the working behind that match.
     """
     mods = installed_mods(game_root)
     out = []
     for name, path, files in campaigns_in(parent):
         label, root, rows = match_mod(files, mods)
-        out.append({
-            "name": name,
-            "path": path,
-            "files": files,
-            "mod_label": label,
-            "mod_path": root,
-            "candidates": rows,
-        })
+        out.append(Surveyed(name, path, files, label, root, rows))
     return out
+
+
+def survey_cross(parent, game_root, args, verbose=True):
+    """
+    Every campaign under `parent`, and the mod each one will be read under.
+
+    One `Surveyed` per campaign, and no save read whole: the mod is named,
+    or worked out from the last save or two. This is everything the report
+    is made from, which is why it is its own step: the report stamp has to
+    cover every campaign in the comparison, not just the one the rest of the
+    report is about, and it has to be taken before the campaigns are read,
+    or a run with nothing to do reads all of them first to find that out.
+    """
+    # Told, rather than worked out: `--campaign-mod NAME=PATH` settles one
+    # campaign each. Two mods built on the same base can agree on their
+    # countries, their technologies and their whole invention array, so the
+    # search is a good guess and nothing more -- being told beats it every time.
+    chosen = {}
+    for name, path in args.campaign_mod or ():
+        path = os.path.expanduser(os.path.expandvars(path))
+        if not os.path.isdir(os.path.join(path, "common")):
+            sys.exit("--campaign-mod %s: %s has no common/ inside it, so it is "
+                     "not a mod folder." % (name, path))
+        chosen[name.lower()] = path
+
+    # Naming a mod is an answer, not a hint. Campaigns played on the same mod
+    # are the ordinary case, and being told which one is better evidence than
+    # anything that can be inferred, so the search is skipped entirely.
+    if args.mod_path:
+        label = os.path.basename(os.path.normpath(args.mod_path))
+        found = []
+        for name, path, files in campaigns_in(parent):
+            # One mod for all of them is the general instruction; a campaign
+            # named outright is the particular one, and the particular wins.
+            told = chosen.get(name.lower())
+            found.append(Surveyed(
+                name, path, files,
+                mod_label=(os.path.basename(os.path.normpath(told))
+                           if told else label),
+                mod_path=told or args.mod_path, told=bool(told)))
+        if verbose:
+            odd = sum(1 for e in found if e.told)
+            print("Campaigns found under %s, read under %s%s:"
+                  % (parent, label,
+                     "" if not odd else " except where named"))
+            for entry in found:
+                print("  %-22s %3d saves%s"
+                      % (entry.name, len(entry.files),
+                         "  ->  %s   (as told)" % entry.mod_label
+                         if entry.told else ""))
+    elif not game_root and not chosen:
+        sys.exit("--cross needs --game-root (the Victoria 2 install folder, the "
+                 "one with mod/ inside) to work each campaign's mod out, "
+                 "--mod-path to read them all under one mod, or "
+                 "--campaign-mod to name them one at a time.")
+    else:
+        # Every campaign named outright is settled before anything is searched
+        # for; only the rest go through `survey`, and if none are left the
+        # search does not run at all.
+        folders = campaigns_in(parent)
+        unsettled = [e for e in folders if e[0].lower() not in chosen]
+        found = (survey(parent, game_root) if (unsettled and game_root)
+                 else [Surveyed(n, p, f) for n, p, f in folders])
+        for entry in found:
+            override = chosen.get(entry.name.lower())
+            if override:
+                entry.mod_path = override
+                entry.mod_label = os.path.basename(os.path.normpath(override))
+                entry.candidates = []
+                entry.told = True
+        if verbose:
+            print("Campaigns found under %s:" % parent)
+            for entry in found:
+                fits = sum(1 for _l, v, _d in entry.candidates if v == "fits")
+                print("  %-22s %3d saves  ->  %s%s"
+                      % (entry.name, len(entry.files),
+                         entry.mod_label or "no mod in that folder fits",
+                         "   (as told)" if entry.told else ""))
+                if entry.told:
+                    continue
+                nearest = [r for r in entry.candidates if r[1] == "nearest"]
+                if nearest:
+                    print("      WARNING: nothing in %s explains these saves. "
+                          "The closest is %s, and it does not match: %s. The "
+                          "numbers below are computed against a mod this "
+                          "campaign was not played on -- name the right one "
+                          "with --mod-path."
+                          % (game_root, nearest[0][0], nearest[0][2]))
+                elif fits > 1:
+                    print("      note: %d mods fit these saves; picked the one "
+                            "the campaign leaves least of unused. Name it with "
+                            "--mod-path, or in the window pick the mod itself "
+                            "instead of the folder, to settle it." % fits)
+                elif not entry.mod_label:
+                    print("      note: nothing in %s explains these saves. If "
+                          "the mod is installed elsewhere, point the mod box "
+                          "at it directly." % game_root)
+    if verbose:
+        for entry in found:
+            for stray, worst, of in history_breaks(entry.files):
+                print("      note: %s disagrees with all %d later saves by at "
+                      "least %d event flags; it may be from another game"
+                      % (stray, of, worst))
+    return found
+
+
+def cross_stamp(found, args):
+    """
+    The report stamp of a `--cross` run: every campaign that will be read,
+    its saves, and the mod it is read under.
+    """
+    from mod_reader import mod_signature
+    read = [entry for entry in found if entry.mod_path]
+    world = "\n".join("%s|%s|%s" % (entry.name,
+                                    os.path.abspath(entry.mod_path),
+                                    mod_signature(entry.mod_path))
+                       for entry in read)
+    return report_stamp([f for entry in read for f in entry.files], args,
+                        world)
+
+
+def campaign_rows(parsed, mod, args, wanted=None):
+    """
+    One campaign's saves as finalized rows: (date, tag, nation).
+
+    The same finishing the single-campaign path runs -- the same function
+    against a spec from the same builder -- so a measure means here exactly
+    what it means on the report's own charts. A second copy of the recipe
+    had once drifted from the first in five places.
+
+    `finishing.finish_nations` is called through the module, so that
+    `testkit/crossrows.py` can watch both of its callers.
+    """
+    live = None
+    if mod is not None:
+        # Until this has run the mod refuses to say which base decodes the
+        # campaign's invention indices, because "nobody looked" and "they do
+        # not decode" mean different things and only one of them is a reason
+        # to fall back to guessing what a nation holds.
+        live, _every = settle_campaign(mod, parsed)
+
+    spec = finishing.finish_spec(args, mod, live, wanted)
+    out = []
+    for meta, nations in parsed:
+        for tag, done in finishing.finish_nations(meta, nations, spec).items():
+            if finishing.kept_by(spec, tag, done):
+                out.append((meta["date"], tag, done))
+    return out
+
+
+def run_cross(parent, found, args, verbose=True):
+    """
+    Read every campaign `survey_cross` found, each under its own mod.
+
+    Returns (cross payload, the chosen campaign's files, its mod path, the
+    `Reading` its saves were read under). That campaign -- the one
+    `--primary` names, else the one with most saves -- becomes the subject
+    of the ordinary report, so the cross-campaign block is an addition
+    rather than a replacement.
+    """
+    from mod_reader import load_mod, name_for
+
+    results, names, primary = [], {}, None
+    for entry in found:
+        if not entry.mod_path:
+            if verbose:
+                print("  skipping %s: no mod in %s explains its saves"
+                      % (entry.name, args.game_root))
+            continue
+        mod = load_mod(entry.mod_path)
+        # The defaults `main` applies, applied here too, so `--mob-types`
+        # means the same on a cross run as on a single one. Only the pop list
+        # is wanted here, for the parse; the regiment size comes from the
+        # same function where `campaign_rows` builds the finishing spec.
+        _regiment_size, mob_types = finishing.mod_defaults(args, mod)
+        # How this campaign's saves are read, which is also their cache key.
+        reading = reading_for(entry.mod_path, mod, mob_types)
+        files = one_per_date(in_date_order(entry.files))
+        if verbose:
+            print("Reading %s (%d saves) under %s"
+                  % (entry.name, len(files), entry.mod_label))
+        parsed = parse_saves(files, verbose=False,
+                             use_cache=not args.no_cache, reading=reading,
+                             jobs=args.jobs)
+        if not parsed:
+            continue
+        parsed.sort(key=lambda p: sort_key(p[0]["date"]))
+        results.append((entry.name, entry.mod_label,
+                        campaign_rows(parsed, mod, args,
+                                      set(args.tags) if args.tags else None)))
+        # Nation names come from whichever mod names them: a tag any mod names
+        # is better than the bare tag, and where two mods share a tag they were
+        # measured to agree on it. Country names live in the localisation, not
+        # in `display_names`, which is goods and unit types.
+        loc = mod.localisation or {}
+        for _meta, nations in parsed:
+            for tag, nat in nations.items():
+                if tag not in names:
+                    label = name_for(tag, str(nat.get("government") or ""), loc)
+                    if label and label != tag:
+                        names[tag] = label
+        if args.primary:
+            if entry.name.lower() == args.primary.lower():
+                primary = (entry, files, reading)
+        elif primary is None or len(files) > len(primary[1]):
+            primary = (entry, files, reading)
+
+    if args.primary and primary is None and results:
+        known = ", ".join(name for name, _m, _p in results)
+        sys.exit("No campaign called %r under %s. There is: %s"
+                 % (args.primary, parent, known))
+    if not results or primary is None:
+        return None, [], args.mod_path, PLAIN
+    entry, files, reading = primary
+    payload = series_payload(results, names=names)
+    if verbose:
+        print("Cross-campaign: %d campaigns, %d nations in two or more of them."
+              % (len(payload["campaigns"]), len(payload["tags"])))
+        print("The rest of the report is %s%s."
+              % (entry.name,
+                 "" if args.primary else " (the most saves; --primary picks "
+                                         "another)"))
+    return payload, files, entry.mod_path, reading

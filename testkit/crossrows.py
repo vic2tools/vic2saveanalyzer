@@ -38,6 +38,7 @@ sys.path.insert(0, HERE)
 
 import matching                                            # noqa: E402
 import savefmt                                             # noqa: E402
+import cross                                               # noqa: E402
 import vic2_analyzer as vic2                               # noqa: E402
 import finishing                                            # noqa: E402
 import spending                                             # noqa: E402
@@ -153,7 +154,7 @@ def watched_run(argv):
     inside = []
 
     real_finish = finishing.finish_nations
-    real_rows = vic2.campaign_rows
+    real_rows = cross.campaign_rows
 
     def watch_finish(meta, nations, spec):
         out = real_finish(meta, nations, spec)
@@ -173,7 +174,7 @@ def watched_run(argv):
 
     argv_was, out_was = sys.argv, sys.stdout
     finishing.finish_nations = watch_finish
-    vic2.campaign_rows = watch_rows
+    cross.campaign_rows = watch_rows
     try:
         sys.argv = ["vic2_analyzer.py"] + argv
         sys.stdout = io.StringIO()
@@ -184,7 +185,7 @@ def watched_run(argv):
                 raise AssertionError("the run stopped: %s" % exc.code)
     finally:
         finishing.finish_nations = real_finish
-        vic2.campaign_rows = real_rows
+        cross.campaign_rows = real_rows
         sys.argv, sys.stdout = argv_was, out_was
     return seen
 
