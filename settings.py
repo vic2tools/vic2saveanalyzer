@@ -109,3 +109,44 @@ def game_folders():
     """Where Victoria II keeps its saves and the rest, in each Documents."""
     return [os.path.join(docs, "Paradox Interactive", "Victoria II")
             for docs in documents()]
+
+
+def steam_libraries():
+    """
+    Every Steam library folder this machine has, the usual places first:
+    where a Browse button opens, never an answer by itself.
+
+    Steam records extra libraries in `libraryfolders.vdf` beside the default
+    one, which is how a game ends up on a second drive. The file is read with
+    a regex rather than a vdf parser: one key is wanted out of it.
+
+    Windows keeps Steam under Program Files. Linux keeps it in the home
+    folder, in one of several places depending on how it was installed --
+    the distribution's package, Flatpak or Snap -- and macOS under
+    Application Support. Where Steam is not, nothing is listed.
+    """
+    home = os.path.expanduser("~")
+    seen = [os.path.join(base, "Steam")
+            for base in (os.environ.get("ProgramFiles(x86)"),
+                         os.environ.get("ProgramFiles"),
+                         r"C:\Program Files (x86)", r"C:\Program Files")
+            if base]
+    seen += [os.path.join(home, *where) for where in (
+        (".local", "share", "Steam"), (".steam", "steam"), (".steam", "root"),
+        (".var", "app", "com.valvesoftware.Steam", ".local", "share", "Steam"),
+        ("snap", "steam", "common", ".local", "share", "Steam"),
+        ("Library", "Application Support", "Steam"))]
+    import re
+    out = list(seen)
+    for root in seen:
+        vdf = os.path.join(root, "steamapps", "libraryfolders.vdf")
+        if not os.path.isfile(vdf):
+            continue
+        try:
+            with open(vdf, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        out += [p.replace("\\\\", "\\")
+                for p in re.findall(r'"path"\s+"([^"]+)"', text)]
+    return out

@@ -48,6 +48,10 @@ def merge_prices(parsed):
     duplicates collapse, and the result is continuous monthly coverage from the
     earliest buffer to the last save.
     """
+    # {stamp: {good: price}}. Keyed by the date and then the good rather than
+    # by the pair, which was a tuple built and hashed for each of the half a
+    # million entries 265 saves carry -- their buffers overlap, so most of
+    # them are only looked up and passed over.
     prices = {}
     # Newest save first, and the first answer for a month is the one that
     # stands. Walked oldest first, every one of the hundred and twenty
@@ -65,27 +69,61 @@ def merge_prices(parsed):
         # own history, and after every later save's, which is exactly the
         # order it won in before.
         stamp = meta["date"]
+        day = prices.get(stamp)
+        if day is None:
+            day = prices[stamp] = {}
         for good, price in market["current"].items():
-            key = (stamp, good)
-            if key not in prices:
-                prices[key] = price
+            if good not in day:
+                day[good] = price
+        last = None
         for stamp, good, price in market["history"]:
-            key = (stamp, good)
-            if key not in prices:
-                prices[key] = price
+            if stamp != last:
+                last = stamp
+                day = prices.get(stamp)
+                if day is None:
+                    day = prices[stamp] = {}
+            if good not in day:
+                day[good] = price
 
     # Tuples in `PRICE_COLUMNS` order, like the other
     # big tables: a campaign has ninety thousand of these, and a dict each
     # was half the time this took and made the CSV writer name the same
     # five columns ninety thousand times.
+    #
+    # Oldest date first and then by good, as sorting every row by the pair
+    # would put them, but sorted a date at a time: four thousand dates and a
+    # few dozen goods each, rather than two hundred thousand rows through a
+    # key function. Two spellings of one date (1869.09.29 and 1869.9.29) are
+    # the one case where the two orders could part, and they take the old
+    # way, whose ties fall in the order the entries were met.
+    stamps = sorted(prices, key=date_key)
+    keys = [date_key(s) for s in stamps]
+    if any(a == b for a, b in zip(keys, keys[1:])):
+        return _price_rows_by_pair(parsed)
     rows = []
-    years = {}
-    for (stamp, good), price in prices.items():
-        year = years.get(stamp)
-        if year is None:
-            year = years[stamp] = stamp.split(".")[0]
-        rows.append((stamp, year, good, GOOD_CATEGORY.get(good, "other"),
-                     round(price, 5)))
+    category = GOOD_CATEGORY.get
+    for stamp in stamps:
+        day = prices[stamp]
+        year = stamp.split(".")[0]
+        rows.extend([(stamp, year, good, category(good, "other"),
+                      round(day[good], 5)) for good in sorted(day)])
+    return rows
+
+
+def _price_rows_by_pair(parsed):
+    """`merge_prices` as it was, keyed by (date, good) and sorted by row."""
+    prices = {}
+    for meta, _ in reversed(parsed):
+        market = meta.get("market")
+        if not market:
+            continue
+        stamp = meta["date"]
+        for good, price in market["current"].items():
+            prices.setdefault((stamp, good), price)
+        for stamp, good, price in market["history"]:
+            prices.setdefault((stamp, good), price)
+    rows = [(stamp, stamp.split(".")[0], good, GOOD_CATEGORY.get(good, "other"),
+             round(price, 5)) for (stamp, good), price in prices.items()]
     rows.sort(key=lambda r: (date_key(r[0]), r[2]))
     return rows
 

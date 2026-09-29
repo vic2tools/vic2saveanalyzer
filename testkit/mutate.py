@@ -258,9 +258,9 @@ def m12():
           "reforms", "caching.py")
 def m13():
     patch("readfolder.py",
-          "        meta, nations = analyze_save(path, reading, verbose=False)\n",
+          "        meta, nations, pickled = read_save(path, reading)\n",
           "        from readsave import PLAIN\n"
-          "        meta, nations = analyze_save(path, PLAIN, verbose=False)\n")
+          "        meta, nations, pickled = read_save(path, PLAIN)\n")
 
 
 @mutation("reading-key-drops-mod", "the cache key stops naming the mod",
@@ -422,6 +422,16 @@ def m46():
           "        if name in last:\n            continue\n")
 
 
+# ---- a war over before the first save was judged by that save alone
+
+@mutation("goal-judged-before-first-save",
+          "a war that ended before the first save has its goal judged by "
+          "that save against itself, and reads 'none taken'", "edges.py")
+def m55():
+    patch("wars.py", "                and ledger_dates[0] >= year_fraction(end)):",
+          "                and False):")
+
+
 # ---- an empty table was skipped, and the last run's copy stayed
 
 @mutation("empty-table-left-stale",
@@ -443,8 +453,9 @@ def m32():
           "their rows in every table while the report shows one",
           "edges.py")
 def m33():
-    patch("vic2_analyzer.py", "    files = one_per_date(in_date_order(files))",
-          "    files = in_date_order(files)")
+    patch("vic2_analyzer.py",
+          "    files = one_per_date(in_date_order(files, dates), dates)",
+          "    files = in_date_order(files, dates)")
 
 
 # ---- one worker dying took the whole run down
@@ -564,6 +575,36 @@ def m39():
           '    raw = raw.replace("<", "\\\\u2039").replace(">", "\\\\u203a")\n', "")
 
 
+# ---- a mod kept away from its game was read with nothing beneath it
+
+@mutation("mod-forgets-its-game",
+          "the mod reader ignores the install a mod folder was paired with, "
+          "so a mod outside the game has no map, no flags and inherits "
+          "nothing", "modcache.py")
+def m57():
+    patch("mod_reader.py",
+          '    given = getattr(path, "game", None)\n    if given:\n'
+          '        return given\n', "")
+
+
+@mutation("run-never-pairs-a-game",
+          "a run reads its mod as it finds it, so a mod unpacked away from "
+          "the game is read with no game at all, told or found", "edges.py")
+def m58():
+    patch("vic2_analyzer.py", "    return replace(args, mod_path=paired)\n",
+          "    return args\n")
+
+
+# ---- a war's detail was drawn by nothing any check ever clicked
+
+@mutation("war-infobox-throws",
+          "the infobox a war opens into throws, where no check had ever "
+          "opened a war", "boots.py", ("--hostile",))
+def m56():
+    patch("template.py", "  const opening = warOpening(w);\n",
+          "  const opening = warOpening(w.unset.start);\n")
+
+
 # ---- publishing: the token followed redirects, and failures came out raw
 
 @mutation("token-follows-redirect",
@@ -669,6 +710,84 @@ def m48():
     # with the scanner can see this.
     patch("readsave.py", "        literate = to_float(pop[_POP_LITERACY]) * size",
           "        literate = to_float(pop[_POP_LITERACY]) * size * 2")
+
+
+# ---- the map's province bitmap, read a run at a time and decoded ahead
+
+
+@mutation("raster-runs-merged-by-colour",
+          "two colours naming one province, or a run carrying into the next "
+          "row, ship as two runs where the map had one", "raster.py")
+def m59():
+    patch("mod_reader.py", "                if pid == last:",
+          "                if False:")
+
+
+@mutation("raster-red-channel-dropped",
+          "the bitmap is read without its red channel, so provinces told "
+          "apart only by red come out as one", "raster.py")
+def m60():
+    patch("mod_reader.py", "            wide[2::4] = row[2:span:step]\n", "")
+
+
+@mutation("raster-samples-wrong-rows",
+          "a scaled map samples every row instead of every scale-th, and "
+          "draws the top of the world stretched", "raster.py")
+def m61():
+    patch("mod_reader.py", "fh.seek(offset + (oy * scale) * stride)",
+          "fh.seek(offset + oy * stride)")
+
+
+@mutation("raster-ahead-when-cached",
+          "a run decodes the map in another process even when its entry is "
+          "already cached", "raster.py")
+def m62():
+    patch("mod_reader.py",
+          "    if not slot or (os.path.isfile(slot) and os.path.isfile(_text_slot(slot))):",
+          "    if not slot:")
+
+
+@mutation("raster-text-miscounted",
+          "the map's runs are spelled with every count one short, and the "
+          "page draws a map that drifts a cell further each run", "raster.py")
+def m67():
+    patch("mod_reader.py",
+          '    text = " ".join(_b36(p) if c == 1 else _b36(p) + "." + _b36(c)',
+          '    text = " ".join(_b36(p) if c == 1 else _b36(p) + "." + _b36(c - 1)')
+
+
+@mutation("anchor-nearer-column-skipped",
+          "a province's anchor measures only the column left of its middle, "
+          "and lands a cell off where the right one is nearer", "raster.py")
+def m63():
+    patch("mod_reader.py",
+          "        for x in (left, min(left + 1, x1)) if left < x1 else (left,):",
+          "        for x in (left,):")
+
+
+@mutation("anchor-sum-of-first-columns",
+          "a stretch of a row counts only its first column toward the "
+          "province's middle", "raster.py")
+def m64():
+    patch("mod_reader.py", "        got[0] += (x0 + x1) * n // 2",
+          "        got[0] += x0 * n")
+
+
+@mutation("anchor-run-not-split-at-row-end",
+          "a run carrying into the next row is measured as one stretch "
+          "running off the edge of the map", "raster.py")
+def m65():
+    patch("mod_reader.py", "                    x1 = min(width, x0 + end - at) - 1",
+          "                    x1 = x0 + end - at - 1")
+
+
+@mutation("positions-cache-ignores-edits",
+          "an edited positions.txt keeps being served from the cache",
+          "raster.py")
+def m66():
+    patch("mod_reader.py",
+          '        f"{os.path.abspath(target)}|{info.st_size}|{info.st_mtime_ns}|{version}"',
+          '        f"{os.path.abspath(target)}|{version}"')
 
 
 def main():

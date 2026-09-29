@@ -42,7 +42,7 @@ import tempfile
 import cacheio
 from cacheio import load as _cache_read
 import fastscan
-from readsave import analyze_save
+from readsave import analyze_save, read_save
 
 
 class Cancelled(Exception):
@@ -341,9 +341,14 @@ def _worker_parse(job):
         if got is not None:
             meta, nations = got
     if nations is None:
-        meta, nations = analyze_save(path, reading, verbose=False)
-        nations = dict(nations)
-        _cache_write(slot, meta, nations)
+        meta, nations, pickled = read_save(path, reading)
+        if pickled is not None:
+            # The scanner's own bytes are the entry: pickling the pair again
+            # here was a tenth of what a save cost its worker.
+            cacheio.store_pickled(slot, pickled)
+        else:
+            nations = dict(nations)
+            _cache_write(slot, meta, nations)
     # Whatever the transform makes of the save goes back as it made it: a
     # pair for the invention summary, a spent save for the report.
     if _TRANSFORM is not None:

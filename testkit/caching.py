@@ -15,6 +15,7 @@ from unittest.mock import patch
 HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
 import fastscan
+import matching
 # The smallest thing `Mod` will make, from the check that already needed one.
 from mobrate import a_mod
 # The imports walked properly, off the syntax tree, including those made
@@ -102,10 +103,12 @@ class SaveCacheTests(unittest.TestCase):
         self.assertEqual([p[0]["file"] for p in parallel], ["0.v2", "1.v2"])
 
     def test_changing_mobilizable_types_matches_uncached_run(self):
+        game = matching.a_vanilla(str(self.root / "Victoria 2"))
+
         def build(kind, output, cached=True):
             args = [sys.executable, str(HERE / "vic2_analyzer.py"), self.files[0],
                     "--out", str(self.root / output), "--no-html", "-q", "--jobs", "1",
-                    "--mob-types", kind]
+                    "--game-root", game, "--mob-types", kind]
             if not cached:
                 args.append("--no-cache")
             done = subprocess.run(args, capture_output=True, text=True,

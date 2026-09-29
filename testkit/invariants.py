@@ -257,6 +257,14 @@ def check_payload(data):
                  "%s: %s against %s" % (name, war.get("losses"), losses))
         if war.get("dated") != sum(1 for b in battles if b.get("date")):
             note("the dated-battle count is the number with a date", name)
+        # Nothing saw who held the state going in, so nothing can say
+        # whether the peace moved it.
+        if (dates and end and not war.get("active")
+                and year_fraction(end) <= year_fraction(dates[0])):
+            for g in war.get("goals") or []:
+                if g.get("checkable"):
+                    note("a war over before the first save has no goal "
+                         "judged", "%s, ended %s" % (name, end))
         for b in battles:
             when = b.get("date")
             if not when:

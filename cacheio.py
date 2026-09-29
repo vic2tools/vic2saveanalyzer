@@ -101,9 +101,24 @@ def store(slot, value):
     """Publish one complete entry. Cache failures never prevent analysis."""
     if not slot:
         return
+    try:
+        pickled = pickle.dumps(value, protocol=5)
+    except (pickle.PickleError, TypeError):
+        return
+    store_pickled(slot, pickled)
+
+
+def store_pickled(slot, pickled):
+    """
+    `store` for a value that arrives pickled already: a save the scanner
+    read whole comes as the bytes of its `(meta, nations)` (see
+    `fastscan.record`), and they are the entry as they stand.
+    """
+    if not slot:
+        return
     temporary = None
     try:
-        data = zlib.compress(pickle.dumps(value, protocol=5), 1)
+        data = zlib.compress(pickled, 1)
         folder = os.path.dirname(slot)
         os.makedirs(folder, exist_ok=True)
         with tempfile.NamedTemporaryFile(dir=folder, suffix=".tmp",
@@ -111,7 +126,7 @@ def store(slot, value):
             temporary = fh.name
             fh.write(data)
         os.replace(temporary, slot)
-    except (OSError, pickle.PickleError, TypeError):
+    except OSError:
         pass
     finally:
         if temporary is not None:

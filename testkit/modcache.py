@@ -73,6 +73,45 @@ class ModCacheTests(unittest.TestCase):
         (game / "save games/autosave.v2").write_text("unrelated")
         self.assertEqual(stamp, mod_reader.mod_signature(str(mod)))
 
+    def an_install(self, name="game"):
+        game = self.root / name
+        (game / "map").mkdir(parents=True)
+        (game / "map/default.map").write_text("max_provinces = 40\n")
+        (game / "common").mkdir()
+        (game / "common/defines.lua").write_text("POP_SIZE_PER_REGIMENT = 2000,\n")
+        return game
+
+    def test_a_run_is_read_on_an_installed_game_and_nowhere_else(self):
+        # One way to run: an install, and a mod in its mod folder or none.
+        # A stray copy of a mod is read with nothing beneath it -- no map,
+        # no flags, none of what it inherits -- so it is refused rather than
+        # guessed at.
+        game = self.an_install()
+        other = self.an_install("other")
+        inside = Path(a_mod(str(game / "mod/inside")))
+        settle = mod_reader.settle_game
+        self.assertEqual(settle(None, str(game)), (str(game), str(game)))
+        self.assertEqual(settle(str(inside), None), (str(inside), str(game)))
+        self.assertEqual(settle(str(inside), str(game)),
+                         (str(inside), str(game)))
+        self.assertEqual(settle(str(game), None), (str(game), str(game)))
+        refused = {
+            "no game": (None, None),
+            "a stray mod": (str(self.mod), None),
+            "a stray mod, the game named": (str(self.mod), str(game)),
+            "another game's mod": (str(inside), str(other)),
+            "a game that is not one": (None, str(self.mod)),
+            "the mod folder itself": (str(game / "mod"), str(game)),
+        }
+        for why, (mod, root) in refused.items():
+            with self.subTest(why):
+                with self.assertRaises(ValueError):
+                    settle(mod, root)
+        # And the mod the rule lets through is read on that game.
+        self.assertEqual(
+            mod_reader.load_mod(settle(str(inside), None)[0])
+            .defines["POP_SIZE_PER_REGIMENT"], 2000)
+
     def test_a_mod_file_named_in_other_case_replaces_the_games(self):
         # Windows, where the game runs, does not tell these two names apart,
         # so the mod's file replaces the game's there. Read as two files

@@ -95,6 +95,10 @@ def _participants(tags, join_dates, is_attacker, original_tag, start,
             or cutoff is None or year_fraction(joined) <= cutoff
         )
         row = {"tag": tag, "joined": joined, "original": original}
+        # The war leader: the one who declared it, or the one it was declared
+        # on, and the one who signs the peace. The page flies its flag large.
+        if tag == original_tag:
+            row["leads"] = True
         # The engine removes everybody when a war ends, so most recorded exits
         # are the war finishing rather than anyone leaving it: 17,964 of 18,657
         # in one campaign fall on the war's own end date. Only an exit before
@@ -442,6 +446,16 @@ def build_wars(parsed, province_names=None, province_regions=None,
         listed = recovered or ([war["goal"]] if war["goal"]["actor"] else [])
         before = (_ledger_at(books, ledger_dates, war["start"], True)
                   if war.get("start") else {})
+        # A war that was over before the first save has no before at all:
+        # both lookups land on that first save, the state is compared with
+        # itself, and nothing ever moved. The Austrian Liberation of
+        # Moldavia, fought 1845-1849 and judged by an 1872 save against
+        # itself, read "none taken" -- a verdict on a peace no save saw.
+        # Only a save taken before the war ended can say who held the state
+        # going in, so without one the goal is left unjudged.
+        if (end and ledger_dates
+                and ledger_dates[0] >= year_fraction(end)):
+            before = {}
         after = (_ledger_at(books, ledger_dates, end or war["start"],
                             False) if war.get("start") else {})
         goals, transfers = [], []
@@ -529,6 +543,26 @@ def build_wars(parsed, province_names=None, province_regions=None,
         })
     out.sort(key=lambda w: year_fraction(w["start"]) if w["start"] else 9999.0)
     return out
+
+
+def war_tags(wars):
+    """
+    Every nation `build_wars`' output names: both sides, every battle, every
+    goal and every state that changed hands. Most of these were gone before
+    the first save -- Baden, the North German Federation -- so nothing else
+    in the report names them.
+    """
+    tags = set()
+    for w in wars or ():
+        tags.update(w["attackers"])
+        tags.update(w["defenders"])
+        for b in w["battles"]:
+            tags.update((b["a"][0], b["d"][0]))
+        for g in w["goals"]:
+            tags.update((g["actor"], g["receiver"]))
+        for t in w["transfers"]:
+            tags.update(t[2:4])
+    return {t for t in tags if t and t != "---"}
 
 
 def _units(side):

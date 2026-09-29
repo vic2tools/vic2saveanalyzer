@@ -55,8 +55,8 @@ from mod_reader import (country_entries, invention_sequence, read_clausewitz,
 from readfolder import parse_saves
 from readsave import PLAIN, reading_for
 from run import RunError
-from savehead import (FLAG_FLOOR, FLAG_GAP, fields, flags_in, head_of,
-                      in_date_order, one_per_date, sort_key)
+from savehead import (FLAG_FLOOR, FLAG_GAP, dates_of, fields, flags_in,
+                      head_of, in_date_order, one_per_date, sort_key)
 from stamp import report_stamp
 
 # The country blocks sit after the province data, near the end of the file, so
@@ -506,6 +506,20 @@ def survey_cross(parent, game_root, args, verbose=True):
     report is about, and it has to be taken before the campaigns are read,
     or a run with nothing to do reads all of them first to find that out.
     """
+    # Every mod on the game it sits in, the same rule a single campaign is
+    # held to (`mod_reader.settle_game`): an install named with --game-root
+    # has to be one, and a mod named either way has to be in its mod folder.
+    from mod_reader import settle_game
+
+    def on_the_game(path, flag):
+        try:
+            settle_game(path, game_root)
+        except ValueError as exc:
+            raise RunError("%s: %s" % (flag, exc)) from exc
+
+    if game_root:
+        on_the_game(None, "--game-root")
+
     # Told, rather than worked out: `--campaign-mod NAME=PATH` settles one
     # campaign each. Two mods built on the same base can agree on their
     # countries, their technologies and their whole invention array, so the
@@ -516,7 +530,10 @@ def survey_cross(parent, game_root, args, verbose=True):
         if not os.path.isdir(os.path.join(path, "common")):
             raise RunError("--campaign-mod %s: %s has no common/ inside it, so it is "
                      "not a mod folder." % (name, path))
+        on_the_game(path, "--campaign-mod %s" % name)
         chosen[name.lower()] = path
+    if args.mod_path:
+        on_the_game(args.mod_path, "--mod-path")
 
     # Naming a mod is an answer, not a hint. Campaigns played on the same mod
     # are the ordinary case, and being told which one is better evidence than
@@ -670,7 +687,8 @@ def run_cross(parent, found, args, verbose=True):
         _regiment_size, mob_types = finishing.mod_defaults(args, mod)
         # How this campaign's saves are read, which is also their cache key.
         reading = reading_for(entry.mod_path, mod, mob_types)
-        files = one_per_date(in_date_order(entry.files))
+        dates = dates_of(entry.files)
+        files = one_per_date(in_date_order(entry.files, dates), dates)
         if verbose:
             print("Reading %s (%d saves) under %s"
                   % (entry.name, len(files), entry.mod_label))

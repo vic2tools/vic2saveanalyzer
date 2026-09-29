@@ -79,11 +79,6 @@ NARROW = {
 # these names.
 PER_SAVE = (MAIN,) + tuple(NARROW)
 
-# Cultures per nation per save the report keeps, beyond which the tail is
-# negligible and only inflates the file.
-MAX_CULTURES = 30
-
-
 def nation_columns(pop_columns):
     """The main table's columns, given the pop types this run reads."""
     return (BASE_COLUMNS + [f"pop_{t}" for t in pop_columns]
@@ -98,7 +93,7 @@ def columns_of(name, pop_columns):
 # One save's share of the payload's per-nation tables, each {tag: what that
 # nation has in this save}: ship counts and, where they differ, what the
 # hulls are worth as they stand; brigades; technology names; pops by type;
-# and the largest cultures. A nation with nothing in one has no entry in it.
+# and all cultures (pie slices must account for the whole population). A nation with nothing in one has no entry in it.
 PerNation = namedtuple("PerNation", "ships crews brigades techs pops cultures")
 
 
@@ -221,8 +216,7 @@ def save_rows(meta, nations, spec, pop_columns):
                                     key=lambda kv: -kv[1]):
             accepted = int(culture in accepted_set)
             culture_rows.append((date, year, tag, culture, size, accepted))
-            if len(largest) < MAX_CULTURES:
-                largest.append([culture, int(size), accepted])
+            largest.append([culture, int(size), accepted])
         if largest:
             cultures[tag] = largest
 
@@ -250,8 +244,12 @@ def spend(meta, nations, spec, keep_fields, pop_columns):
     `partial`, so it has to stay a plain function at the top of a module:
     Windows sends it to each worker by name.
     """
-    meta, finished = finishing.finish_and_pack(meta, nations, spec)
+    from state_history import Snapshot
+    snapshot = Snapshot() if spec.mod else None
+    meta, finished = finishing.finish_and_pack(meta, nations, spec, snapshot)
     rows = save_rows(meta, finished, spec, pop_columns)
     wars = pack_wars(meta.get("wars", ()))
     meta, finished = trim_save(meta, finished, keep_fields)
+    if snapshot is not None:
+        meta["population_chunk"] = snapshot.pack()
     return Spent(meta, finished, wars, rows)

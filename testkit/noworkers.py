@@ -53,7 +53,7 @@ def a_campaign(folder):
     return folder
 
 
-def refusing_pool(saves, out):
+def refusing_pool(saves, out, game):
     """
     [what went wrong] when no worker will start.
 
@@ -78,7 +78,8 @@ def refusing_pool(saves, out):
     old_argv = sys.argv
     cf.ProcessPoolExecutor = WillNotStart
     try:
-        sys.argv = [old_argv[0], saves, "--out", out, "--rebuild"]
+        sys.argv = [old_argv[0], saves, "--out", out, "--game-root", game,
+                    "--rebuild"]
         with contextlib.redirect_stdout(said), \
                 contextlib.redirect_stderr(said):
             try:
@@ -123,7 +124,7 @@ def same_answer(saves, a, b):
     return wrong
 
 
-def dying_pool(saves, out):
+def dying_pool(saves, out, game):
     """
     [what went wrong] when a worker dies part-way through the campaign.
 
@@ -157,8 +158,8 @@ def dying_pool(saves, out):
     old_argv = sys.argv
     cf.ProcessPoolExecutor = OneDies
     try:
-        sys.argv = [old_argv[0], saves, "--out", out, "--rebuild",
-                    "--no-cache"]
+        sys.argv = [old_argv[0], saves, "--out", out, "--game-root", game,
+                    "--rebuild", "--no-cache"]
         with contextlib.redirect_stdout(said), \
                 contextlib.redirect_stderr(said):
             try:
@@ -245,6 +246,10 @@ def main():
     try:
         if not saves:
             saves = a_campaign(os.path.join(holding, "saves"))
+        # Every report is read on an installed game; this one has nothing in
+        # it but the rules a run needs.
+        import matching
+        game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
 
         # The ordinary run first, so there is something to compare against.
         import vic2_analyzer as va
@@ -252,7 +257,8 @@ def main():
         old = sys.argv
         quiet = io.StringIO()
         try:
-            sys.argv = [old[0], saves, "--out", normal, "--rebuild", "-q"]
+            sys.argv = [old[0], saves, "--out", normal, "--game-root", game,
+                        "--rebuild", "-q"]
             with contextlib.redirect_stdout(quiet), \
                     contextlib.redirect_stderr(quiet):
                 va.main()
@@ -260,7 +266,7 @@ def main():
             sys.argv = old
 
         serial = os.path.join(holding, "serial")
-        wrong, _said = refusing_pool(saves, serial)
+        wrong, _said = refusing_pool(saves, serial, game)
         print("  %-44s %s" % ("a pool that will not start",
                               "FAILED" if wrong else "ok (read serially)"))
         if not wrong:
@@ -270,7 +276,7 @@ def main():
             wrong += same
 
         died = os.path.join(holding, "died")
-        broke, _said = dying_pool(saves, died)
+        broke, _said = dying_pool(saves, died, game)
         print("  %-44s %s" % ("a worker that dies part-way",
                               "FAILED" if broke else "ok (read serially)"))
         if not broke:

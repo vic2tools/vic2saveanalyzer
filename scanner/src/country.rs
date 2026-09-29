@@ -18,7 +18,7 @@
 // bare values mixed with keys are kept under `_items`.
 
 use crate::text::{find, unquote};
-use std::collections::HashMap;
+use crate::pickle::FxMap;
 
 /// A token cursor over the save's own grammar: `"quoted"`, `{`, `}`, `=`, or
 /// a run of anything else. The same rule as the Python `TOKEN_RE`.
@@ -83,13 +83,26 @@ impl<'a> Tokens<'a> {
     /// Step over the block whose `{` has just been read.
     pub fn skip_to_close(&mut self) {
         let mut depth = 1;
-        while depth > 0 {
-            match self.next() {
-                None => return,
-                Some("{") => depth += 1,
-                Some("}") => depth -= 1,
-                _ => {}
+        // Unused blocks need their boundaries, not tokens or allocations.
+        // Quoting follows next(): a brace inside a quoted name is data.
+        self.pushed = None;
+        let mut quoted = false;
+        let mut bare = false;
+        while self.pos < self.bytes.len() && depth > 0 {
+            let c = self.bytes[self.pos];
+            if quoted {
+                if c == b'"' { quoted = false; }
+            } else {
+                match c {
+                    b'"' if !bare => quoted = true,
+                    b'{' => { depth += 1; bare = false; }
+                    b'}' => { depth -= 1; bare = false; }
+                    b'=' => bare = false,
+                    c if (c as char).is_whitespace() => bare = false,
+                    _ => bare = true,
+                }
             }
+            self.pos += 1;
         }
     }
 }
@@ -147,8 +160,40 @@ pub fn sub_blocks(v: &Value) -> Vec<&Dict> {
 /// `items`. That is what the Python does, and several readers downstream
 /// depend on which of the three they get.
 pub fn parse_block(tok: &mut Tokens, skip: &[&str]) -> Value {
+    parse_fields(tok, skip, Shape::All)
+}
+
+/// Retain only fields used by the state and unit consumers. Keeping the
+/// existing duplicate-key representation preserves malformed/reference
+/// blocks and the ordering of repeated regiments, ships and embarked armies.
+#[derive(Clone, Copy)]
+enum Shape { All, State, Factory, Units, Regiment, Pop, Ship }
+
+impl Shape {
+    fn field(self, key: &str) -> Option<Shape> {
+        use Shape::*;
+        match (self, key) {
+            (All, _) => Some(All),
+            (State, "provinces" | "is_colonial") => Some(All),
+            (State, "state_buildings") => Some(Factory),
+            (Factory, "level") => Some(All),
+            (Units, "location") => Some(All),
+            (Units, "army" | "navy") => Some(Units),
+            (Units, "regiment") => Some(Regiment),
+            (Units, "ship") => Some(Ship),
+            (Regiment, "type" | "strength") => Some(All),
+            (Regiment, "pop") => Some(Pop),
+            (Pop, "id") => Some(All),
+            (Ship, "type" | "strength" | "experience") => Some(All),
+            _ => None,
+        }
+    }
+}
+
+fn parse_fields(tok: &mut Tokens, skip: &[&str], shape: Shape) -> Value {
     let mut pairs: Vec<(String, Value)> = Vec::new();
     let mut items: Vec<Value> = Vec::new();
+    let mut discarded_pair = false;
     loop {
         let t = match tok.next() {
             None => break,
@@ -156,7 +201,7 @@ pub fn parse_block(tok: &mut Tokens, skip: &[&str]) -> Value {
             Some(t) => t,
         };
         if t == "{" {
-            items.push(parse_block(tok, skip));
+            items.push(parse_fields(tok, skip, shape));
             continue;
         }
         if t == "=" {
@@ -165,20 +210,29 @@ pub fn parse_block(tok: &mut Tokens, skip: &[&str]) -> Value {
         let nxt = tok.next();
         match nxt {
             Some("=") => {
-                let key = unquote(t).to_string();
+                let key = unquote(t);
                 let val_tok = tok.next();
+                let child = match shape.field(key) {
+                    Some(child) => child,
+                    None => {
+                        discarded_pair |= val_tok.is_some()
+                            && !(val_tok == Some("{") && skip.contains(&key));
+                        if val_tok == Some("{") { tok.skip_to_close(); }
+                        continue;
+                    }
+                };
                 let val = match val_tok {
                     Some("{") => {
-                        if skip.contains(&key.as_str()) {
+                        if skip.contains(&key) {
                             tok.skip_to_close();
                             continue;
                         }
-                        parse_block(tok, skip)
+                        parse_fields(tok, skip, child)
                     }
                     None => break,
                     Some(v) => Value::Text(unquote(v).to_string()),
                 };
-                match pairs.iter_mut().find(|(k, _)| *k == key) {
+                match pairs.iter_mut().find(|(k, _)| k == key) {
                     Some(slot) => {
                         // A repeat: the pair becomes the list of both.
                         let held = std::mem::replace(&mut slot.1,
@@ -191,7 +245,7 @@ pub fn parse_block(tok: &mut Tokens, skip: &[&str]) -> Value {
                             one => slot.1 = Value::List(vec![one, val]),
                         }
                     }
-                    None => pairs.push((key, val)),
+                    None => pairs.push((key.to_string(), val)),
                 }
             }
             other => {
@@ -202,7 +256,7 @@ pub fn parse_block(tok: &mut Tokens, skip: &[&str]) -> Value {
             }
         }
     }
-    if !items.is_empty() && pairs.is_empty() {
+    if !items.is_empty() && pairs.is_empty() && !discarded_pair {
         return Value::List(items);
     }
     Value::Dict(Dict { pairs, items })
@@ -279,7 +333,7 @@ pub struct Country {
 #[derive(Default)]
 struct Tally {
     order: Vec<String>,
-    index: HashMap<String, usize>,
+    index: FxMap<String, usize>,
     total: Vec<f64>,
 }
 
@@ -483,7 +537,8 @@ pub fn read_country(text: &str, at: usize, stop: usize, tag: &str,
         match key {
             "army" | "navy" => {
                 let mut tok = Tokens::new(text, brace + 1);
-                let block = parse_block(&mut tok, UNIT_SKIP);
+                let block = parse_fields(&mut tok, UNIT_SKIP, Shape::Units);
+                i = tok.pos;
                 let mut wrapper = Dict::default();
                 wrapper.pairs.push((key.to_string(), block));
                 count_units(&wrapper, &mut units, None);
@@ -573,7 +628,9 @@ pub fn read_country(text: &str, at: usize, stop: usize, tag: &str,
             }
             "state" => {
                 let mut tok = Tokens::new(text, brace + 1);
-                if let Value::Dict(d) = parse_block(&mut tok, STATE_SKIP) {
+                let block = parse_fields(&mut tok, STATE_SKIP, Shape::State);
+                i = tok.pos;
+                if let Value::Dict(d) = block {
                     out.states += 1;
                     let ordinal = out.states;
                     let ids: Vec<i64> = match d.get("provinces") {

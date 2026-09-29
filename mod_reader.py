@@ -603,12 +603,11 @@ def _regions(path):
     if not os.path.isfile(target):
         return {}
     out = {}
-    for line in _plain(target).splitlines():
-        hit = re.match(r"\s*([A-Za-z0-9_]+)\s*=\s*\{([^}]*)\}", line)
-        if hit:
-            ids = [int(n) for n in hit.group(2).split() if n.isdigit()]
-            if ids:
-                out[hit.group(1)] = ids
+    # State definitions may span lines (including comments inside the block).
+    for hit in re.finditer(r"([A-Za-z0-9_]+)\s*=\s*\{([^{}]*)\}", _plain(target)):
+        ids = [int(n) for n in hit.group(2).split() if n.isdigit()]
+        if ids:
+            out[hit.group(1)] = ids
     return out
 
 
@@ -953,6 +952,61 @@ def country_colours(path):
     return out
 
 
+def is_install(path):
+    """Whether a folder is a Victoria II install: it holds the game's map."""
+    return bool(path) and os.path.isfile(os.path.join(path, "map", "default.map"))
+
+
+def _same_folder(a, b):
+    return (os.path.normcase(os.path.realpath(a))
+            == os.path.normcase(os.path.realpath(b)))
+
+
+def settle_game(mod_path, game_root):
+    """
+    (the folder to read as the mod, the install it runs on) for a run, or
+    ValueError saying in a sentence what to do instead.
+
+    A report is read on an installed Victoria II, and a mod is read where the
+    game loads it from: `<install>/mod/<name>`. Every file a mod does not
+    ship comes from the install beneath it -- the map, most of the flags,
+    whatever rules and names it leaves alone -- so a mod anywhere else is
+    missing all of that, and a report built from a stray copy says things the
+    game would not. So there is exactly one way to run: name the install
+    with `game_root`, and a mod inside its mod folder with `mod_path`, or no
+    mod for the unmodded game. A mod inside an install names that install
+    itself, and the install asked for as its own mod is vanilla.
+    """
+    game = None
+    if game_root:
+        game = os.path.abspath(os.path.expanduser(os.path.expandvars(game_root)))
+        if not is_install(game):
+            raise ValueError(
+                f"{game_root} is not a Victoria II install: there is no "
+                f"map/default.map in it. Point --game-root at the folder the "
+                f"game is installed in, the one holding map/, gfx/ and mod/.")
+    if not mod_path:
+        if not game:
+            raise ValueError(
+                "Say where Victoria II is installed, with --game-root. The "
+                "report is read on the game's own rules, or on a mod's when "
+                "--mod-path names one inside the game's mod folder.")
+        return game_root, game
+    mod = os.path.abspath(os.path.expanduser(os.path.expandvars(mod_path)))
+    home = mod if is_install(mod) else _base_game_path(mod)
+    if not home:
+        raise ValueError(
+            f"{mod_path} is not in a Victoria II install's mod folder. Put the "
+            f"mod -- its folder and its .mod file -- in the mod folder of the "
+            f"game it runs on, where the game loads it from, and point "
+            f"--mod-path at it there.")
+    if game and not _same_folder(home, game):
+        raise ValueError(
+            f"{mod_path} is in the mod folder of {home}, not of {game_root}. "
+            f"Point --game-root at the install the mod is in, or leave it out.")
+    return mod_path, home
+
+
 def _base_game_path(path):
     """
     The Victoria II install a mod sits inside, or None when there isn't one.
@@ -966,7 +1020,7 @@ def _base_game_path(path):
     root = os.path.dirname(os.path.dirname(os.path.abspath(path)))
     if os.path.basename(os.path.dirname(os.path.abspath(path))).lower() != "mod":
         return None
-    if not os.path.isfile(os.path.join(root, "map", "default.map")):
+    if not is_install(root):
         return None
     return root
 
@@ -1008,10 +1062,18 @@ def unit_positions(path):
     where a player expects rather than at a computed centroid. The file's y runs
     from the bottom of the map, matching the province bitmap, and is flipped to
     screen orientation by the caller that knows the height.
+
+    Kept in the temp folder beside the raster, because it is the game's
+    3,000-odd blocks parsed again on every report -- a tenth of a second --
+    and changes only with the file or the code that reads it.
     """
     target = _map_file(path, "positions.txt")
     if not os.path.isfile(target):
         return {}
+    slot = _positions_slot(target)
+    held = cacheio.load(slot)
+    if held is not None:
+        return held
     out = {}
     for key, block in read_clausewitz(target):
         if not isinstance(block, dict):
@@ -1032,7 +1094,25 @@ def unit_positions(path):
             out[int(key)] = (to_float(spot.get("x"), 0.0), to_float(spot.get("y"), 0.0))
         except (TypeError, ValueError):
             continue
+    cacheio.store(slot, out)
     return out
+
+
+def _positions_slot(target):
+    """Where one `positions.txt` read lives, keyed by the file and by the
+    code that parses it."""
+    version = _reader_fingerprint()
+    try:
+        info = os.stat(target)
+    except OSError:
+        return None
+    if not version:
+        return None
+    key = hashlib.md5(
+        f"{os.path.abspath(target)}|{info.st_size}|{info.st_mtime_ns}|{version}"
+        .encode("utf-8")).hexdigest()
+    return os.path.join(tempfile.gettempdir(), "vic2_analyzer_cache",
+                        "positions_" + key + ".pkl")
 
 
 def province_anchors(width, runs, wanted):
@@ -1057,35 +1137,47 @@ def province_anchors(width, runs, wanted):
     if not width or not wanted:
         return {}
 
-    def walk():
-        """(province, x, y) for every raster cell belonging to `wanted`."""
+    def segments():
+        """(province, y, first x, last x) for every stretch of one row of
+        raster cells belonging to `wanted` -- a run split where it wraps."""
         at = 0
         for pid, count in runs:
             if pid in wanted:
-                for i in range(at, at + count):
-                    yield pid, i % width, i // width
-            at += count
+                end = at + count
+                while at < end:
+                    y, x0 = divmod(at, width)
+                    x1 = min(width, x0 + end - at) - 1
+                    yield pid, y, x0, x1
+                    at += x1 - x0 + 1
+            else:
+                at += count
 
-    # Two passes rather than one, so nothing holds a province's pixels: at
-    # full scale the grid is twelve million cells and the land alone would be
-    # a few hundred megabytes of coordinate tuples.
+    # A stretch at a time rather than a cell at a time: at full scale a
+    # province is thousands of cells but a few dozen stretches. The sums are
+    # whole numbers, so they come out exactly as adding the cells did.
     totals = {}
-    for pid, x, y in walk():
+    for pid, y, x0, x1 in segments():
+        n = x1 - x0 + 1
         got = totals.get(pid)
         if got is None:
-            totals[pid] = [x, y, 1]
-        else:
-            got[0] += x
-            got[1] += y
-            got[2] += 1
+            totals[pid] = got = [0, 0, 0]
+        got[0] += (x0 + x1) * n // 2
+        got[1] += y * n
+        got[2] += n
     middle = {pid: (sx / n, sy / n) for pid, (sx, sy, n) in totals.items()}
 
+    # The cell nearest the middle, the first in reading order on a tie. Along
+    # one stretch the distance falls to the column nearest the middle and
+    # rises after it, so only the one or two columns either side of it can be
+    # nearest; the rest of the stretch cannot, and is not measured.
     best = {}
-    for pid, x, y in walk():
+    for pid, y, x0, x1 in segments():
         cx, cy = middle[pid]
-        far = (x - cx) ** 2 + (y - cy) ** 2
-        if pid not in best or far < best[pid][0]:
-            best[pid] = (far, x, y)
+        left = min(max(int(cx // 1), x0), x1)
+        for x in (left, min(left + 1, x1)) if left < x1 else (left,):
+            far = (x - cx) ** 2 + (y - cy) ** 2
+            if pid not in best or far < best[pid][0]:
+                best[pid] = (far, x, y)
     return {pid: [round(x + 0.5, 1), round(y + 0.5, 1)]
             for pid, (_far, x, y) in best.items()}
 
@@ -1132,10 +1224,12 @@ def province_raster(path, scale=4):
     36 MB, but province areas are contiguous, so a quarter-scale grid run-length
     encodes to about 130 KB and still shows every province in the game.
 
-    Only the sampled rows are read, so this costs a tenth of a second rather
-    than the minute a full decode would take. The result is kept next to the
-    parsed saves in the temp folder, because a mod's map does not change between
-    runs and half a second is most of what is left once the saves are cached.
+    Only the sampled rows are read, and no pixel is visited by Python: at the
+    default full scale, twelve million of them, this is 0.6 s where a loop
+    over them took 2.2 (a tenth of a second at scale 5). The result is kept
+    next to the parsed saves in the temp folder, because a mod's map does not
+    change between runs, and a run with nothing cached decodes it in another
+    process while the saves are read -- see `raster_ahead`.
     """
     bmp = _map_file(path, "provinces.bmp")
     csv_path = _map_file(path, "definition.csv")
@@ -1148,8 +1242,8 @@ def province_raster(path, scale=4):
         return held
 
     # Keyed by the three bytes as the bitmap stores them -- blue, green, red --
-    # so a pixel is looked up by slicing the row rather than by unpacking it
-    # into a tuple of three integers three million times.
+    # read as one little-endian integer with a zero byte on top, which is
+    # what a row becomes below.
     colour = {}
     with open(csv_path, "rb") as fh:
         next(fh, None)
@@ -1158,7 +1252,7 @@ def province_raster(path, scale=4):
             if len(bits) < 4:
                 continue
             try:
-                colour[bytes((int(bits[3]), int(bits[2]), int(bits[1])))] = \
+                colour[int(bits[3]) | int(bits[2]) << 8 | int(bits[1]) << 16] = \
                     int(bits[0])
             except ValueError:
                 continue
@@ -1174,10 +1268,13 @@ def province_raster(path, scale=4):
             return 0, 0, []
         stride = ((width * bpp + 31) // 32) * 4
         out_w, out_h = width // scale, height // scale
-        grid = array.array("i", bytes(4 * out_w * out_h))
-        at = 0
         step = scale * 3
         span = out_w * step
+        # One sampled pixel per four bytes: blue, green, red, and a zero that
+        # is never written, so the row reads as an array of colour integers.
+        wide = bytearray(4 * out_w)
+        runs = []
+        last, count = None, 0
         look = colour.get
         for oy in range(out_h):
             # Rows are stored top-down here despite the positive height a
@@ -1186,22 +1283,110 @@ def province_raster(path, scale=4):
             # the southern ocean.
             fh.seek(offset + (oy * scale) * stride)
             row = fh.read(stride)
-            # Provinces are contiguous, so a pixel almost always repeats the one
-            # to its left. Comparing three bytes is cheaper than a dict lookup,
-            # and skips nine in ten of them.
-            seen, pid = None, 0
-            for i in range(0, span, step):
-                key = row[i:i + 3]
-                if key != seen:
-                    seen = key
-                    pid = look(key, 0)
-                grid[at] = pid
-                at += 1
+            # Every channel of every sampled pixel moved in three slices,
+            # which is C's work rather than a Python step per pixel.
+            wide[0::4] = row[0:span:step]
+            wide[1::4] = row[1:span:step]
+            wide[2::4] = row[2:span:step]
+            # Provinces are contiguous, so a row is a hundred-odd runs of one
+            # colour, and only a run is looked up. Two colours can name the
+            # same province (or none), and a run can carry on into the next
+            # row, so runs are merged by province, not by colour.
+            for key, same in groupby(array.array("I", wide)):
+                pid = look(key, 0)
+                n = sum(1 for _ in same)
+                if pid == last:
+                    count += n
+                else:
+                    if last is not None:
+                        runs.append((last, count))
+                    last, count = pid, n
+        if last is not None:
+            runs.append((last, count))
 
-    made = (out_w, out_h, [(pid, sum(1 for _ in run))
-                           for pid, run in groupby(grid)])
+    made = (out_w, out_h, runs)
     cacheio.store(slot, made)
     return made
+
+
+def raster_ahead(path, scale):
+    """
+    Start decoding the province bitmap in another process, or return None
+    when there is nothing to start: no map, or one already cached.
+
+    The raster needs nothing but the map's two files, yet it used to be
+    decoded after every save had been read, by this process alone, with
+    every worker idle -- a third of a first run at full scale. Decoded
+    beside the saves instead, with `positions.txt` read alongside, both land
+    in their cache entries and the run finds them there. A process rather
+    than a thread, because this one is busy handing out saves and loading
+    the mod, and a thread decoding pixels only took turns with them:
+    measured, no faster at all.
+
+    What comes back is the process, to `join` before the raster is wanted.
+    If it failed or was killed, the entry is simply not there and the raster
+    is decoded where it is asked for, as it always was.
+    """
+    import multiprocessing
+    bmp = _map_file(path, "provinces.bmp")
+    csv_path = _map_file(path, "definition.csv")
+    if not (os.path.isfile(bmp) and os.path.isfile(csv_path)):
+        return None
+    slot = _raster_slot(bmp, csv_path, scale)
+    if not slot or (os.path.isfile(slot) and os.path.isfile(_text_slot(slot))):
+        return None
+    try:
+        proc = multiprocessing.Process(target=_decode_map,
+                                       args=(path, scale), daemon=True)
+        proc.start()
+    except (OSError, ValueError):
+        return None
+    return proc
+
+
+def _decode_map(path, scale):
+    """What `raster_ahead` runs: everything the map needs of the map's own
+    files, into the cache entries the run then reads."""
+    raster_text(path, scale)
+    unit_positions(path)
+
+
+_B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def _b36(n):
+    if n <= 0:
+        return "0"
+    out = ""
+    while n:
+        out = _B36[n % 36] + out
+        n //= 36
+    return out
+
+
+def raster_text(path, scale):
+    """
+    The raster's runs as the page carries them: `province` or
+    `province.count` in base 36, a space between runs, "" with no map.
+
+    Kept in a cache entry of its own beside the raster's, because it is the
+    same text on every run over the same map -- a quarter of a million runs
+    at full scale, a sixth of a second to spell out every time the report
+    was built.
+    """
+    bmp = _map_file(path, "provinces.bmp")
+    csv_path = _map_file(path, "definition.csv")
+    if not (os.path.isfile(bmp) and os.path.isfile(csv_path)):
+        return ""
+    text_slot = _text_slot(_raster_slot(bmp, csv_path, scale))
+    held = cacheio.load(text_slot)
+    if held is not None:
+        return held
+    _width, _height, runs = province_raster(path, scale)
+    text = " ".join(_b36(p) if c == 1 else _b36(p) + "." + _b36(c)
+                    for p, c in runs)
+    cacheio.store(text_slot, text)
+    return text
 
 
 def _raster_slot(bmp, csv_path, scale):
@@ -1218,6 +1403,12 @@ def _raster_slot(bmp, csv_path, scale):
         f"|{b.st_size}|{b.st_mtime_ns}|{scale}|2".encode("utf-8")).hexdigest()
     return os.path.join(tempfile.gettempdir(), "vic2_analyzer_cache",
                         "map_" + key + ".pkl")
+
+
+def _text_slot(raster_slot):
+    """Where `raster_text` keeps the raster's spelled-out runs, beside the
+    raster; the trailing number is the spelling's version."""
+    return raster_slot and raster_slot[:-len(".pkl")] + "_text1.pkl"
 
 
 def government_flag_types(path):
@@ -1999,20 +2190,15 @@ def has_rules(path):
 
 
 class ModHead(namedtuple("ModHead",
-                         "pop_types mob_types reform_names defines")):
+                         "pop_types mob_types reform_names defines province_regions")):
     """
     What reading a save needs of a mod, and the fields of `Mod` it fills.
 
-    The mod decides which pop types a save's provinces are read for, which
-    of those can mobilize, and which reforms a country block is read for;
-    `defines` settles the regiment size printed beside them. Those four take
-    a few milliseconds to read, where the whole mod takes most of a second
-    -- and nothing else in it is needed until every save has been read once.
-    So a run with no cached mod reads its saves on the strength of these,
-    while the rest loads beside them. See `vic2_analyzer.main`.
-
-    `_load_mod` takes its four fields from `_head`, so what is read here
-    and what the whole mod says cannot be worked out two ways.
+    Pop types, mobilizable types, reform names and defines settle the parsing
+    rules. Province regions let the scanner accumulate the report's geographic
+    state populations without building per-province composition tables.
+    These small inputs are available while the rest of an uncached mod loads.
+    `_load_mod` reuses them rather than reading them a second time.
     """
 
     __slots__ = ()
@@ -2031,7 +2217,8 @@ def _head(path):
         pop_types=frozenset(strata),
         mob_types=_mobilizable_types(strata),
         reform_names=_watched_reforms(reform_sizes, reform_groups, triggers),
-        defines=_read_defines(path))
+        defines=_read_defines(path),
+        province_regions=province_regions(path))
     return head, strata, reform_sizes, triggers
 
 
@@ -2145,7 +2332,7 @@ def _load_mod(path):
         "culture_names": culture_names(path),
         "display_names": display_names(path),
         "province_names": province_names(path),
-        "province_regions": province_regions(path),
+        "province_regions": head.province_regions,
         "state_names": state_names(path),
         "unit_kinds": unit_kinds(path),
         "naval_units": _naval_units(path),

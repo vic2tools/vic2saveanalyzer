@@ -162,10 +162,11 @@ def command_line():
     ap.add_argument("-o", "--out", default="vic2_report", help="output folder")
     ap.add_argument("--tags", nargs="*", help="only keep these country tags")
     ap.add_argument("--mod-path",
-                    help="game or mod folder containing technologies/ and "
-                         "inventions/. When given, each nation's mobilisation "
-                         "size is computed from the mod's own rules and "
-                         "--mobilisation-size becomes a fallback only.")
+                    help="the mod the campaign was played on, in the mod "
+                         "folder of the game it runs on: <Victoria 2>/mod/"
+                         "<name>. Each nation's mobilisation size is computed "
+                         "from its own rules, and --mobilisation-size becomes "
+                         "a fallback only. Leave it out for the unmodded game.")
     ap.add_argument("--check-inventions", action="store_true",
                     dest="check_inventions",
                     help="check the invention decode against the saves "
@@ -277,7 +278,11 @@ def command_line():
                          "is built from. The folder's own name. Without it the "
                          "one with the most saves is used.")
     ap.add_argument("--game-root",
-                    help="the Victoria 2 install folder, the one with mod/ "
-                         "inside. Only used by --cross, to find candidates.")
+                    help="the folder Victoria 2 is installed in, the one "
+                         "holding map/, gfx/ and mod/. Every report is read on "
+                         "it: on its own rules, or on those of a mod in its "
+                         "mod folder. A mod there names its install, so with "
+                         "--mod-path this can be left out. With --cross, also "
+                         "where to look for each campaign's mod.")
     ap.add_argument("-q", "--quiet", action="store_true")
     return ap.parse_args()

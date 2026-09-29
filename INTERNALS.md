@@ -504,6 +504,161 @@ occupied; only that third one took anything.
 
 ## Speed
 
+### The scanner reads the whole save, 2026-09-29
+
+After the round below, a save still cost a worker about 57 ms of Python
+beside the scanner's 90: the wars, the market and the great power list
+parsed here (21 ms), the scanner's JSON decoded (13), folded into nation
+records (10), and the pair pickled again for the cache (8). In `--record`
+mode (`scanner/src/record.rs`) the scanner does all of it: it reads those
+three blocks with its own copy of Python's tree and readers
+(`clause.rs`, on a thread beside the province scan), folds every nation
+exactly as `nation.fold_provinces` and `fold_country` do, settles the
+regiments, keeps the nations holding land or people, and answers with the
+pickled `(meta, nations)` (`pickle.rs`). The worker unpickles it in one call
+and writes the same bytes as its cache entry (`cacheio.store_pickled`).
+
+What Python's readers would have done and no save should make them do -- a
+block where a name belongs, whose repr Python would keep; an infinite number
+made an int -- the scanner refuses, and the save is read the old way, which
+does what it always did. So is a save cut short, which in this mode Python
+never opens to check (`mangled.py` found that one).
+
+Held to the old way on every save of both campaigns, 368 of them, value for
+value and type for type -- an int is not a float, a `defaultdict(int)` is
+not a dict, dict order counts -- by `~/.cache/vic2speed/recordcheck.py`, and
+on every save any check reads both ways by `testkit/readboth.py`, which now
+reads the record, the JSON answer and Python, and fails when any two differ.
+
+Around it:
+
+- **The page is gzipped a megabyte at a time on every core**
+  (`report.gzip_pieces`, as `pigz` does it): 387 ms to 63 over 31 MB, one
+  ordinary gzip stream, a few hundred bytes larger.
+- **`build_succession` gathers provinces only for nations that appeared or
+  vanished** between two saves: 96 ms to 27 over 265 saves, and the same
+  answer on 2,000 random campaigns built to have successors.
+- **The top-level blocks are found eight bytes at a time**
+  (`text::find_pair`): 16.5 ms a save to 5.8.
+- **The scanner's tables hash with Fx**, not SipHash: the province scan
+  55 ms to 52.
+
+| truly cold, 265 saves | before | after | rounds |
+|---|---:|---:|---|
+| sixteen threads | 10.51 s (9.75-10.58) | **8.46 s** (8.45-8.47) | 3, all won |
+| four cores (`--jobs 3`) | 16.97 s (16.95-16.98) | **14.15 s** (14.14-14.16) | 2, both won |
+| 103 saves, sixteen threads* | 4.78 s (4.76-4.80) | **3.90 s** (3.88-3.91) | 3, all won |
+
+\*Measured while three stray profiling scripts were loading the machine,
+both trees alike; the 265-save rows were taken again after they were
+stopped.
+
+**Tried and dropped:** reading the wars on a thread of the scanner's own
+made no difference by itself -- they are 10 ms of a save -- and was kept
+only because the record needs them read somewhere; starting the CSV thread
+at the top of the page build instead of at its compression (3.35 s to 3.37
+warm, the wrong way, as it was the last time).
+
+**Where a first run goes now** (8.3 s, truly cold, 265 saves): start-up
+0.35 s; the saves read 4.9 s (the scanner: 14 ms reading the file, 6
+finding blocks, 52 scanning, 16 building the record, a save); the second
+walk 1.0 s, bound by the parent unpickling what the workers send; the page
+1.6 s, of which the JSON 0.33 s and the CSV thread's tail about 0.1.
+
+### A first run measured as a first run, 2026-09-28
+
+"Cold" in every table below this one meant an empty analyzer cache, with the
+saves, the game and Python itself still in memory from the run before. A
+first run has none of that. `~/.cache/vic2speed/trulycold.py` deletes the
+cache at its real location and the tree's bytecode, and drops the saves, the
+game, the mod, the tree, the standard library and the scanner from the page
+cache (`posix_fadvise`, checked with `fincore`: 9.8 GB of saves to none).
+That adds 0.7-0.9 s to the 103-save campaign here, and it found a cost the
+old way hid: sorting the saves opened each one's first 4 KB in turn, 0.47 s
+off a cold disk for 265 saves where a cached one took 30 ms.
+
+Measured on a second campaign as well, 265 saves (9.1 GB, 1872-1894).
+
+- **Every save's date is read once, on sixteen threads** (`dates_of`), for
+  both the sort and the one-save-a-date check that read it again.
+- **The wars, the market and the great powers are tokenised a block at a
+  time** (`v2parse.parse_span`), the change the 24 September session left as
+  a diff, ported: the same trees on all 59,664 such blocks of both campaigns
+  and on 100,000 random token streams; 7.52 s to 5.06 over 265 saves.
+- **The map's runs are spelled once per map** (`raster_text`), cached beside
+  the raster and made by the process that decodes it: a sixth of a second
+  every report.
+- **The state snapshots travel beside the payload** (`STATE_CHUNKS` in the
+  page), not gzipped a second time inside it: they are gzipped in the worker
+  already and were three quarters of the compressed page. The page's four
+  small fields are filled before the data goes in rather than after it.
+- **Prices are merged by date and then good**, and sorted a date at a time:
+  336 ms to 157 over 265 saves, the same 218,160 rows.
+
+| truly cold | before | after | rounds |
+|---|---:|---:|---|
+| 265 saves | 12.53 s (12.12-12.61) | **11.61 s** (11.36-11.72) | 3, all won |
+| 103 saves | 5.14 s (5.12-5.19) | **4.69 s** (4.65-4.75) | 3, all won |
+| 265 saves, four cores | 18.83, 19.88 s | **18.47, 18.30 s** | 2, both won |
+| 265 saves, warm rebuild | 4.36 s | **3.80 s** | 5, all won |
+
+The CSVs and printed output are byte-identical on both campaigns and with
+`--split`; the page carries the same data, which Firefox decodes to the same
+152,959 state records.
+
+**Tried and dropped:** turning each state's list of pop types and cultures
+into numbers once instead of name by name (2.4 ms a save to 2.3, not worth
+the code); a wider window of saves in flight for the second walk (1.30 s
+either way). The second walk is bound by the parent unpickling 57 MB of
+results a run (0.56 s of 1.3 over 265 saves), most of it the main table's
+row dicts; cutting that means building the series and facts in the workers,
+as `HANDOFF.md` item 2 says.
+
+### The map on a first run, 2026-09-28
+
+Once the game was installed, reading the mod on top of it doubled a first
+run: 3.5 s to 6.3 s. The cause was the map. At the default `--map-scale 1`
+the province bitmap is 12.1 million pixels, and `province_raster` visited
+each one in Python: 2.1 s, run by the parent after the last save, with every
+worker idle. Its docstring's "a tenth of a second" had been measured at
+scale 4-5.
+
+- **Pixels are moved in bulk.** Each row's sampled pixels are gathered with
+  three slices into an array of colour integers, and only runs are looked
+  up: 2.25 s to 0.62 s, the same 236,012 runs.
+- **It is decoded in another process while the saves are read**
+  (`raster_ahead`), which fills the cache entry the run then reads. A thread
+  was tried first: with the old decoder no faster at all, because the
+  parent is already handing out saves and loading the mod on one; with the
+  new one 4.85 s where a process gives 4.36.
+- **`positions.txt` is cached** beside the raster, and read in the same
+  process: 0.10 s on every report.
+- **`province_anchors` works a stretch of a row at a time**, not a cell at
+  a time: 0.24 s every report to at most 0.06 (all 99 provinces this map's
+  `positions.txt` misses); 5.34 s to 0.29 with every province wanted, the
+  same anchors.
+- `app.py` calls `freeze_support` before importing the window, so a packaged
+  worker no longer imports tkinter and `publish` (about 45 ms each here;
+  not measured on Windows).
+
+| run, 103 saves, the mod on the Steam game | before | after | rounds |
+|---|---:|---:|---|
+| cold | 6.35 s (6.12-6.38) | **4.15 s** (4.14-4.17) | 5, all won |
+| cold on four cores (`--jobs 3`) | 8.51 s (8.45-8.65) | **6.34 s** (6.32-6.35) | 3, all won |
+| rebuild from a warm cache | 2.06 s (2.04-2.08) | **1.75 s** (1.73-1.77) | 15, all won |
+| nothing changed | 86.8 ms | 88.0 ms | 9, 4 won |
+
+The nine outputs are byte-identical, cold and warm, with `--no-cache`, under
+spawn, at `--map-scale 5` and on the game with no mod. `testkit/raster.py`
+checks the decoder and the anchors against pixel-by-pixel readings, and
+eight mutations prove it.
+
+**Not done:** the base36 run string (about 0.1 s every report) is still
+encoded each time; the cache still lives in the temp folder, which Fedora
+empties at every boot; and the Windows exe still unpacks itself on every
+launch (`--onefile`: 228 ms against 119 for `--onedir`, measured on Linux).
+Where the cache lives and how the program ships are the maintainer's to decide.
+
 ### What was done about it, 2026-09-24
 
 The tree the session started from (`9ee3aeb`, with the scanner it was built

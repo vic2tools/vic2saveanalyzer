@@ -119,3 +119,41 @@ pub(crate) fn find(hay: &[u8], needle: &[u8], from: usize, stop: usize) -> Optio
         .position(|w| w == needle)
         .map(|i| i + from)
 }
+
+/// Where the two bytes `a` then `b` next start in `hay[from..stop]`: `find`
+/// for a two-byte needle, eight bytes at a time.
+///
+/// `top_level_blocks` looks for `\n{` across the whole file, and the sliding
+/// window above spent a sixth of a save's scan doing it: 34 MB for three
+/// thousand hits. This compares a word at once -- a byte of the word is
+/// marked where it equals `a`, another where it equals `b`, and a hit is an
+/// `a` mark with a `b` mark in the byte after it, the last byte of one word
+/// carried into the first of the next. Plain arithmetic on a `u64`, so the
+/// same everywhere the scanner is built.
+pub(crate) fn find_pair(hay: &[u8], a: u8, b: u8, from: usize, stop: usize) -> Option<usize> {
+    const LOW: u64 = 0x0101_0101_0101_0101;
+    const SEVEN: u64 = 0x7f7f_7f7f_7f7f_7f7f;
+    let end = stop.min(hay.len());
+    if from >= end {
+        return None;
+    }
+    // The high bit of each byte of `x` that is zero, and of no other.
+    let zeros = |x: u64| !(((x & SEVEN).wrapping_add(SEVEN)) | x | SEVEN);
+    let (wa, wb) = (LOW * a as u64, LOW * b as u64);
+    let mut i = from;
+    let mut carry = 0u64;
+    while i + 8 <= end {
+        let w = u64::from_le_bytes(hay[i..i + 8].try_into().unwrap());
+        let ma = zeros(w ^ wa);
+        let hit = ((ma << 8) | carry) & zeros(w ^ wb);
+        if hit != 0 {
+            let at = i + (hit.trailing_zeros() / 8) as usize;
+            return Some(at - 1);
+        }
+        carry = ma >> 56;
+        i += 8;
+    }
+    // The last few bytes, and a pair that starts in the last whole word.
+    let start = if i > from && carry != 0 { i - 1 } else { i };
+    hay[start..end].windows(2).position(|w| w[0] == a && w[1] == b).map(|k| start + k)
+}

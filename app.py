@@ -26,8 +26,18 @@ make either of them harder to test.
 Packaged as vic2saveanalyzer.exe by build_exe.py.
 """
 
+import multiprocessing
 import os
 import sys
+
+# Before anything else is imported. A worker in the packaged program starts
+# by running this file again from the top, and stops only here: every import
+# above this line is made again in every worker. The window's are not needed
+# to read a save -- tkinter, and `publish` bringing the web and mail modules
+# with it, about 45 ms of each worker's start -- so they come after.
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+
 import threading
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk

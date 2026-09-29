@@ -264,7 +264,7 @@ def the_diagnostic_explains_the_report():
 
     holding = tempfile.mkdtemp(prefix="vic2explain")
     try:
-        mod = matching.a_mod(os.path.join(holding, "mod"), pop_per_regiment=1000)
+        mod = matching.a_mod_in_a_game(holding, "mod", pop_per_regiment=1000)
         with open(os.path.join(mod, "common", "triggered_modifiers.txt"),
                   "w") as fh:
             fh.write("war_footing = {\n\ticon = 1\n\ttrigger = {\n"

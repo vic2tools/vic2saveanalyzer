@@ -31,6 +31,8 @@ python3 testkit/invariants.py out/nations_timeseries.csv out/report.html
 python3 testkit/mangled.py "/path/to/one/save.v2"
 python3 testkit/parity.py ["/path/to/saves"] [8]   # builds one if none
 python3 testkit/boots.py out/report.html
+python3 testkit/state_history_ui.py out/report.html # every decoded state value and order
+python3 testkit/map_rendering.py out/report.html # map pixels, seams, and cache reuse
 python3 testkit/looks.py out/report.html shot.png   # for eyes, not for CI
 python3 testkit/keeping.py                        # no saves needed
 python3 testkit/histories.py                      # no saves needed
@@ -39,6 +41,7 @@ python3 testkit/savefmt.py                       # no saves needed
 python3 testkit/packing.py                       # no saves needed
 python3 testkit/matching.py                      # no saves needed
 python3 testkit/modcache.py                      # no saves needed
+python3 testkit/raster.py                        # no saves needed
 python3 testkit/noworkers.py                     # no saves needed
 python3 testkit/staleness.py                     # no saves needed
 python3 testkit/mobrate.py                       # no saves needed
@@ -168,6 +171,12 @@ discriminator off and exactly its own case fails.
 changes to inherited base-game files, local overrides, parser dependencies,
 corrupt cache entries and failed atomic writes. It also checks quoted braces
 and the shared tokenizer's block skip.
+
+**`raster.py`** decodes a small bitmap of awkward runs -- a colour the map
+does not name, two colours for one province, runs carrying into the next
+row, row padding, rows a scale skips -- and compares it with a reading done
+a pixel at a time, at four scales. It also checks that `raster_ahead` leaves
+the cache entry behind, and starts nothing without a map or with one cached.
 
 **`caching.py`** checks that invention summaries preserve order, skip invalid
 saves, survive corruption, and expire after same-size edits within one second.
@@ -337,7 +346,8 @@ bytes of another one, which catches a changed number and misses the only
 failure a reader would notice: a page that does not run. A helper called
 from outside the function that defined it is a `ReferenceError` at boot and
 a blank page, and the file is byte-for-byte what it was supposed to be.
-Then it builds a campaign of its own whose war name and one of whose belligerents are script, and requires both to stay text: names come out of saves and mods, and a war named `<img onerror=...>` used to run when the Wars tab drew. `boots.py --hostile` runs that part alone.
+It also opens every war, and the first battle of each, because a war's detail is drawn only when its row is clicked: until it did, no check had ever run the infobox, which writes more names out of saves into HTML than anything else on the page.
+Then it builds a campaign of its own whose war name and one of whose belligerents are script, and requires both to stay text, and the page not to throw: names come out of saves and mods, and a war named `<img onerror=...>` used to run when the Wars tab drew. `boots.py --hostile` runs that part alone.
 It also checks the tab the reader lands on has something on it. That one
 is there because counting missed it: a report built without a mod opened on
 the map tab with no map in it, every section inside hidden, the page blank

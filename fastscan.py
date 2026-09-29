@@ -29,6 +29,9 @@ import os
 import subprocess
 import sys
 import threading
+import hashlib
+import tempfile
+from functools import lru_cache
 
 from nation import fold_country, fold_provinces
 
@@ -42,7 +45,7 @@ HEAD_NEEDED = frozenset(("date", "player", "blocks"))
 # The whole answer of a serving scanner to a file it turns down, in place of
 # the first line. See `Served`.
 REFUSED = "refused"
-NEEDED = frozenset(("world_pop", "owners", "pop_ids", "pop_kinds",
+NEEDED = frozenset(("population_aggregates", "world_pop", "owners", "pop_ids", "pop_kinds",
                     "kind_names", "nations"))
 _FOUND = None
 
@@ -289,6 +292,21 @@ class Served:
             self._lost()
         return got.rstrip(b"\n")
 
+    def blob(self, size):
+        """The `size` bytes of a `--record` answer, or None if they did not all come."""
+        if not self._open:
+            return None
+        try:
+            got = self.server.proc.stdout.read(size)
+        except (OSError, ValueError):
+            got = b""
+        if len(got) != size:
+            self._lost()
+            return None
+        self.returncode = 0
+        self._done()
+        return got
+
     def remainder(self):
         if not self._open:
             return None
@@ -364,8 +382,51 @@ def _serve(binary, path, told, timeout):
     return Served(_SERVER, timeout)
 
 
+@lru_cache(maxsize=8)
+def _population_group_description(groups):
+    text = "".join(f"{pid} {group}\n" for pid, group in groups)
+    folder = os.path.join(tempfile.gettempdir(), "vic2_analyzer_cache")
+    path = os.path.join(folder, "population_groups_" +
+                        hashlib.sha256(text.encode()).hexdigest() + ".txt")
+    return text, path
+
+
+def _population_group_file(groups):
+    """Shared numeric lookup, passed as a file to avoid Windows' argv limit."""
+    text, path = _population_group_description(groups)
+    if not os.path.isfile(path):
+        folder = os.path.dirname(path)
+        os.makedirs(folder, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", dir=folder, delete=False) as fh:
+            temporary = fh.name
+            fh.write(text)
+        try:
+            os.replace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    return path
+
+
+def _told(pop_types, mob_types, army_techs, navy_techs, reform_keys,
+          population_groups):
+    """What the scanner is started with: the lists a save is read against.
+    None when the grouping file cannot be written."""
+    told = ["--pop-types", ",".join(sorted(pop_types)),
+            "--mob-types", ",".join(sorted(mob_types)),
+            "--army-techs", ",".join(sorted(army_techs)),
+            "--navy-techs", ",".join(sorted(navy_techs)),
+            "--reform-keys", ",".join(sorted(reform_keys))]
+    if population_groups:
+        try:
+            told += ["--population-groups", _population_group_file(population_groups)]
+        except OSError:
+            return None   # Python can use the lookup directly.
+    return told
+
+
 def start(path, pop_types, mob_types, army_techs=(), navy_techs=(),
-          reform_keys=(), timeout=600):
+          reform_keys=(), timeout=600, population_groups=()):
     """
     Set the scanner going and come straight back.
 
@@ -378,11 +439,10 @@ def start(path, pop_types, mob_types, army_techs=(), navy_techs=(),
     binary = available()
     if binary is None:
         return None
-    told = ["--pop-types", ",".join(sorted(pop_types)),
-            "--mob-types", ",".join(sorted(mob_types)),
-            "--army-techs", ",".join(sorted(army_techs)),
-            "--navy-techs", ",".join(sorted(navy_techs)),
-            "--reform-keys", ",".join(sorted(reform_keys))]
+    told = _told(pop_types, mob_types, army_techs, navy_techs, reform_keys,
+                 population_groups)
+    if told is None:
+        return None
     served = _serve(binary, path, told, timeout)
     if served is not None:
         return served
@@ -390,6 +450,48 @@ def start(path, pop_types, mob_types, army_techs=(), navy_techs=(),
         return Running(_launch([binary, path] + told), timeout)
     except OSError:
         return None
+
+
+def record(path, pop_types, mob_types, army_techs=(), navy_techs=(),
+           reform_keys=(), timeout=600, population_groups=()):
+    """
+    The whole save, read by the scanner: the pickled `(meta, nations)`
+    `readsave.analyze_save` returns, as bytes. Or None, and the caller reads
+    it the other way.
+
+    The scanner reads the wars, the market and the great power list too in
+    this mode, and builds every nation's record itself (`scanner/src/
+    record.rs`), so nothing of the save is read or folded here: what comes
+    back is unpickled in one call, and written to the cache as it is. That
+    was about fifty milliseconds of Python a save -- parsing the wars,
+    decoding the JSON, folding it into records, pickling them for the cache
+    -- against a few for the unpickling.
+
+    Only from a serving scanner. A save it will not read whole -- the wars
+    holding something only Python's reader copes with, a zip, a reflowed
+    file -- is refused, and `start` and the JSON answer, or Python alone,
+    read it instead.
+    """
+    binary = available()
+    if binary is None or not _SERVES:
+        return None
+    told = _told(pop_types, mob_types, army_techs, navy_techs, reform_keys,
+                 population_groups)
+    if told is None:
+        return None
+    served = _serve(binary, path, told + ["--record"], timeout)
+    if served is None:
+        return None
+    line = served.line()
+    if not line:
+        return None               # refused, or the server went
+    try:
+        size = int(json.loads(line)["record"])
+    except (ValueError, KeyError, TypeError):
+        served.abandon()
+        note_unusable()
+        return None
+    return served.blob(size)
 
 
 def head(running):
@@ -472,7 +574,7 @@ def note_unusable():
 
 
 def scan(path, pop_types, mob_types, timeout=600, army_techs=(),
-         navy_techs=(), reform_keys=()):
+         navy_techs=(), reform_keys=(), population_groups=()):
     """
     Start the scanner and wait for all of it. Both halves, as one dict.
 
@@ -480,7 +582,7 @@ def scan(path, pop_types, mob_types, timeout=600, army_techs=(),
     analyzer takes the two halves separately and works between them.
     """
     running = start(path, pop_types, mob_types, army_techs, navy_techs,
-                    reform_keys, timeout=timeout)
+                    reform_keys, timeout=timeout, population_groups=population_groups)
     first = head(running)
     if first is None:
         if running is not None:

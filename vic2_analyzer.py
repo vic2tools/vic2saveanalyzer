@@ -55,7 +55,7 @@ from readfolder import (
 from readfolder import Cancelled, set_cancel_check, set_progress  # noqa: F401
 from run import Run, RunError, command_line
 # The front of a save, read without the rest: its date, for the order.
-from savehead import in_date_order, one_per_date
+from savehead import dates_of, in_date_order, one_per_date
 from stamp import already_built, forget_stamp, report_stamp, write_stamp
 # What a nation comes to once its save is read. Called through the module,
 # never imported by name: `testkit/crossrows.py` replaces
@@ -348,7 +348,7 @@ class Aside:
 
 
 def build_html(args, mod, campaign, price_rows, snapshot_rows,
-               cross_payload, tables):
+               cross_payload, tables, map_ahead=None):
     """
     The report page, or None when `--no-html` said not to build one.
 
@@ -362,6 +362,9 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
     over so `build_report` can start it at the one moment in the run when
     the interpreter lock is free, and it is drained here if the report
     throws, so a half-written CSV is not left behind a stack trace.
+
+    `map_ahead` is the process decoding the province bitmap since the saves
+    began (see `_map_ahead`), waited for here before the map is built.
     """
     rows, parsed = campaign.rows, campaign.parsed
     naval_profiles, naval_of = campaign.naval_profiles, campaign.naval_of
@@ -371,10 +374,14 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
     if not args.no_html:
         from report import (build_map, build_report, build_succession,
                             flags_for, nation_names)
-        from wars import build_wars
-        report_names = nation_names(mod, parsed)
+        from wars import build_wars, war_tags
+        wars = build_wars(parsed, mod.province_names, mod.province_regions,
+                          mod.state_names, mod.unit_kinds, book=war_book)
+        report_names = nation_names(mod, parsed, also=war_tags(wars))
         # The map needs the mod's province bitmap; without --mod-path the tab
         # is dropped rather than shown empty.
+        if map_ahead is not None:
+            map_ahead.join()
         map_data = build_map(mod, parsed, args.map_scale) if mod else None
         if map_data and map_data.get("derived") and not args.quiet:
             print(f"map/positions.txt anchors no army counter for "
@@ -391,9 +398,7 @@ def build_html(args, mod, campaign, price_rows, snapshot_rows,
                 flags=flags,
                 cross=cross_payload,
                 technology=mod.technology,
-                wars=build_wars(parsed, mod.province_names,
-                                mod.province_regions, mod.state_names,
-                                mod.unit_kinds, book=war_book),
+                wars=wars,
                 succession=build_succession(parsed, mod.formations),
                 culture_names=mod.culture_names,
                 display_names=mod.display_names,
@@ -482,6 +487,28 @@ def _open_mod(args, signature):
         return mod, mod, None
     except (OSError, ValueError) as exc:
         raise RunError(str(exc)) from exc
+
+
+def _on_the_game(args):
+    """
+    (the run with its mod settled on an installed Victoria II, a line saying
+    which), or refused in a sentence (see `mod_reader.settle_game`). With no
+    mod named, the mod is the install itself, which is how the unmodded game
+    is read.
+
+    A `--cross` run settles each campaign's mod as it surveys them.
+    """
+    if args.cross:
+        return args, ""
+    from mod_reader import is_install, settle_game
+    try:
+        mod_path, game = settle_game(args.mod_path, args.game_root)
+    except ValueError as exc:
+        raise RunError(str(exc)) from exc
+    said = (f"Victoria II at {game}, "
+            + ("unmodded." if is_install(mod_path) else
+               f"with {os.path.basename(os.path.normpath(mod_path))}."))
+    return replace(args, mod_path=mod_path), said
 
 
 def _say_mod(mod, live, walked, every_nation):
@@ -589,6 +616,22 @@ def analyze(run, cancel=None, progress=None, ready=None):
         set_report_ready(None)
 
 
+def _map_ahead(args):
+    """
+    The process decoding the map's province bitmap while the saves are read
+    (`mod_reader.raster_ahead`), or None.
+
+    Started only for a run that goes on to draw the map: one building the
+    page, and not one of the diagnostics that end the run before it. A run
+    it was started for needlessly loses nothing but the core it used.
+    """
+    if (args.no_html or not args.mod_path or args.explain_mob_pool
+            or args.check_inventions or args.inventions or args.explain_mob):
+        return None
+    from mod_reader import raster_ahead
+    return raster_ahead(args.mod_path, args.map_scale)
+
+
 def start_forkserver():
     """
     Start the process workers are made from, now, with what they will need.
@@ -690,6 +733,10 @@ def _main(run=None):
         verify_all(files, verify_under, args.jobs)
         return
 
+    # The game and the mod settled before anything else is made or read: a
+    # run that is going to be refused leaves no output folder behind.
+    args, settled = _on_the_game(args)
+
     # Asked for now rather than after the campaign has been read. A folder
     # that cannot be made -- a typo, a drive that is not plugged in, a place
     # this user may not write -- used to surface as a stack trace out of
@@ -703,6 +750,9 @@ def _main(run=None):
     verbose = not args.quiet
     if verbose:
         print(f"Found {len(files)} save(s).")
+        if settled:
+            print(settled)
+
 
     # Whether there is anything to do is asked before the mod is loaded. The
     # stamp signs the mod's files rather than reading them, so a run with
@@ -721,6 +771,7 @@ def _main(run=None):
     start_forkserver()
 
     mod, known, loading = _open_mod(args, signature)
+    map_ahead = _map_ahead(args)
     # The run as the mod settles it, because the rest of a single-campaign
     # run reads these two off it -- the finishing spec, the reading below,
     # the two printed lines, and `explain.py`. `run_cross` asks the same
@@ -751,8 +802,10 @@ def _main(run=None):
     # Oldest first, decided from each save's own first line rather than by
     # sorting them after the fact -- the campaign is now walked in one pass
     # and a pass cannot be sorted halfway through. `stream` is a generator:
-    # nothing is read until the loop below asks for it.
-    files = one_per_date(in_date_order(files))
+    # nothing is read until the loop below asks for it. Each save's date is
+    # read once, and all of them at once (`dates_of`).
+    dates = dates_of(files)
+    files = one_per_date(in_date_order(files, dates), dates)
     wanted = set(args.tags) if args.tags else None
     # A nation's mobilizable pops are one entry per pop per province -- eleven
     # thousand of them for a large nation, two megabytes a save -- and the only
@@ -868,7 +921,7 @@ def _main(run=None):
         campaign.text, price_rows, snapshot_rows, args.out, pop_columns))
 
     html_path = build_html(args, mod, campaign, price_rows,
-                           snapshot_rows, cross_payload, tables)
+                           snapshot_rows, cross_payload, tables, map_ahead)
     if html_path:
         _tell_report_ready(html_path)
     # Started at the compression if a report was built, and simply done

@@ -130,32 +130,14 @@ def default_saves():
     return _first_folder([os.path.join(r, "save games") for r in roots] + roots)
 
 
-def _steam_libraries():
-    """Every Steam library folder this machine has, common ones first.
+def default_game_home():
+    """Where Steam keeps its games, so Browse for the game opens beside it.
 
-    Steam records extra libraries in `libraryfolders.vdf` beside the default
-    one, which is how a game ends up on a second drive. The file is read with
-    a regex rather than a vdf parser: one key is wanted out of it.
+    Like `default_mod_home`, a place to start browsing and not an answer:
+    the box stays empty until the install is picked.
     """
-    seen = []
-    for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles"),
-                 r"C:\Program Files (x86)", r"C:\Program Files"):
-        if base:
-            seen.append(os.path.join(base, "Steam"))
-    out = list(seen)
-    for root in seen:
-        vdf = os.path.join(root, "steamapps", "libraryfolders.vdf")
-        if not os.path.isfile(vdf):
-            continue
-        try:
-            with open(vdf, encoding="utf-8", errors="replace") as fh:
-                text = fh.read()
-        except OSError:
-            continue
-        import re
-        out += [p.replace("\\\\", "\\")
-                for p in re.findall(r'"path"\s+"([^"]+)"', text)]
-    return out
+    return _first_folder([os.path.join(lib, "steamapps", "common")
+                          for lib in settings.steam_libraries()])
 
 
 def default_mod_home():
@@ -166,7 +148,7 @@ def default_mod_home():
     """
     return _first_folder([
         os.path.join(lib, "steamapps", "common", "Victoria 2", "mod")
-        for lib in _steam_libraries()])
+        for lib in settings.steam_libraries()])
 
 
 def default_out():
@@ -235,6 +217,7 @@ class App:
         # can be one click. `mod_home` is only where Browse opens.
         self.mod_home = default_mod_home()
         self.saves = tk.StringVar(value=saved.get("saves") or default_saves())
+        self.game = tk.StringVar(value=saved.get("game", ""))
         self.mod = tk.StringVar(value=saved.get("mod", ""))
         self.out = tk.StringVar(value=saved.get("out") or default_out())
         self.open_after = tk.BooleanVar(value=saved.get("open_after", True))
@@ -243,9 +226,12 @@ class App:
             ("Saves folder", self.saves,
              "One campaign's .v2 files, or the folder all your campaigns "
              "live in"),
+            ("Victoria 2 folder", self.game,
+             "Where the game is installed: the folder holding map/, gfx/ "
+             "and mod/"),
             ("Mod folder", self.mod,
-             "The mod's own folder, the one with common/ inside -- or "
-             "Victoria 2/mod, to work each campaign's mod out from its saves"),
+             "Empty for the unmodded game. Otherwise a mod in that folder's "
+             "mod/ -- or mod/ itself, to work each campaign's mod out"),
             ("Report goes to", self.out,
              "Where to write the report and the spreadsheets"),
         ]
@@ -298,16 +284,16 @@ class App:
             "<Configure>",
             lambda e: self.camp_canvas.itemconfigure(self.camp_window,
                                                      width=e.width))
-        self.primary_row.grid(row=6, column=0, columnspan=3, sticky="ew",
+        self.primary_row.grid(row=8, column=0, columnspan=3, sticky="ew",
                               padx=8, pady=(0, 6))
         self.primary_row.grid_remove()
 
         ttk.Checkbutton(frame, text="Open the report when it is finished",
                         variable=self.open_after).grid(
-            row=7, column=1, sticky="w", padx=8)
+            row=9, column=1, sticky="w", padx=8)
 
         buttons = ttk.Frame(frame)
-        buttons.grid(row=8, column=1, sticky="w", padx=8, pady=(10, 6))
+        buttons.grid(row=10, column=1, sticky="w", padx=8, pady=(10, 6))
         self.button = ttk.Button(buttons, text="Analyze", command=self.start)
         self.button.pack(side="left")
         self.stop_button = ttk.Button(buttons, text="Stop", command=self.cancel,
@@ -321,21 +307,21 @@ class App:
         self.seen = None              # (saves done, saves in all), from the
         self.began = 0.0              # worker thread; drawn by `drain`
         self.status = ttk.Label(frame, text="Pick a saves folder to begin.")
-        self.status.grid(row=8, column=2, sticky="e", pady=(10, 6))
+        self.status.grid(row=10, column=2, sticky="e", pady=(10, 6))
 
         self.log = tk.Text(frame, height=14, wrap="none",
                            background="#2A0F17", foreground="#F4E7CC",
                            insertbackground="#F4E7CC", relief="flat")
-        self.log.grid(row=9, column=0, columnspan=3, sticky="nsew")
-        frame.rowconfigure(9, weight=1)
+        self.log.grid(row=11, column=0, columnspan=3, sticky="nsew")
+        frame.rowconfigure(11, weight=1)
         bar = ttk.Scrollbar(frame, command=self.log.yview)
-        bar.grid(row=9, column=3, sticky="ns")
+        bar.grid(row=11, column=3, sticky="ns")
         self.log.configure(yscrollcommand=bar.set, state="disabled")
 
         # A footer rather than a place in the main flow: emptying the
         # cache is housekeeping, not a step in running an analysis.
         foot = ttk.Frame(frame)
-        foot.grid(row=10, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        foot.grid(row=12, column=0, columnspan=4, sticky="ew", pady=(8, 0))
         self.cache_label = ttk.Label(foot, text="", foreground="#666")
         self.cache_label.pack(side="left")
         self.cache_button = ttk.Button(foot, text="Wipe cache", width=12,
@@ -345,6 +331,7 @@ class App:
 
         self.saves.trace_add("write", lambda *_a: self.refresh_campaigns())
         self.mod.trace_add("write", lambda *_a: self.refresh_campaigns())
+        self.game.trace_add("write", lambda *_a: self.refresh_campaigns())
         self.refresh_campaigns()
 
         root.after(80, self.drain)
@@ -355,7 +342,10 @@ class App:
     def pick(self, var, label):
         start = var.get()
         if not start:
-            start = (self.mod_home if var is self.mod
+            game = self.game.get().strip()
+            start = ((os.path.join(game, "mod") if game else self.mod_home)
+                     if var is self.mod
+                     else default_game_home() if var is self.game
                      else default_saves() if var is self.saves else "")
         chosen = filedialog.askdirectory(
             title=label, initialdir=start or os.path.expanduser("~"))
@@ -378,7 +368,12 @@ class App:
         """
         mod = self.mod.get().strip()
         kind, where = mod_kind(mod)
-        if kind == "home":
+        game = self.game.get().strip()
+        # Every mod a campaign can be read under is in the game's mod folder,
+        # so that is where the list comes from once the game is named.
+        if game:
+            home = os.path.join(game, "mod")
+        elif kind == "home":
             home = os.path.join(where, "mod")
         elif kind == "mod":
             home = os.path.dirname(os.path.normpath(mod))
@@ -402,7 +397,7 @@ class App:
         rest = [n for n in out
                 if os.path.normcase(os.path.normpath(out[n])) != here]
         # Offered only when there is somewhere to search.
-        search = [AUTO] if search_root(mod) else []
+        search = [AUTO] if game or search_root(mod) else []
         return [SELECTED] + search + rest, SELECTED
 
     def refresh_campaigns(self):
@@ -584,8 +579,20 @@ class App:
                      "the folder all your campaigns live in.")
             return
 
+        # The game first: every report is read on it, and a mod only ever
+        # inside its mod folder. See `mod_reader.settle_game`.
+        from mod_reader import is_install, settle_game
+        game = self.game.get().strip()
+        if not is_install(game):
+            messagebox.showerror(
+                APP, "Point the Victoria 2 folder at where the game is "
+                     "installed: the folder holding map/, gfx/ and mod/.\n\n"
+                     "The report is read on the game's own rules, or on those "
+                     "of a mod in its mod folder.")
+            return
+
         mod = self.mod.get().strip()
-        kind, _where = mod_kind(mod)
+        kind, where = mod_kind(mod)
         if kind == "bad":
             messagebox.showerror(
                 APP, "That folder is neither a mod nor the folder mods live "
@@ -593,6 +600,24 @@ class App:
                      "holding common/, map/ and history/ -- or at "
                      "Victoria 2/mod itself, and each campaign's mod will be "
                      "worked out from its own saves.")
+            return
+        try:
+            if kind == "mod":
+                settle_game(mod, game)
+            elif kind == "home" and not is_install(where):
+                raise ValueError("%s is not the mod folder of a Victoria II "
+                                 "install." % mod)
+            elif kind == "home":
+                settle_game(None, where)
+                if os.path.normcase(os.path.realpath(where)) != \
+                        os.path.normcase(os.path.realpath(game)):
+                    raise ValueError("%s is the mod folder of %s, not of the "
+                                     "Victoria 2 folder above." % (mod, where))
+        except ValueError as exc:
+            messagebox.showerror(
+                APP, "%s\n\nMods are read where the game loads them from, "
+                     "its own mod folder, so that everything a mod leaves to "
+                     "the game comes from the game it runs on." % exc)
             return
         # Several campaigns, or a mod that has to be identified, both mean
         # the cross-campaign path. It reads one campaign quite happily, so a
@@ -606,38 +631,19 @@ class App:
         # but arrived at without them, so a row moved to a neighbouring mod was
         # quietly overruled. Naming every campaign settles every campaign, and
         # leaves the search to run only where a row asked for it.
-        told, wants_search = [], False
+        told = []
         rows = self.rows if cross else []
         for row in rows:
             pick = row["mod"].get()
             if pick == AUTO:
-                wants_search = True
                 continue
             told.append((row["name"],
                          mod if pick == SELECTED else self.mod_paths.get(pick, pick)))
-        if rows:
-            mod_arg = ""
-            game_root = search_root(mod) if wants_search else None
-        else:
-            # One campaign, or none listed: the box speaks for itself.
-            mod_arg = mod
-            game_root = search_root(mod) if kind == "home" else None
-
-        # Asked before the question below, not after: there is no point
-        # offering to carry on without a mod and then refusing to.
-        if wants_search and not game_root:
-            messagebox.showerror(
-                APP, "There is nowhere to look for the mod of every campaign "
-                     "still set to work it out from its saves.\n\nPoint the "
-                     "mod box at Victoria 2/mod, or name each campaign's mod "
-                     "in the list beside it.")
-            return
-        if not mod and not messagebox.askokcancel(
-                APP, "Without a mod folder the report loses the map, the "
-                     "technology tree, the great powers and the war goals, and "
-                     "mobilisation size falls back to a fixed guess.\n\n"
-                     "Carry on anyway?"):
-            return
+        # One campaign, or none listed: the box speaks for itself -- a mod,
+        # or nothing for the unmodded game. The folder mods live in is a
+        # search, and the search looks in the game named above.
+        mod_arg = "" if rows or kind != "mod" else mod
+        game_root = game
 
         if cross and shape == "many":
             left = campaigns - len(told)
@@ -655,7 +661,7 @@ class App:
         self.out.set(out)
         # Into what is there, not over it: the same file holds the GitHub
         # token and the report host. See `settings`.
-        settings.remember(saves=saves, mod=mod, out=out,
+        settings.remember(saves=saves, game=game, mod=mod, out=out,
                           open_after=self.open_after.get())
 
         self.running = True
@@ -679,14 +685,11 @@ class App:
 
     def work(self, saves, mod, out, cross=False, game_root=None, primary="",
              told=()):
-        # Naming one mod and naming the folder mods live in are different
-        # instructions and must not be run together. `mod_path` says "this
-        # one, for every campaign"; `game_root` says "work it out from each
-        # campaign's own saves, searching here". Passing a chosen mod as the
-        # root made the search look for candidates *inside* that mod, where
-        # the only thing it could find was the mod itself under the wrong
-        # name -- so every campaign was matched to it whether it fitted or not.
-        # Where the campaign rows are showing, neither is sent as a blanket:
+        # `game_root` is always the install, which every report is read on.
+        # `mod_path` says "this one, for every campaign", and without it the
+        # unmodded game -- or, reading several campaigns, "work each one's
+        # mod out from its own saves, searching the game's mod folder".
+        # Where the campaign rows are showing, no mod is sent as a blanket:
         # `mod` arrives empty and each campaign has been named instead.
         #
         # A `Run`, not an argv: this used to rewrite `sys.argv` for the
@@ -695,8 +698,7 @@ class App:
         run = vic2_analyzer.Run(
             saves=saves, out=out, cross=cross, primary=primary or None,
             campaign_mod=tuple(told) if cross else (),
-            game_root=game_root or None,
-            mod_path=None if game_root else (mod or None))
+            game_root=game_root or None, mod_path=mod or None)
         old_out, old_err = sys.stdout, sys.stderr
         sys.stdout = sys.stderr = Pipe(self.log_queue)
         ok = True

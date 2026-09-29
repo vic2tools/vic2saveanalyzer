@@ -148,7 +148,9 @@ def blank_nation():
         # while under 1% is starving -- so which is meant has to be said
         # rather than implied.
         "starving": 0,
-        "soldiers_at": defaultdict(int),
+        "soldiers_noncolonial": 0,
+        "pop_noncolonial": 0,
+        "literacy_noncolonial": 0.0,
         # The cap is a per-pop rule, not a per-province one: two pops of 1000
         # raise two brigades where a single pop of 2000 raises one, so the
         # sizes cannot be added up before the rule is applied to each.
@@ -162,14 +164,11 @@ def blank_nation():
         # here, 285 of 288 in another -- but it is the province's own flag the
         # engine charges the multiplier against, measured on a test bed that
         # set only that one. Kept separately rather than folded into
-        # `colonial_provinces`, which mobilization and the stated-states
-        # literacy were both measured against as they stand.
+        # `colonial_provinces`, which mobilization and home-state literacy use.
         "province_colonial": {},
-        # Per province, because whether a province is colonial is not known
-        # until the country's state blocks are read, and provinces are read
-        # first. Same shape as `soldiers_at`, which exists for the same reason.
-        "pop_at": defaultdict(int),
-        "literacy_at": defaultdict(float),
+        # Geographic group -> population, literate population, types,
+        # cultures, populated province count. Filled during the POP scan.
+        "population_by_state": {},
         # good -> what this nation put on the world market, from the save's own
         # `saved_country_supply`. Summed over the nations still holding land it
         # comes back to the world market's supply pool exactly, which is what
@@ -283,8 +282,8 @@ def brigades_from_clusters(buckets, rate, pop_per_regiment=POP_SIZE_PER_REGIMENT
 # Each one is a table with an entry per province -- eleven thousand of them
 # for a large nation -- they are about a third of what a parsed save weighs,
 # and `finalize` is the last thing that ever reads any of them.
-SPENT_ON_FINALIZE = ("mobilizable_pops", "literacy_at", "pop_at",
-                     "soldiers_at", "soldier_pops_at", "province_state")
+SPENT_ON_FINALIZE = ("mobilizable_pops", "population_by_state",
+                     "literacy_noncolonial", "soldier_pops_at", "province_state")
 
 
 # Counted with a `Counter` or a `defaultdict` because that is what counting
@@ -312,7 +311,7 @@ KEEP_META = ("date", "player", "file", "province_owner", "great_nations",
 
 
 KEEP_NATION = ("units_at", "men_at", "primary_culture", "accepted_cultures",
-               "government", "total_pop", "is_player")
+               "government", "total_pop", "is_player", "population_states", "capital")
 
 
 # What `--inventions` and `--check-inventions` read back off the saves after
@@ -445,7 +444,14 @@ def _pairs_add_nested(nat, field, value):
     for key, items in value:
         counter = target[key]
         for kind, item in items:
-            counter[_intern(kind)] += item
+            counter[_intern(kind)] = counter.get(kind, 0) + item
+
+
+def _population_rows(nat, field, value):
+    nat[field] = {group: [pop, literate,
+                         {_intern(k): n for k, n in types},
+                         {_intern(k): n for k, n in cultures}, provinces]
+                  for group, pop, literate, types, cultures, provinces in value}
 
 
 # What the scanner sends about the provinces a nation owns, and what becomes
@@ -470,9 +476,11 @@ SCANNED_PROVINCES = (
     ("colonial", "province_colonial", _pairs_put),
     ("pop_by_type", "pop_by_type", _pairs_add_interned),
     ("pop_by_culture", "pop_by_culture", _pairs_add_interned),
-    ("pop_at", "pop_at", _pairs_add),
-    ("soldiers_at", "soldiers_at", _pairs_add),
-    ("literacy_at", "literacy_at", _pairs_add),
+    ("population_by_state", "population_by_state", _population_rows),
+    ("soldiers_noncolonial", "soldiers_noncolonial", _add),
+    ("pop_noncolonial", "pop_noncolonial", _add),
+    ("literacy_noncolonial", "literacy_noncolonial", _add),
+    ("mob_excluded_culture", "mob_excluded_culture", _add),
     ("soldier_pops_at", "soldier_pops_at", _pairs_extend),
 )
 

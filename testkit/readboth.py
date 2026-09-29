@@ -25,26 +25,43 @@ def both_ways(path, reading):
     (the scanner's reading, the Python reading) of one save, both read
     the way `reading` says.
 
+    The scanner has two ways of answering, and both are held to Python here.
+    The first reading is the one a run uses: the whole save, built by the
+    scanner (`fastscan.record`). The second is the provinces and countries
+    in JSON with the rest read in Python, which a run falls back to for a
+    save the first will not take; it has to agree with the first, or this
+    raises, so every check that reads a save both ways reads it all three.
+
     The scanner is switched off with the argument `analyze_save` has for it,
     and then checked to have stayed off. That guard is what this module is
     for: a comparison that has quietly stopped comparing still says the two
     agree.
     """
     fast = readsave.analyze_save(path, reading, verbose=False)
+    halfway = readsave.analyze_save(path, reading, verbose=False, record=False)
+    apart = differences(fast, halfway)
+    if apart:
+        raise AssertionError(
+            "the scanner's whole-save record and its JSON answer disagree "
+            "on %d field(s): %s" % (len(apart), ", ".join(w for w, _a, _b in apart[:8])))
 
     started = []
-    real_start = fastscan.start
+    real_start, real_record = fastscan.start, fastscan.record
 
     def watched(*a, **k):
         started.append(1)
         return real_start(*a, **k)
 
-    fastscan.start = watched
+    def watched_record(*a, **k):
+        started.append(1)
+        return real_record(*a, **k)
+
+    fastscan.start, fastscan.record = watched, watched_record
     try:
         slow = readsave.analyze_save(path, reading, verbose=False,
                                      use_scanner=False)
     finally:
-        fastscan.start = real_start
+        fastscan.start, fastscan.record = real_start, real_record
     if started:
         raise AssertionError(
             "the Python-only read started the scanner %d time(s), so this "

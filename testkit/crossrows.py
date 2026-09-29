@@ -113,11 +113,12 @@ def a_campaign_save(path, date, scale):
 
 def a_world(holding):
     """Two campaigns, two mods, and the folder that holds them both."""
-    mod_a = matching.a_mod(os.path.join(holding, "mod-alpha"),
-                           pops=MOD_POPS,
-                           pop_per_regiment=ALPHA_REGIMENT, mob_size=RATE)
-    mod_b = matching.a_mod(os.path.join(holding, "mod-beta"),
-                           pop_per_regiment=BETA_REGIMENT, mob_size=RATE)
+    mod_a = matching.a_mod_in_a_game(holding, "mod-alpha", pops=MOD_POPS,
+                                     pop_per_regiment=ALPHA_REGIMENT,
+                                     mob_size=RATE)
+    mod_b = matching.a_mod_in_a_game(holding, "mod-beta",
+                                     pop_per_regiment=BETA_REGIMENT,
+                                     mob_size=RATE)
     parent = os.path.join(holding, "campaigns")
     alpha = os.path.join(parent, "alpha")
     beta = os.path.join(parent, "beta")
@@ -156,8 +157,8 @@ def watched_run(argv):
     real_finish = finishing.finish_nations
     real_rows = cross.campaign_rows
 
-    def watch_finish(meta, nations, spec):
-        out = real_finish(meta, nations, spec)
+    def watch_finish(meta, nations, spec, state_snapshot=None):
+        out = real_finish(meta, nations, spec, state_snapshot)
         where = "cross" if inside else "report"
         seen[where].append(
             (meta.get("date"), spec,
@@ -393,12 +394,12 @@ def both(*checks):
 
 def one_case(name, holding, extra, must):
     """[what went wrong] for one way of asking."""
-    parent, mod_a, _mod_b = a_world(os.path.join(holding, name))
+    parent, mod_a, mod_b = a_world(os.path.join(holding, name))
     out = os.path.join(holding, name, "out")
     seen = watched_run([
         parent, "--cross", "--primary", "alpha",
         "--campaign-mod", "alpha=" + mod_a,
-        "--campaign-mod", "beta=" + os.path.join(holding, name, "mod-beta"),
+        "--campaign-mod", "beta=" + mod_b,
         "--out", out, "--no-html", "--no-cache", "-j", "1", "-q"] + extra)
 
     if not seen["cross"] or not seen["report"]:

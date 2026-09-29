@@ -29,6 +29,7 @@ held to each other field by field by `testkit/parity.py`.
 
 import hashlib
 import os
+import pickle
 from collections import defaultdict, namedtuple
 
 import v2parse
@@ -44,6 +45,7 @@ from v2parse import (
     as_list,
     looks_like_country_tag,
     parse_block,
+    parse_span,
     pop_culture,
     read_pop,
     scan_entries,
@@ -65,7 +67,8 @@ STRATA = {
 }
 
 
-def mod_fingerprint(mod_path, pop_types, reform_keys=(), mob_types=()):
+def mod_fingerprint(mod_path, pop_types, reform_keys=(), mob_types=(),
+                    population_groups=()):
     """
     What the mod changes about parsing, as a short string.
 
@@ -79,29 +82,22 @@ def mod_fingerprint(mod_path, pop_types, reform_keys=(), mob_types=()):
         ((os.path.abspath(mod_path) if mod_path else "no-mod")
          + "|" + ",".join(sorted(pop_types))
          + "|" + ",".join(sorted(reform_keys))
-         + "|" + ",".join(sorted(mob_types)))
+         + "|" + ",".join(sorted(mob_types))
+         + "|" + repr(population_groups))
         .encode("utf-8")).hexdigest()[:10]
 
 
-class Reading(namedtuple("Reading", "mod_path pop_types mob_types reform_keys")):
+class Reading(namedtuple("Reading", "mod_path pop_types mob_types reform_keys population_groups",
+                         defaults=((),))):
     """
     How a save is read under a mod, handed to `analyze_save` with the save.
 
-    Three things decide what comes out of a save file, and all three are the
-    mod's to say: `pop_types`, which pop blocks the province reader keeps;
-    `mob_types`, which of those it keeps for a mobilization pool; and
-    `reform_keys`, which country scalars are a reform choice rather than an
-    ordinary number. A country block writes its choice as a plain
-    `conscription=mandatory_service` line, indistinguishable from any other
-    scalar until the mod says `conscription` is a reform.
-
-    They were three module globals, set in `main`, again in `run_cross` for
-    every campaign, again in every worker, and read back out to make the
-    cache key -- and a set that only ever grew once carried one mod's
-    `bankers` into the next campaign, which then cached what it read under
-    a key that said it had not. As an argument there is nothing to set,
-    nothing to forget to set, and nothing left over from the last campaign:
-    the key and the parse are made from the same object.
+    Pop types, mobilizable types and reform names select the fields read.
+    `population_groups` maps provinces to a representative province of each
+    geographic region. It lets the POP scan produce state aggregates directly,
+    and is included in the cache identity because it changes their grouping.
+    Numeric representatives keep region names out of the scanner protocol;
+    provinces absent from the lookup remain independent groups.
     """
 
     __slots__ = ()
@@ -109,7 +105,8 @@ class Reading(namedtuple("Reading", "mod_path pop_types mob_types reform_keys"))
     def fingerprint(self):
         """The cache key for a save read this way."""
         return mod_fingerprint(self.mod_path, self.pop_types,
-                               self.reform_keys, self.mob_types)
+                               self.reform_keys, self.mob_types,
+                               self.population_groups)
 
 
 def reading_for(mod_path, mod, mob_types):
@@ -121,12 +118,22 @@ def reading_for(mod_path, mod, mob_types):
     the same way twice.
     """
     named = (mod.pop_types if mod else None) or ()
+    # A numeric representative keeps region names out of the scanner protocol.
+    # The map's regions can differ from the state's records in a save, so use
+    # the same geographic grouping as the report, with one-province fallbacks.
+    regions = (getattr(mod, "province_regions", None) if mod else None) or {}
+    representatives = {}
+    groups = []
+    for pid, region in sorted(regions.items()):
+        if region:
+            groups.append((pid, representatives.setdefault(str(region), pid)))
     return Reading(
         mod_path=mod_path,
         pop_types=tuple(sorted(v2parse.VANILLA_POP_TYPES
                                | {n for n in named if n})),
         mob_types=tuple(sorted(mob_types)),
-        reform_keys=tuple(sorted((mod.reform_names if mod else None) or ())))
+        reform_keys=tuple(sorted((mod.reform_names if mod else None) or ())),
+        population_groups=tuple(groups))
 
 
 # No mod: the twelve pop types the game ships and the three that can
@@ -354,6 +361,8 @@ def read_province(text, at, stop, found, province_id, flat, pop_types,
     # Both, because the map shades occupied land by whoever holds it while
     # still knowing whose it is.
     found.province_owner[province_id] = (owner, controller or owner)
+    if owner not in found.nations and owner in found.countries:
+        found.nations[owner] = found.countries.pop(owner)
     nat = found.nations[owner]
     nat["provinces"] += 1
     if owner in cores:
@@ -372,10 +381,18 @@ def read_province(text, at, stop, found, province_id, flat, pop_types,
     nat["railroad_levels"] += building_level(buildings.get("railroad", 0))
 
     pop_registry = found.pop_registry
+    accepted = accepted_cultures_of(nat)
+    home = province_id not in nat["colonial_provinces"]
+    group = found.population_groups.get(province_id, province_id)
+    row = None
+    province_pop = 0
+    province_literate = 0.0
     for pop in pops:
         poptype = pop[_POP_TYPE]
         if pop[_POP_ID] is not None:
-            pop_registry[to_int(pop[_POP_ID], -1)] = poptype
+            pop_id = to_int(pop[_POP_ID], -1)
+            if pop_id in found.referenced_pops:
+                pop_registry[pop_id] = poptype
         size = to_int(pop[_POP_SIZE])
         if size <= 0:
             continue
@@ -383,9 +400,19 @@ def read_province(text, at, stop, found, province_id, flat, pop_types,
         nat["total_pop"] += size
         nat["pop_by_type"][poptype] += size
         if poptype == "soldiers":
-            nat["soldiers_at"][province_id] += size
+            if home:
+                nat["soldiers_noncolonial"] += size
             nat["soldier_pops_at"][province_id].append(size)
-        nat["pop_at"][province_id] += size
+        if row is None:
+            row = nat["population_by_state"].get(group)
+            if row is None:
+                row = nat["population_by_state"][group] = [0, 0.0, {}, {}, 0]
+            row[4] += 1
+        province_pop += size
+        for slot, key in ((2, poptype), (3, culture)):
+            if key:
+                counts = row[slot]
+                counts[key] = counts.get(key, 0) + size
         # Absent means the pop wants for nothing; present and short of 1 means
         # it is going without some part of what it needs to live.
         life = pop[_POP_LIFE]
@@ -398,14 +425,23 @@ def read_province(text, at, stop, found, province_id, flat, pop_types,
         if culture:
             nat["pop_by_culture"][culture] += size
             if poptype in mob_types:
-                nat["mobilizable_pops"].append(
-                    (poptype, culture, size, province_id))
+                if culture in accepted:
+                    nat["mobilizable_pops"].append(
+                        (poptype, culture, size, province_id))
+                else:
+                    nat["mob_excluded_culture"] += size
         literate = to_float(pop[_POP_LITERACY]) * size
         nat["literacy_weighted"] += literate
-        nat["literacy_at"][province_id] += literate
+        province_literate += literate
         nat["con_weighted"] += to_float(pop[_POP_CON]) * size
         nat["mil_weighted"] += to_float(pop[_POP_MIL]) * size
         nat["money_total"] += to_float(pop[_POP_MONEY])
+    if row is not None:
+        row[0] += province_pop
+        row[1] += province_literate
+    if home:
+        nat["pop_noncolonial"] += province_pop
+        nat["literacy_noncolonial"] += province_literate
 
 
 def sub_blocks(value):
@@ -601,13 +637,17 @@ class _Found:
     how many people the world holds.
     """
 
-    __slots__ = ("nations", "province_owner", "pop_registry", "world_pop")
+    __slots__ = ("nations", "countries", "province_owner", "pop_registry",
+                 "world_pop", "referenced_pops", "population_groups")
 
     def __init__(self):
         self.nations = defaultdict(blank_nation)
+        self.countries = defaultdict(blank_nation)
         self.province_owner = {}
         self.pop_registry = {}
         self.world_pop = 0
+        self.referenced_pops = set()
+        self.population_groups = {}
 
 
 def _walk_top(text, source):
@@ -753,7 +793,8 @@ def _open(path, reading, use_scanner):
     import fastscan
     running = (fastscan.start(path, reading.pop_types, reading.mob_types,
                               army_techs=ARMY_TECHS, navy_techs=NAVY_TECHS,
-                              reform_keys=reading.reform_keys)
+                              reform_keys=reading.reform_keys,
+                              population_groups=reading.population_groups)
                if use_scanner else None)
     head = fastscan.head(running)
     if head is not None:
@@ -765,16 +806,11 @@ def _open(path, reading, use_scanner):
 
 def _settle(nations, pop_registry):
     """
-    What can only be worked out once the whole file has been read, because
-    a province can be written before its owner's country block.
+    Classify regiments using only the POP IDs the country blocks referenced.
 
-    A brigade is standing or mobilized according to the type of the pop that
-    raised it. And a pop counts toward a mobilization ceiling only if the
-    nation accepts its culture: applying that here rather than in `finalize`
-    drops about half of the largest thing a parsed save carries -- half of
-    what a worker sends back, half of what the cache stores, and half of what
-    a campaign of monthly autosaves holds in memory at once. The order of
-    what survives is untouched, because the counting rule depends on it.
+    Country metadata is read first, but the types of those POPs are not known
+    until their provinces have been read. Culture eligibility has already
+    been applied during the POP scan, preserving eligible POPs in save order.
     """
     for nat in nations.values():
         for pid in nat["regiment_pops"]:
@@ -788,19 +824,6 @@ def _settle(nations, pop_registry):
         # further: not back from the worker, not into the cache, not into
         # the campaign.
         nat["regiment_pops"] = ()
-        pops = nat["mobilizable_pops"]
-        if not pops:
-            continue
-        accepted = accepted_cultures_of(nat)
-        keep = []
-        dropped = 0
-        for entry in pops:
-            if entry[1] in accepted:
-                keep.append(entry)
-            else:
-                dropped += entry[2]
-        nat["mob_excluded_culture"] = dropped
-        nat["mobilizable_pops"] = keep
 
 
 def _changed(path, before):
@@ -815,18 +838,96 @@ def _changed(path, before):
             != (after.st_size, after.st_mtime_ns))
 
 
-def analyze_save(path, reading, verbose=True, use_scanner=True, again=False):
+def _changed_twice(path):
+    """What a save rewritten under both of two reads is refused with."""
+    # Once is bad luck. Twice means the game is writing to it about as fast
+    # as this can read it, and a save half from each of two months is worse
+    # than no save.
+    return ValueError(
+        "%s changed while it was being read. It is probably the "
+        "file the game is writing to right now; read the copies "
+        "the keeper makes instead." % path)
+
+
+def _say_read(meta, live):
+    """The end of the verbose line `analyze_save` starts."""
+    months = len({d for d, _, _ in meta["market"]["history"]}) if meta["market"] else 0
+    extra = f", {months} months of prices" if months else ""
+    print(f" {meta['date']}, {len(live)} nations{extra}")
+
+
+def _read_record(path, reading, again=False):
+    """
+    (meta, nations, the pickled pair) as the scanner reads a save whole
+    (`fastscan.record`), or None when it will not.
+
+    The pickle is kept for the caller that caches the save, which then
+    writes it as it came rather than pickling the pair again; it is None
+    where the pair had to be touched here.
+    """
+    import fastscan
+    try:
+        before = os.stat(path)
+    except OSError:
+        before = None
+    blob = fastscan.record(path, reading.pop_types, reading.mob_types,
+                           army_techs=ARMY_TECHS, navy_techs=NAVY_TECHS,
+                           reform_keys=reading.reform_keys,
+                           population_groups=reading.population_groups)
+    if blob is None:
+        return None
+    meta, live = pickle.loads(blob)
+    if _changed(path, before):
+        if again:
+            raise _changed_twice(path)
+        return _read_record(path, reading, again=True)
+    # The scanner names the file as it was asked for it. A name latin-1
+    # cannot hold comes back empty, and this one is the analyzer's to say.
+    name = os.path.basename(path)
+    if meta.get("file") != name:
+        meta["file"] = name
+        blob = None
+    return meta, live, blob
+
+
+def read_save(path, reading, use_scanner=True):
+    """
+    `analyze_save`, quietly, with the pickled `(meta, nations)` as a third
+    value when the scanner read the save whole -- or None, when it did not
+    and the pair was built here.
+    """
+    if use_scanner:
+        got = _read_record(path, reading)
+        if got is not None:
+            return got
+    meta, live = analyze_save(path, reading, verbose=False,
+                              use_scanner=use_scanner, record=False)
+    return meta, live, None
+
+
+def analyze_save(path, reading, verbose=True, use_scanner=True, again=False,
+                 record=True):
     """
     Parse one save, read the way `reading` says. Returns
     (meta, {tag: nation_stats}).
 
-    `use_scanner=False` reads it entirely in Python, which is the fallback
-    for a save the scanner half-read. `again=True` marks the one retry
-    allowed when the file changed underneath the read; both are set by
-    this function calling itself and by nothing else.
+    With the scanner it is asked for the whole save first (`_read_record`),
+    and for its provinces and countries alone, in JSON, when it will not
+    give that, the rest read here. `record=False` skips the first, which the
+    checks use to hold that second way to the others. `use_scanner=False`
+    reads it entirely in Python, which is the fallback for a save the
+    scanner half-read. `again=True` marks the one retry allowed when the
+    file changed underneath the read; both are set by this function
+    calling itself and by nothing else.
     """
     if verbose:
         print(f"  reading {os.path.basename(path)} ...", end="", flush=True)
+    if use_scanner and record:
+        got = _read_record(path, reading, again)
+        if got is not None:
+            if verbose:
+                _say_read(got[0], got[1])
+            return got[0], got[1]
     # What the file looked like before anything touched it, checked again
     # at the end. The scanner reads a save whole and the wars and the market
     # are lifted out of it beside it, so one rewritten in between would be
@@ -845,6 +946,18 @@ def analyze_save(path, reading, verbose=True, use_scanner=True, again=False):
     mob_types = frozenset(reading.mob_types)
     reform_keys = frozenset(reading.reform_keys)
     found = _Found()
+    found.population_groups = dict(reading.population_groups)
+    if not source.scanner_reads_nations:
+        # Only the block index is traversed twice: country bodies are parsed
+        # once, before POPs need their acceptance and colonial metadata.
+        source.blocks = list(source.blocks)
+        for key, at, stop in source.blocks:
+            if looks_like_country_tag(key):
+                body, first, last = source.body(at, stop)
+                read_country(body, first, last, key, found.countries,
+                             flat=source.flat, reform_keys=reform_keys)
+        found.referenced_pops = {pid for nat in found.countries.values()
+                                 for pid in nat["regiment_pops"]}
     nations = found.nations
     meta = {"file": os.path.basename(path), "date": "", "player": "",
             "market": None}
@@ -861,38 +974,41 @@ def analyze_save(path, reading, verbose=True, use_scanner=True, again=False):
             continue
 
         country = looks_like_country_tag(key)
-        if country and source.scanner_reads_nations:
+        if country:
             continue
-        if not (country or key in ("active_war", "previous_war",
+        if not (key in ("active_war", "previous_war",
                                    "great_nations")
                 or (key == "worldmarket" and market_block is None)):
             continue                  # nothing here reads this one
 
         body, first, last = source.body(at, stop)
-        if country:
-            read_country(body, first, last, key, nations, flat=source.flat,
-                         reform_keys=reform_keys)
-        elif key in ("active_war", "previous_war"):
-            war = read_war(parse_block(Tokens(body, first)),
-                           key == "active_war")
+        # A block laid out the game's way ends where its span does, so it
+        # is tokenised in one call; one found by walking the tokens (a save
+        # some editor reflowed) runs to the end of the file, and is read a
+        # token at a time as far as it goes.
+        block = (parse_span(body, first, last) if source.flat
+                 else parse_block(Tokens(body, first)))
+        if key in ("active_war", "previous_war"):
+            war = read_war(block, key == "active_war")
             if war:
                 wars.append(war)
         elif key == "great_nations":
             # The engine's own great power list, in rank order, as 1-based
             # indices into the country array that common/countries.txt
             # defines. Nothing else in the save ranks nations.
-            block = parse_block(Tokens(body, first))
             ids = (block if isinstance(block, list)
                    else block.get("_items", []) if isinstance(block, dict) else [])
             great_nations = [to_int(i, -1) for i in ids]
         else:
-            market_block = parse_block(Tokens(body, first))
+            market_block = block
 
     # Everything above happened while the scanner, if there was one, was
     # still working. This is where the two meet.
     if not source.finish(found):
         return analyze_save(path, reading, verbose=verbose,
-                            use_scanner=False, again=again)
+                            use_scanner=False, again=again, record=False)
+
+    nations.update(found.countries)
 
     _settle(nations, found.pop_registry)
 
@@ -913,18 +1029,10 @@ def analyze_save(path, reading, verbose=True, use_scanner=True, again=False):
     }
     if _changed(path, before):
         if again:
-            # Once is bad luck. Twice means the game is writing to it about
-            # as fast as this can read it, and a save half from each of two
-            # months is worse than no save.
-            raise ValueError(
-                "%s changed while it was being read. It is probably the "
-                "file the game is writing to right now; read the copies "
-                "the keeper makes instead." % path)
+            raise _changed_twice(path)
         return analyze_save(path, reading, verbose=verbose,
-                            use_scanner=use_scanner, again=True)
+                            use_scanner=use_scanner, again=True, record=record)
 
     if verbose:
-        months = len({d for d, _, _ in meta["market"]["history"]}) if meta["market"] else 0
-        extra = f", {months} months of prices" if months else ""
-        print(f" {meta['date']}, {len(live)} nations{extra}")
+        _say_read(meta, live)
     return meta, live

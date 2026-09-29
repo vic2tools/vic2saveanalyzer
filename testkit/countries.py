@@ -264,6 +264,21 @@ def main():
     crew = round(eng["ship_crew"]["manowar"], 6)
     want("ship crew", crew, round(0.8 / 0.75, 6))
 
+    # Unused fields still need correct boundaries, including quoted braces
+    # and inline closings. Locations may follow embarked troops. Duplicate
+    # scalars and mixed bare/keyed blocks retain the generic reader's meaning.
+    variants = [
+        SAVE.replace('level=4', 'level=4\n\t\t\tprofit={ 1 2 { 3 } "} {" }'),
+        SAVE.replace('building=0', 'building=0\n\t\t\t7').replace('level=4', 'ignored=4'),
+        SAVE.replace('strength=80.000', 'strength=80.000\n\t\t\tstrength=50.000'),
+        SAVE.replace('\t\tlocation=2\n', '').replace('\n\t}\n}', '\n\t\tlocation=2\n\t}\n}'),
+    ]
+    for n, text in enumerate(variants):
+        with open(out, 'w', encoding='latin-1') as fh:
+            fh.write(text)
+        fast, slow = both_ways(out, reading)
+        problems.extend('variant %s: %s' % (n, where)
+                        for where, _x, _y in differences(fast, slow))
     os.remove(out)
     if problems:
         print("PROBLEMS:")

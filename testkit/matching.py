@@ -96,6 +96,35 @@ def a_mod(root, tags=None, techs=None, provinces=None, inventions=2,
     return root
 
 
+def a_game(root):
+    """
+    The least a folder needs to be read as a Victoria II install: its map's
+    `default.map`, and nothing in it to inherit.
+
+    A mod is only read inside one: the analyzer refuses a mod anywhere but
+    an install's mod folder, the way the game only loads mods from there.
+    """
+    os.makedirs(os.path.join(root, "map"), exist_ok=True)
+    open(os.path.join(root, "map", "default.map"), "w").close()
+    return root
+
+
+def a_mod_in_a_game(holding, name, **kwargs):
+    """`a_mod`, at `<holding>/game/mod/<name>`, on an `a_game` install."""
+    game = a_game(os.path.join(holding, "game"))
+    return a_mod(os.path.join(game, "mod", name), **kwargs)
+
+
+def a_vanilla(root, **kwargs):
+    """
+    An install a run can be read on with no mod: `a_mod`'s rules and names,
+    and the map file that makes it an install. Every report is read on an
+    installed game, so a check that runs the analyzer names one of these
+    with `--game-root` where it used to name nothing.
+    """
+    return a_game(a_mod(root, **kwargs))
+
+
 def a_save(path, tags=None, techs=None, provinces=None, top_invention=1):
     """A save carrying exactly the names a mod either accounts for or not."""
     tags = TAGS if tags is None else tags

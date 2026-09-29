@@ -94,10 +94,8 @@ def scanner_binary():
     """
     The Rust province scanner, if this machine has built one.
 
-    Optional on purpose. Without it the analyzer reads every save in Python
-    exactly as it always did, a little slower; with it the executable carries
-    the binary alongside and finds it at run time. A release built where
-    there is no Rust compiler is a slower release, not a broken one.
+    Source runs can fall back to Python. Releases require this binary so a
+    missing build dependency cannot silently make every user's first run slow.
     """
     name = "vic2scan.exe" if sys.platform == "win32" else "vic2scan"
     built = os.path.join(HERE, "scanner", "target", "release", name)
@@ -105,6 +103,12 @@ def scanner_binary():
 
 
 def build():
+    scanner = scanner_binary()
+    if scanner is None:
+        print("A release requires the Rust scanner. Build it first with: "
+              "cargo build --release --manifest-path scanner/Cargo.toml",
+              file=sys.stderr)
+        return 1
     write_icon()
     # These are imported inside functions rather than at the top of the file, so
     # they are named here in case the bundler's scan ever stops following them.
@@ -118,7 +122,7 @@ def build():
                "gui", "keeper", "keeper_gui", "settings", "publish",
                # reached only from inside functions, in both the window and the
                # analyzer, so the scan has nothing at module level to follow
-               "cross",
+               "cross", "state_history",
                # saves are read on several cores, and the machinery for that is
                # reached through function-level imports
                "multiprocessing", "multiprocessing.spawn",
@@ -130,16 +134,9 @@ def build():
            "--specpath", os.path.join(HERE, "build")]
     for module in carried:
         cmd += ["--hidden-import", module]
-    scanner = scanner_binary()
-    if scanner:
-        # `.` puts it beside the unpacked modules, which is the first place
-        # fastscan looks.
-        cmd += ["--add-binary", "%s%s." % (scanner, os.pathsep)]
-        print("carrying the Rust scanner: %s" % scanner)
-    else:
-        print("no Rust scanner built; the executable will read saves in "
-              "Python. Build one with: cargo build --release --manifest-path "
-              "scanner/Cargo.toml")
+    # `.` puts it beside the unpacked modules, where fastscan looks first.
+    cmd += ["--add-binary", "%s%s." % (scanner, os.pathsep)]
+    print("carrying the Rust scanner: %s" % scanner)
     for junk in ("numpy", "pandas", "matplotlib", "PIL", "scipy", "setuptools",
                  "pip", "pytest", "test"):
         cmd += ["--exclude-module", junk]

@@ -26,6 +26,7 @@ from html import escape as _escape
 from dates import year_fraction
 from tech_groups import ARMY_LINES, NAVY_LINES
 from template import TEMPLATE
+from wars import war_tags
 
 METRICS = [
     ("total_pop", "Total population", "count"),
@@ -157,19 +158,6 @@ CATEGORY_LABELS = {
     "other": "Other",
 }
 
-_B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
-
-
-def _b36(n):
-    if n <= 0:
-        return "0"
-    out = ""
-    while n:
-        out = _B36[n % 36] + out
-        n //= 36
-    return out
-
-
 def build_map(mod, parsed, scale=5):
     """
     Everything the deployment map needs, small enough to embed.
@@ -182,7 +170,8 @@ def build_map(mod, parsed, scale=5):
     campaign rarely moves more than a few hundred provinces between snapshots.
     """
     from mod_reader import (country_colours, province_anchors, province_names,
-                            province_raster, sea_provinces, unit_positions)
+                            province_raster, raster_text, sea_provinces,
+                            unit_positions)
 
     if not mod or not mod.path:
         return None
@@ -273,8 +262,7 @@ def build_map(mod, parsed, scale=5):
         # How many garrisoned provinces the mod's positions.txt could not
         # anchor, so the caller can say so rather than leave it silent.
         "derived": fallback,
-        "runs": " ".join(_b36(p) if c == 1 else _b36(p) + "." + _b36(c)
-                         for p, c in runs),
+        "runs": raster_text(mod.path, scale),
         "tags": tags,
         "colours": {t: colours[t] for t in tags if t in colours},
         "sea": sorted(sea),
@@ -282,6 +270,17 @@ def build_map(mod, parsed, scale=5):
         "names": {p: n for p, n in province_names(mod.path).items()
                   if p in spots},
         "owners": owners,
+        "capitals": {meta.get("date") or "": {
+            tag: nat["capital"] for tag, nat in nations.items()
+            if nat.get("capital")} for meta, nations in parsed},
+        "populationStates": {meta.get("date") or "": {
+            tag: nat["population_states"] for tag, nat in nations.items()
+            if "population_states" in nat} for meta, nations in parsed},
+        "populationStateChunks": [(meta.get("date") or "", meta["population_chunk"])
+                                  for meta, _ in parsed if "population_chunk" in meta],
+        "provinceRegions": {pid: str(region) for pid, region in
+                            (mod.province_regions or {}).items()},
+        "stateNames": mod.state_names or {},
         "armies": armies,
         # What a regiment holds at full strength, so the map can say whether a
         # brigade is under-strength rather than just how many men it has.
@@ -326,23 +325,38 @@ def build_succession(parsed, formations=None):
     Germany.
     """
     formations = formations or {}
+    # Per save, who owns anything at all. Who owns which provinces is only
+    # wanted for a nation that appears or vanishes between two saves, which
+    # in a monthly campaign is next to none of them, so it is gathered for
+    # those alone (`holdings`): gathering every nation's provinces for every
+    # save was a third of a second over 265 of them.
     ledgers = []
     for meta, nations in parsed:
-        book = {}
-        for pid, (owner, _ctrl) in meta.get("province_owner", {}).items():
-            if owner:
-                book.setdefault(owner, set()).add(pid)
+        book = meta.get("province_owner", {})
+        owners = {owner for owner, _ctrl in book.values() if owner}
         home = {}
         for tag, nat in nations.items():
             primary = str(nat.get("primary_culture") or "")
             home[tag] = (primary,
                          set(nat.get("accepted_cultures") or ()) | {primary})
-        ledgers.append((meta.get("date") or "", book, home))
+        ledgers.append((meta.get("date") or "", book, owners, home))
+
+    def holdings(book, tags):
+        held = {tag: set() for tag in tags}
+        for pid, (owner, _ctrl) in book.items():
+            if owner in held:
+                held[owner].add(pid)
+        return held
 
     out = {}
-    for (_before, was, was_home), (date, now, home) in zip(ledgers, ledgers[1:]):
-        appeared = set(now) - set(was)
-        vanished = set(was) - set(now)
+    for (_before, was_book, was_owners, was_home), (date, book, owners, home) \
+            in zip(ledgers, ledgers[1:]):
+        appeared = owners - was_owners
+        if not appeared:
+            continue
+        vanished = was_owners - owners
+        now = holdings(book, appeared)
+        was = holdings(was_book, vanished)
         for tag in sorted(appeared):
             land = now[tag]
             if not land:
@@ -513,7 +527,84 @@ def pack_bytes(payload):
     raw = raw.replace("<", "\\u2039").replace(">", "\\u203a")
     # Level 6 rather than 9: the last 5% of size costs three times the wall
     # clock, and this runs once per report over a hundred megabytes.
-    return gzip.compress(raw.encode("utf-8"), 6)
+    return gzip_pieces(raw.encode("utf-8"), 6)
+
+
+# The header `gzip.compress` writes at level 6: no name, mtime 0, so the same
+# payload makes the same bytes on every run.
+_GZIP_HEAD = gzip.compress(b"", 6)[:10]
+
+
+def gzip_pieces(data, level, piece=1 << 20):
+    """
+    `gzip.compress(data, level)`, compressed a megabyte at a time on as many
+    threads as the machine has, as `pigz` does it.
+
+    A long campaign's payload is thirty megabytes of JSON, and one core
+    took two thirds of a second over it while the rest of the machine sat
+    idle. Each piece is compressed with the thirty-two kilobytes before it
+    as its dictionary, so it can refer back across the join as one stream
+    would, and ends on a byte boundary without ending the stream; laid end
+    to end with one header and one checksum they are an ordinary gzip file,
+    which every browser's `DecompressionStream` reads as it always has.
+    Not the same bytes as one core's, and a few hundred bytes larger in
+    thirteen megabytes; the same payload out of it. Small ones, which one
+    core does in the blink of an eye, go through `gzip.compress` unchanged.
+    """
+    if len(data) <= 2 * piece:
+        return gzip.compress(data, level)
+    import struct
+    import zlib
+    from concurrent.futures import ThreadPoolExecutor
+    view = memoryview(data)
+
+    def one(at):
+        end = min(at + piece, len(data))
+        if at:
+            squeeze = zlib.compressobj(level, zlib.DEFLATED, -15,
+                                       zdict=view[max(0, at - 32768):at])
+        else:
+            squeeze = zlib.compressobj(level, zlib.DEFLATED, -15)
+        out = squeeze.compress(view[at:end])
+        # zlib lets go of the interpreter for all of this, which is what
+        # makes threads worth having here.
+        return out + squeeze.flush(zlib.Z_FINISH if end == len(data)
+                                   else zlib.Z_SYNC_FLUSH)
+
+    with ThreadPoolExecutor(max_workers=max(1, min(8, os.cpu_count() or 1))) as pool:
+        crc = pool.submit(zlib.crc32, view)
+        parts = list(pool.map(one, range(0, len(data), piece)))
+    return (_GZIP_HEAD + b"".join(parts)
+            + struct.pack("<II", crc.result(), len(data) & 0xffffffff))
+
+
+def _fill_counts(html, dates, tags, span, price_span):
+    """The page's four small fields, which say what the report covers."""
+    html = html.replace("__SAVECOUNT__", str(len(dates)))
+    html = html.replace("__NATIONCOUNT__", str(len(tags)))
+    html = html.replace("__SPAN__", span)
+    return html.replace("__PRICESPAN__", price_span)
+
+
+def _state_chunks(payload):
+    """
+    The map's state snapshots, taken out of `payload` and spelled as the
+    JavaScript array the page reads beside it (`STATE_CHUNKS`).
+
+    Each snapshot is gzipped already, in the worker that made it, so gzipping
+    the payload with them inside was a second pass over megabytes that
+    cannot shrink -- three quarters of the compressed page on a long
+    campaign, and a sixth of a second of the parent's time. Beside the
+    payload they travel as they are. The dates are escaped as the payload's
+    text is (`pack_bytes`), so one shows exactly as it did from inside it.
+    """
+    board = payload.get("map")
+    if not board or not board.get("populationStateChunks"):
+        return "[]"
+    payload["map"] = {k: v for k, v in board.items()
+                      if k != "populationStateChunks"}
+    text = json.dumps(board["populationStateChunks"], separators=(",", ":"))
+    return text.replace("<", "\\u2039").replace(">", "\\u203a")
 
 
 def _trim_supply(supply, dates):
@@ -543,7 +634,7 @@ def _trim_supply(supply, dates):
     return out
 
 
-def nation_names(mod, parsed):
+def nation_names(mod, parsed, also=()):
     """
     {tag: the name the report shows}, from the mod's own localisation, which
     is where the game gets them: a bare TAG, overridden by TAG_<government>
@@ -551,6 +642,12 @@ def nation_names(mod, parsed):
     while it is a democracy. Saves are walked in order so the name reflects
     the government the nation ended the series with. Without a mod there is
     nothing to read, and tags stand in for names.
+
+    `also` names nations no save holds, by their plain name. A save lists
+    only nations that own land, and most of a campaign's wars were fought by
+    nations gone before its first save: in one 1872-1881 campaign 89 of the
+    128 nations in its wars read as bare tags -- AUS, PRU, NGF -- although
+    the mod names every one of them.
     """
     names = {}
     if not mod or not mod.localisation:
@@ -560,7 +657,24 @@ def nation_names(mod, parsed):
     for _meta, nations in parsed:
         for tag, nat in nations.items():
             names[tag] = name_for(tag, str(nat.get("government") or ""), loc)
+    for tag in also:
+        if tag not in names:
+            names[tag] = name_for(tag, "", loc)
     return names
+
+
+def _names_shown(tags, tag_names, wars):
+    """
+    {tag: name} for the charted nations, and for every other nation a war
+    names that has a name: the Wars tab shows them by name too. The extras
+    go in sorted, after the charted ones, so the page is the same bytes on
+    every run.
+    """
+    shown = {t: tag_names.get(t, t) for t in tags}
+    for t in sorted(war_tags(wars)):
+        if t not in shown and t in tag_names:
+            shown[t] = tag_names[t]
+    return shown
 
 
 def flags_for(mod, parsed, war_book):
@@ -787,7 +901,7 @@ def build_report(rows, tables, price_rows, snapshot_rows, outdir,
         "dates": dates,
         "years": [year_fraction(d) for d in dates],
         "tags": tags,
-        "tagNames": {t: tag_names.get(t, t) for t in tags},
+        "tagNames": _names_shown(tags, tag_names, wars),
         "cultureNames": culture_names or {},
         "names": display_names or {},
         "metrics": [
@@ -875,13 +989,15 @@ def build_report(rows, tables, price_rows, snapshot_rows, outdir,
             fh.write(pack_bytes(payload))
         html = TEMPLATE.replace("__DATA__", "").replace("__DATAURL__",
                                                         data_name)
+        html = html.replace("__STATES__", "[]")
+        html = _fill_counts(html, dates, tags, span, price_span)
     else:
-        html = TEMPLATE.replace("__DATA__", pack(payload))
+        # The small fields first, while the page is a few hundred kilobytes:
+        # filled after the data, each one was a pass over twenty megabytes.
+        html = _fill_counts(TEMPLATE, dates, tags, span, price_span)
         html = html.replace("__DATAURL__", "")
-    html = html.replace("__SAVECOUNT__", str(len(dates)))
-    html = html.replace("__NATIONCOUNT__", str(len(tags)))
-    html = html.replace("__SPAN__", span)
-    html = html.replace("__PRICESPAN__", price_span)
+        html = html.replace("__STATES__", _state_chunks(payload))
+        html = html.replace("__DATA__", pack(payload))
 
     path = os.path.join(outdir, filename)
     with open(path, "w", encoding="utf-8") as fh:

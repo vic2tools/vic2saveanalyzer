@@ -114,8 +114,8 @@ def cross_campaigns():
 
     holding = tempfile.mkdtemp(prefix="vic2xstale")
     try:
-        mods = {name: matching.a_mod(os.path.join(holding, "mod-" + name),
-                                     pop_per_regiment=1000)
+        mods = {name: matching.a_mod_in_a_game(holding, "mod-" + name,
+                                               pop_per_regiment=1000)
                 for name in ("alpha", "beta")}
         parent = os.path.join(holding, "campaigns")
 
@@ -179,6 +179,7 @@ def cross_campaigns():
 def unfinished_runs():
     """[what went wrong] when a run rewrites the files and does not finish."""
     sys.path.insert(0, os.path.join(HERE, "testkit"))
+    import matching
     import savefmt
 
     holding = tempfile.mkdtemp(prefix="vic2ustale")
@@ -197,11 +198,12 @@ def unfinished_runs():
         out = os.path.join(holding, "out")
         table = os.path.join(out, "nations_timeseries.csv")
         env = dict(os.environ, TMPDIR=holding)
+        game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
 
         def run(*extra):
             return subprocess.run(
                 [sys.executable, os.path.join(HERE, "vic2_analyzer.py"), saves,
-                 "--out", out, "--no-cache"] + list(extra),
+                 "--out", out, "--game-root", game, "--no-cache"] + list(extra),
                 capture_output=True, text=True, cwd=HERE, env=env)
 
         wrong = []
@@ -248,6 +250,7 @@ def leftover_tables():
     """[what went wrong] when a table in the folder is from an earlier run."""
     import csv
     sys.path.insert(0, os.path.join(HERE, "testkit"))
+    import matching
     import savefmt
 
     holding = tempfile.mkdtemp(prefix="vic2lstale")
@@ -268,9 +271,11 @@ def leftover_tables():
                 savefmt.country("FRA", culture="french", capital=2))
         out = os.path.join(holding, "out")
         env = dict(os.environ, TMPDIR=holding)
+        game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
         for extra in ([], ["--tags", "FRA"]):
             subprocess.run([sys.executable, os.path.join(HERE, "vic2_analyzer.py"),
-                            saves, "--out", out, "--no-cache", "-q"] + extra,
+                            saves, "--out", out, "--game-root", game,
+                            "--no-cache", "-q"] + extra,
                            capture_output=True, text=True, cwd=HERE, env=env)
         wrong = []
         for name in sorted(os.listdir(out)):

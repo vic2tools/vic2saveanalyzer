@@ -13,9 +13,9 @@
 // reads it by, and the save-wide bookkeeping -- who owns what, each pop's
 // type by its id, the world's people -- that no one nation's record holds.
 
-use crate::text::{find, is_number_b, to_float_b, to_int_b, trim_b, trim_end_b,
+use crate::text::{find, find_pair, is_number_b, to_float_b, to_int_b, trim_b, trim_end_b,
                   unquote_b};
-use std::collections::HashMap;
+use crate::pickle::{FxMap, FxSet};
 
 
 // The fields a pop can hold other than its culture line. A field not in here,
@@ -42,7 +42,7 @@ pub(crate) const STARVING_BELOW: f64 = 0.05;
 #[derive(Default)]
 pub(crate) struct Interner {
     pub(crate) names: Vec<Vec<u8>>,
-    pub(crate) index: HashMap<Vec<u8>, u32>,
+    pub(crate) index: FxMap<Vec<u8>, u32>,
 }
 
 impl Interner {
@@ -61,7 +61,7 @@ impl Interner {
 #[derive(Default)]
 pub(crate) struct Counter {
     pub(crate) order: Vec<Vec<u8>>,
-    pub(crate) index: HashMap<Vec<u8>, usize>,
+    pub(crate) index: FxMap<Vec<u8>, usize>,
     pub(crate) total: Vec<i64>,
 }
 
@@ -103,15 +103,33 @@ pub(crate) struct Nation {
     // took a whole-campaign hash to notice.
     pub(crate) pop_by_type: Counter,
     pub(crate) pop_by_culture: Counter,
-    pub(crate) pop_at: HashMap<i64, i64>,
-    pub(crate) soldiers_at: HashMap<i64, i64>,
-    pub(crate) soldier_pops_at: HashMap<i64, Vec<i64>>,
-    pub(crate) literacy_at: HashMap<i64, f64>,
+    pub(crate) population_by_state: FxMap<i64, Population>,
+    pub(crate) population_order: Vec<i64>,
+    pub(crate) soldiers_noncolonial: i64,
+    pub(crate) pop_noncolonial: i64,
+    pub(crate) literacy_noncolonial: f64,
+    pub(crate) mob_excluded_culture: i64,
+    pub(crate) soldier_pops_at: FxMap<i64, Vec<i64>>,
     // (pop type, culture, size, province), the first two as interned ids:
     // a campaign has a dozen pop types and a few hundred cultures, and this
     // list holds tens of thousands of entries per save. Two fresh strings
     // apiece was the scanner's largest single cost.
     pub(crate) mobilizable: Vec<(u32, u32, i64, i64)>,
+}
+
+#[derive(Default)]
+pub(crate) struct Population {
+    pub(crate) total: i64,
+    pub(crate) literate: f64,
+    pub(crate) types: Counter,
+    pub(crate) cultures: Counter,
+    pub(crate) provinces: i64,
+}
+
+#[derive(Default)]
+pub(crate) struct PopulationRules {
+    pub(crate) accepted: FxSet<Vec<u8>>,
+    pub(crate) colonial: FxSet<i64>,
 }
 
 /// One pop, as the scan fills it in: every field is text until it is wanted.
@@ -138,7 +156,7 @@ pub(crate) struct Pop<'a> {
 pub(crate) fn top_level_blocks(bytes: &[u8]) -> Option<Vec<(&[u8], usize, usize)>> {
     let mut found: Vec<(&[u8], usize, usize)> = Vec::new();
     let mut pos = 0usize;
-    while let Some(hit) = find(bytes, b"\n{", pos, bytes.len()) {
+    while let Some(hit) = find_pair(bytes, b'\n', b'{', pos, bytes.len()) {
         let line = bytes[..hit].iter().rposition(|&c| c == b'\n').map_or(0, |i| i + 1);
         let mut key = &bytes[line..hit];
         if key.last() == Some(&b'\r') {
@@ -197,7 +215,7 @@ pub(crate) fn building_level(bytes: &[u8], open: usize, stop: usize) -> f64 {
 pub(crate) struct Scan {
     pub(crate) world_pop: i64,
     pub(crate) owners: Vec<(i64, Vec<u8>, Vec<u8>)>,
-    pub(crate) nations: HashMap<Vec<u8>, Nation>,
+    pub(crate) nations: FxMap<Vec<u8>, Nation>,
     // The order nations were first seen, which is the order the file names
     // them. Python builds its dict that way and rows are written by walking
     // it, so emitting them alphabetically reordered every CSV in the run
@@ -224,6 +242,9 @@ pub(crate) fn read_province(
     pop_types: &[Vec<u8>],
     mob_types: &[Vec<u8>],
     scan: &mut Scan,
+    rules: &FxMap<Vec<u8>, PopulationRules>,
+    referenced_pops: &FxSet<i64>,
+    population_groups: &FxMap<i64, i64>,
 ) {
     let mut owner: Option<&[u8]> = None;
     let mut controller: Option<&[u8]> = None;
@@ -255,6 +276,15 @@ pub(crate) fn read_province(
         };
         let line = &bytes[p..end];
         i = end;
+        // Python's province pattern reaches exactly two levels -- one tab for
+        // the province's own fields, two for a pop's -- so a deeper line is
+        // passed over whole, before anything looks inside it. Most of a
+        // province is deeper: every pop's ideology and issues, twenty-odd
+        // lines of numbers nothing here reads, which used to be searched for
+        // an `=` and have their key checked only to be dropped after.
+        if depth > 2 {
+            continue;
+        }
         let eq = match line.iter().position(|&c| c == b'=') {
             Some(e) => e,
             None => continue,
@@ -270,12 +300,6 @@ pub(crate) fn read_province(
             continue;
         }
 
-        // Python's province pattern reaches exactly two levels: one tab for
-        // the province's own fields, two for a pop's. Deeper is not matched
-        // there and is not matched here.
-        if depth > 2 {
-            continue;
-        }
         if depth == 2 {
             if let Some(idx) = current {
                 let slot = &mut pops[idx];
@@ -388,11 +412,20 @@ pub(crate) fn read_province(
     nat.fort_levels += fort;
     nat.railroad_levels += railroad;
 
+    let country = rules.get(owner);
+    let home = !country.is_some_and(|r| r.colonial.contains(&pid));
+    let group = *population_groups.get(&pid).unwrap_or(&pid);
+    let mut province_pop = 0;
+    let mut province_literate = 0.0;
+
     for pop in &pops {
         if let Some(id) = pop.id {
-            scan.pop_ids.push(to_int_b(id));
-            let k = scan.words.id(pop.kind);
-            scan.pop_kinds.push(k);
+            let id = to_int_b(id);
+            if referenced_pops.contains(&id) {
+                scan.pop_ids.push(id);
+                let k = scan.words.id(pop.kind);
+                scan.pop_kinds.push(k);
+            }
         }
         let size = pop.size.map_or(0, to_int_b);
         if size <= 0 {
@@ -400,8 +433,12 @@ pub(crate) fn read_province(
         }
         // Interned before the nation is borrowed: both live on the same
         // struct and the borrow checker is right to mind.
+        let candidate = pop.culture.is_some()
+            && mob_types.iter().any(|t| t.as_slice() == pop.kind);
+        let accepted = pop.culture.is_some_and(|c|
+            country.is_some_and(|r| r.accepted.contains(c)));
         let mob = match pop.culture {
-            Some(culture) if mob_types.iter().any(|t| t.as_slice() == pop.kind) => {
+            Some(culture) if candidate && accepted => {
                 Some((scan.words.id(pop.kind), scan.words.id(culture)))
             }
             _ => None,
@@ -409,11 +446,20 @@ pub(crate) fn read_province(
         let nat = scan.nations.get_mut(owner).unwrap();
         nat.total_pop += size;
         nat.pop_by_type.add(pop.kind, size);
+        if province_pop == 0 {
+            if !nat.population_by_state.contains_key(&group) {
+                nat.population_order.push(group);
+            }
+            nat.population_by_state.entry(group).or_default().provinces += 1;
+        }
+        let state = nat.population_by_state.get_mut(&group).unwrap();
+        state.types.add(pop.kind, size);
+        if let Some(culture) = pop.culture { state.cultures.add(culture, size); }
         if pop.kind == b"soldiers" {
-            *nat.soldiers_at.entry(pid).or_insert(0) += size;
+            if home { nat.soldiers_noncolonial += size; }
             nat.soldier_pops_at.entry(pid).or_default().push(size);
         }
-        *nat.pop_at.entry(pid).or_insert(0) += size;
+        province_pop += size;
         if let Some(life) = pop.life {
             let got = to_float_b(life);
             if got < 1.0 {
@@ -427,13 +473,25 @@ pub(crate) fn read_province(
             nat.pop_by_culture.add(culture, size);
             if let Some((k, c)) = mob {
                 nat.mobilizable.push((k, c, size, pid));
+            } else if candidate && !accepted {
+                nat.mob_excluded_culture += size;
             }
         }
         let literate = pop.literacy.map_or(0.0, to_float_b) * size as f64;
         nat.literacy_weighted += literate;
-        *nat.literacy_at.entry(pid).or_insert(0.0) += literate;
+        province_literate += literate;
         nat.con_weighted += pop.con.map_or(0.0, to_float_b) * size as f64;
         nat.mil_weighted += pop.mil.map_or(0.0, to_float_b) * size as f64;
         nat.money_total += pop.money.map_or(0.0, to_float_b);
+    }
+    let nat = scan.nations.get_mut(owner).unwrap();
+    if province_pop > 0 {
+        let state = nat.population_by_state.get_mut(&group).unwrap();
+        state.total += province_pop;
+        state.literate += province_literate;
+    }
+    if home {
+        nat.pop_noncolonial += province_pop;
+        nat.literacy_noncolonial += province_literate;
     }
 }

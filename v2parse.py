@@ -354,6 +354,70 @@ def parse_block(tok, skip=frozenset()):
     return out
 
 
+def parse_span(text, start, stop):
+    """
+    `parse_block` over `text[start:stop]`, the opening `{` already behind
+    `start`, tokenised in one call instead of a token at a time.
+
+    For a span that ends where its block does -- a save laid out the way the
+    game writes it, where a block runs to the next one's key -- because all
+    of it is tokenised whether the block closes early or not. The wars, the
+    market and the great power list are read this way: 280,000 tokens a
+    save, and `Tokens.next` handing them over one method call at a time was
+    a third of what reading them cost. The tree is the same one, shape for
+    shape: `_parse_listed` is `parse_block` with a list index for a cursor.
+    """
+    return _parse_listed(TOKEN_RE.findall(text, start, stop), 0)[0]
+
+
+def _parse_listed(toks, i):
+    """`parse_block` over a list of tokens from `i`: (the value, where it ended)."""
+    out = {}
+    items = []
+    n = len(toks)
+    while i < n:
+        t = toks[i]
+        i += 1
+        if t == "}":
+            break
+        if t == "{":
+            val, i = _parse_listed(toks, i)
+            items.append(val)
+            continue
+        if t == "=":
+            continue
+        nxt = toks[i] if i < n else None
+        if nxt is not None:
+            i += 1
+        if nxt == "=":
+            if i >= n:
+                break
+            val_tok = toks[i]
+            i += 1
+            if val_tok == "{":
+                val, i = _parse_listed(toks, i)
+            else:
+                val = unquote(val_tok)
+            key = unquote(t)
+            if key in out:
+                cur = out[key]
+                if isinstance(cur, list) and getattr(cur, "_multi", False):
+                    cur.append(val)
+                else:
+                    out[key] = _MultiList([cur, val])
+            else:
+                out[key] = val
+        else:
+            items.append(unquote(t))
+            if nxt is not None:
+                i -= 1            # read again, as `Tokens.push` would have it
+    if items:
+        if not out:
+            return items, i
+        out["_items"] = items
+    return out, i
+
+
 class _MultiList(list):
     """Marks a list that came from repeated keys, not a bare value list."""
     _multi = True

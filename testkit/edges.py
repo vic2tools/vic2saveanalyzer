@@ -62,10 +62,33 @@ def a_save(path, date, tags=("ENG",), provinces=2, techs=(), inventions=(),
 WAR = savefmt.war("The Test War", "ENG", "FRA")
 
 
-def run(saves, out, extra_argv=()):
-    """The analyzer, in this process, with everything it printed."""
+_VANILLA = []
+
+
+def vanilla():
+    """
+    An unmodded install to read the cases on, made once. Every report is
+    read on an installed game, and a case that named none would only ever
+    be refused -- which passes here, and tests nothing.
+    """
+    if not _VANILLA:
+        import atexit
+        import matching
+        where = tempfile.mkdtemp(prefix="vic2edgegame")
+        atexit.register(shutil.rmtree, where, True)
+        _VANILLA.append(matching.a_vanilla(os.path.join(where, "Victoria 2")))
+    return _VANILLA[0]
+
+
+def run(saves, out, extra_argv=(), game=True):
+    """
+    The analyzer, in this process, with everything it printed. On `vanilla`
+    unless the case names a game or a mod itself, or asks for none.
+    """
     import vic2_analyzer as va
     argv = [sys.argv[0], saves, "--out", out] + list(extra_argv)
+    if game and "--game-root" not in argv and "--mod-path" not in argv:
+        argv += ["--game-root", vanilla()]
     old = sys.argv
     said = io.StringIO()
     code = None
@@ -143,6 +166,90 @@ def _(folder, out):
             wrong.append("the table holds %d rows for %d nation-dates"
                          % (len(rows), len(set(rows))))
     return got, "a manual save beside an autosave", wrong
+
+
+@case("a war over before the first save")
+def _(folder, out):
+    # A save keeps its finished wars, so a campaign's first save can carry
+    # one fought decades before it. Nothing saw who held the state going
+    # in, so nothing can say whether the peace moved it. It used to be
+    # judged anyway, by the first save against itself, and read "none
+    # taken" for every such war.
+    from invariants import payload_of
+    old = ["previous_war=", "{", '\tname="The Old War"', "\thistory=", "\t{",
+           "\t\t1850.1.1=", "\t\t{", '\t\t\tadd_attacker="ENG"', "\t\t}",
+           "\t\t1850.1.1=", "\t\t{", '\t\t\tadd_defender="FRA"', "\t\t}",
+           "\t\t1851.6.1=", "\t\t{", '\t\t\trem_attacker="ENG"', "\t\t}",
+           "\t}", '\toriginal_attacker="ENG"', '\toriginal_defender="FRA"',
+           "\toriginal_wargoal=", "\t{", '\t\tcasus_belli="acquire_state"',
+           '\t\tactor="ENG"', '\t\treceiver="FRA"', "\t\tstate_province_id=3",
+           "\t}", '\taction="1850.1.1"', "}"]
+    for name, date in (("a.v2", "1860.1.1"), ("b.v2", "1861.1.1")):
+        a_save(os.path.join(folder, name), date, tags=("ENG", "FRA"),
+               wars=old)
+    got = run(folder, out)
+    report = os.path.join(out, "report.html")
+    data = payload_of(report) if os.path.isfile(report) else None
+    goals = [g for w in (data or {}).get("wars", []) for g in w["goals"]]
+    wrong = []
+    if not goals:
+        wrong.append("the war's goal never reached the report")
+    for g in goals:
+        if g["checkable"]:
+            wrong.append("an 1851 peace was judged from saves of 1860 and "
+                         "1861: %d of %d taken" % (g["took"], g["of"]))
+    return got, "a goal nothing can judge", wrong
+
+
+@case("a mod anywhere but its game's mod folder")
+def _(folder, out):
+    # A report is read on an installed game and a mod only where the game
+    # loads it from, so there is one way to run and nothing to guess. Here
+    # the game is the only place England is called Englandia, so a report
+    # that says so was read on it.
+    from invariants import payload_of
+    import matching
+    for name, date in (("a.v2", "1860.1.1"), ("b.v2", "1861.1.1")):
+        a_save(os.path.join(folder, name), date, tags=("ENG", "FRA"))
+    game = matching.a_vanilla(os.path.join(folder, "Victoria 2"))
+    os.makedirs(os.path.join(game, "localisation"))
+    with open(os.path.join(game, "localisation", "names.csv"), "w") as fh:
+        fh.write("ENG;Englandia;x\n")
+    away = matching.a_mod(os.path.join(folder, "downloads", "amod"))
+    home = matching.a_mod(os.path.join(game, "mod", "amod"))
+
+    def england(where, argv, game_given=True):
+        got = run(folder, os.path.join(out, where), argv, game=game_given)
+        report = os.path.join(out, where, "report.html")
+        data = payload_of(report) if os.path.isfile(report) else None
+        return got, ((data or {}).get("tagNames") or {}).get("ENG")
+
+    wrong = []
+    for label, argv, game_given, words in (
+            ("no game at all", [], False, "Say where Victoria II is installed"),
+            ("a mod in Downloads", ["--mod-path", away], True,
+             "not in a Victoria II install's mod folder"),
+            ("a mod in Downloads, the game named", ["--mod-path", away,
+                                                    "--game-root", game], True,
+             "not in a Victoria II install's mod folder"),
+            ("a game that is not one", ["--game-root", folder], True,
+             "is not a Victoria II install")):
+        (code, said), name = england(label, argv, game_given)
+        if not isinstance(code, str) or words not in code:
+            wrong.append("%s was not refused with %r: %r"
+                         % (label, words, code if code else said[-200:]))
+        elif name is not None:
+            wrong.append("%s was refused, and a report was written anyway"
+                         % label)
+    got, name = england("the mod in the game", ["--mod-path", home])
+    if name != "Englandia":
+        wrong.append("a mod in the game's mod folder was not read on that "
+                     "game: England came out %r" % name)
+    (code, _said), name = england("the game alone", ["--game-root", game])
+    if code or name != "Englandia":
+        wrong.append("the game with no mod was not read as the unmodded "
+                     "game: %r, England %r" % (code, name))
+    return got, "one way to run", wrong
 
 
 @case("saves out of order on disk")

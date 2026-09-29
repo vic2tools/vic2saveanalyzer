@@ -60,18 +60,18 @@ def really_used(path):
     So the fallback is a thing to be told about, not just relied on.
     """
     seen = []
-    real = fastscan.collect
+    real = fastscan.record
 
-    def watched(running):
-        got = real(running)
+    def watched(*a, **k):
+        got = real(*a, **k)
         seen.append(got is not None)
         return got
 
-    fastscan.collect = watched
+    fastscan.record = watched
     try:
         readsave.analyze_save(path, READING, verbose=False)
     finally:
-        fastscan.collect = real
+        fastscan.record = real
     return bool(seen) and seen[0]
 
 

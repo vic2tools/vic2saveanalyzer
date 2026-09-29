@@ -129,8 +129,16 @@ went BLIND rather than failing to apply, which only the harness noticed.
   not). `START=spawn` starts workers the Windows way; `CPUS=0,2,4,6` with
   `-- --jobs 3` imitates a four-core machine (siblings here are 0/1, 2/3...);
   `MOD=/tmp/fakegame/mod/...` uses a stand-in game install that
-  `fakegame.py` builds, with 1,385 flags, because this mod has no game
-  beneath it and so draws six.
+  `fakegame.py` builds, with 1,385 flags, because this mod had no game
+  beneath it and so drew six.
+- **Since 26 September the real game is installed here**, at
+  `~/.local/share/Steam/steamapps/common/Victoria 2`, and a mod kept outside
+  an install is now read on the one Steam has (`mod_reader.with_game`). So
+  the Downloads mod reads the game's map and 138 flags: a warm rebuild went
+  from 1.11 s to 1.84 s and the report from 1.7 MB to 2.7 MB, every CSV
+  byte-identical. Every timing and contract log above that date was taken
+  without the game. `HOME` pointed at an empty folder hides Steam, which
+  is how to get the old conditions back for a comparison.
 - `phases.py` + `timeline.py` time the parent's phases and every worker job
   on one clock, without touching the tree.
 - Seven warm rounds cannot tell 10 ms apart: identical code has read 6 ms

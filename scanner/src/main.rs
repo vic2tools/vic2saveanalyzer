@@ -8,13 +8,11 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 //
-// Reading a save is 90% scanning text and converting numbers, and about
-// fifty-five percent of it is one loop: the province blocks, which are most
-// of the file and hold every pop in the game. That loop is what this is. The
-// analyzer still reads the country blocks, the wars and the market itself --
-// they are a fifth of the time and most of the intricacy -- and it still
-// reads everything itself if this binary is missing, so a build that has not
-// got a Rust compiler loses speed and nothing else.
+// Country metadata is read before provinces so the POP scan can accumulate
+// geographic state populations directly, retain only referenced POP IDs and
+// filter mobilization candidates before sending them to Python. The Python
+// reader handles wars and the market concurrently and also provides a full
+// fallback when the scanner is unavailable.
 //
 // The rules below are not this program's own. They are Python's, in
 // `read_province` and `v2parse`, reproduced exactly on purpose: the pop
@@ -23,13 +21,16 @@
 // strange in both places, and `testkit/parity.py` holds them to it save by
 // save against real campaigns.
 
+mod clause;
 mod country;
+mod pickle;
 mod province;
+mod record;
 mod text;
 
 use country::{read_country, Country, Tables};
-use province::{read_province, top_level_blocks, Counter, Interner, Scan};
-use std::collections::HashMap;
+use province::{read_province, top_level_blocks, Counter, Interner, Scan, PopulationRules};
+use crate::pickle::{FxMap, FxSet};
 use std::io::{self, BufRead, Read, Write};
 use std::time::Instant;
 use text::{latin1, tag_bytes, to_int_b, trim_b, unquote_b};
@@ -57,6 +58,17 @@ fn escape(out: &mut String, s: &[u8]) {
     out.push('"');
 }
 
+fn counter(out: &mut String, counts: &Counter) {
+    out.push('[');
+    for (i, key) in counts.order.iter().enumerate() {
+        if i > 0 { out.push(','); }
+        out.push('[');
+        escape(out, key);
+        out.push_str(&format!(",{}]", counts.total[i]));
+    }
+    out.push(']');
+}
+
 /// A float as Python's `repr` writes it, so the two sides agree on the text
 /// as well as the value.
 fn num(v: f64) -> String {
@@ -78,6 +90,10 @@ struct Lists {
     army_techs: Vec<String>,
     navy_techs: Vec<String>,
     reform_keys: Vec<String>,
+    population_groups: FxMap<i64, i64>,
+    /// Answer with the save's whole record, pickled (`record.rs`), in
+    /// place of the block table and the scan as JSON.
+    record: bool,
 }
 
 /// A file turned down: the code a one-save run exits with, and why.
@@ -99,9 +115,32 @@ fn main() {
         army_techs: Vec::new(),
         navy_techs: Vec::new(),
         reform_keys: Vec::new(),
+        population_groups: FxMap::default(),
+        record: args.iter().any(|a| a == "--record"),
     };
     let mut k = 2;
     while k + 1 < args.len() {
+        if args[k] == "--record" || args[k] == "--bench" {
+            k += 1;
+            continue;
+        }
+        if args[k] == "--population-groups" {
+            let text = std::fs::read_to_string(&args[k + 1]).unwrap_or_else(|e| {
+                eprintln!("cannot read population grouping: {}", e);
+                std::process::exit(2);
+            });
+            for line in text.lines() {
+                let pair = line.split_once(' ').and_then(|(a, b)|
+                    Some((a.parse::<i64>().ok()?, b.parse::<i64>().ok()?)));
+                let (pid, group) = pair.unwrap_or_else(|| {
+                    eprintln!("invalid population grouping");
+                    std::process::exit(2);
+                });
+                lists.population_groups.insert(pid, group);
+            }
+            k += 2;
+            continue;
+        }
         let list: Vec<String> = args[k + 1]
             .split(',')
             .filter(|s| !s.is_empty())
@@ -194,6 +233,20 @@ fn scan_one(path: &str, lists: &Lists, bench: bool, raw: &mut Vec<u8>,
             why: format!("{} is a zip archive, not a plaintext save", path),
         });
     }
+    // What `v2parse._refuse_unless_whole` turns down, turned down here too
+    // for a record: in that mode Python never opens the file, and a save cut
+    // short -- the game crashed while writing it, or is writing it now --
+    // would be read as a whole one, most of its nations empty and nothing
+    // said. Refused, it is read the other way, which says why.
+    if lists.record {
+        let head = &raw[..raw.len().min(4096)];
+        let has = |needle: &[u8]| head.windows(needle.len()).any(|w| w == needle);
+        let tail = &raw[raw.len().saturating_sub(256)..];
+        let end = tail.iter().rposition(|c| !b" \t\n\r\x0b\x0c".contains(c));
+        if !(has(b"date=") || has(b"date =")) || end.map(|i| tail[i]) != Some(b'}') {
+            return Err(Refusal { code: 7, why: format!("{} is not a whole save", path) });
+        }
+    }
     // The file stays bytes from here. Decoding all 31 MB of it to read the
     // 8 MB of country blocks cost 23 ms a save and, worse on a machine bound
     // by memory traffic, a 31 MB allocation per worker.
@@ -236,7 +289,7 @@ fn scan_one(path: &str, lists: &Lists, bench: bool, raw: &mut Vec<u8>,
             }
         }
     }
-    {
+    if !lists.record {
         let mut head = String::with_capacity(1 << 16);
         head.push_str("{\"date\":");
         escape(&mut head, date.as_bytes());
@@ -265,7 +318,7 @@ fn scan_one(path: &str, lists: &Lists, bench: bool, raw: &mut Vec<u8>,
     let mut scan = Scan {
         world_pop: 0,
         owners: Vec::new(),
-        nations: HashMap::new(),
+        nations: FxMap::default(),
         pop_ids: Vec::new(),
         pop_kinds: Vec::new(),
         words: Interner::default(),
@@ -277,24 +330,59 @@ fn scan_one(path: &str, lists: &Lists, bench: bool, raw: &mut Vec<u8>,
         reform_keys: &lists.reform_keys,
     };
     let mut countries: Vec<Country> = Vec::new();
-    for (key, at, stop) in &blocks {
-        if !key.is_empty() && key.iter().all(|c| c.is_ascii_digit()) {
-            let pid = to_int_b(key);
-            read_province(text, *at, *stop, pid, &lists.pop_types,
-                          &lists.mob_types, &mut scan);
-        } else if tag_bytes(key) {
-            // Decoded here and nowhere else: this block, and only this one.
-            let chunk = latin1(&text[*at..(*stop).min(text.len())]);
-            let tag = latin1(key);
-            countries.push(read_country(&chunk, 0, chunk.len(), &tag, &tables));
+    // The block index already exists. Parse each country once, before POPs
+    // need acceptance, colonial status and the regiment-to-POP references.
+    let mut rules: FxMap<Vec<u8>, PopulationRules> = FxMap::default();
+    let mut referenced_pops = FxSet::default();
+    let date_b: Vec<u8> = date.chars().map(|c| c as u32 as u8).collect();
+    // For a record, the wars, the market and the great power list are read on
+    // a thread of their own while this one scans the countries and provinces:
+    // the two halves share nothing, and they are what Python read beside the
+    // scanner before, so a save costs the longer of them and not the sum.
+    let rest = std::thread::scope(|sc| {
+        let ahead = if lists.record {
+            Some(sc.spawn(|| record::read_rest(text, &blocks, &date_b)))
+        } else {
+            None
+        };
+        for (key, at, stop) in &blocks {
+            if tag_bytes(key) {
+                // Decoded here and nowhere else: this block, and only this one.
+                let chunk = latin1(&text[*at..(*stop).min(text.len())]);
+                let tag = latin1(key);
+                let country = read_country(&chunk, 0, chunk.len(), &tag, &tables);
+                let rule = rules.entry(key.to_vec()).or_default();
+                let bytes = |s: &str| s.chars().map(|c| c as u8).collect::<Vec<_>>();
+                rule.accepted.extend(country.accepted_cultures.iter().map(|s| bytes(s)));
+                for (name, value) in &country.scalars {
+                    if name == "primary_culture" && !value.is_empty() {
+                        rule.accepted.insert(bytes(value));
+                    }
+                }
+                rule.colonial.extend(&country.colonial_provinces);
+                referenced_pops.extend(&country.regiment_pops);
+                countries.push(country);
+            }
         }
-    }
+        for (key, at, stop) in &blocks {
+            if !key.is_empty() && key.iter().all(|c| c.is_ascii_digit()) {
+                read_province(text, *at, *stop, to_int_b(key), &lists.pop_types,
+                              &lists.mob_types, &mut scan, &rules,
+                              &referenced_pops, &lists.population_groups);
+            }
+        }
+        ahead.map(|h| h.join().unwrap_or(Err(())))
+    });
 
     mark("scan provinces+countries", &mut last);
+    if let Some(rest) = rest {
+        return answer_record(path, &date_b, &player, rest, &scan, &countries,
+                             sink, serving, bench, &mut last);
+    }
     // The date, the player and the block table went out above, before the
     // scan, and are not repeated here.
     let mut out = String::with_capacity(4 << 20);
-    out.push_str("{\"world_pop\":");
+    out.push_str("{\"population_aggregates\":true,\"world_pop\":");
     out.push_str(&scan.world_pop.to_string());
     out.push_str(",\"owners\":[");
     for (i, (pid, owner, held)) in scan.owners.iter().enumerate() {
@@ -352,6 +440,10 @@ fn scan_one(path: &str, lists: &Lists, bench: bool, raw: &mut Vec<u8>,
         out.push_str(&format!(",\"con_weighted\":{}", num(nat.con_weighted)));
         out.push_str(&format!(",\"mil_weighted\":{}", num(nat.mil_weighted)));
         out.push_str(&format!(",\"money_total\":{}", num(nat.money_total)));
+        out.push_str(&format!(",\"soldiers_noncolonial\":{}", nat.soldiers_noncolonial));
+        out.push_str(&format!(",\"pop_noncolonial\":{}", nat.pop_noncolonial));
+        out.push_str(&format!(",\"literacy_noncolonial\":{}", num(nat.literacy_noncolonial)));
+        out.push_str(&format!(",\"mob_excluded_culture\":{}", nat.mob_excluded_culture));
 
         let ints = |out: &mut String, name: &str, v: &Vec<i64>| {
             out.push_str(&format!(",\"{}\":[", name));
@@ -394,29 +486,15 @@ fn scan_one(path: &str, lists: &Lists, bench: bool, raw: &mut Vec<u8>,
         strmap(&mut out, "pop_by_type", &nat.pop_by_type);
         strmap(&mut out, "pop_by_culture", &nat.pop_by_culture);
 
-        let intmap = |out: &mut String, name: &str, m: &HashMap<i64, i64>| {
-            out.push_str(&format!(",\"{}\":[", name));
-            let mut keys: Vec<&i64> = m.keys().collect();
-            keys.sort();
-            for (i, k) in keys.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                out.push_str(&format!("[{},{}]", k, m[*k]));
-            }
-            out.push(']');
-        };
-        intmap(&mut out, "pop_at", &nat.pop_at);
-        intmap(&mut out, "soldiers_at", &nat.soldiers_at);
-
-        out.push_str(",\"literacy_at\":[");
-        let mut lkeys: Vec<&i64> = nat.literacy_at.keys().collect();
-        lkeys.sort();
-        for (i, k) in lkeys.iter().enumerate() {
-            if i > 0 {
-                out.push(',');
-            }
-            out.push_str(&format!("[{},{}]", k, num(nat.literacy_at[*k])));
+        out.push_str(",\"population_by_state\":[");
+        for (i, group) in nat.population_order.iter().enumerate() {
+            if i > 0 { out.push(','); }
+            let state = &nat.population_by_state[group];
+            out.push_str(&format!("[{},{},{},", group, state.total, num(state.literate)));
+            counter(&mut out, &state.types);
+            out.push(',');
+            counter(&mut out, &state.cultures);
+            out.push_str(&format!(",{}]", state.provinces));
         }
         out.push(']');
 
@@ -580,6 +658,50 @@ fn scan_one(path: &str, lists: &Lists, bench: bool, raw: &mut Vec<u8>,
 
     mark("build the output", &mut last);
     let sent = sink.write_all(out.as_bytes()).and_then(|_| sink.flush());
+    if sent.is_err() && serving {
+        std::process::exit(5);        // nobody listening
+    }
+    Ok(())
+}
+
+/// The file's own name, as Python's `os.path.basename` gives it here.
+fn basename(path: &str) -> &str {
+    let cut: &[char] = if cfg!(windows) { &['/', '\\', ':'] } else { &['/'] };
+    match path.rfind(cut) {
+        Some(i) => &path[i + 1..],
+        None => path,
+    }
+}
+
+/// `--record`: the save's `(meta, nations)`, pickled, after a line saying
+/// how many bytes of it follow. Refused with code 6 where the Python reader
+/// would have done something the record will not copy (see `clause.rs`).
+#[allow(clippy::too_many_arguments)]
+fn answer_record(path: &str, date_b: &[u8], player: &str, rest: Result<record::Rest, ()>,
+                 scan: &Scan, countries: &[Country],
+                 sink: &mut impl Write, serving: bool, bench: bool,
+                 last: &mut Instant) -> Result<(), Refusal> {
+    let to_latin = |s: &str| -> Vec<u8> { s.chars().map(|c| c as u32 as u8).collect() };
+    let player_b = to_latin(player);
+    // Latin-1, as every string in the record is. A name that does not fit
+    // is sent empty, and the analyzer, which checks it, puts its own in.
+    let name = basename(path);
+    let file = if name.chars().all(|c| (c as u32) < 256) { to_latin(name) } else { Vec::new() };
+    let head = record::Head { file: &file, date: date_b, player: &player_b };
+    let blob = match rest.and_then(|rest| record::build(&head, scan, countries, rest)) {
+        Ok(b) => b,
+        Err(()) => return Err(Refusal {
+            code: 6,
+            why: format!("{}: the wars or the market hold something only Python reads", path),
+        }),
+    };
+    if bench {
+        eprintln!("  {:<22} {:>6.1} ms", "build the record", last.elapsed().as_secs_f64() * 1000.0);
+    }
+    let said = format!("{{\"record\":{}}}\n", blob.len());
+    let sent = sink.write_all(said.as_bytes())
+        .and_then(|_| sink.write_all(&blob))
+        .and_then(|_| sink.flush());
     if sent.is_err() && serving {
         std::process::exit(5);        // nobody listening
     }

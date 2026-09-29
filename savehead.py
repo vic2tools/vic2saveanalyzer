@@ -119,25 +119,46 @@ def date_of(path):
     return found.group(1).decode("ascii") if found else ""
 
 
+def dates_of(files):
+    """
+    {path: `date_of(path)`} for every save, the files opened side by side.
+
+    One after another this was the first half second of a first run over 265
+    saves: the files were not in memory yet, so each 4 KB was a trip to the
+    disk, and on Windows a file opened is also a file the virus scanner
+    looks at. Threads, because each one spends its time waiting for the
+    disk, which it does without holding the interpreter.
+    """
+    files = list(files)
+    if len(files) < 8:
+        return {p: date_of(p) for p in files}
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(16, len(files))) as pool:
+        return dict(zip(files, pool.map(date_of, files)))
+
+
 def sort_key(date):
     """(0, year, month, day), or (1, 0, 0, 0) -- after every date -- for none."""
     got = ymd(date)
     return (0,) + got if got else (1, 0, 0, 0)
 
 
-def in_date_order(files):
+def in_date_order(files, dates=None):
     """
     The saves sorted by the date inside them, read from their first line.
 
     Worth the 4 KB a save: the campaign has to be walked oldest first -- war
     histories fold that way -- and knowing the order up front is what lets
     saves be handed over one at a time instead of collected and sorted.
-    Saves with no date come last, by name.
+    Saves with no date come last, by name. `dates` is `dates_of(files)`,
+    when the caller has it.
     """
-    return sorted(files, key=lambda p: (sort_key(date_of(p)), p))
+    if dates is None:
+        dates = dates_of(files)
+    return sorted(files, key=lambda p: (sort_key(dates[p]), p))
 
 
-def one_per_date(files):
+def one_per_date(files, dates=None):
     """
     `files`, in date order, with one save per in-game date.
 
@@ -149,16 +170,17 @@ def one_per_date(files):
     on an autosave's day. The later-named file is kept, which is the one
     the report already showed, and the rest are named on the way past.
     """
-    kept, dates, clash = [], [], {}
+    known = dates if dates is not None else {}
+    kept, keys, clash = [], [], {}
     for path in files:
-        date = date_of(path)
+        date = known[path] if path in known else date_of(path)
         key = sort_key(date)
-        if kept and key[0] == 0 and key == dates[-1]:
+        if kept and key[0] == 0 and key == keys[-1]:
             clash.setdefault(date, [kept[-1]]).append(path)
             kept[-1] = path
             continue
         kept.append(path)
-        dates.append(key)
+        keys.append(key)
     for date, same in clash.items():
         print("note: %s are all dated %s, so only %s is read. Saves from two "
               "games in one folder? Keep each game in a folder of its own."

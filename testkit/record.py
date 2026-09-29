@@ -101,6 +101,7 @@ SAMPLES = {
     nation._pairs_add_interned: [("a", 2)],
     nation._pairs_extend: [(1, [5, 6])],
     nation._pairs_add_nested: [(1, [("a", 2)])],
+    nation._population_rows: [(1, 2, 1.0, [("farmers", 2)], [("dutch", 2)], 1)],
 }
 
 
@@ -174,9 +175,10 @@ def neither_side_knows_more():
                 "patterns in `rust_keys` no longer find it" % len(sent)]
     # `fastscan` keeps the save's own bookkeeping -- who owns which province,
     # what type each pop was -- because it belongs to no one nation.
-    # A serving scanner's answer for a file it turns down is one key too.
+    # A serving scanner's answer for a file it turns down is one key too,
+    # and so is the line that says how long a `--record` answer is.
     top = (set(fastscan.HEAD_NEEDED) | set(fastscan.NEEDED)
-           | {"countries", fastscan.REFUSED})
+           | {"countries", fastscan.REFUSED, "record"})
     known = set()
     for _what, table, extras in TABLES:
         known |= {key for key, _f, _r in table} | set(extras)

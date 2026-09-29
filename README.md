@@ -161,9 +161,17 @@ A mod is read the way the game reads one: file by file, with the mod's copy
 winning and anything it does not ship taken from the Victoria 2 install
 underneath. That matters for the partial ones — Divergences of Darkness names
 599 of its 658 countries and leaves the rest to the base game, and CE 1v1 ships
-two localisation files and no pop types at all. So keep the mod inside
-`Victoria 2/mod/`, where the game keeps it, rather than copying it somewhere
-else; pointed at a stray copy it can only read what that copy contains.
+two localisation files and no pop types at all. It is also where the map and
+most of the flags come from: a mod rarely ships either.
+
+A mod inside `Victoria 2/mod/`, where the game keeps it, is read on that
+install. A copy kept anywhere else, such as a mod unpacked into Downloads, is
+read on the Victoria 2 this machine has installed through Steam, found in
+Steam's usual places on Windows, Linux and macOS, including a library on
+another drive. The log says which install it used. `--game-root` names one
+instead: an install bought somewhere other than Steam, or a second copy. With
+no game found at all, the report has no map and only the flags the mod ships
+itself.
 
 ### Saves must be plaintext
 
@@ -440,23 +448,45 @@ Every war in the campaign. The table lists who fought whom, when it started and
 ended, total casualties, how many battles, how many states changed hands, and
 how many of its war goals were met. Search by war name or by any nation in it.
 
-Click a war for the detail:
+Click a war for the detail. It opens as an infobox, the way an encyclopedia
+sets one out, with the war goals and battles beside it:
 
-- **Belligerents**, split into those who were there from the start and those who
-  intervened later, each with the date it joined. A nation that was knocked out
-  before the end — a separate peace, or annexation — also carries the date it
-  left, which the war's own dates do not say. The engine removes everyone when
-  a war ends, so only an exit earlier than that is shown: of 18,657 recorded
-  removals in one campaign, 17,964 were simply the war finishing.
-- **War goals** — every demand the war carried: the one it opened with plus any
-  added while it ran. **Taken at the peace** compares who held the state before
-  the war against who held it after. **Occupied mid-war** is a different thing
-  and says so — the claimant held the state by siege at the moment a save was
-  taken, which is a condition during the war, not an outcome.
-- **States that changed hands**, with how many provinces of each moved.
+- **The name** in a box at the top, and under it the flags of each side's
+  principal belligerents facing each other: its war leader, and any great power
+  fighting for it. A mod with no game beneath it has almost no flags, so a
+  nation without one flies its own colour with its tag on it.
+- **Date**, with how long the war lasted. **Result**: whether each side's war
+  goals were taken at the peace, as far as the saves can tell. A war that was
+  over before the first save, or is still being fought, is not given a
+  verdict. **Territorial changes**: every state that changed hands. **Battles**:
+  how many on land and at sea, how many each side won, and the places fought
+  over most.
+- **Belligerents** in two columns, defenders left and attackers right, as in
+  the battle tables. The war leader and the great powers come first with large
+  flags, each marked as such with its rank. Nations that joined later are listed
+  apart with the date they joined. A nation knocked out before the end (a
+  separate peace, or annexation) also shows the date it left, which the war's
+  own dates do not say. The engine removes everyone when a war ends, so only an
+  exit earlier than that is shown: of 18,657 recorded removals in one campaign,
+  17,964 were simply the war finishing.
+- **Commanders and leaders**: every general and admiral the battles name, on
+  the side they fought for, most battles first.
+- **Strength**: each nation's brigades and ships at the last save before the
+  war, or at the first save taken during it. Great-power ranks come from the
+  same save. A war fought before the first save has neither.
+- **Casualties and losses**: what each nation lost in the battles it fought,
+  with each side's total.
+- **War goals**: every demand the war carried, meaning the one it opened with
+  plus any added while it ran. **Taken at the peace** compares who held the
+  state before the war against who held it after. **Occupied mid-war** is a
+  different thing and says so: the claimant held the state by siege at the
+  moment a save was taken, which is a condition during the war, not an outcome.
 - **Land battles** and **naval battles**, separately, each sortable by date, by
   name, or by either side's losses. Every battle shows both commanders and what
   each side was made of.
+
+Nations are named even when they were gone before the first save, such as
+Baden or the North German Federation, as long as the mod names them.
 
 Battles carry dates where any save still remembered them; a save keeps dates
 only on its most recent battles, so older ones are marked undated rather than
@@ -616,6 +646,7 @@ Useful flags:
 |---|---|
 | `-o`, `--out` | Output folder (default `vic2_report`) |
 | `--mod-path` | The mod or game folder |
+| `--game-root` | The Victoria 2 install a mod kept outside it runs on, when it is not the one Steam installed |
 | `--tags ENG FRA …` | Only keep these nations |
 | `--min-pop 500000` | Drop microstates |
 | `--no-html` | CSVs only |
@@ -747,8 +778,8 @@ cargo build --release --manifest-path scanner/Cargo.toml
 ```
 
 No dependencies, so that works on a machine that has never talked to
-crates.io. `build_exe.py` then carries the binary inside the executable; run
-without it and the build says so and carries on.
+crates.io. `build_exe.py` requires the binary and carries it inside the
+executable. Source runs can still use the Python fallback.
 
 On 103 real saves, 3.5 GB:
 
@@ -777,6 +808,7 @@ integer `0` and the scanner was handing back `0.0`.
 ## Building the executable
 
 ```bash
+cargo build --release --manifest-path scanner/Cargo.toml
 python build_exe.py
 ```
 
@@ -801,6 +833,7 @@ runs it.
 | `modrules.py` | What those rules are worth to one nation, triggers and all |
 | `cross.py` | Finds campaigns, works out which mod each was played on |
 | `report.py` | Prepares everything the report needs |
+| `state_history.py` | Compacts and compresses state snapshots in workers; restores them for offline comparisons |
 | `template.py` | The report's HTML, CSS and JavaScript |
 | `tech_groups.py` | Which technologies count as army or navy |
 | `build_exe.py` | Draws the icon and packs the executable |

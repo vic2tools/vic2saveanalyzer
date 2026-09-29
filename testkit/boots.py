@@ -72,6 +72,33 @@ WATCHER = """<script>
     }, %(settle)d);
   }
 
+  // Every war in turn, and the first battle of each opened out. A war's
+  // detail is drawn only when its row is clicked, so nothing above ever runs
+  // it -- and it is the part of the page that writes the most names out of
+  // saves into HTML, the infobox beside all of them.
+  function tourWars(then) {
+    var tab = document.getElementById('tab-wars');
+    if (!tab || tab.hidden) { say('wars', '0:0'); then(); return; }
+    var before = bad.length, opened = 0, boxes = 0;
+    try { tab.click(); } catch (e) { bad.push('clicking tab-wars: ' + e.message); }
+    var n = document.querySelectorAll('#wartable tbody tr').length;
+    for (var i = 0; i < n; i++) {
+      var row = document.querySelectorAll('#wartable tbody tr')[i];
+      if (!row) break;
+      try { row.click(); } catch (e) { bad.push('opening war ' + i + ': ' + e.message); }
+      opened++;
+      if (document.querySelector('#wardetail .ib')) boxes++;
+      var battle = document.querySelector('#wardetail tr.battlerow');
+      if (battle) {
+        try { battle.click(); }
+        catch (e) { bad.push('opening a battle of war ' + i + ': ' + e.message); }
+      }
+    }
+    say('wars', opened + ':' + boxes);
+    if (bad.length > before) say('badtab', 'wars-detail');
+    then();
+  }
+
   function verdict() {
     for (var i = 0; i < bad.length; i++) say('error', bad[i]);
     var note = document.getElementById('bootnote');
@@ -107,7 +134,9 @@ WATCHER = """<script>
   window.addEventListener('load', function () {
     setTimeout(function () {
       landing();
-      visit(document.querySelectorAll('button.tab'), 0, verdict);
+      visit(document.querySelectorAll('button.tab'), 0, function () {
+        tourWars(verdict);
+      });
     }, %(wait)d);
   });
 }());
@@ -208,10 +237,12 @@ def hostile_names():
                  '\toriginal_attacker="ENG"', '\toriginal_defender="FRA"',
                  '\taction="1869.5.1"', "}"])
         out = os.path.join(holding, "out")
+        import matching
+        game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
         built = subprocess.run(
             [sys.executable, os.path.join(here, "vic2_analyzer.py"), saves,
-             "--out", out, "--no-cache", "-q"], capture_output=True,
-            text=True, env=dict(os.environ, TMPDIR=holding))
+             "--out", out, "--game-root", game, "--no-cache", "-q"],
+            capture_output=True, text=True, env=dict(os.environ, TMPDIR=holding))
         report = os.path.join(out, "report.html")
         if built.returncode or not os.path.isfile(report):
             return ["the hostile campaign did not build: %s"
@@ -226,6 +257,8 @@ def hostile_names():
     if ran:
         return ["a name from a save ran as script in the report (probe %s)"
                 % ran]
+    if said["error"]:
+        return ["the hostile campaign's report threw: %s" % said["error"][0]]
     if not said.get("done"):
         return ["the hostile campaign's report never finished loading"]
     print("  names that are markup stay text: ok")
@@ -267,6 +300,10 @@ def main():
         problems.append("no tabs, so the page shell did not render either")
     for which in said["badtab"]:
         problems.append("the %s tab threw when it was opened" % which)
+    opened, _, boxes = (said.get("wars") or "0:0").partition(":")
+    if int(boxes or 0) < int(opened or 0):
+        problems.append("%s of %s wars opened without their infobox"
+                        % (int(opened) - int(boxes or 0), opened))
     landed = said.get("landed")
     if landed:
         which, total, shown, state = landed.split(":")
@@ -294,6 +331,8 @@ def main():
                     t.split(":")[2] if t.count(":") > 1 else "?")
         for t in said["oktab"]))
     print("          the bracket is how many shapes that tab's charts drew")
+    print("  wars    opened %s, each with its first battle"
+          % (said.get("wars") or "0:0").partition(":")[0])
     problems += hostile_names()
     if problems:
         print("\nPROBLEMS:")

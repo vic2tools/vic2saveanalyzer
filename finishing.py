@@ -163,7 +163,25 @@ def kept_by(spec, tag, nat):
             and nat["total_pop"] >= spec.min_pop)
 
 
-def finish_nations(meta, nations, spec):
+def state_population(nat, regions):
+    """Owned population and composition per geographic state.
+
+    Report rows: [population, weighted literacy, types, cultures, populated
+    province count]. Culture entries include acceptance at this save.
+    """
+    accepted = accepted_cultures_of(nat)
+    # The reader already grouped each POP. Only presentation (names,
+    # literacy rounding and acceptance flags) remains; never mutate the raw
+    # aggregates, which can be finished again with another set of options.
+    return {str(regions.get(pid) or ("province:" + str(pid))):
+            [size, round(literate / size, 6) if size else None, types,
+             [[culture, amount, culture in accepted]
+              for culture, amount in cultures.items()], provinces]
+            for pid, (size, literate, types, cultures, provinces)
+            in nat["population_by_state"].items()}
+
+
+def finish_nations(meta, nations, spec, state_snapshot=None):
     """
     One save's nations, finished: the players picked, the rest filtered out,
     and `finalize` run over what is left.
@@ -196,6 +214,14 @@ def finish_nations(meta, nations, spec):
                         include_occupied=spec.include_occupied,
                         mod=spec.mod, world=stage)
         done["mobilisation_size"] = round(rate, 5)
+        # Compact geographic totals for population drill-down, before the
+        # per-province working tables are discarded by finish_and_pack.
+        regions = (spec.mod.province_regions if spec.mod else None) or {}
+        if state_snapshot is None:
+            done["population_states"] = state_population(nat, regions)
+        else:
+            state_snapshot.add(tag, nat["population_by_state"], regions,
+                               accepted_cultures_of(nat))
         if not spec.keep_pools:
             # A nation's mobilizable pops are one entry per pop per province
             # -- eleven thousand of them for a large nation, two megabytes a
@@ -208,7 +234,7 @@ def finish_nations(meta, nations, spec):
     return out
 
 
-def finish_and_pack(meta, nations, spec):
+def finish_and_pack(meta, nations, spec, state_snapshot=None):
     """
     `finish_nations`, and then what a save needs to cross a pipe.
 
@@ -223,7 +249,7 @@ def finish_and_pack(meta, nations, spec):
     function inside a function -- cannot be sent, so no worker starts and
     every save is read on one core.
     """
-    out = finish_nations(meta, nations, spec)
+    out = finish_nations(meta, nations, spec, state_snapshot)
     for done in out.values():
         for name in SPENT_ON_FINALIZE:
             done.pop(name, None)
@@ -419,9 +445,7 @@ def finalize(nat, rate=1.0, pop_per_regiment=POP_SIZE_PER_REGIMENT,
     # matter to an army are the ones in stated land. The share is taken against
     # the whole nation, colonies included: a soldier base of five million reads
     # differently under fifty million people than under two hundred.
-    colonial = nat["colonial_provinces"]
-    stated = sum(size for pid, size in nat["soldiers_at"].items()
-                 if pid not in colonial)
+    stated = nat["soldiers_noncolonial"]
     out["soldiers_noncolonial"] = stated
     out["soldiers_noncolonial_pct"] = (
         round(100.0 * stated / total, 3) if total else 0.0)
@@ -430,10 +454,8 @@ def finalize(nat, rate=1.0, pop_per_regiment=POP_SIZE_PER_REGIMENT,
     # reads one way with India in the figure and another without. This is the
     # same restriction the soldier measure above uses, so the two agree about
     # what "our own states" means.
-    home_pop = sum(size for pid, size in nat["pop_at"].items()
-                   if pid not in colonial)
-    home_literate = sum(v for pid, v in nat["literacy_at"].items()
-                        if pid not in colonial)
+    home_pop = nat["pop_noncolonial"]
+    home_literate = nat["literacy_noncolonial"]
     out["avg_literacy_stated"] = (
         round(home_literate / home_pop, 5) if home_pop else 0.0)
     out["pop_noncolonial"] = home_pop
