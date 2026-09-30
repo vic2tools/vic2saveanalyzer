@@ -64,6 +64,31 @@ def build_scanner():
     return done.returncode == 0, done.stderr[-2000:]
 
 
+def put_back(pristine, binary):
+    """
+    The scanner as committed, back in place, by renaming a copy over it.
+
+    Written into, the file cannot be while any process is still running it
+    (ETXTBSY), and one run of this harness met exactly that the moment a
+    check returned. A rename replaces the name and leaves a running copy
+    alone. Anything of this tree's still running is named, since a check
+    leaving a scanner behind is a bug of its own.
+    """
+    if sys.platform.startswith("linux"):
+        mine = os.path.realpath(os.path.join(TREE, "scanner"))
+        for pid in os.listdir("/proc"):
+            try:
+                exe = os.readlink(os.path.join("/proc", pid, "exe"))
+            except OSError:
+                continue
+            if exe.startswith(mine):
+                print("  note: process %s is still running %s" % (pid, exe))
+    fresh = binary + ".next"
+    shutil.copyfile(pristine, fresh)
+    shutil.copymode(pristine, fresh)
+    os.replace(fresh, binary)
+
+
 def patch(path, old, new, count=1):
     """Replace `old` with `new` in TREE/path. Fails loudly if it does not match."""
     full = os.path.join(TREE, path)
@@ -977,7 +1002,7 @@ def main():
                 print("%-34s %-10s %s" % (name, "NOAPPLY", "does not build:\n" + said))
                 results.append((name, "NOAPPLY", bug, catcher, ""))
                 revert()
-                shutil.copyfile(pristine, binary)
+                put_back(pristine, binary)
                 continue
         try:
             passed, out = check(catcher, argv_for(extra))
@@ -985,7 +1010,7 @@ def main():
             passed, out = True, "TIMEOUT"
         if rust:
             revert()
-            shutil.copyfile(pristine, binary)
+            put_back(pristine, binary)
         verdict = "BLIND" if passed else "caught"
         print("%-34s %-10s %s  [%s]" % (name, verdict, bug, catcher))
         results.append((name, verdict, bug, catcher, out))
