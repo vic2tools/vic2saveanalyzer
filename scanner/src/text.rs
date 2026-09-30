@@ -40,10 +40,10 @@ pub(crate) fn to_float_b(s: &[u8]) -> f64 {
     if let Some(v) = fast_decimal(t) {
         return v;
     }
-    match std::str::from_utf8(t) {
-        Ok(t) => t.parse::<f64>().unwrap_or(0.0),
-        Err(_) => 0.0,
-    }
+    // Anything but a plain decimal is what Python's `float()` makes of it:
+    // `1_000`, `inf`, the spaces it trims; a ValueError is the 0.0 the
+    // readers default to.
+    crate::engine::modread::py_float(s).unwrap_or(0.0)
 }
 
 const TENS: [f64; 16] = [1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12,

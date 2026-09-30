@@ -8,12 +8,10 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 //
-// When this program runs the analyzer's command line itself (`analyze`), a
-// run it hands back to Python is done again from the start by Python, which
-// prints everything it prints. So until the run can no longer be handed
-// back, what it says to stdout and stderr is kept, in the order it was
-// said, and either let out then or dropped with the run. Run for Python
-// instead (`report`), nothing is held.
+// Everything a run says goes through here. It can be held -- kept in the
+// order it was said and let out at once, or dropped with the run -- which
+// the front end did while it still handed runs back after speaking; nothing
+// holds it now, and the output streams as it is said.
 //
 // The lines the host reads (`@progress`, `@ready`, `@done`) are not these:
 // they go out at once, and only when there is a host to read them.
@@ -51,14 +49,6 @@ pub fn write(to_stdout: bool, text: String) {
     }
 }
 
-/// Keep everything said from here until `release`.
-pub fn hold() {
-    let mut held = HELD.lock().unwrap();
-    if held.is_none() {
-        *held = Some(Vec::new());
-    }
-}
-
 /// Let out what was kept, in order, and stop keeping.
 pub fn release() {
     let kept = HELD.lock().unwrap().take();
@@ -70,6 +60,10 @@ pub fn release() {
 /// Whether a host is reading the protocol lines.
 pub fn set_protocol(on: bool) {
     PROTOCOL.store(on, Ordering::Relaxed);
+}
+
+pub fn protocol_on() -> bool {
+    PROTOCOL.load(Ordering::Relaxed)
 }
 
 /// One line for the host: `@progress`, `@ready`, `@done`.

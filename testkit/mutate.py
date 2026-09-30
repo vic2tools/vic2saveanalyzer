@@ -952,6 +952,24 @@ def m81():
           "    let saves_path = pypath::expanduser(&args.saves);")
 
 
+@mutation("walk-navy-not-entered",
+          "a save laid out another way loses the ships and embarked armies "
+          "inside its navies", "frontcheck.py")
+def m82():
+    patch("scanner/src/engine/walk.rs",
+          '        } else if key == b"army" || key == b"navy" {',
+          '        } else if key == b"army" {')
+
+
+@mutation("walk-colonies-ignored",
+          "a save laid out another way reads no state as colonial",
+          "frontcheck.py")
+def m83():
+    patch("scanner/src/engine/walk.rs",
+          '                        let colonial = get(&block, b"is_colonial").is_some();',
+          '                        let colonial = false;')
+
+
 def main():
     global TREE, SAVES
     ap = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])

@@ -62,6 +62,31 @@ def world(holding):
     return mod, saves
 
 
+def reflow(data, rnd, how):
+    """
+    The same tokens, laid out another way: every run of whitespace outside
+    quotes made one space (`line`), something random (`random`), or its tabs
+    taken out (`untabbed`). A save the game did not lay out, which the
+    scanner walks a token at a time as Python does.
+    """
+    import re
+    parts = re.split(rb'("[^"]*")', data)
+    out = []
+    for i, part in enumerate(parts):
+        if i % 2:
+            out.append(part)
+            continue
+        if how == "line":
+            part = re.sub(rb"\s+", b" ", part)
+        elif how == "untabbed":
+            part = part.replace(b"\t", b"")
+        else:
+            part = re.sub(rb"\s+", lambda m: rnd.choice(
+                [b" ", b"\n", b"\r\n\t", b"  \t", b"\n\n", b"\x0b "]), part)
+        out.append(part)
+    return b"".join(out)
+
+
 def run(argv, cwd, env, out):
     """(status, stdout, stderr) of one run, the out folder's path made OUT."""
     done = subprocess.run([sys.executable, os.path.join(HERE, "vic2_analyzer.py")] + argv,
@@ -165,6 +190,20 @@ def main():
         # With a bitmap and a definition of its own, the map read is its own.
         with open(os.path.join(bad_region, "map", "provinces.bmp"), "wb") as fh:
             fh.write(b"BM")
+        # Saves laid out another way, from the fullest save the builders
+        # write: armies at sea, states, colonies, occupied land, a war.
+        import random
+        walked = os.path.join(holding, "walked")
+        os.makedirs(walked)
+        full = savefmt.furnished(os.path.join(holding, "furnished.v2"))
+        with open(full, "rb") as fh:
+            rich = fh.read()
+        rnd = random.Random(7)
+        for i, (date, how) in enumerate((("1881.3.24", "line"), ("1882.1.1", "random"),
+                                          ("1883.1.1", "untabbed"), ("1884.1.1", "random"))):
+            data = rich.replace(b'date="1881.3.24"', ('date="%s"' % date).encode())
+            with open(os.path.join(walked, "%d.v2" % i), "wb") as fh:
+                fh.write(reflow(data, rnd, how))
         afile = os.path.join(holding, "afile")
         with open(afile, "w") as fh:
             fh.write("x")
@@ -216,6 +255,8 @@ def main():
             ("a define that is not a number", [saves, "--mod-path", bad_define], None),
             ("a ship stat that is not a number", [saves, "--mod-path", bad_ship], None),
             ("a region naming a superscript", [saves, "--mod-path", bad_region], None),
+            ("saves laid out another way", [walked] + M, None),
+            ("saves laid out another way, one at a time", [walked, "-j", "1"] + M, None),
             ("a diagnostic", [saves, "--explain-mob", "ENG"] + M, "handed back"),
             ("a peek", [saves, "--peek"] + M, "handed back"),
         ]

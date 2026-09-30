@@ -564,11 +564,21 @@ turned up that a run it hands back prints its first pass twice (the engine's
 lines are relayed as they come, then Python starts over), which is how the
 hosted path has behaved since stage 1.
 
-Still ahead: saves not laid out the game's way (Python reads them with a
-token walk), after which nothing need be held and the output streams again;
-the diagnostics; `--cross`; and the window running the binary. What would
-crash the Python itself -- `int()` of an infinity, a number past 64 bits --
-stays handed back.
+A save not laid out the game's way -- reflowed by an editor -- is read as
+Python reads it, a token at a time (`engine/walk.rs`: `Tokens` with
+`skip_to_close`, `walk_entries`, `parse_block`, `read_pop`, and the walked
+halves of the country and province readers), into the same record the scan
+fills. `frontcheck.py` reflows the fullest save the builders write three
+ways; two real saves of the 1870s campaign, reflowed, came out the same as
+the pure Python's too (Python's walk took minutes over them). With that,
+nothing the ordinary run meets is handed back after it has spoken, so its
+output is no longer held and streams as before. The diagnostics, `--cross`,
+`--peek` and `--verify` are handed back before a word. What would crash the
+Python itself -- `int()` of an infinity, a number past 64 bits, a state
+block that is a list -- is still handed back where it is met, and there the
+Python, starting over, says again what had been said.
+
+Still ahead: the diagnostics; `--cross`; and the window running the binary.
 
 ### The engine reads the mod itself, 2026-09-29
 

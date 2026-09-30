@@ -26,7 +26,7 @@ pub(crate) const STARVING_BELOW: f64 = 0.05;
 /// how the game writes it, `french=catholic`, with no key of its own. A
 /// match, which the compiler turns into a few length and byte tests; held
 /// to Python's `v2parse.POP_KNOWN_FIELDS` by `testkit/record.py`.
-fn pop_known(key: &[u8]) -> bool {
+pub(crate) fn pop_known(key: &[u8]) -> bool {
     matches!(key,
         b"id" | b"size" | b"money" | b"ideology" | b"issues" | b"mil" | b"con" | b"literacy"
         | b"bank" | b"con_factor" | b"luxury_needs" | b"everyday_needs" | b"life_needs"
@@ -375,6 +375,36 @@ pub(crate) fn read_province(
         }
     }
 
+    let parts = Parts { owner, controller, colonial_flag, cores, pops, naval_base, fort, railroad };
+    accumulate(parts, pid, mob_types, scan, rules, referenced_pops, population_groups);
+}
+
+/// What a province block says, however it was read: the flat scan above or
+/// the token walk (`engine::walk`).
+pub(crate) struct Parts<'a> {
+    pub(crate) owner: Option<&'a [u8]>,
+    pub(crate) controller: Option<&'a [u8]>,
+    pub(crate) colonial_flag: i64,
+    pub(crate) cores: Vec<&'a [u8]>,
+    pub(crate) pops: Vec<Pop<'a>>,
+    pub(crate) naval_base: f64,
+    pub(crate) fort: f64,
+    pub(crate) railroad: f64,
+}
+
+/// A province's pops to its owner's record, and its owner, its pop ids and
+/// its people to the save's own bookkeeping.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn accumulate(
+    parts: Parts,
+    pid: i64,
+    mob_types: &[Vec<u8>],
+    scan: &mut Scan,
+    rules: &FxMap<Vec<u8>, PopulationRules>,
+    referenced_pops: &FxSet<i64>,
+    population_groups: &FxMap<i64, i64>,
+) {
+    let Parts { owner, controller, colonial_flag, cores, pops, naval_base, fort, railroad } = parts;
     // Counted before the owner check: land nobody has colonised still holds
     // people, and they are still part of the world.
     for pop in &pops {

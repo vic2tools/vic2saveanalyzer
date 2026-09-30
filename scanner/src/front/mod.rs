@@ -17,11 +17,11 @@
 // order, and runs the engine (`engine::run_spec`) -- printing what Python
 // printed, in its words, and refusing what it refused.
 //
-// What it does not do yet it hands back (status 3) before saying anything:
-// the diagnostics, `--cross`, `--peek`, `--verify`, and whatever the engine
-// hands back. Everything said is held (`engine::out`) until the run can no
-// longer be handed back, so the Python that then does the run says it all
-// once.
+// What it does not do yet -- the diagnostics, `--cross`, `--peek`,
+// `--verify` -- it hands back (status 3) before saying anything. What the
+// engine still hands back later is what would crash the Python itself (an
+// `int()` of an infinity, a number past 64 bits), and there the Python,
+// doing the run again, says again what had been said.
 
 pub mod pypath;
 
@@ -567,7 +567,6 @@ fn strs(v: &[String]) -> J {
 
 /// `vic2scan analyze --run RUN.json`.
 pub fn main(argv: &[String]) -> ! {
-    out::hold();
     out::set_protocol(false);
     let args = match (argv.get(2).map(|s| s.as_str()), argv.get(3)) {
         (Some("--run"), Some(file)) => {
@@ -604,16 +603,12 @@ pub fn main(argv: &[String]) -> ! {
 }
 
 fn run(mut args: Args) -> R<i32> {
+    // What is still Python's is handed back before anything is said or
+    // looked at, so the Python says all of it once.
+    if args.peek || args.cross || args.verify || args.asked() {
+        hand_back("a diagnostic, --peek, --verify or --cross is read in Python");
+    }
     let (_saves_path, files) = saves_in(&args)?;
-    if args.peek {
-        hand_back("--peek is read in Python");
-    }
-    if args.cross {
-        hand_back("--cross is read in Python");
-    }
-    if args.verify {
-        hand_back("--verify is read in Python");
-    }
 
     // `_on_the_game`.
     let (mod_path, game) = settle_game(args.mod_path.as_deref(), args.game_root.as_deref())?;
@@ -645,9 +640,6 @@ fn run(mut args: Args) -> R<i32> {
                           join(&args.out, "report.html"));
         }
         return Ok(0);
-    }
-    if args.asked() {
-        hand_back("the diagnostics are read in Python");
     }
 
     // `_mod_head`: what reading a save needs of the mod.

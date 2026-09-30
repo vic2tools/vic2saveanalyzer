@@ -33,6 +33,7 @@ pub mod market;
 pub mod model;
 pub mod modread;
 pub mod out;
+pub mod walk;
 pub mod report;
 pub mod rules;
 pub mod tables;
@@ -412,22 +413,6 @@ fn read_once(path: &str, reading: &Reading, raw: &mut Vec<u8>, again: bool) -> R
              the keeper makes instead.", path)));
     }
     let text: &[u8] = &raw[..];
-    let blocks = top_level_blocks(text)
-        .ok_or_else(|| Refused::Back(format!("{} is not laid out flat", path)))?;
-    let mut date = String::new();
-    let mut player = String::new();
-    let head_end = blocks.first().map(|b| b.1).unwrap_or(0).min(text.len());
-    for line in text[..head_end].split(|&c| c == b'\n').take(40) {
-        if let Some(eq) = line.iter().position(|&c| c == b'=') {
-            let k = trim_b(&line[..eq]);
-            let v = unquote_b(trim_b(&line[eq + 1..]));
-            if k == b"date" && date.is_empty() {
-                date = latin1(v);
-            } else if k == b"player" && player.is_empty() {
-                player = latin1(v);
-            }
-        }
-    }
     let mut scan = Scan {
         world_pop: 0,
         owners: Vec::new(),
@@ -442,14 +427,59 @@ fn read_once(path: &str, reading: &Reading, raw: &mut Vec<u8>, again: bool) -> R
         navy_techs: &reading.navy_techs,
         reform_keys: &reading.reform_keys,
     };
+    let (blocks, date, player, countries) = match top_level_blocks(text) {
+        Some(blocks) => {
+            let (date, player, countries) = read_flat(text, &blocks, reading, &tables, &mut scan);
+            (blocks, date, player, countries)
+        }
+        // Not the game's layout: Python walks it a token at a time, and so
+        // does this.
+        None => {
+            let w = walk::read(text, &reading.pop_types, &reading.mob_types, &tables, &mut scan,
+                               &reading.population_groups)
+                .map_err(|why| Refused::Back(format!("{}: {}", path, why)))?;
+            (w.blocks, w.date, w.player, w.countries)
+        }
+    };
+    let rest = model::read_rest(text, &blocks)
+        .map_err(|_| Refused::Back(format!("{}: the wars or the market hold something only Python reads", path)))?;
+    let save = model::build(basename(path).to_string(), date, player, &scan, &countries, rest)
+        .map_err(|_| Refused::Back(format!("{}: the record could not be built", path)))?;
+    // Again after the scan, not only after the read: a mapped file is read
+    // as it is scanned, and one the game rewrote meanwhile would be half of
+    // each. Python reads it again, and says so if it changes a second time.
+    if stamp(path) != before {
+        return Err(Refused::Back(CHANGED.into()));
+    }
+    Ok(save)
+}
+
+/// The date, the player and the countries of a save laid out the game's
+/// way, its provinces folded into `scan`.
+fn read_flat(text: &[u8], blocks: &[(&[u8], usize, usize)], reading: &Reading, tables: &Tables,
+             scan: &mut Scan) -> (String, String, Vec<Country>) {
+    let mut date = String::new();
+    let mut player = String::new();
+    let head_end = blocks.first().map(|b| b.1).unwrap_or(0).min(text.len());
+    for line in text[..head_end].split(|&c| c == b'\n').take(40) {
+        if let Some(eq) = line.iter().position(|&c| c == b'=') {
+            let k = trim_b(&line[..eq]);
+            let v = unquote_b(trim_b(&line[eq + 1..]));
+            if k == b"date" && date.is_empty() {
+                date = latin1(v);
+            } else if k == b"player" && player.is_empty() {
+                player = latin1(v);
+            }
+        }
+    }
     let mut countries: Vec<Country> = Vec::new();
     let mut rules: FxMap<Vec<u8>, PopulationRules> = FxMap::default();
     let mut referenced_pops = FxSet::default();
-    for (key, at, stop) in &blocks {
+    for (key, at, stop) in blocks {
         if tag_bytes(key) {
             let chunk = latin1(&text[*at..(*stop).min(text.len())]);
             let tag = latin1(key);
-            let country = read_country(&chunk, 0, chunk.len(), &tag, &tables);
+            let country = read_country(&chunk, 0, chunk.len(), &tag, tables);
             let rule = rules.entry(key.to_vec()).or_default();
             let bytes = |s: &str| s.chars().map(|c| c as u8).collect::<Vec<_>>();
             rule.accepted.extend(country.accepted_cultures.iter().map(|s| bytes(s)));
@@ -463,24 +493,14 @@ fn read_once(path: &str, reading: &Reading, raw: &mut Vec<u8>, again: bool) -> R
             countries.push(country);
         }
     }
-    for (key, at, stop) in &blocks {
+    for (key, at, stop) in blocks {
         if !key.is_empty() && key.iter().all(|c| c.is_ascii_digit()) {
             read_province(text, *at, *stop, to_int_b(key), &reading.pop_types,
-                          &reading.mob_types, &mut scan, &rules, &referenced_pops,
+                          &reading.mob_types, scan, &rules, &referenced_pops,
                           &reading.population_groups);
         }
     }
-    let rest = model::read_rest(text, &blocks)
-        .map_err(|_| Refused::Back(format!("{}: the wars or the market hold something only Python reads", path)))?;
-    let save = model::build(basename(path).to_string(), date, player, &scan, &countries, rest)
-        .map_err(|_| Refused::Back(format!("{}: the record could not be built", path)))?;
-    // Again after the scan, not only after the read: a mapped file is read
-    // as it is scanned, and one the game rewrote meanwhile would be half of
-    // each. Python reads it again, and says so if it changes a second time.
-    if stamp(path) != before {
-        return Err(Refused::Back(CHANGED.into()));
-    }
-    Ok(save)
+    (date, player, countries)
 }
 
 // ------------------------------------------------------------ the pool
@@ -604,7 +624,8 @@ pub fn decline(why: &str) -> ! {
     front_log(&format!("handed back: {}", why));
     if std::env::var_os("VIC2_ENGINE_REQUIRED").is_some() {
         eprintln!("engine: {}", why);
-    } else {
+    } else if out::protocol_on() {
+        // Python hosting the engine keeps its stderr for when it fails.
         crate::errln!("engine: {}", why);
     }
     std::process::exit(DECLINED);
