@@ -615,6 +615,21 @@ fits, two folders of one name, one too deep, and a save from another game.
 Nothing the command line or the window asks for is handed to Python now
 but what would crash the Python itself.
 
+Where the rewrite leaves a run, against the tree before it began:
+
+| 265 saves, Steam install | before (`35c8933`) | now (`bc19f16`) | rounds |
+|---|---:|---:|---|
+| truly cold | 7.91-8.61 s | **5.17-5.19 s** | 2 |
+| rebuild from a warm cache | 3.44-3.47 s | **1.39 s** | 2 |
+| nothing changed | 91-93 ms | **73-76 ms** | 2 |
+
+Most of a first run is still reading the saves (3.9 s, bound by the CPU:
+btrfs decompresses them and the scan reads them on the same cores). Most
+of "nothing changed" is Python starting and parsing the command line,
+which it still does before it hands the run over; the locator it needs to
+find the scanner brings most of the same imports, so there is little left
+to take off there.
+
 ### The engine reads the mod itself, 2026-09-29
 
 The report engine now reads the mod folder (`scanner/src/engine/modread.rs`)
