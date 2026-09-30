@@ -653,11 +653,26 @@ fn write_table(path: &std::path::Path, columns: &[&str], body: impl FnOnce(&mut 
     w.flush()
 }
 
-/// Every CSV table: (the paths written, the paths refused).
+/// Whether a table could not be opened because something else holds it:
+/// Python's `PermissionError`. On Windows that is a sharing or lock
+/// violation as well as a denied access -- a table open in Excel fails with
+/// the first (32), which Rust does not call `PermissionDenied`, and which
+/// Python's C runtime reports as `EACCES`.
+fn held_elsewhere(e: &std::io::Error) -> bool {
+    if e.kind() == std::io::ErrorKind::PermissionDenied {
+        return true;
+    }
+    cfg!(windows) && matches!(e.raw_os_error(), Some(32) | Some(33))
+}
+
+/// Every CSV table: (the paths written, the paths refused, what else failed).
+/// A failure is said by the caller once the page is on disk, rather than
+/// ending the process from this thread while the page is being written.
 fn write_outputs(out: &str, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow],
-                 t: &Tables) -> (Vec<String>, Vec<String>) {
+                 t: &Tables) -> (Vec<String>, Vec<String>, Vec<String>) {
     let mut paths = Vec::new();
     let mut refused = Vec::new();
+    let mut failed = Vec::new();
     // `per_save[:1] + [prices, snapshot] + per_save[1:]`, as `write_outputs` orders them.
     let mut order: Vec<(usize, &str, &Vec<String>)> = vec![(0, &t.per_save[0].0, &t.per_save[0].1),
         (100, "prices.csv", &t.price_columns), (101, "market_snapshot.csv", &t.snapshot_columns)];
@@ -703,14 +718,11 @@ fn write_outputs(out: &str, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]
         let shown = path.to_string_lossy().to_string();
         match got {
             Ok(()) => paths.push(shown),
-            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => refused.push(shown),
-            Err(e) => {
-                crate::errln!("cannot write {}: {}", shown, e);
-                std::process::exit(1);
-            }
+            Err(e) if held_elsewhere(&e) => refused.push(shown),
+            Err(e) => failed.push(format!("cannot write {}: {}", shown, e)),
         }
     }
-    (paths, refused)
+    (paths, refused, failed)
 }
 
 fn line(out: &mut String, vals: &[Val]) {
@@ -922,18 +934,33 @@ pub fn run(run: &Run, m: &Mod, live: &FxSet<String>, spent: Vec<Spent>) -> Outco
     let out = &run.out;
     let _ = std::fs::create_dir_all(out);
     let mut html_path: Option<String> = None;
-    let mut tables: (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+    let mut tables: (Vec<String>, Vec<String>, Vec<String>) = (Vec::new(), Vec::new(), Vec::new());
+    let mut page_failed: Option<String> = None;
     std::thread::scope(|s| {
         let csv = s.spawn(|| write_outputs(out, &c, &prices, &snaps, &run.tables));
         if !run.no_html {
-            html_path = Some(page(run, m, &c, &prices, &snaps));
-            say(&format!("@ready {}", html_path.as_ref().unwrap()));
+            match page(run, m, &c, &prices, &snaps) {
+                Ok(p) => {
+                    say(&format!("@ready {}", p));
+                    html_path = Some(p);
+                }
+                Err(why) => page_failed = Some(why),
+            }
         }
         tables = csv.join().unwrap();
         crate::engine::phase("tables written");
     });
     let _ = live;
-    let (mut paths, refused) = tables;
+    let (mut paths, refused, mut failed) = tables;
+    if let Some(why) = page_failed {
+        failed.insert(0, why);
+    }
+    if !failed.is_empty() {
+        for line in &failed {
+            crate::errln!("{}", line);
+        }
+        std::process::exit(1);
+    }
     if let Some(h) = &html_path {
         paths.insert(0, h.clone());
     }
@@ -948,7 +975,8 @@ pub fn run(run: &Run, m: &Mod, live: &FxSet<String>, spent: Vec<Spent>) -> Outco
 }
 
 /// `build_html` and `build_report`: the page, written; its path.
-fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]) -> String {
+fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow])
+        -> Result<String, String> {
     let t = &run.tables;
     let rows = &c.rows;
     let mut dates: Vec<String> = Vec::new();
@@ -1118,7 +1146,7 @@ fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]
     let html = if run.split {
         let data_name = "report.data.gz";
         std::fs::write(std::path::Path::new(&run.out).join(data_name), &packed)
-            .unwrap_or_else(|e| { crate::errln!("cannot write {}: {}", data_name, e); std::process::exit(1); });
+            .map_err(|e| format!("cannot write {}: {}", data_name, e))?;
         fill(t.template.replace("__DATA__", "").replace("__DATAURL__", data_name)
              .replace("__STATES__", "[]"))
     } else {
@@ -1131,8 +1159,8 @@ fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]
     let path = std::path::Path::new(&run.out).join("report.html");
     crate::engine::phase("page filled");
     std::fs::write(&path, html.as_bytes())
-        .unwrap_or_else(|e| { crate::errln!("cannot write {}: {}", path.display(), e); std::process::exit(1); });
-    path.to_string_lossy().to_string()
+        .map_err(|e| format!("cannot write {}: {}", path.display(), e))?;
+    Ok(path.to_string_lossy().to_string())
 }
 
 /// `metrics` to `factKeys`: the measures, their columns and the facts.

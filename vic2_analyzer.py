@@ -729,13 +729,28 @@ def _front(run, hosted=False):
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(json.dumps(dataclasses.asdict(run)))
-        sys.stdout.flush()
-        sys.stderr.flush()
+        # A windowed build started with arguments and no console to attach
+        # to (a folder dropped on it) has no streams at all.
+        silent = sys.stdout is None or sys.stderr is None
+        for stream in (sys.stdout, sys.stderr):
+            if stream is not None:
+                stream.flush()
         argv = [binary, "analyze", "--run", path, "--refused", refused]
         if hosted:
             argv.append("--protocol")
-        if not hosted and sys.stdout is sys.__stdout__ and sys.stderr is sys.__stderr__:
-            status = subprocess.call(argv, creationflags=fastscan._no_window())
+        if silent:
+            # Nowhere to say anything: the scanner says it to nowhere too,
+            # and opens no window of its own to do it in.
+            status = subprocess.call(argv, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL,
+                                     creationflags=fastscan._no_window())
+        elif not hosted and sys.stdout is sys.__stdout__ and sys.stderr is sys.__stderr__:
+            # No CREATE_NO_WINDOW here. It gives a console program a hidden
+            # console of its own, and with no handles passed its output goes
+            # there: on Windows a run from a terminal printed nothing. Handed
+            # this process's own streams, it writes where Python would have --
+            # the console, or the file they were redirected to.
+            status = subprocess.call(argv, stdout=sys.stdout, stderr=sys.stderr)
         else:
             # Someone is catching what this prints -- the window's log, or a
             # check running the analyzer in its own process -- and a child's

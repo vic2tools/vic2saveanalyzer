@@ -261,6 +261,17 @@ pub enum Bytes<'a> {
     Mapped(mapped::Map),
 }
 
+impl Bytes<'_> {
+    /// Whether the file was cut short while it was mapped (`mapped`).
+    fn faulted(&self) -> bool {
+        match self {
+            Bytes::Buffer(_) => false,
+            #[cfg(target_os = "linux")]
+            Bytes::Mapped(m) => m.faulted(),
+        }
+    }
+}
+
 impl std::ops::Deref for Bytes<'_> {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
@@ -274,22 +285,99 @@ impl std::ops::Deref for Bytes<'_> {
 
 #[cfg(target_os = "linux")]
 pub mod mapped {
+    //! A save mapped rather than read, and kept safe from the one thing a
+    //! mapping cannot survive on its own: the file cut short while it is
+    //! being scanned -- the game rewriting an autosave in the folder being
+    //! read. Touching a page past the new end raises SIGBUS, which kills the
+    //! process. Every live mapping is listed where a SIGBUS handler can see
+    //! it; a fault inside one gets a page of zeros mapped over the page that
+    //! went, the mapping is marked, and the read that owns it is then treated
+    //! as a file changed under a read -- read again, into a buffer. A fault
+    //! anywhere else is left to kill the process as it always would.
     use std::os::raw::{c_int, c_long, c_void};
     use std::os::unix::io::AsRawFd;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
     extern "C" {
         fn mmap(addr: *mut c_void, len: usize, prot: c_int, flags: c_int, fd: c_int,
                 off: c_long) -> *mut c_void;
         fn munmap(addr: *mut c_void, len: usize) -> c_int;
         fn madvise(addr: *mut c_void, len: usize, advice: c_int) -> c_int;
+        fn sigaction(sig: c_int, act: *const SigAction, old: *mut SigAction) -> c_int;
+        fn sysconf(name: c_int) -> c_long;
     }
     const PROT_READ: c_int = 1;
     const MAP_PRIVATE: c_int = 2;
+    const MAP_FIXED: c_int = 0x10;
+    const MAP_ANONYMOUS: c_int = 0x20;
     const MAP_POPULATE: c_int = 0x8000;
     const MADV_SEQUENTIAL: c_int = 2;
+    const SIGBUS: c_int = 7;
+    const SA_SIGINFO: c_int = 4;
+    const SC_PAGESIZE: c_int = 30;
+    /// Where `si_addr` sits in a `siginfo_t`: after three ints, aligned.
+    const SI_ADDR: usize = if cfg!(target_pointer_width = "64") { 16 } else { 12 };
+
+    /// glibc's `struct sigaction`, on Linux.
+    #[repr(C)]
+    struct SigAction {
+        handler: usize,
+        mask: [u64; 16],
+        flags: c_int,
+        restorer: usize,
+    }
+
+    /// The live mappings, as (start, length) and whether one has faulted.
+    /// A thread reads one save at a time, so a slot a thread is plenty; a
+    /// mapping with no free slot is not made, and the save is read instead.
+    const SLOTS: usize = 256;
+    static START: [AtomicUsize; SLOTS] = [const { AtomicUsize::new(0) }; SLOTS];
+    static LEN: [AtomicUsize; SLOTS] = [const { AtomicUsize::new(0) }; SLOTS];
+    static FAULTED: [AtomicBool; SLOTS] = [const { AtomicBool::new(false) }; SLOTS];
+    static PAGE: AtomicUsize = AtomicUsize::new(4096);
+
+    extern "C" fn on_sigbus(_sig: c_int, info: *mut c_void, _ctx: *mut c_void) {
+        let addr = unsafe { *((info as *const u8).add(SI_ADDR) as *const usize) };
+        for i in 0..SLOTS {
+            let start = START[i].load(Ordering::Acquire);
+            let len = LEN[i].load(Ordering::Acquire);
+            if start != 0 && addr >= start && addr < start + len {
+                let page = PAGE.load(Ordering::Relaxed);
+                let at = addr & !(page - 1);
+                let got = unsafe {
+                    mmap(at as *mut c_void, page, PROT_READ,
+                         MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0)
+                };
+                if got as isize != -1 {
+                    FAULTED[i].store(true, Ordering::Release);
+                    return;
+                }
+            }
+        }
+        // Not one of ours: back to the default, and the fault, met again,
+        // ends the process as it would have.
+        let default = SigAction { handler: 0, mask: [0; 16], flags: 0, restorer: 0 };
+        unsafe { sigaction(SIGBUS, &default, std::ptr::null_mut()) };
+    }
+
+    fn install() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let page = unsafe { sysconf(SC_PAGESIZE) };
+            if page > 0 {
+                PAGE.store(page as usize, Ordering::Relaxed);
+            }
+            let handler: extern "C" fn(c_int, *mut c_void, *mut c_void) = on_sigbus;
+            let act = SigAction { handler: handler as usize, mask: [0; 16], flags: SA_SIGINFO,
+                                  restorer: 0 };
+            unsafe { sigaction(SIGBUS, &act, std::ptr::null_mut()) };
+        });
+    }
 
     pub struct Map {
         ptr: *mut c_void,
         len: usize,
+        slot: usize,
     }
 
     unsafe impl Send for Map {}
@@ -299,25 +387,69 @@ pub mod mapped {
             if len == 0 {
                 return None;
             }
+            install();
+            // A slot first: a mapping the handler cannot see is not made.
+            let slot = (0..SLOTS).find(|&i| {
+                LEN[i].compare_exchange(0, usize::MAX, Ordering::AcqRel, Ordering::Relaxed).is_ok()
+            })?;
             let ptr = unsafe {
                 mmap(std::ptr::null_mut(), len, PROT_READ, MAP_PRIVATE | MAP_POPULATE,
                      file.as_raw_fd(), 0)
             };
             if ptr as isize == -1 {
+                LEN[slot].store(0, Ordering::Release);
                 return None;
             }
+            FAULTED[slot].store(false, Ordering::Release);
+            START[slot].store(ptr as usize, Ordering::Release);
+            LEN[slot].store(len, Ordering::Release);
             unsafe { madvise(ptr, len, MADV_SEQUENTIAL) };
-            Some(Map { ptr, len })
+            Some(Map { ptr, len, slot })
         }
 
         pub fn bytes(&self) -> &[u8] {
             unsafe { std::slice::from_raw_parts(self.ptr as *const u8, self.len) }
         }
+
+        /// Whether the file was cut short under the mapping, so that some of
+        /// what was read is zeros standing in for pages that went.
+        pub fn faulted(&self) -> bool {
+            FAULTED[self.slot].load(Ordering::Acquire)
+        }
     }
 
     impl Drop for Map {
         fn drop(&mut self) {
+            // Out of the list before the pages go, then the slot freed.
+            START[self.slot].store(0, Ordering::Release);
             unsafe { munmap(self.ptr, self.len) };
+            FAULTED[self.slot].store(false, Ordering::Release);
+            LEN[self.slot].store(0, Ordering::Release);
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::io::Write;
+
+        #[test]
+        fn a_file_cut_short_under_the_mapping_is_survived_and_said() {
+            let path = std::env::temp_dir().join(format!("vic2map{}", std::process::id()));
+            let mut f = std::fs::File::create(&path).unwrap();
+            f.write_all(&vec![b'x'; 64 * 1024]).unwrap();
+            drop(f);
+            let f = std::fs::File::open(&path).unwrap();
+            let m = Map::open(&f, 64 * 1024).unwrap();
+            assert_eq!(m.bytes()[40000], b'x');
+            assert!(!m.faulted());
+            std::fs::OpenOptions::new().write(true).open(&path).unwrap().set_len(0).unwrap();
+            // Past the new end: SIGBUS without the handler.
+            let tail: u64 = m.bytes()[8192..].iter().map(|&b| b as u64).sum();
+            assert_eq!(tail, 0);
+            assert!(m.faulted());
+            drop(m);
+            std::fs::remove_file(&path).unwrap();
         }
     }
 }
@@ -385,8 +517,8 @@ const CHANGED: &str = "changed while it was being read";
 
 fn read_once(path: &str, reading: &Reading, raw: &mut Vec<u8>, again: bool) -> Result<Save, Refused> {
     let before = stamp(path);
-    // A second read is a plain one: a file that changes under a mapping
-    // can take the process down with it.
+    // A second read is a plain one: the first may have been cut short under
+    // its mapping (`mapped`), and this one is read whole into a buffer.
     let raw = if again {
         std::fs::read(path).map(|v| {
             *raw = v;
@@ -395,6 +527,18 @@ fn read_once(path: &str, reading: &Reading, raw: &mut Vec<u8>, again: bool) -> R
     } else {
         load(path, raw)
     }.map_err(|e| Refused::Skip(os_error_text(&e, path)))?;
+    let got = read_bytes(path, reading, &raw, before);
+    // A file cut short under its mapping was read partly as zeros, whatever
+    // the read made of them: it is a file changed under a read, and read again.
+    if raw.faulted() {
+        return Err(Refused::Back(CHANGED.into()));
+    }
+    got
+}
+
+/// The rest of `read_once`, on the bytes as loaded.
+fn read_bytes(path: &str, reading: &Reading, raw: &[u8],
+              before: Option<(u64, std::time::SystemTime)>) -> Result<Save, Refused> {
     if stamp(path) != before {
         return Err(Refused::Back(CHANGED.into()));
     }

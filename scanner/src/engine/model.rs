@@ -416,7 +416,9 @@ pub fn build(file: String, date: String, player: String, scan: &Scan, countries:
         let mut nat = nations.remove(tag).ok_or(())?;
         nat.key = latin1(tag);
         for c in countries {
-            if c.tag.as_bytes() == tag.as_slice() {
+            // The tag as latin-1 bytes, as `tag` is: its UTF-8 differs for
+            // any letter past ASCII.
+            if c.tag.chars().map(|ch| ch as u32 as u8).eq(tag.iter().copied()) {
                 for pid in &c.regiment_pops {
                     match registry.get(pid) {
                         None | Some(true) => nat.regular_brigades += 1,

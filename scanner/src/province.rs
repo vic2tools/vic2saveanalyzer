@@ -302,10 +302,16 @@ pub(crate) fn read_province(
         if depth == 2 {
             if let Some(idx) = current {
                 let slot = &mut pops[idx];
+                let own = matches!(key, b"id" | b"size" | b"money" | b"con" | b"mil" | b"literacy"
+                                        | b"life_needs");
+                // `\t(id|size|...)=([^\r\n]+)` wants a value: with none the
+                // line matches nothing, and the field keeps what it had.
+                if own && value.is_empty() {
+                    continue;
+                }
+                // Each overwrites, as `current[slot] = value` does: the last wins.
                 if key == b"id" {
-                    if slot.id.is_none() {
-                        slot.id = Some(trim_end_b(value));
-                    }
+                    slot.id = Some(trim_end_b(value));
                 } else if key == b"size" {
                     slot.size = Some(trim_end_b(value));
                 } else if key == b"money" {
@@ -331,7 +337,8 @@ pub(crate) fn read_province(
                     if starts_right
                         && slot.culture.is_none()
                         && !pop_known(key)
-                        && !is_number_b(unquote_b(trim_end_b(value)))
+                        // `float(g4.rstrip())`: as written, quotes and all.
+                        && !is_number_b(trim_end_b(value))
                     {
                         slot.culture = Some(key);
                     }
@@ -522,5 +529,33 @@ pub(crate) fn accumulate(
     if home {
         nat.pop_noncolonial += province_pop;
         nat.literacy_noncolonial += province_literate;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scan() -> Scan {
+        Scan { world_pop: 0, owners: Vec::new(), nations: FxMap::default(), pop_ids: Vec::new(),
+               pop_kinds: Vec::new(), words: Interner::default(), seen: Vec::new() }
+    }
+
+    /// As `PROVINCE_FIELDS` reads a pop: a field with no value is no field,
+    /// the last of a repeated one stands, and the culture test is `float()`
+    /// of the value as written, quotes and all.
+    #[test]
+    fn pop_lines_are_read_as_python_reads_them() {
+        let block = b"1=\n{\n\towner=\"ENG\"\n\tfarmers=\n\t{\n\t\tid=5\n\t\tid=7\n\t\tsize=100\n\t\tsize=\n\t\tlife_needs=\n\t\tbritish=\"1\"\n\t}\n}\n";
+        let mut s = scan();
+        let mut referenced = FxSet::default();
+        referenced.insert(7);
+        read_province(block, 3, block.len(), 1, &[b"farmers".to_vec()], &[], &mut s,
+                      &FxMap::default(), &referenced, &FxMap::default());
+        let nat = &s.nations[&b"ENG".to_vec()];
+        assert_eq!(nat.total_pop, 100);
+        assert_eq!(nat.starving, 0);
+        assert_eq!(s.pop_ids, vec![7]);
+        assert_eq!(nat.pop_by_culture.order, vec![b"british".to_vec()]);
     }
 }

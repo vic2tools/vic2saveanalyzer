@@ -366,9 +366,9 @@ pub fn py_space_char(c: char) -> bool {
         | '\u{3000}')
 }
 
-/// Python's `float(s)` for a str: None for the ValueError. Underscores
-/// between digits, which Python also takes, are not followed; nothing here
-/// writes them.
+/// Python's `float(s)` for a str: None for the ValueError. Underscores are
+/// taken where Python takes them, one between two digits, as
+/// `modread::py_float` takes them for the save's own text.
 pub fn py_float(s: &str) -> Option<f64> {
     // Not quite `str.strip()`: `float()` maps non-ASCII whitespace to spaces
     // and then trims C's six, so `\x1c`-`\x1f`, which `isspace` calls space,
@@ -376,6 +376,20 @@ pub fn py_float(s: &str) -> Option<f64> {
     let t = s.trim_matches(|c: char| {
         matches!(c, '\t'..='\r' | ' ') || (c as u32 >= 0x80 && py_space_char(c))
     });
+    let owned;
+    let t = if t.contains('_') {
+        let b = t.as_bytes();
+        for (i, &c) in b.iter().enumerate() {
+            if c == b'_' && (i == 0 || i + 1 == b.len() || !b[i - 1].is_ascii_digit()
+                             || !b[i + 1].is_ascii_digit()) {
+                return None;
+            }
+        }
+        owned = t.replace('_', "");
+        owned.as_str()
+    } else {
+        t
+    };
     if t.is_empty() {
         return None;
     }
@@ -545,5 +559,19 @@ pub fn selftest() {
             _ => s.push('?'),
         }
         writeln!(out, "{}", s).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn floats_take_underscores_where_python_does() {
+        assert_eq!(py_float("1_000"), Some(1000.0));
+        assert_eq!(py_float(" 1_0.5_0 "), Some(10.5));
+        for bad in ["_1", "1_", "1__0", "1_.5", "1._5"] {
+            assert_eq!(py_float(bad), None, "{}", bad);
+        }
     }
 }

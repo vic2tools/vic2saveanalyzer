@@ -286,7 +286,7 @@ impl<'a> Parser<'a> {
                 b'\\' => {
                     out.push_str(&self.s[start..self.i]);
                     self.i += 1;
-                    let c = self.b[self.i];
+                    let c = *self.b.get(self.i).ok_or("unterminated escape")?;
                     self.i += 1;
                     match c {
                         b'"' => out.push('"'),
@@ -309,7 +309,9 @@ impl<'a> Parser<'a> {
                                     self.i = save;
                                 }
                             }
-                            out.push(char::from_u32(u).unwrap_or('\u{fffd}'));
+                            // A lone surrogate is a name Python held undecoded
+                            // (a Linux path that is not UTF-8): said, not guessed.
+                            out.push(char::from_u32(u).ok_or("a lone surrogate")?);
                         }
                         _ => return Err("bad escape".into()),
                     }
@@ -318,5 +320,17 @@ impl<'a> Parser<'a> {
                 _ => self.i += 1,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn damaged_text_is_an_error_not_a_panic() {
+        assert!(parse("\"abc\\").is_err());
+        assert!(parse("\"\\udc80\"").is_err());
+        assert_eq!(parse("\"\\ud83d\\ude00\"").unwrap(), J::Str("\u{1f600}".into()));
     }
 }

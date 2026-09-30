@@ -20,6 +20,19 @@
 use crate::text::{find, unquote};
 use crate::pickle::FxMap;
 
+/// How many bytes of whitespace start at `i`: 0 for none. The text is the
+/// latin-1 block re-encoded as UTF-8, so a character is judged whole -- the
+/// ASCII spaces, or U+0085 and U+00A0 (`C2 85`, `C2 A0`) -- and never by a
+/// byte of one: `0x85` and `0xA0` are also the second bytes of `Å` and `à`,
+/// and taking them for spaces cut a word inside a character.
+pub(crate) fn space_len(b: &[u8], i: usize) -> usize {
+    match b[i] {
+        0x09..=0x0d | 0x20 => 1,
+        0xc2 if matches!(b.get(i + 1), Some(0x85) | Some(0xa0)) => 2,
+        _ => 0,
+    }
+}
+
 /// A token cursor over the save's own grammar: `"quoted"`, `{`, `}`, `=`, or
 /// a run of anything else. The same rule as the Python `TOKEN_RE`.
 pub struct Tokens<'a> {
@@ -39,8 +52,12 @@ impl<'a> Tokens<'a> {
             return Some(t);
         }
         let b = self.bytes;
-        while self.pos < b.len() && (b[self.pos] as char).is_whitespace() {
-            self.pos += 1;
+        while self.pos < b.len() {
+            let n = space_len(b, self.pos);
+            if n == 0 {
+                break;
+            }
+            self.pos += n;
         }
         if self.pos >= b.len() {
             return None;
@@ -63,9 +80,7 @@ impl<'a> Tokens<'a> {
                 let mut i = start;
                 while i < b.len() {
                     let c = b[i];
-                    if (c as char).is_whitespace() || c == b'{' || c == b'}'
-                        || c == b'='
-                    {
+                    if space_len(b, i) > 0 || c == b'{' || c == b'}' || c == b'=' {
                         break;
                     }
                     i += 1;
@@ -98,7 +113,7 @@ impl<'a> Tokens<'a> {
                     b'{' => { depth += 1; bare = false; }
                     b'}' => { depth -= 1; bare = false; }
                     b'=' => bare = false,
-                    c if (c as char).is_whitespace() => bare = false,
+                    _ if space_len(self.bytes, self.pos) > 0 => bare = false,
                     _ => bare = true,
                 }
             }
@@ -412,7 +427,7 @@ fn count_units(node: &Dict, out: &mut Units, where_: Option<i64>) {
                     let i = out.at_mut(w);
                     out.at[i].1.add(rtype, 1.0);
                     let strength = to_float(reg.text("strength").unwrap_or(""));
-                    out.men[i].1.add(rtype, (strength * 1000.0).round());
+                    out.men[i].1.add(rtype, (strength * 1000.0).round_ties_even());
                 }
             }
         } else if key == "ship" {
@@ -493,7 +508,7 @@ pub fn read_country(text: &str, at: usize, stop: usize, tag: &str,
         let mut p = key_start;
         while p < stop && bytes[p] != b'=' {
             let c = bytes[p];
-            if (c as char).is_whitespace() || c == b'{' || c == b'}' || c == b'"' {
+            if space_len(bytes, p) > 0 || c == b'{' || c == b'}' || c == b'"' {
                 break;
             }
             p += 1;
@@ -711,4 +726,19 @@ pub fn read_country(text: &str, at: usize, stop: usize, tag: &str,
     out.units_at = units.at.iter().map(|(p, t)| (*p, t.ints())).collect();
     out.men_at = units.men.iter().map(|(p, t)| (*p, t.ints())).collect();
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `Å` and `à` are `C3 85` and `C3 A0` once decoded: neither byte is a
+    /// space, and a bare word holding one is read whole, as Python reads it.
+    #[test]
+    fn a_bare_word_past_ascii_is_one_token() {
+        let text = crate::text::latin1(b"\xc5land_flag=yes \xe0x\xa0y }");
+        let mut tok = Tokens::new(&text, 0);
+        let got: Vec<&str> = std::iter::from_fn(|| tok.next()).collect();
+        assert_eq!(got, ["\u{c5}land_flag", "=", "yes", "\u{e0}x", "y", "}"]);
+    }
 }

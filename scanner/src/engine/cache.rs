@@ -192,7 +192,9 @@ impl<T: Keep> Keep for Vec<T> {
     }
     fn get(r: &mut R) -> X<Self> {
         let n = r.len()?;
-        let mut v = Vec::with_capacity(n);
+        // Reserved up to a bound: a damaged count must be a miss, not an
+        // allocation of gigabytes.
+        let mut v = Vec::with_capacity(n.min(4096));
         for _ in 0..n {
             v.push(T::get(r)?);
         }

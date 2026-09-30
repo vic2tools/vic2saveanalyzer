@@ -66,6 +66,14 @@ fn escape(out: &mut String, s: &[u8]) {
     out.push('"');
 }
 
+/// `escape` for text the scanner decoded from latin-1: back to its bytes
+/// first, one a character, so a name past ASCII is written as itself and not
+/// as the two bytes of its UTF-8.
+fn escape_str(out: &mut String, s: &str) {
+    let bytes: Vec<u8> = s.chars().map(|c| c as u32 as u8).collect();
+    escape(out, &bytes);
+}
+
 fn counter(out: &mut String, counts: &Counter) {
     out.push('[');
     for (i, key) in counts.order.iter().enumerate() {
@@ -333,9 +341,9 @@ fn scan_one(path: &str, lists: &Lists, bench: bool, raw: &mut Vec<u8>,
     if !lists.record {
         let mut head = String::with_capacity(1 << 16);
         head.push_str("{\"date\":");
-        escape(&mut head, date.as_bytes());
+        escape_str(&mut head, &date);
         head.push_str(",\"player\":");
-        escape(&mut head, player.as_bytes());
+        escape_str(&mut head, &player);
         head.push_str(",\"blocks\":[");
         let mut first_block = true;
         for (key, at, stop) in &blocks {
@@ -580,15 +588,15 @@ fn scan_one(path: &str, lists: &Lists, bench: bool, raw: &mut Vec<u8>,
         }
         out.push('{');
         out.push_str("\"tag\":");
-        escape(&mut out, c.tag.as_bytes());
+        escape_str(&mut out, &c.tag);
         let pairs_s = |out: &mut String, name: &str, v: &Vec<(String, String)>| {
             out.push_str(&format!(",\"{}\":[", name));
             for (i, (k, val)) in v.iter().enumerate() {
                 if i > 0 { out.push(','); }
                 out.push('[');
-                escape(out, k.as_bytes());
+                escape_str(out, &k);
                 out.push(',');
-                escape(out, val.as_bytes());
+                escape_str(out, &val);
                 out.push(']');
             }
             out.push(']');
@@ -598,7 +606,7 @@ fn scan_one(path: &str, lists: &Lists, bench: bool, raw: &mut Vec<u8>,
             for (i, (k, val)) in v.iter().enumerate() {
                 if i > 0 { out.push(','); }
                 out.push('[');
-                escape(out, k.as_bytes());
+                escape_str(out, &k);
                 out.push_str(&format!(",{}]", num(*val)));
             }
             out.push(']');
@@ -608,7 +616,7 @@ fn scan_one(path: &str, lists: &Lists, bench: bool, raw: &mut Vec<u8>,
             for (i, (k, val)) in v.iter().enumerate() {
                 if i > 0 { out.push(','); }
                 out.push('[');
-                escape(out, k.as_bytes());
+                escape_str(out, &k);
                 out.push_str(&format!(",{}]", val));
             }
             out.push(']');
@@ -617,7 +625,7 @@ fn scan_one(path: &str, lists: &Lists, bench: bool, raw: &mut Vec<u8>,
             out.push_str(&format!(",\"{}\":[", name));
             for (i, x) in v.iter().enumerate() {
                 if i > 0 { out.push(','); }
-                escape(out, x.as_bytes());
+                escape_str(out, &x);
             }
             out.push(']');
         };
@@ -673,7 +681,7 @@ fn scan_one(path: &str, lists: &Lists, bench: bool, raw: &mut Vec<u8>,
             for (j, (k, v)) in t.iter().enumerate() {
                 if j > 0 { out.push(','); }
                 out.push('[');
-                escape(&mut out, k.as_bytes());
+                escape_str(&mut out, &k);
                 out.push_str(&format!(",{}]", v));
             }
             out.push_str("]]");
@@ -685,7 +693,7 @@ fn scan_one(path: &str, lists: &Lists, bench: bool, raw: &mut Vec<u8>,
             for (j, (k, v)) in t.iter().enumerate() {
                 if j > 0 { out.push(','); }
                 out.push('[');
-                escape(&mut out, k.as_bytes());
+                escape_str(&mut out, &k);
                 out.push_str(&format!(",{}]", v));
             }
             out.push_str("]]");

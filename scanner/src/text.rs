@@ -123,7 +123,8 @@ pub(crate) fn is_number_b(s: &[u8]) -> bool {
     // starts with a letter; only `inf`, `infinity` and `nan` of those parse.
     match s.first() {
         Some(c) if c.is_ascii_alphabetic() && !matches!(c, b'i' | b'I' | b'n' | b'N') => false,
-        _ => std::str::from_utf8(s).ok().and_then(|t| t.parse::<f64>().ok()).is_some(),
+        // Python's `float()` otherwise: its trimming, its underscores.
+        _ => crate::engine::modread::py_float(s).is_some(),
     }
 }
 

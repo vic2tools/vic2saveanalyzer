@@ -39,7 +39,8 @@ pub fn splitroot(p: &str) -> (&str, &str, &str) {
     let nb = norm.as_bytes();
     if nb.first() == Some(&b'\\') {
         if nb.get(1) == Some(&b'\\') {
-            let start = if norm.len() >= 8 && norm[..8].eq_ignore_ascii_case("\\\\?\\UNC\\") { 8 } else { 2 };
+            // `get`, not a slice: byte 8 can fall inside a character.
+            let start = if norm.get(..8).is_some_and(|h| h.eq_ignore_ascii_case("\\\\?\\UNC\\")) { 8 } else { 2 };
             let index = match norm[start.min(norm.len())..].find('\\') {
                 Some(i) => start + i,
                 None => return (p, "", ""),
