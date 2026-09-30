@@ -504,6 +504,103 @@ occupied; only that third one took anything.
 
 ## Speed
 
+### The report is built in Rust, 2026-09-29
+
+Everything a run does once the mod is read is now done by the scanner's
+`report` mode (`scanner/src/engine/`), which `engine.py` starts and talks
+to. Python still settles the game and the mod, takes the stamp, reads the
+mod (or its cache) and runs the diagnostics and `--cross`'s survey; the
+engine reads every save on every core, settles the campaign's inventions,
+finishes every nation, walks the campaign, and writes the page and the
+nine tables. The window starts it the same way and gets the same progress
+and "report written" calls, from a thread.
+
+How the two meet:
+
+- **The spec** (`engine.spec`): the saves in report order, how each is
+  read, how each nation is finished, where the report goes -- and the page
+  template and the tables' declarations (`report.METRICS`,
+  `spending.BASE_COLUMNS`, `market.GOOD_CATEGORIES` ...), so the Python's
+  are the only copies and an edit reaches the engine without a rebuild.
+- **The mod** (`engine.export_mod`): its rules, names and the map's and
+  the flags' inputs as JSON, handed over on the engine's stdin while it is
+  already reading the saves (an uncached mod takes most of a second).
+- **Lines back**: `@progress`, `@ready` when report.html is on disk (the
+  tables are still being written), `@done` with any table it could not
+  write; everything else is printed as the Python would have printed it.
+- **Handing a run back.** A save the scanner turns down (a zip, a save cut
+  short, a layout the game does not write, a war block where a name should
+  be), a file changed while it was read, a trigger holding a list: the
+  engine exits with status 3 before writing anything, and the run goes on
+  in Python as before. `VIC2_NO_ENGINE=1` keeps every run in Python.
+
+**It is held to the Python.** On both campaigns, `--no-cache`, quiet and
+verbose: the nine CSVs byte for byte, the payload identical as JSON text
+(key order, and an int against a float, count) once each flag's PNG and
+each state chunk are decoded -- they are two compressors' output, and
+Python here links zlib-ng while Python on Windows links zlib, so those
+bytes already differed by platform -- the page around it identical, and
+the printed output identical. Intermediate results (settlement, every
+table's CSV text per save, finished nations, state chunks) were compared
+the same way while it was built (`testkit/engineintermediate.py`).
+`testkit/enginecheck.py` runs the program both ways over real saves under
+the real mod with rules added that the campaigns never meet -- triggered
+modifiers asking every question the trigger reader answers, a reform and
+a national modifier granting mobilisation size, an uncivilized penalty --
+over a campaign built on every boundary a brigade count has, and out of
+the engine's cache; `staleness`, `edges` and `boots --hostile` run both
+ways; `enginefmt` and `enginecompress` hold the hand-written pieces to
+Python and zlib.
+
+What Python does that had to be copied exactly, found by comparing:
+
+- `repr(float)`: Rust's shortest digits round a tie up where Python goes
+  to the even digit (267406172.666015625 is `...62` in Python, `...63` in
+  Rust). Ties are found exactly and turned.
+- `sum()` of floats is Neumaier-compensated since Python 3.12; plain
+  addition put one supply total a cent off. The mobilisation rate is such
+  a sum.
+- `round(x, n)` on the exact binary value; `//` on floats; `float()`
+  trims C's whitespace and non-ASCII spaces, not `\x1c`-`\x1f`.
+- `is_player` reaches the main table as `True`/`False`: the row copies the
+  record's bool over the int it started with.
+- One bug found and left as it is, because both sides must agree: a
+  trigger's `owns = N` compares the ledger's (owner, controller) pair with
+  a tag and never holds.
+
+No dependencies were added (the maintainer's decision): the JSON writer and reader,
+deflate, gzip, zlib, CRC-32, base64, PNG and the thread pool are here.
+The compressor makes streams 1-2% larger than zlib's.
+
+The engine keeps a cache of its own (`engine/cache.rs`), one entry a save
+beside the Python's (`engine_*.pkl`, so "empty the cache" takes them),
+keyed by the file, the reading, the settings `prepare` takes and the
+program's version: without it the everyday run read every save again and
+was slower than the Python's.
+
+| 265 saves | before (`35c8933`) | after (`49fecd1`) | rounds |
+|---|---:|---:|---|
+| truly cold | 8.49 s (7.79-8.52) | **5.33 s** (5.33-5.34) | 3 |
+| one new save beside 264 read | 3.43 s (3.41-3.74) | **1.45 s** (1.45-1.50) | 3 |
+| rebuild from a warm cache | 3.46 s | **1.45 s** | 3 |
+| 103 saves, truly cold | 3.50 s (3.40-3.58) | **2.18 s** (2.00-2.21) | 3 |
+| nothing changed | 91 ms | 92 ms | 5 |
+
+Where a first run goes now (5.33 s): Python's start, the stamp and the
+mod 0.5 s; the saves read 3.9 s; the settlement, the finishing, the walk
+and the page 0.9 s, the page's sections on threads of their own.
+
+**A first run here is bound by CPU, not the disk.** Sixteen `cat`s read
+the 9.8 GB of saves cold in 1.5 s; btrfs decompresses them (zstd) in the
+kernel on the same cores the scan runs on. More scanning threads (24, 32),
+the files mapped rather than read, `posix_fadvise(WILLNEED)` for every
+save, and threads reading ahead of the workers (4, 8, 16 of them) all left
+the read at 3.9-4.0 s or made it slower (4.3 s with readers ahead). What
+shortens it is a cheaper scan: a province's lines are now found eight bytes
+at a time, a pop's known fields by a `match`, and its numbers by Clinger's
+fast path (26.3 ms to 20.8 a save on one core). On Windows, where saves are
+not compressed on disk, the scan is a larger share of a first run.
+
 ### The scanner reads the whole save, 2026-09-29
 
 After the round below, a save still cost a worker about 57 ms of Python
