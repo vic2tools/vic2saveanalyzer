@@ -248,7 +248,34 @@ def a_stray_key_is_an_error():
     return wrong
 
 
+def a_pop_knows_the_same_fields():
+    """
+    [what went wrong] between the fields a pop is known to have in Python
+    (`v2parse.POP_KNOWN_FIELDS`) and in the scanner (`province::pop_known`).
+    A field one knows and the other does not is a culture to one of them:
+    the pop's culture is the first field that is neither known nor a number.
+    """
+    import v2parse
+    text = rust_source()
+    at = text.find("fn pop_known")
+    if at < 0:
+        return ["the scanner has no pop_known to compare"]
+    body = text[at:text.index("\n}\n", at)]
+    rust = set(re.findall(r'b"([a-z_]+)"', body))
+    python = set(v2parse.POP_KNOWN_FIELDS)
+    wrong = []
+    if rust - python:
+        wrong.append("the scanner knows pop fields Python does not: %s"
+                     % ", ".join(sorted(rust - python)))
+    if python - rust:
+        wrong.append("Python knows pop fields the scanner does not: %s"
+                     % ", ".join(sorted(python - rust)))
+    return wrong
+
+
 CHECKS = [
+    ("a pop has the same known fields in both readers",
+     a_pop_knows_the_same_fields),
     ("every rule fills a real field, and one rule a field",
      rules_name_real_fields),
     ("Python and Rust name the same lines",

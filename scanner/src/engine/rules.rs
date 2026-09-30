@@ -116,6 +116,8 @@ pub struct Mod {
     pub map_csv: String,
     /// Settled against the campaign (`decode_indices`); None is "cannot".
     pub index_base: Option<i64>,
+    /// The map's bitmap as (width, height, runs), when it was decoded ahead.
+    pub raster: Option<(i64, i64, Vec<(i64, i64)>)>,
 }
 
 fn strings(v: &J) -> Vec<String> {
@@ -240,6 +242,7 @@ impl Mod {
             map_bmp: j.at("map_bmp").str().to_string(),
             map_csv: j.at("map_csv").str().to_string(),
             index_base: None,
+            raster: None,
         };
         for t in &m.triggered_mob {
             refuse_unjudgeable(&t.trigger)?;
@@ -750,12 +753,13 @@ pub struct Held {
 }
 
 /// `attainable_inventions(mod, all_nations)`.
-pub fn attainable_inventions(m: &Mod, all: &OMap<String, FxSet<String>>) -> FxSet<String> {
+pub fn attainable_inventions(m: &Mod, all: &OMap<&str, FxSet<&str>>) -> FxSet<String> {
     let rules = &m.invention_rules;
     let mut live: OMap<String, bool> = OMap::new();
     for (name, rule) in rules.iter() {
         let eligible = all.iter().any(|(tag, techs)| {
-            subset(&rule.techs, techs) && (rule.tags.is_empty() || rule.tags.contains(tag))
+            rule.techs.iter().all(|t| techs.contains(t.as_str()))
+                && (rule.tags.is_empty() || rule.tags.iter().any(|t| t == tag))
         });
         live.set(name.clone(), eligible);
     }
@@ -796,23 +800,25 @@ pub fn attainable_inventions(m: &Mod, all: &OMap<String, FxSet<String>>) -> FxSe
 }
 
 /// `_holdings`: each distinct (tag, technologies, ids), counted.
-pub fn holdings(every: &[&Held]) -> Vec<(i64, FxSet<String>, String, Vec<i64>)> {
-    let mut seen: OMap<(String, Vec<String>, Vec<i64>), i64> = OMap::new();
+pub fn holdings<'a>(every: &[&'a Held]) -> Vec<(i64, FxSet<&'a str>, &'a str, &'a [i64])> {
+    let mut seen: FxMap<(&str, &[String], &[i64]), i64> = FxMap::default();
     for nat in every {
-        let key = (nat.record_tag.clone(), nat.tech_list.clone(), nat.invention_ids.clone());
-        *seen.entry(key, || 0) += 1;
+        *seen.entry((nat.record_tag.as_str(), nat.tech_list.as_slice(),
+                     nat.invention_ids.as_slice())).or_insert(0) += 1;
     }
-    seen.into_iter_pairs().map(|((tag, techs, ids), count)| {
-        (count, techs.into_iter().collect(), tag, ids)
+    // The totals are sums of counts, so the order they are met in is no
+    // matter: a hash map where Python kept a dict.
+    seen.into_iter().map(|((tag, techs, ids), count)| {
+        (count, techs.iter().map(|t| t.as_str()).collect(), tag, ids)
     }).collect()
 }
 
 /// `_violations`: (bad, total).
-pub fn violations(m: &Mod, holdings: &[(i64, FxSet<String>, String, Vec<i64>)], base: i64) -> (i64, i64) {
+pub fn violations(m: &Mod, holdings: &[(i64, FxSet<&str>, &str, &[i64])], base: i64) -> (i64, i64) {
     let seq = &m.invention_sequence;
     let (mut bad, mut total) = (0i64, 0i64);
     for (count, techs, tag, ids) in holdings {
-        for idx in ids {
+        for idx in ids.iter() {
             total += count;
             let j = idx - base;
             if j < 0 || j as usize >= seq.len() {
@@ -820,7 +826,8 @@ pub fn violations(m: &Mod, holdings: &[(i64, FxSet<String>, String, Vec<i64>)], 
                 continue;
             }
             let rule = &seq[j as usize];
-            if !subset(&rule.techs, techs) || (!rule.tags.is_empty() && !rule.tags.contains(tag)) {
+            if !rule.techs.iter().all(|t| techs.contains(t.as_str()))
+                || (!rule.tags.is_empty() && !rule.tags.iter().any(|t| t == tag)) {
                 bad += count;
             }
         }
@@ -847,13 +854,14 @@ pub fn index_base_for(m: &Mod, every: &[&Held]) -> Option<i64> {
 }
 
 /// `settle_campaign`: the live inventions; the base is written onto `m`.
-pub fn settle_campaign(m: &mut Mod, saves: &[Vec<Held>]) -> FxSet<String> {
-    let mut all_techs: OMap<String, FxSet<String>> = OMap::new();
+pub fn settle_campaign(m: &mut Mod, saves: &[&[Held]]) -> FxSet<String> {
+    let mut all_techs: OMap<&str, FxSet<&str>> = OMap::new();
     let mut every: Vec<&Held> = Vec::new();
     for nations in saves {
-        for nat in nations {
+        for nat in nations.iter() {
             every.push(nat);
-            all_techs.entry(nat.tag.clone(), FxSet::default).extend(nat.tech_list.iter().cloned());
+            all_techs.entry(nat.tag.as_str(), FxSet::default)
+                .extend(nat.tech_list.iter().map(|t| t.as_str()));
         }
     }
     let live = attainable_inventions(m, &all_techs);

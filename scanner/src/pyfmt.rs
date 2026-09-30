@@ -91,26 +91,56 @@ fn itoa(buf: &mut [u8; 24], v: i64) -> &str {
     unsafe { std::str::from_utf8_unchecked(&buf[i..]) }
 }
 
-/// The shortest digits that read back as `v` (v finite, > 0), and the
-/// decimal point's place: v = 0.d1d2... x 10^decpt.
-fn shortest(v: f64) -> (String, i32) {
+/// A few dozen bytes on the stack that `write!` can fill: the shortest
+/// digits are asked of Rust's formatter without a String for every number.
+struct Stack {
+    b: [u8; 48],
+    n: usize,
+}
+
+impl std::fmt::Write for Stack {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        let end = self.n + s.len();
+        if end > self.b.len() {
+            return Err(std::fmt::Error);
+        }
+        self.b[self.n..end].copy_from_slice(s.as_bytes());
+        self.n = end;
+        Ok(())
+    }
+}
+
+/// The shortest digits that read back as `v` (v finite, > 0), into `out`,
+/// and (how many, the decimal point's place): v = 0.d1d2... x 10^decpt.
+fn shortest(v: f64, out: &mut [u8; 24]) -> (usize, i32) {
     // Rust's `{:e}` gives the shortest round-tripping digits, the closest of
     // them to the value, as Python's repr does (David Gay's mode 0) -- except
     // when the value sits exactly halfway between two such spellings, where
     // Rust rounds up and Python to the even digit: 267406172.666015625 is
     // `...62` in Python and `...63` here. Those ties are found exactly and
     // turned the other way.
-    let s = format!("{:e}", v);
-    let (mant, exp) = s.split_once('e').unwrap();
-    let exp: i32 = exp.parse().unwrap();
-    let digits: String = mant.chars().filter(|c| *c != '.').collect();
-    let decpt = exp + 1;
-    if digits.len() > 1 && (digits.as_bytes()[digits.len() - 1] - b'0') % 2 == 1 {
-        if let Some(other) = even_neighbour(v, &digits, decpt) {
-            return other;
+    use std::fmt::Write as _;
+    let mut st = Stack { b: [0; 48], n: 0 };
+    write!(st, "{:e}", v).unwrap();
+    let text = &st.b[..st.n];
+    let e_at = text.iter().position(|&c| c == b'e').unwrap();
+    let mut n = 0;
+    for &c in &text[..e_at] {
+        if c != b'.' {
+            out[n] = c;
+            n += 1;
         }
     }
-    (digits, decpt)
+    let exp_text = std::str::from_utf8(&text[e_at + 1..]).unwrap();
+    let decpt = exp_text.parse::<i32>().unwrap() + 1;
+    if n > 1 && (out[n - 1] - b'0') % 2 == 1 {
+        let digits = std::str::from_utf8(&out[..n]).unwrap();
+        if let Some((other, d)) = even_neighbour(v, digits, decpt) {
+            out[..other.len()].copy_from_slice(other.as_bytes());
+            return (other.len(), d);
+        }
+    }
+    (n, decpt)
 }
 
 /// For a tie -- `v` exactly half a last digit away from `digits` -- the
@@ -174,11 +204,21 @@ pub fn push_float(out: &mut String, v: f64) {
         out.push_str(if v.is_sign_negative() { "-0.0" } else { "0.0" });
         return;
     }
+    // A whole number under 10^15 is its digits and `.0`, which is most of
+    // what the tables hold: levels, counts made floats by a sum.
+    if v == v.trunc() && v.abs() < 1e15 {
+        push_int(out, v as i64);
+        out.push_str(".0");
+        return;
+    }
     if v < 0.0 {
         out.push('-');
     }
-    let (digits, decpt) = shortest(v.abs());
-    let n = digits.len() as i32;
+    let mut buf = [0u8; 24];
+    let (n, decpt) = shortest(v.abs(), &mut buf);
+    // Safe: ASCII digits.
+    let digits = unsafe { std::str::from_utf8_unchecked(&buf[..n]) };
+    let n = n as i32;
     if decpt <= -4 || decpt > 16 {
         out.push_str(&digits[..1]);
         if n > 1 {
@@ -192,15 +232,15 @@ pub fn push_float(out: &mut String, v: f64) {
         if a < 10 {
             out.push('0');
         }
-        out.push_str(&a.to_string());
+        push_int(out, a as i64);
     } else if decpt <= 0 {
         out.push_str("0.");
         for _ in 0..(-decpt) {
             out.push('0');
         }
-        out.push_str(&digits);
+        out.push_str(digits);
     } else if decpt >= n {
-        out.push_str(&digits);
+        out.push_str(digits);
         for _ in 0..(decpt - n) {
             out.push('0');
         }
@@ -497,6 +537,7 @@ pub fn selftest() {
                     None => s.push('0'),
                 }
             }
+            "b" => push_float(&mut s, crate::text::to_float_b(line.get(2..).unwrap_or("").as_bytes())),
             "p" => match py_float(line.get(2..).unwrap_or("")) {
                 Some(v) => push_float(&mut s, v),
                 None => s.push('E'),

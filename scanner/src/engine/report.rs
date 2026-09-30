@@ -71,7 +71,26 @@ fn add_table<V>(table: &mut ByTag<V>, date: &str, part: Vec<(String, V)>) {
     }
 }
 
-fn walk(spent: Vec<Spent>) -> Campaign {
+fn walk(mut spent: Vec<Spent>) -> Campaign {
+    // The war book takes only the wars, oldest save first, and nothing else
+    // takes them: it is folded on a thread of its own beside the rest.
+    let wars: Vec<Vec<crate::engine::model::War>> =
+        spent.iter_mut().map(|s| std::mem::take(&mut s.meta.wars)).collect();
+    std::thread::scope(|scope| {
+        let book = scope.spawn(move || {
+            let mut book = Book::default();
+            for w in &wars {
+                book.fold_save(w);
+            }
+            book
+        });
+        let mut c = walk_tables(spent);
+        c.book = book.join().unwrap();
+        c
+    })
+}
+
+fn walk_tables(spent: Vec<Spent>) -> Campaign {
     let mut c = Campaign {
         rows: Vec::new(), ships: OMap::new(), crews: OMap::new(), brigades: OMap::new(),
         techs: OMap::new(), pops: OMap::new(), cultures: OMap::new(),
@@ -102,9 +121,7 @@ fn walk(spent: Vec<Spent>) -> Campaign {
         for (good, tag, amount) in s.supply {
             c.supply.entry(good, OMap::new).entry(date.clone(), OMap::new).set(tag, amount);
         }
-        c.book.fold_save(&s.meta.wars);
-        let mut meta = s.meta;
-        meta.wars = Vec::new();
+        let meta = s.meta;
         c.parsed.push(Kept1 { meta, nations: s.nations, chunk: s.chunk });
     }
     c
@@ -123,7 +140,14 @@ fn build_map(m: &Mod, parsed: &[Kept1], scale: i64) -> Option<MapOut> {
     if m.path.is_empty() {
         return None;
     }
-    let (width, height, runs) = mapflags::province_raster(&m.map_bmp, &m.map_csv, scale);
+    let decoded;
+    let (width, height, runs) = match &m.raster {
+        Some((w, h, r)) => (*w, *h, r),
+        None => {
+            decoded = mapflags::province_raster(&m.map_bmp, &m.map_csv, scale);
+            (decoded.0, decoded.1, &decoded.2)
+        }
+    };
     if width == 0 {
         return None;
     }
@@ -141,18 +165,21 @@ fn build_map(m: &Mod, parsed: &[Kept1], scale: i64) -> Option<MapOut> {
         spots.set(*pid, [round(x / scale as f64, 1), round((full_height as f64 - y) / scale as f64, 1)]);
     }
     let unanchored: FxSet<i64> = garrisoned.iter().copied().filter(|p| !spots.contains_key(p)).collect();
-    let anchors = mapflags::province_anchors(width, &runs, &unanchored);
+    let anchors = mapflags::province_anchors(width, runs, &unanchored);
     for (pid, xy) in anchors.iter() {
         spots.set(*pid, *xy);
     }
     let derived = unanchored.iter().filter(|p| spots.contains_key(*p)).count();
 
-    let mut tagset: Vec<String> = parsed.iter()
-        .flat_map(|k| k.meta.province_owner.iter())
-        .flat_map(|(_, o, c)| [o.clone(), c.clone()])
-        .collect();
+    crate::engine::phase("map: raster decoded, spots placed");
+    let mut tagset: Vec<String> = {
+        let seen: FxSet<&str> = parsed.iter()
+            .flat_map(|k| k.meta.province_owner.iter())
+            .flat_map(|(_, o, c)| [o.as_str(), c.as_str()])
+            .collect();
+        seen.into_iter().map(|t| t.to_string()).collect()
+    };
     tagset.sort();
-    tagset.dedup();
     let index: FxMap<&str, usize> = tagset.iter().enumerate().map(|(i, t)| (t.as_str(), i)).collect();
 
     let mut j = String::with_capacity(4 << 20);
@@ -165,7 +192,7 @@ fn build_map(m: &Mod, parsed: &[Kept1], scale: i64) -> Option<MapOut> {
     j.push_str(",\"derived\":");
     push_int(&mut j, derived as i64);
     j.push_str(",\"runs\":");
-    push_json_str(&mut j, &mapflags::raster_text(&runs));
+    push_json_str(&mut j, &mapflags::raster_text(runs));
     j.push_str(",\"tags\":");
     j.push('[');
     for (i, t) in tagset.iter().enumerate() {
@@ -198,37 +225,76 @@ fn build_map(m: &Mod, parsed: &[Kept1], scale: i64) -> Option<MapOut> {
     int_keyed(&mut j, &names, |o, n| push_json_str(o, n));
 
     j.push_str(",\"owners\":[");
-    let mut previous: OMap<i64, usize> = OMap::new();
+    // Province ids are small and dense, so each save's ledger is an array
+    // by id: a later line for the same province wins, as in a dict, and
+    // walking the ids in order is the sort.
+    let top = parsed.iter().flat_map(|k| k.meta.province_owner.iter())
+        .map(|(p, _, _)| *p).filter(|p| *p >= 0).max().unwrap_or(0) as usize;
+    let mut previous: Vec<i32> = vec![-1; top + 1];
+    let mut previous_any = false;
+    let mut held: Vec<i32> = vec![-1; top + 1];
+    let mut occ: Vec<i32> = vec![-1; top + 1];
     for (si, k) in parsed.iter().enumerate() {
-        let book = &k.meta.province_owner;
-        let held: OMap<i64, usize> = book.iter().map(|(p, o, _)| (*p, index[o.as_str()])).collect();
-        let mut changed: Vec<(i64, usize)> = held.iter()
-            .filter(|(p, i)| previous.get(*p) != Some(*i)).map(|(p, i)| (*p, *i)).collect();
-        changed.sort();
-        let mut gone: Vec<i64> = previous.keys().filter(|p| !held.contains_key(*p)).copied().collect();
-        gone.sort();
-        let mut occupied: Vec<(i64, usize)> = book.iter().filter(|(_, o, c)| c != o)
-            .map(|(p, _, c)| (*p, index[c.as_str()])).collect();
-        occupied.sort();
-        occupied.dedup_by(|a, b| a.0 == b.0);
+        held.iter_mut().for_each(|h| *h = -1);
+        occ.iter_mut().for_each(|h| *h = -1);
+        let mut any = false;
+        for (p, o, c) in &k.meta.province_owner {
+            if *p < 0 {
+                continue;
+            }
+            held[*p as usize] = index[o.as_str()] as i32;
+            occ[*p as usize] = if c != o { index[c.as_str()] as i32 } else { -1 };
+            any = true;
+        }
         if si > 0 {
             j.push(',');
         }
         j.push_str("{\"date\":");
         push_json_str(&mut j, &k.meta.date);
         j.push_str(",\"base\":");
-        j.push_str(if previous.is_empty() { "true" } else { "false" });
-        let pairs = |v: &[(i64, usize)]| v.iter().map(|(p, i)| format!("{}:{}", p, i))
-            .collect::<Vec<_>>().join(",");
-        j.push_str(",\"set\":");
-        push_json_str(&mut j, &pairs(&changed));
-        j.push_str(",\"clear\":");
-        push_json_str(&mut j, &gone.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(","));
-        j.push_str(",\"occ\":");
-        push_json_str(&mut j, &pairs(&occupied));
-        j.push('}');
-        previous = held;
+        j.push_str(if previous_any { "false" } else { "true" });
+        j.push_str(",\"set\":\"");
+        let mut first = true;
+        for (pid, &h) in held.iter().enumerate() {
+            if h >= 0 && previous[pid] != h {
+                if !first {
+                    j.push(',');
+                }
+                first = false;
+                push_int(&mut j, pid as i64);
+                j.push(':');
+                push_int(&mut j, h as i64);
+            }
+        }
+        j.push_str("\",\"clear\":\"");
+        let mut first = true;
+        for (pid, &h) in held.iter().enumerate() {
+            if h < 0 && previous[pid] >= 0 {
+                if !first {
+                    j.push(',');
+                }
+                first = false;
+                push_int(&mut j, pid as i64);
+            }
+        }
+        j.push_str("\",\"occ\":\"");
+        let mut first = true;
+        for (pid, &c) in occ.iter().enumerate() {
+            if c >= 0 {
+                if !first {
+                    j.push(',');
+                }
+                first = false;
+                push_int(&mut j, pid as i64);
+                j.push(':');
+                push_int(&mut j, c as i64);
+            }
+        }
+        j.push_str("\"}");
+        std::mem::swap(&mut previous, &mut held);
+        previous_any = any;
     }
+    crate::engine::phase("map: owners");
     j.push_str("],\"capitals\":{");
     for (si, k) in parsed.iter().enumerate() {
         if si > 0 {
@@ -266,6 +332,7 @@ fn build_map(m: &Mod, parsed: &[Kept1], scale: i64) -> Option<MapOut> {
     int_keyed(&mut j, &m.province_regions, |o, r| push_json_str(o, r));
     j.push_str(",\"stateNames\":");
     m.state_names_j.write(&mut j);
+    crate::engine::phase("map: capitals");
     j.push_str(",\"armies\":{");
     for (si, k) in parsed.iter().enumerate() {
         if si > 0 {
@@ -657,13 +724,13 @@ fn line(out: &mut String, vals: &[Val]) {
 }
 
 /// `_say_mod`, once the inventions are settled.
-pub fn say_mod(m: &Mod, live: &FxSet<String>, held: &[Vec<rules::Held>], files: &[String]) {
+pub fn say_mod(m: &Mod, live: &FxSet<String>, held: &[&[rules::Held]], files: &[String]) {
     let seq = &m.invention_sequence;
     match m.index_base {
         None => println!("\nInvention indices could not be decoded from {} inventions; falling back \
                           to requirement matching, which overstates unlucky nations.", seq.len()),
         Some(base) => {
-            let every: Vec<&rules::Held> = held.iter().flatten().collect();
+            let every: Vec<&rules::Held> = held.iter().flat_map(|h| h.iter()).collect();
             let (bad, total) = rules::violations(m, &rules::holdings(&every), base);
             println!("\nInvention indices decoded against {} inventions (base {}): {} of {} \
                       nation-invention pairs are unreachable ({:.1}%).", seq.len(), base, bad, total,
@@ -674,7 +741,7 @@ pub fn say_mod(m: &Mod, live: &FxSet<String>, held: &[Vec<rules::Held>], files: 
             for (nations, file) in held.iter().zip(files) {
                 let mut past: FxSet<i64> = FxSet::default();
                 let mut lost = 0i64;
-                for nat in nations {
+                for nat in nations.iter() {
                     for idx in &nat.invention_ids {
                         seen += 1;
                         if *idx > top {
@@ -860,13 +927,46 @@ pub fn run(run: &Run, m: &Mod, live: &FxSet<String>, spent: Vec<Spent>) {
 
 /// `build_html` and `build_report`: the page, written; its path.
 fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]) -> String {
-    let mapping = Mapping { province_names: &m.province_names, province_regions: &m.province_regions,
-                            state_names: &m.state_names, unit_kinds: &m.unit_kinds };
-    let owners: Vec<(String, Vec<(i64, String)>)> = c.parsed.iter()
-        .map(|k| (k.meta.date.clone(), k.meta.province_owner.iter().map(|(p, o, _)| (*p, o.clone())).collect()))
-        .collect();
-    let built = wars::build(&c.book, &owners, &mapping);
-    crate::engine::phase("wars built");
+    let t = &run.tables;
+    let rows = &c.rows;
+    let mut dates: Vec<String> = Vec::new();
+    let mut seen: FxSet<&str> = FxSet::default();
+    for r in rows {
+        if seen.insert(&r.date) {
+            dates.push(r.date.clone());
+        }
+    }
+    dates.sort_by(|a, b| year_fraction(a).partial_cmp(&year_fraction(b)).unwrap_or(std::cmp::Ordering::Equal));
+    let mut tags: Vec<String> = rows.iter().map(|r| r.nat.tag.clone()).collect();
+    tags.sort();
+    tags.dedup();
+
+    // The payload's sections do not depend on one another, so each is
+    // made on a thread of its own and they are laid end to end after, in
+    // the order Python's dict holds them.
+    let (built, map, (great_powers, flags), succession_json, series_facts, tables, (market, price_ends)) =
+        std::thread::scope(|s| {
+            let wars_job = s.spawn(|| {
+                let mapping = Mapping { province_names: &m.province_names,
+                                        province_regions: &m.province_regions,
+                                        state_names: &m.state_names, unit_kinds: &m.unit_kinds };
+                let owners: Vec<(String, Vec<(i64, String)>)> = c.parsed.iter()
+                    .map(|k| (k.meta.date.clone(),
+                              k.meta.province_owner.iter().map(|(p, o, _)| (*p, o.clone())).collect()))
+                    .collect();
+                wars::build(&c.book, &owners, &mapping)
+            });
+            let map_job = s.spawn(|| build_map(m, &c.parsed, run.map_scale));
+            let flags_job = s.spawn(|| flags_for(m, &c.parsed, &c.book));
+            let succession_job = s.spawn(|| succession(&c.parsed, m));
+            let series_job = s.spawn(|| section_series_facts(run, rows, &dates, &tags));
+            let tables_job = s.spawn(|| section_tables(run, c));
+            let market_job = s.spawn(|| section_market(run, m, c, prices, snaps, &dates));
+            (wars_job.join().unwrap(), map_job.join().unwrap(), flags_job.join().unwrap(),
+             succession_job.join().unwrap(), series_job.join().unwrap(),
+             tables_job.join().unwrap(), market_job.join().unwrap())
+        });
+    crate::engine::phase("payload sections made");
     let war_tags = wars::war_tags(&built);
     // `nation_names`: every nation of every save, the later government winning.
     let mut tag_names: FxMap<String, String> = FxMap::default();
@@ -882,66 +982,15 @@ fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]
             }
         }
     }
-    let map = build_map(m, &c.parsed, run.map_scale);
     if let Some(mp) = &map {
         if mp.derived > 0 && !run.quiet {
             println!("map/positions.txt anchors no army counter for {} of the provinces holding \
                       troops; those markers sit at the middle of the province instead.", mp.derived);
         }
     }
-    crate::engine::phase("map built");
-    let (great_powers, flags) = flags_for(m, &c.parsed, &c.book);
-    crate::engine::phase("flags");
 
-    // --- build_report
-    let rows = &c.rows;
-    let mut dates: Vec<String> = Vec::new();
-    let mut seen: FxSet<&str> = FxSet::default();
-    for r in rows {
-        if seen.insert(&r.date) {
-            dates.push(r.date.clone());
-        }
-    }
-    dates.sort_by(|a, b| year_fraction(a).partial_cmp(&year_fraction(b)).unwrap_or(std::cmp::Ordering::Equal));
-    let mut tags: Vec<String> = rows.iter().map(|r| r.nat.tag.clone()).collect();
-    tags.sort();
-    tags.dedup();
-    let t = &run.tables;
-    let metric_keys: Vec<&str> = if rows.is_empty() { Vec::new() }
-                                 else { t.metrics.iter().map(|m| m.0.as_str()).collect() };
-    // series[tag][key][date]
-    let mut series: FxMap<&str, Vec<OMap<String, f64>>> = tags.iter()
-        .map(|t| (t.as_str(), (0..metric_keys.len()).map(|_| OMap::new()).collect())).collect();
-    for r in rows {
-        let slot = series.get_mut(r.nat.tag.as_str()).unwrap();
-        for (i, key) in metric_keys.iter().enumerate() {
-            if let Some(v) = r.get(key).float() {
-                slot[i].set(r.date.clone(), v);
-            }
-        }
-    }
-    let mut growth_keys: Vec<&str> = Vec::new();
-    let mut extra: FxMap<&str, Vec<OMap<String, f64>>> = tags.iter().map(|t| (t.as_str(), Vec::new())).collect();
-    let gains: FxSet<&str> = t.gain.iter().map(|g| g.0.as_str()).collect();
-    let span = t.growth_span;
-    for (key, source, _) in t.growth.iter().chain(t.gain.iter()) {
-        let (key, source) = (key.as_str(), source.as_str());
-        let si = match metric_keys.iter().position(|k| *k == source) {
-            Some(i) => i,
-            None => continue,
-        };
-        growth_keys.push(key);
-        let is_gain = gains.contains(key);
-        for t in &tags {
-            let have = &series[t.as_str()][si];
-            let readings: Vec<(&str, Option<f64>)> = dates.iter()
-                .map(|d| (d.as_str(), have.get(d.as_str()).copied())).collect();
-            let got = if is_gain { gain_series(&readings) } else { growth_series(&readings, span) };
-            extra.get_mut(t.as_str()).unwrap().push(got);
-        }
-    }
+    let mut p = String::with_capacity(series_facts.len() + tables.len() + market.len() + (8 << 20));
 
-    let mut p = String::with_capacity(32 << 20);
     p.push_str("{\"dates\":");
     str_array(&mut p, dates.iter());
     p.push_str(",\"years\":");
@@ -977,7 +1026,132 @@ fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]
     m.culture_names.write(&mut p);
     p.push_str(",\"names\":");
     m.display_names.write(&mut p);
-    p.push_str(",\"metrics\":[");
+    p.push_str(&series_facts);
+    p.push_str(&tables);
+    p.push_str(",\"map\":");
+    let mut chunks_text = "[]".to_string();
+    match &map {
+        None => p.push_str("null"),
+        Some(mp) => {
+            let (a, b) = mp.json.split_once("\u{0}CHUNKS\u{0}").unwrap();
+            p.push_str(a);
+            if run.split {
+                p.push_str(",\"populationStateChunks\":");
+                p.push_str(&mp.chunks);
+            } else if mp.chunks == "[]" {
+                // `_state_chunks` leaves an empty list where it was.
+                p.push_str(",\"populationStateChunks\":[]");
+            } else {
+                chunks_text = escape_angles(&mp.chunks);
+            }
+            p.push_str(b);
+        }
+    }
+    p.push_str(",\"basePrices\":");
+    m.base_prices.write(&mut p);
+    p.push_str(",\"greatPowers\":");
+    p.push_str(&great_powers);
+    p.push_str(",\"flags\":");
+    p.push_str(&flags);
+    p.push_str(",\"technology\":");
+    m.technology.write(&mut p);
+    p.push_str(",\"wars\":[");
+    for (i, w) in built.iter().enumerate() {
+        if i > 0 {
+            p.push(',');
+        }
+        p.push_str(&w.json);
+    }
+    p.push_str("],\"succession\":");
+    p.push_str(&succession_json);
+    p.push_str(&market);
+    p.push_str(",\"growthSpan\":");
+    push_json_float(&mut p, t.growth_span);
+    p.push_str(",\"cross\":");
+    match &run.cross {
+        Some(x) if x != "null" && x != "{}" && x != "[]" && !x.is_empty() => p.push_str(x),
+        _ => p.push_str("null"),
+    }
+    p.push('}');
+
+    let span = if dates.is_empty() { "—".to_string() }
+               else { html_escape(&format!("{} – {}", dates[0], dates[dates.len() - 1])) };
+    let price_span = match &price_ends {
+        None => "no price data".to_string(),
+        Some((a, b)) => html_escape(&format!("{} – {}", a, b)),
+    };
+    let fill = |html: String| -> String {
+        html.replace("__SAVECOUNT__", &dates.len().to_string())
+            .replace("__NATIONCOUNT__", &tags.len().to_string())
+            .replace("__SPAN__", &span)
+            .replace("__PRICESPAN__", &price_span)
+    };
+    std::fs::create_dir_all(&run.out).ok();
+    if std::env::var_os("VIC2_ENGINE_PAYLOAD").is_some() {
+        std::fs::write(std::path::Path::new(&run.out).join("payload.json"), escape_angles(&p)).ok();
+    }
+    crate::engine::phase("payload assembled");
+    let packed = pack_bytes(&p);
+    crate::engine::phase("payload gzipped");
+    let html = if run.split {
+        let data_name = "report.data.gz";
+        std::fs::write(std::path::Path::new(&run.out).join(data_name), &packed)
+            .unwrap_or_else(|e| { eprintln!("cannot write {}: {}", data_name, e); std::process::exit(1); });
+        fill(t.template.replace("__DATA__", "").replace("__DATAURL__", data_name)
+             .replace("__STATES__", "[]"))
+    } else {
+        let html = fill(t.template.clone()).replace("__DATAURL__", "")
+            .replace("__STATES__", &chunks_text);
+        let mut b64 = String::with_capacity(packed.len() * 4 / 3 + 4);
+        crate::deflate::base64_into(&mut b64, &packed);
+        html.replace("__DATA__", &b64)
+    };
+    let path = std::path::Path::new(&run.out).join("report.html");
+    crate::engine::phase("page filled");
+    std::fs::write(&path, html.as_bytes())
+        .unwrap_or_else(|e| { eprintln!("cannot write {}: {}", path.display(), e); std::process::exit(1); });
+    path.to_string_lossy().to_string()
+}
+
+/// `metrics` to `factKeys`: the measures, their columns and the facts.
+fn section_series_facts(run: &Run, rows: &[Row], dates: &[String], tags: &[String]) -> String {
+    let t = &run.tables;
+    let metric_keys: Vec<&str> = if rows.is_empty() { Vec::new() }
+                                 else { t.metrics.iter().map(|m| m.0.as_str()).collect() };
+    // series[tag][key][date]
+    let mut series: FxMap<&str, Vec<OMap<String, f64>>> = tags.iter()
+        .map(|t| (t.as_str(), (0..metric_keys.len()).map(|_| OMap::new()).collect())).collect();
+    for r in rows {
+        let slot = series.get_mut(r.nat.tag.as_str()).unwrap();
+        for (i, key) in metric_keys.iter().enumerate() {
+            if let Some(v) = r.get(key).float() {
+                slot[i].set(r.date.clone(), v);
+            }
+        }
+    }
+    let mut growth_keys: Vec<&str> = Vec::new();
+    let mut extra: FxMap<&str, Vec<OMap<String, f64>>> = tags.iter().map(|t| (t.as_str(), Vec::new())).collect();
+    let gains: FxSet<&str> = t.gain.iter().map(|g| g.0.as_str()).collect();
+    let span = t.growth_span;
+    for (key, source, _) in t.growth.iter().chain(t.gain.iter()) {
+        let (key, source) = (key.as_str(), source.as_str());
+        let si = match metric_keys.iter().position(|k| *k == source) {
+            Some(i) => i,
+            None => continue,
+        };
+        growth_keys.push(key);
+        let is_gain = gains.contains(key);
+        for t in tags.iter() {
+            let have = &series[t.as_str()][si];
+            let readings: Vec<(&str, Option<f64>)> = dates.iter()
+                .map(|d| (d.as_str(), have.get(d.as_str()).copied())).collect();
+            let got = if is_gain { gain_series(&readings) } else { growth_series(&readings, span) };
+            extra.get_mut(t.as_str()).unwrap().push(got);
+        }
+    }
+    let mut p = String::with_capacity(8 << 20);
+    p.push_str(",");
+    p.push_str("\"metrics\":[");
     let mut first = true;
     let mut sep = |p: &mut String| {
         if !first {
@@ -1118,6 +1292,13 @@ fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]
     }
     p.push_str("},\"factKeys\":");
     str_array(&mut p, taken.iter());
+    p
+}
+
+/// `ships` to `colours`: the per-nation tables.
+fn section_tables(run: &Run, c: &Campaign) -> String {
+    let t = &run.tables;
+    let mut p = String::with_capacity(8 << 20);
     // the per-nation tables
     let date_map_i = |p: &mut String, t: &ByTag<Vec<(String, i64)>>| {
         obj(p, t.iter().map(|(k, v)| (k.as_str(), v)), |o, by| {
@@ -1246,43 +1427,14 @@ fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]
     });
     p.push_str(",\"colours\":");
     str_array(&mut p, t.colours.iter());
-    p.push_str(",\"map\":");
-    let mut chunks_text = "[]".to_string();
-    match &map {
-        None => p.push_str("null"),
-        Some(mp) => {
-            let (a, b) = mp.json.split_once("\u{0}CHUNKS\u{0}").unwrap();
-            p.push_str(a);
-            if run.split {
-                p.push_str(",\"populationStateChunks\":");
-                p.push_str(&mp.chunks);
-            } else if mp.chunks == "[]" {
-                // `_state_chunks` leaves an empty list where it was.
-                p.push_str(",\"populationStateChunks\":[]");
-            } else {
-                chunks_text = escape_angles(&mp.chunks);
-            }
-            p.push_str(b);
-        }
-    }
-    p.push_str(",\"basePrices\":");
-    m.base_prices.write(&mut p);
-    p.push_str(",\"greatPowers\":");
-    p.push_str(&great_powers);
-    p.push_str(",\"flags\":");
-    p.push_str(&flags);
-    p.push_str(",\"technology\":");
-    m.technology.write(&mut p);
-    p.push_str(",\"wars\":[");
-    for (i, w) in built.iter().enumerate() {
-        if i > 0 {
-            p.push(',');
-        }
-        p.push_str(&w.json);
-    }
-    p.push_str("],\"succession\":");
-    p.push_str(&succession(&c.parsed, m));
-    // market
+    p
+}
+
+/// `priceDates` to `supply`: the market; and the first and last price dates.
+fn section_market(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow],
+                  dates: &[String]) -> (String, Option<(String, String)>) {
+    let t = &run.tables;
+    let mut p = String::with_capacity(8 << 20);
     let mut price_dates: Vec<&str> = Vec::new();
     let mut pseen: FxSet<&str> = FxSet::default();
     let mut goods_meta: OMap<&str, &str> = OMap::new();
@@ -1445,57 +1597,18 @@ fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]
         p.push_str(&rowsj);
         p.push('}');
     }
-    p.push_str("},\"growthSpan\":");
-    push_json_float(&mut p, t.growth_span);
-    p.push_str(",\"cross\":");
-    match &run.cross {
-        Some(x) if x != "null" && x != "{}" && x != "[]" && !x.is_empty() => p.push_str(x),
-        _ => p.push_str("null"),
-    }
     p.push('}');
-
-    let span = if dates.is_empty() { "—".to_string() }
-               else { html_escape(&format!("{} – {}", dates[0], dates[dates.len() - 1])) };
-    let price_span = if price_dates.is_empty() { "no price data".to_string() }
-                     else { html_escape(&format!("{} – {}", price_dates[0], price_dates[price_dates.len() - 1])) };
-    let fill = |html: String| -> String {
-        html.replace("__SAVECOUNT__", &dates.len().to_string())
-            .replace("__NATIONCOUNT__", &tags.len().to_string())
-            .replace("__SPAN__", &span)
-            .replace("__PRICESPAN__", &price_span)
-    };
-    std::fs::create_dir_all(&run.out).ok();
-    if std::env::var_os("VIC2_ENGINE_PAYLOAD").is_some() {
-        std::fs::write(std::path::Path::new(&run.out).join("payload.json"), escape_angles(&p)).ok();
-    }
-    crate::engine::phase("payload assembled");
-    let packed = pack_bytes(&p);
-    crate::engine::phase("payload gzipped");
-    let html = if run.split {
-        let data_name = "report.data.gz";
-        std::fs::write(std::path::Path::new(&run.out).join(data_name), &packed)
-            .unwrap_or_else(|e| { eprintln!("cannot write {}: {}", data_name, e); std::process::exit(1); });
-        fill(t.template.replace("__DATA__", "").replace("__DATAURL__", data_name)
-             .replace("__STATES__", "[]"))
-    } else {
-        let html = fill(t.template.clone()).replace("__DATAURL__", "")
-            .replace("__STATES__", &chunks_text);
-        let mut b64 = String::with_capacity(packed.len() * 4 / 3 + 4);
-        crate::deflate::base64_into(&mut b64, &packed);
-        html.replace("__DATA__", &b64)
-    };
-    let path = std::path::Path::new(&run.out).join("report.html");
-    crate::engine::phase("page filled");
-    std::fs::write(&path, html.as_bytes())
-        .unwrap_or_else(|e| { eprintln!("cannot write {}: {}", path.display(), e); std::process::exit(1); });
-    path.to_string_lossy().to_string()
+    let ends = if price_dates.is_empty() { None }
+               else { Some((price_dates[0].to_string(), price_dates[price_dates.len() - 1].to_string())) };
+    (p, ends)
 }
+
 
 /// `pack_bytes`: the payload's `<` and `>` made look-alikes, gzipped on
 /// every core.
 fn pack_bytes(payload: &str) -> Vec<u8> {
     let raw = escape_angles(payload);
-    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).clamp(1, 8);
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).clamp(1, 16);
     crate::deflate::gzip_parallel(raw.as_bytes(), threads)
 }
 

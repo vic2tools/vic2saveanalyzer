@@ -281,33 +281,6 @@ pub mod mapped {
     }
 }
 
-/// Ask the system to start reading every save now, in the order they will
-/// be wanted, so a worker scanning one is not also the one waiting for the
-/// disk to hand it the next. Linux only, and only a hint: a system that
-/// ignores it reads each save when it is opened, as before.
-#[cfg(target_os = "linux")]
-fn prefetch(files: &[String]) {
-    if std::env::var_os("VIC2_ENGINE_NO_PREFETCH").is_some() {
-        return;
-    }
-    let files = files.to_vec();
-    std::thread::spawn(move || {
-        use std::os::unix::io::AsRawFd;
-        extern "C" {
-            fn posix_fadvise(fd: i32, offset: i64, len: i64, advice: i32) -> i32;
-        }
-        const POSIX_FADV_WILLNEED: i32 = 3;
-        for f in files {
-            if let Ok(fh) = std::fs::File::open(&f) {
-                unsafe { posix_fadvise(fh.as_raw_fd(), 0, 0, POSIX_FADV_WILLNEED) };
-            }
-        }
-    });
-}
-
-#[cfg(not(target_os = "linux"))]
-fn prefetch(_files: &[String]) {}
-
 fn load<'a>(path: &str, raw: &'a mut Vec<u8>) -> std::io::Result<Bytes<'a>> {
     let mut f = std::fs::File::open(path)?;
     #[cfg(target_os = "linux")]
@@ -528,8 +501,8 @@ fn decline(why: &str) -> ! {
 
 /// The mod, from the spec's `mod_file` or from the path Python sends on
 /// stdin once it has written it.
-fn load_mod(run: &Run) -> Mod {
-    let path = match &run.mod_file {
+fn load_mod(mod_file: &Option<String>) -> Mod {
+    let path = match mod_file {
         Some(p) => p.clone(),
         None => {
             let mut line = String::new();
@@ -565,6 +538,55 @@ pub fn bench(args: &[String]) {
     }
     let k = n as f64 / 1000.0;
     eprintln!("per save: read+scan+build {:.1} ms, prepare {:.1} ms", t_read / k, t_prep / k);
+    // And the parts of a read, one at a time.
+    let mut t = [0.0f64; 6];
+    for f in run.files.iter().take(n) {
+        let c = std::time::Instant::now();
+        let raw = std::fs::read(f).unwrap();
+        t[0] += c.elapsed().as_secs_f64();
+        let c = std::time::Instant::now();
+        let blocks = top_level_blocks(&raw).unwrap();
+        t[1] += c.elapsed().as_secs_f64();
+        let c = std::time::Instant::now();
+        let tables = Tables { army_techs: &run.reading.army_techs, navy_techs: &run.reading.navy_techs,
+                              reform_keys: &run.reading.reform_keys };
+        let mut countries = Vec::new();
+        let mut rules: FxMap<Vec<u8>, PopulationRules> = FxMap::default();
+        let mut referenced = FxSet::default();
+        for (key, at, stop) in &blocks {
+            if tag_bytes(key) {
+                let chunk = latin1(&raw[*at..(*stop).min(raw.len())]);
+                let country = read_country(&chunk, 0, chunk.len(), &latin1(key), &tables);
+                let rule = rules.entry(key.to_vec()).or_default();
+                rule.accepted.extend(country.accepted_cultures.iter().map(|s| s.as_bytes().to_vec()));
+                rule.colonial.extend(&country.colonial_provinces);
+                referenced.extend(&country.regiment_pops);
+                countries.push(country);
+            }
+        }
+        t[2] += c.elapsed().as_secs_f64();
+        let c = std::time::Instant::now();
+        let mut scan = Scan { world_pop: 0, owners: Vec::new(), nations: FxMap::default(),
+                              pop_ids: Vec::new(), pop_kinds: Vec::new(),
+                              words: Interner::default(), seen: Vec::new() };
+        for (key, at, stop) in &blocks {
+            if !key.is_empty() && key.iter().all(|c| c.is_ascii_digit()) {
+                read_province(&raw, *at, *stop, to_int_b(key), &run.reading.pop_types,
+                              &run.reading.mob_types, &mut scan, &rules, &referenced,
+                              &run.reading.population_groups);
+            }
+        }
+        t[3] += c.elapsed().as_secs_f64();
+        let c = std::time::Instant::now();
+        let rest = model::read_rest(&raw, &blocks).unwrap();
+        t[4] += c.elapsed().as_secs_f64();
+        let c = std::time::Instant::now();
+        let save = model::build(String::new(), String::new(), String::new(), &scan, &countries, rest);
+        std::hint::black_box(save.ok());
+        t[5] += c.elapsed().as_secs_f64();
+    }
+    eprintln!("per save: file {:.1}, blocks {:.1}, countries {:.1}, provinces {:.1}, wars+market {:.1}, record {:.1} ms",
+              t[0] / k, t[1] / k, t[2] / k, t[3] / k, t[4] / k, t[5] / k);
 }
 
 pub fn main(args: &[String]) {
@@ -600,10 +622,22 @@ pub fn main(args: &[String]) {
     if say_each {
         println!("Reading {} save(s) on {} cores.", todo, workers);
     }
+    // The mod, and the map's bitmap it names, read on a thread of their own
+    // while the saves are: the mod arrives while they are being read, and
+    // the bitmap is twelve million pixels nothing else needs until the page.
+    let mod_job = {
+        let (mod_file, scale, want_map) = (run.mod_file.clone(), run.map_scale, !run.no_html);
+        std::thread::spawn(move || {
+            let mut m = load_mod(&mod_file);
+            if want_map {
+                m.raster = Some(crate::engine::mapflags::province_raster(&m.map_bmp, &m.map_csv, scale));
+            }
+            m
+        })
+    };
     let mut pres: Vec<Option<Pre>> = (0..n).map(|_| None).collect();
     let mut failed: Option<String> = None;
     let mut done = 0usize;
-    prefetch(&run.files);
     thread_local!(static RAW: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) });
     in_order(n, workers, |i| {
         if let Some(slot) = &slots[i] {
@@ -664,12 +698,8 @@ pub fn main(args: &[String]) {
     phase("pass one: saves read and prepared");
 
     // The campaign's inventions, settled against the mod.
-    let mut m = load_mod(&run);
-    let held: Vec<Vec<rules::Held>> = pres.iter()
-        .map(|p| p.held.iter().map(|h| rules::Held { tag: h.tag.clone(),
-             record_tag: h.record_tag.clone(), tech_list: h.tech_list.clone(),
-             invention_ids: h.invention_ids.clone() }).collect())
-        .collect();
+    let mut m = mod_job.join().unwrap_or_else(|_| decline("the mod could not be read"));
+    let held: Vec<&[rules::Held]> = pres.iter().map(|p| p.held.as_slice()).collect();
     phase("mod loaded");
     let live = rules::settle_campaign(&mut m, &held);
     phase("inventions settled");

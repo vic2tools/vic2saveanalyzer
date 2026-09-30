@@ -78,6 +78,18 @@ alphabet = [chr(c) for c in range(0, 0x250)] + ["–", "€", "�", "\U0001F600
 for _ in range(count // 10):
     s = "".join(rnd.choice(alphabet) for _ in range(rnd.randint(0, 12)))
     lines.append("j " + s.encode("utf-8").hex()); want.append(json.dumps(s))
+# a save's numbers as the scanner reads them (`text::to_float_b`, whose
+# fast path divides the digits by a power of ten): every spelling a save
+# writes, and the ones near it
+for _ in range(count // 5):
+    whole = str(rnd.randint(0, 10 ** rnd.randint(0, 12)))
+    frac = "".join(rnd.choice("0123456789") for _ in range(rnd.randint(0, 9)))
+    text = whole + ("." + frac if rnd.random() < 0.8 else "")
+    if rnd.random() < 0.2:
+        text = "-" + text
+    if rnd.random() < 0.05:
+        text = "." + frac if frac else text
+    lines.append("b " + text); want.append(repr(float(text)))
 # float() of text
 texts = ["1", "1.5", " 2.5 ", "\xa03\x1c", "-0", "+7.", ".5", "1e5", "1E-2", "inf", "-Infinity",
          "nan", "abc", "", "1.2.3", "1e", "--1", "0x10", "1_000", "12345.000", "\x853\x85"]

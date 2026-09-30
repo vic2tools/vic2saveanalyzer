@@ -36,10 +36,71 @@ pub(crate) fn trim_end_b(s: &[u8]) -> &[u8] {
 }
 
 pub(crate) fn to_float_b(s: &[u8]) -> f64 {
-    match std::str::from_utf8(trim_b(s)) {
+    let t = trim_b(s);
+    if let Some(v) = fast_decimal(t) {
+        return v;
+    }
+    match std::str::from_utf8(t) {
         Ok(t) => t.parse::<f64>().unwrap_or(0.0),
         Err(_) => 0.0,
     }
+}
+
+const TENS: [f64; 16] = [1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12,
+                         1e13, 1e14, 1e15];
+
+/// `-?digits[.digits]` with at most fifteen digits, which is how a save
+/// writes nearly every number, read exactly: the digits are a whole number
+/// below 2^53 and the power of ten is exact, so one IEEE division gives the
+/// correctly rounded value -- what `parse` gives (Clinger's fast path). None
+/// for anything else, which `parse` reads.
+pub(crate) fn fast_decimal(t: &[u8]) -> Option<f64> {
+    let (neg, body) = match t.first() {
+        Some(b'-') => (true, &t[1..]),
+        _ => (false, t),
+    };
+    let mut m: u64 = 0;
+    let mut digits = 0usize;
+    let mut frac: Option<usize> = None;
+    for &c in body {
+        if c.is_ascii_digit() {
+            m = m * 10 + (c - b'0') as u64;
+            digits += 1;
+            if digits > 15 {
+                return None;
+            }
+            if let Some(f) = frac.as_mut() {
+                *f += 1;
+            }
+        } else if c == b'.' && frac.is_none() {
+            frac = Some(0);
+        } else {
+            return None;
+        }
+    }
+    if digits == 0 {
+        return None;
+    }
+    let v = m as f64 / TENS[frac.unwrap_or(0)];
+    Some(if neg { -v } else { v })
+}
+
+/// Where the next `\n` is in `hay[from..stop]`, eight bytes at a time.
+pub(crate) fn find_newline(hay: &[u8], from: usize, stop: usize) -> Option<usize> {
+    const LOW: u64 = 0x0101_0101_0101_0101;
+    const HIGH: u64 = 0x8080_8080_8080_8080;
+    let end = stop.min(hay.len());
+    let mut i = from;
+    let nl = LOW * b'\n' as u64;
+    while i + 8 <= end {
+        let w = u64::from_le_bytes(hay[i..i + 8].try_into().unwrap()) ^ nl;
+        let hit = w.wrapping_sub(LOW) & !w & HIGH;
+        if hit != 0 {
+            return Some(i + (hit.trailing_zeros() / 8) as usize);
+        }
+        i += 8;
+    }
+    hay[i.min(end)..end].iter().position(|&c| c == b'\n').map(|k| i + k)
 }
 
 /// `int(float(s))`: truncation toward zero, which is what the analyzer does
@@ -58,7 +119,12 @@ pub(crate) fn unquote_b(b: &[u8]) -> &[u8] {
 }
 
 pub(crate) fn is_number_b(s: &[u8]) -> bool {
-    std::str::from_utf8(s).ok().and_then(|t| t.parse::<f64>().ok()).is_some()
+    // A culture's religion, which is what this is asked of nearly always,
+    // starts with a letter; only `inf`, `infinity` and `nan` of those parse.
+    match s.first() {
+        Some(c) if c.is_ascii_alphabetic() && !matches!(c, b'i' | b'I' | b'n' | b'N') => false,
+        _ => std::str::from_utf8(s).ok().and_then(|t| t.parse::<f64>().ok()).is_some(),
+    }
 }
 
 

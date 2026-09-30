@@ -18,24 +18,28 @@ use crate::text::{find, find_pair, is_number_b, to_float_b, to_int_b, trim_b, tr
 use crate::pickle::{FxMap, FxSet};
 
 
-// The fields a pop can hold other than its culture line. A field not in here,
-// whose value does not parse as a number, is the culture -- which is how the
-// game writes it: `french=catholic`, with no key of its own.
-pub(crate) const POP_KNOWN: &[&str] = &[
-    "id", "size", "money", "ideology", "issues", "mil", "con", "literacy",
-    "bank", "con_factor", "luxury_needs", "everyday_needs", "life_needs",
-    "size_changes", "movement", "promoted", "demoted", "days_of_loss",
-    "converted", "local_migration", "external_migration", "colonial_migration",
-    "assimilated", "type", "faction", "random", "political_movement",
-    "social_movement", "supported_regiment", "employed", "stockpile",
-    "movement_tag", "movement_issue", "need", "production_type",
-    "last_spending", "current_producing", "percent_afforded",
-    "percent_sold_domestic", "percent_sold_export", "leftover", "throttle",
-    "needs_cost", "production_income", "promotion", "literacy_change",
-    "con_change", "mil_change",
-];
 
 pub(crate) const STARVING_BELOW: f64 = 0.05;
+
+/// The fields a pop can hold other than its culture line: a field not in
+/// here, whose value does not parse as a number, is the culture -- which is
+/// how the game writes it, `french=catholic`, with no key of its own. A
+/// match, which the compiler turns into a few length and byte tests; held
+/// to Python's `v2parse.POP_KNOWN_FIELDS` by `testkit/record.py`.
+fn pop_known(key: &[u8]) -> bool {
+    matches!(key,
+        b"id" | b"size" | b"money" | b"ideology" | b"issues" | b"mil" | b"con" | b"literacy"
+        | b"bank" | b"con_factor" | b"luxury_needs" | b"everyday_needs" | b"life_needs"
+        | b"size_changes" | b"movement" | b"promoted" | b"demoted" | b"days_of_loss"
+        | b"converted" | b"local_migration" | b"external_migration" | b"colonial_migration"
+        | b"assimilated" | b"type" | b"faction" | b"random" | b"political_movement"
+        | b"social_movement" | b"supported_regiment" | b"employed" | b"stockpile"
+        | b"movement_tag" | b"movement_issue" | b"need" | b"production_type"
+        | b"last_spending" | b"current_producing" | b"percent_afforded"
+        | b"percent_sold_domestic" | b"percent_sold_export" | b"leftover" | b"throttle"
+        | b"needs_cost" | b"production_income" | b"promotion" | b"literacy_change"
+        | b"con_change" | b"mil_change")
+}
 
 
 /// Names stored once, referred to by number.
@@ -268,12 +272,7 @@ pub(crate) fn read_province(
             depth += 1;
             p += 1;
         }
-        let end = match bytes[p..stop.min(bytes.len())].iter()
-            .position(|&c| c == b'\n')
-        {
-            Some(k) => p + k,
-            None => stop,
-        };
+        let end = crate::text::find_newline(bytes, p, stop).unwrap_or(stop);
         let line = &bytes[p..end];
         i = end;
         // Python's province pattern reaches exactly two levels -- one tab for
@@ -331,7 +330,7 @@ pub(crate) fn read_province(
                     };
                     if starts_right
                         && slot.culture.is_none()
-                        && !POP_KNOWN.iter().any(|k| k.as_bytes() == key)
+                        && !pop_known(key)
                         && !is_number_b(unquote_b(trim_end_b(value)))
                     {
                         slot.culture = Some(key);

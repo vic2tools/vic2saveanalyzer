@@ -174,6 +174,11 @@ class _Relay:
         finally:
             self.proc.stderr.close()
 
+    def running(self, timeout):
+        """Whether the engine is still talking, after waiting up to `timeout`."""
+        self._out.join(timeout)
+        return self._out.is_alive()
+
     def finish(self):
         self._out.join()
         self._err.join()
@@ -230,11 +235,10 @@ def run_report(args, files, reading, finish, head, mod_or_loading, cross_payload
                 proc.stdin.close()
             except OSError:
                 pass
-            while proc.poll() is None:
-                try:
-                    proc.wait(timeout=0.2)
-                except subprocess.TimeoutExpired:
-                    stop_if_asked()
+            # The output thread ends the moment the engine does, where a
+            # timed `wait` would notice up to a twentieth of a second late.
+            while relay.running(0.2):
+                stop_if_asked()
         except BaseException:
             if proc.poll() is None:
                 proc.kill()
@@ -268,8 +272,10 @@ def run_report(args, files, reading, finish, head, mod_or_loading, cross_payload
 def write_json(value, folder=None, prefix="vic2_engine_"):
     """`value` as a JSON file of its own; returns the path."""
     fd, path = tempfile.mkstemp(prefix=prefix, suffix=".json", dir=folder)
+    # `dumps` and one write: `dump` to a file takes the pure-Python encoder,
+    # a quarter of a second for the mod and the spec.
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump(value, fh, separators=(",", ":"))
+        fh.write(json.dumps(value, separators=(",", ":")))
     return path
 
 
