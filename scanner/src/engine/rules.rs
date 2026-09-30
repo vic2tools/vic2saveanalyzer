@@ -244,9 +244,6 @@ impl Mod {
             index_base: None,
             raster: None,
         };
-        for t in &m.triggered_mob {
-            refuse_unjudgeable(&t.trigger)?;
-        }
         Ok(m)
     }
 
@@ -255,31 +252,50 @@ impl Mod {
     }
 }
 
-/// A trigger whose condition holds a list where one value belongs -- a
-/// repeated key whose values are themselves lists -- is one Python would
-/// judge by the repr of that list. No mod writes one; the engine hands such
-/// a run back rather than guess at the repr.
-fn refuse_unjudgeable(trigger: &J) -> D<()> {
-    if let J::Obj(pairs) = trigger {
-        for (key, value) in pairs {
-            if key.starts_with('_') {
-                continue;
-            }
-            let parts: Vec<&J> = match value {
-                J::List(v) => v.iter().collect(),
-                one => vec![one],
-            };
-            for p in parts {
-                match p {
-                    J::List(_) => return Err(Decline(format!(
-                        "a triggered modifier's condition `{}` holds a list", key))),
-                    J::Obj(_) => refuse_unjudgeable(p)?,
-                    _ => {}
+/// `str(value)` of a trigger's value as Python has it: the text, or the
+/// repr of a list or a block (`['a', 'b']`), which is what a condition
+/// holding a list where one value belongs is judged by.
+fn str_j(v: &J) -> String {
+    fn repr(v: &J, out: &mut String) {
+        match v {
+            J::Str(s) => out.push_str(&crate::engine::modread::py_repr(s)),
+            J::List(x) => {
+                out.push('[');
+                for (i, e) in x.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    repr(e, out);
                 }
+                out.push(']');
+            }
+            J::Obj(pairs) => {
+                out.push('{');
+                for (i, (k, e)) in pairs.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(&crate::engine::modread::py_repr(k));
+                    out.push_str(": ");
+                    repr(e, out);
+                }
+                out.push('}');
+            }
+            other => {
+                let mut t = String::new();
+                other.write(&mut t);
+                out.push_str(&t);
             }
         }
     }
-    Ok(())
+    match v {
+        J::Str(s) => s.clone(),
+        other => {
+            let mut out = String::new();
+            repr(other, &mut out);
+            out
+        }
+    }
 }
 
 // ------------------------------------------------------------- triggers
@@ -417,11 +433,9 @@ impl<'a> Asker<'a> {
         }
         let raw = match value {
             J::Obj(_) => return Ok(None),
-            J::Str(s) => s.as_str(),
-            // Refused at load (`refuse_unjudgeable`).
-            _ => return Ok(None),
+            other => str_j(other),
         };
-        let text = unquote(raw);
+        let text = unquote(&raw);
         let m = self.m;
         match key {
             "civilized" | "war" | "exists" | "is_greater_power" | "ai" => {
@@ -538,18 +552,21 @@ impl<'a> Asker<'a> {
                 _ => all(&answers.iter().map(|a| a.map(|b| !b)).collect::<Vec<_>>()),
             });
         }
-        let raw = match value {
-            J::Str(s) => s.as_str(),
-            _ => return Ok(None),
-        };
+        if matches!(value, J::Obj(_)) {
+            return Ok(None);
+        }
         if key == "continent" {
             return Ok(match self.m.continents.get(&pid) {
-                Some(w) if !w.is_empty() => Some(w == unquote(raw)),
+                Some(w) if !w.is_empty() => Some(*w == unquote(&str_j(value))),
                 _ => None,
             });
         }
         if key == "province_id" {
-            return Ok(Some(pid == to_int(raw, -2)?));
+            // `to_int(value, -2)`: a list is a TypeError, and the default.
+            return Ok(Some(match value {
+                J::Str(s) => pid == to_int(s, -2)?,
+                _ => pid == -2,
+            }));
         }
         Ok(None)
     }

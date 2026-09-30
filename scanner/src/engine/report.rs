@@ -897,6 +897,9 @@ fn say_summary(c: &Campaign, prices: &[PriceRow], paths: &[String]) {
 pub struct Outcome {
     pub html: Option<String>,
     pub refused: Vec<String>,
+    /// The run refused, in the sentence Python raises: every save refused,
+    /// a mod Python cannot read.
+    pub run_error: Option<String>,
 }
 
 pub fn run(run: &Run, m: &Mod, live: &FxSet<String>, spent: Vec<Spent>) -> Outcome {
@@ -930,7 +933,7 @@ pub fn run(run: &Run, m: &Mod, live: &FxSet<String>, spent: Vec<Spent>) -> Outco
     say(&format!("@done html={} refused={}", html_path.is_some() as i32,
                  refused.iter().map(|p| crate::engine::basename(p).to_string())
                      .collect::<Vec<_>>().join("\t")));
-    Outcome { html: html_path, refused }
+    Outcome { html: html_path, refused, run_error: None }
 }
 
 /// `build_html` and `build_report`: the page, written; its path.

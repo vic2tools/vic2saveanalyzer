@@ -545,10 +545,30 @@ but the two it hands back, and its mod signature is Python's.
 | rebuild from a warm cache | 1.42 s (1.40-1.43) | **1.39 s** (1.38-1.39) | 3 |
 | nothing changed | 93 ms | **72 ms** | 4 |
 
-Still ahead: the hand-backs (saves the scanner refuses or cannot lay out,
-names that are blocks, mods Python would raise over), after which nothing
-need be held and the output streams again; the diagnostics; `--cross`; and
-the window running the binary.
+Fewer hand-backs since (same day). A save Python would skip -- a zip, a
+file with no `date=`, one cut short, one it cannot open, one rewritten under
+two reads -- is skipped in Python's words, "  skipped NAME: ..." on stderr,
+once for each of Python's two passes, and the one-at-a-time run's unfinished
+"  reading NAME ..." with it; a campaign of nothing else ends in "No saves
+could be read." A war holding a block where a name belongs gets Python's
+repr for the name, numbers spelled `1_000` are read as Python reads them,
+and a trigger holding lists is judged by their repr. A mod Python refuses
+with a sentence (a number `float()` or `int()` will not take, a file it
+cannot open) is refused with that sentence, at the point Python refuses it:
+before the saves for the mod's head, after the first pass for the rest.
+Two markers in the cache (`enginer_`, `enginec_`) stand in for Python's
+per-save and per-campaign entries so a verbose run says "Reading N" when the
+Python would. `frontcheck.py` now holds 41 cases against the pure Python
+(`VIC2_NO_ENGINE=1`); the comparison with the Python-hosted engine instead
+turned up that a run it hands back prints its first pass twice (the engine's
+lines are relayed as they come, then Python starts over), which is how the
+hosted path has behaved since stage 1.
+
+Still ahead: saves not laid out the game's way (Python reads them with a
+token walk), after which nothing need be held and the output streams again;
+the diagnostics; `--cross`; and the window running the binary. What would
+crash the Python itself -- `int()` of an infinity, a number past 64 bits --
+stays handed back.
 
 ### The engine reads the mod itself, 2026-09-29
 

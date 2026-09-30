@@ -415,16 +415,55 @@ impl Store {
     /// the settings that shape what pass one makes), or None when the file
     /// cannot be looked at or caching is off.
     pub fn slot(&self, path: &str, context: &str) -> Option<(String, String)> {
+        let key = self.key(path, context)?;
+        let file = std::path::Path::new(&self.dir).join(name_of(&key));
+        Some((file.to_string_lossy().to_string(), key))
+    }
+
+    fn key(&self, path: &str, context: &str) -> Option<String> {
         if !self.on || self.dir.is_empty() || self.version.is_empty() {
             return None;
         }
         let meta = std::fs::metadata(path).ok()?;
         let mtime = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
         let full = std::path::absolute(path).ok()?;
-        let key = format!("{}|{}|{}|{}|{}", full.to_string_lossy(), meta.len(), mtime,
-                          self.version, context);
-        let file = std::path::Path::new(&self.dir).join(name_of(&key));
-        Some((file.to_string_lossy().to_string(), key))
+        Some(format!("{}|{}|{}|{}|{}", full.to_string_lossy(), meta.len(), mtime,
+                     self.version, context))
+    }
+
+    // Python keeps a save as it was read, keyed by the reading alone, and a
+    // campaign's invention summary keyed by all of them; which of the two it
+    // found decides what a verbose run says ("Reading 3 save(s) ...", and a
+    // line a save, or nothing). The entries here are keyed by what
+    // finishing is told as well, so these two empty markers stand in for
+    // Python's, to say the same thing at the same time.
+
+    /// The marker that this save was read under `reading` before.
+    pub fn read_marker(&self, path: &str, reading: &str) -> Option<String> {
+        let key = self.key(path, reading)?;
+        Some(std::path::Path::new(&self.dir).join(format!("enginer_{}.pkl", hash_of(&key)))
+            .to_string_lossy().to_string())
+    }
+
+    /// The marker that this campaign, every save as it is now, was read
+    /// under `reading` before.
+    pub fn campaign_marker(&self, paths: &[String], reading: &str) -> Option<String> {
+        let mut all = String::new();
+        for p in paths {
+            all.push_str(&self.key(p, reading)?);
+            all.push('\n');
+        }
+        if paths.is_empty() {
+            return None;
+        }
+        Some(std::path::Path::new(&self.dir).join(format!("enginec_{}.pkl", hash_of(&all)))
+            .to_string_lossy().to_string())
+    }
+
+    /// Leave a marker. A failure costs the next run a line of its say.
+    pub fn mark(&self, marker: &str) {
+        let _ = std::fs::create_dir_all(&self.dir);
+        let _ = std::fs::write(marker, b"");
     }
 
     /// The entry, or None: missing, from another key, or damaged.

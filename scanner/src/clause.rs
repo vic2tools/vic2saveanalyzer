@@ -186,65 +186,10 @@ pub fn parse_span(b: &[u8]) -> V {
 // ------------------------------------------------------------- conversions
 
 /// Python's `float(s)` for a string: Ok(None) is the ValueError the callers
-/// catch, Err is a spelling Python accepts that this does not follow
-/// (underscores between digits), refused rather than guessed at.
+/// catch. Underscores between digits, spaces Python trims, `inf` and `nan`
+/// are all Python's (`modread::py_float`).
 pub fn py_float(s: &[u8]) -> R<Option<f64>> {
-    let mut a = 0;
-    let mut z = s.len();
-    while a < z && py_space(s[a]) {
-        a += 1;
-    }
-    while z > a && py_space(s[z - 1]) {
-        z -= 1;
-    }
-    let t = &s[a..z];
-    if t.is_empty() {
-        return Ok(None);
-    }
-    if t.contains(&b'_') {
-        return Err(());
-    }
-    // Python's grammar: [sign] (digits [. [digits]] | . digits) [e [sign] digits],
-    // or inf / infinity / nan in any case after a sign.
-    let body = if t[0] == b'+' || t[0] == b'-' { &t[1..] } else { t };
-    let lower: Vec<u8> = body.iter().map(|c| c.to_ascii_lowercase()).collect();
-    if lower == b"inf" || lower == b"infinity" || lower == b"nan" {
-        let v = if lower == b"nan" { f64::NAN } else { f64::INFINITY };
-        return Ok(Some(if t[0] == b'-' { -v } else { v }));
-    }
-    let mut j = 0;
-    let digits = |j: &mut usize| {
-        let s = *j;
-        while *j < body.len() && body[*j].is_ascii_digit() {
-            *j += 1;
-        }
-        *j - s
-    };
-    let whole = digits(&mut j);
-    let mut frac = 0;
-    if j < body.len() && body[j] == b'.' {
-        j += 1;
-        frac = digits(&mut j);
-    }
-    if whole == 0 && frac == 0 {
-        return Ok(None);
-    }
-    if j < body.len() && (body[j] == b'e' || body[j] == b'E') {
-        j += 1;
-        if j < body.len() && (body[j] == b'+' || body[j] == b'-') {
-            j += 1;
-        }
-        if digits(&mut j) == 0 {
-            return Ok(None);
-        }
-    }
-    if j != body.len() {
-        return Ok(None);
-    }
-    match std::str::from_utf8(t).ok().and_then(|x| x.parse::<f64>().ok()) {
-        Some(v) => Ok(Some(v)),
-        None => Err(()),
-    }
+    Ok(crate::engine::modread::py_float(s))
 }
 
 /// `to_float(value, default)`.
@@ -274,22 +219,21 @@ pub fn to_int(v: Option<&V>, default: i64) -> R<i64> {
 }
 
 /// `unquote(str(value))` where value came from `.get(key, "")`: a string,
-/// or the default for a missing key. Anything else is a block where a name
-/// belongs, and Python would have kept its repr.
+/// the default for a missing key, or -- a block where a name belongs -- the
+/// repr Python makes of it.
 pub(crate) fn name(v: Option<&V>) -> R<Vec<u8>> {
     match v {
         None => Ok(Vec::new()),
         Some(V::Str(s)) => Ok(unquote(s).to_vec()),
-        _ => Err(()),
+        Some(other) => Ok(unquote(&crate::engine::modread::str_of(other)).to_vec()),
     }
 }
 
-/// `str(value).lower() == "yes"`.
+/// `str(value).lower() == "yes"`: never, for a block.
 pub(crate) fn yes(v: Option<&V>) -> R<bool> {
     match v {
-        None => Ok(false),
         Some(V::Str(s)) => Ok(s.eq_ignore_ascii_case(b"yes")),
-        _ => Err(()),
+        _ => Ok(false),
     }
 }
 
@@ -526,25 +470,9 @@ pub fn read_war(v: &V, active: bool) -> R<Option<P>> {
 // ------------------------------------------------------------------- market
 
 /// `int(p)` for one part of a `YYYY.M.D` date: Ok(None) is the ValueError
-/// `shift_months` catches. Signs are Python's; spaces and underscores, which
-/// `int()` also takes, are refused.
+/// `shift_months` catches; a number past an i64 is refused.
 pub(crate) fn py_int(p: &[u8]) -> R<Option<i64>> {
-    if p.iter().any(|&c| py_space(c) || c == b'_') {
-        return Err(());
-    }
-    let (neg, digits) = match p.first() {
-        Some(b'-') => (true, &p[1..]),
-        Some(b'+') => (false, &p[1..]),
-        _ => (false, p),
-    };
-    if digits.is_empty() || !digits.iter().all(|c| c.is_ascii_digit()) {
-        return Ok(None);
-    }
-    if digits.len() > 15 {
-        return Err(());
-    }
-    let v = digits.iter().fold(0i64, |a, &c| a * 10 + (c - b'0') as i64);
-    Ok(Some(if neg { -v } else { v }))
+    crate::engine::modread::py_int(p).map_err(|_| ())
 }
 
 /// `readsave.shift_months(date, back)`.

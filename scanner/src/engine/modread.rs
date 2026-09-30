@@ -37,6 +37,20 @@ fn no<T>(why: impl Into<String>) -> D<T> {
     Err(Decline(why.into()))
 }
 
+/// What marks a decline as an exception Python raises and the analyzer
+/// turns into a sentence (`RunError(str(exc))`): the rest of the message is
+/// that sentence, word for word.
+const RAISED: &str = "\u{1}raised: ";
+
+fn raised<T>(sentence: impl Into<String>) -> D<T> {
+    Err(Decline(format!("{}{}", RAISED, sentence.into())))
+}
+
+/// The sentence Python refuses the run with, when this is one.
+pub fn raised_sentence(d: &Decline) -> Option<&str> {
+    d.0.strip_prefix(RAISED)
+}
+
 /// latin-1 bytes as the str Python decoded them to.
 pub fn l1(b: &[u8]) -> String {
     b.iter().map(|&c| c as char).collect()
@@ -263,7 +277,7 @@ pub fn py_int(s: &[u8]) -> D<Option<i64>> {
 fn must_float(s: &[u8]) -> D<f64> {
     match py_float(s) {
         Some(v) => Ok(v),
-        None => no(format!("float({:?}) raises", l1(s))),
+        None => raised(format!("could not convert string to float: {}", py_repr(&l1(s)))),
     }
 }
 
@@ -299,7 +313,7 @@ fn digit_word(w: &[u8]) -> D<bool> {
         return Ok(false);
     }
     if w.iter().any(|&c| !c.is_ascii_digit()) {
-        return no("int() of a superscript digit raises");
+        return raised(format!("invalid literal for int() with base 10: {}", py_repr(&l1(w))));
     }
     Ok(true)
 }
@@ -382,7 +396,7 @@ fn repr_str(s: &[u8], out: &mut String) {
 }
 
 /// `str(value)`, latin-1.
-fn str_of(v: &V) -> Vec<u8> {
+pub(crate) fn str_of(v: &V) -> Vec<u8> {
     match v {
         V::Str(s) => s.clone(),
         other => {
@@ -605,7 +619,7 @@ impl Reader {
     }
 
     fn read(path: &str) -> D<Vec<u8>> {
-        std::fs::read(path).or_else(|e| no(format!("cannot read {}: {}", path, e)))
+        std::fs::read(path).or_else(|e| raised(crate::engine::os_error_text(&e, path)))
     }
 
     /// `_plain`: one file with its comments cut out.
@@ -2151,10 +2165,15 @@ pub fn export(path: &str) -> D<J> {
     put("tech_mob", fmap(&tech_mob));
     put("nv_mob", fmap(&nv_mob));
     put("tech_count", J::Int(tech_count));
-    put("colours", if has_map { r.country_colours()? } else { J::Obj(Vec::new()) });
-    put("sea", J::List(if has_map { r.sea_provinces()?.into_iter().map(J::Int).collect() } else { Vec::new() }));
-    put("positions", J::List(if has_map { r.unit_positions()? } else { Vec::new() }));
-    put("flag_styles", r.flag_styles()?);
+    // Read by Python only when the page is drawn, where what it raises is
+    // not turned into a sentence: handed back, not refused.
+    let later = |d: Decline| Decline(format!("the map or the flags: {}", d.0.trim_start_matches(RAISED)));
+    put("colours", if has_map { r.country_colours().map_err(later)? } else { J::Obj(Vec::new()) });
+    put("sea", J::List(if has_map {
+        r.sea_provinces().map_err(later)?.into_iter().map(J::Int).collect()
+    } else { Vec::new() }));
+    put("positions", J::List(if has_map { r.unit_positions().map_err(later)? } else { Vec::new() }));
+    put("flag_styles", r.flag_styles().map_err(later)?);
     put("flag_roots", J::List(r.flag_roots()));
     put("map_bmp", J::Str(if has_map { bmp } else { String::new() }));
     put("map_csv", J::Str(if has_map { csv } else { String::new() }));
@@ -2184,5 +2203,52 @@ pub fn main(args: &[String]) {
             eprintln!("declined: {}", why);
             std::process::exit(3);
         }
+    }
+}
+
+/// `repr(s)` of a str: quoted the way Python quotes it, with what Python
+/// does not print escaped. Printable is Python's rule exactly for the first
+/// 256 characters, and past them for the spaces, separators and format
+/// characters a path could hold.
+pub fn py_repr(s: &str) -> String {
+    let q = if s.contains('\'') && !s.contains('"') { '"' } else { '\'' };
+    let mut out = String::new();
+    out.push(q);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\t' => out.push_str("\\t"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            c if c == q => {
+                out.push('\\');
+                out.push(q);
+            }
+            c if !printable(c) => {
+                let n = c as u32;
+                if n < 0x100 {
+                    out.push_str(&format!("\\x{:02x}", n));
+                } else if n < 0x10000 {
+                    out.push_str(&format!("\\u{:04x}", n));
+                } else {
+                    out.push_str(&format!("\\U{:08x}", n));
+                }
+            }
+            c => out.push(c),
+        }
+    }
+    out.push(q);
+    out
+}
+
+/// `str.isprintable()` for one character.
+fn printable(c: char) -> bool {
+    let n = c as u32;
+    match n {
+        0x00..=0x1f | 0x7f..=0xa0 | 0xad => false,
+        0x20..=0x7e | 0xa1..=0xff => true,
+        0x1680 | 0x2000..=0x200f | 0x2028..=0x202f | 0x205f..=0x2064 | 0x3000 | 0xfeff => false,
+        0xe000..=0xf8ff | 0xf0000..=0x10ffff => false,
+        _ => true,
     }
 }

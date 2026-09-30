@@ -44,7 +44,7 @@ use crate::jsonr::{self, J};
 use model::Save;
 use crate::pickle::{FxMap, FxSet};
 use crate::province::{read_province, top_level_blocks, Interner, PopulationRules, Scan};
-use rules::{Decline, Mod};
+use rules::{Decline, Mod, D};
 use crate::text::{latin1, tag_bytes, to_int_b, trim_b, unquote_b};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -100,12 +100,19 @@ pub struct Run {
     /// Whether a host reads `@progress` and the rest: Python, which starts
     /// the engine with a spec (`engine.spec`), does.
     pub protocol: bool,
+    /// Whether a save the scanner refuses is skipped here in Python's words
+    /// (`analyze`, which prints what the run says itself) rather than the
+    /// run handed back (Python hosting the engine, which reads only its
+    /// stdout).
+    pub own_refusals: bool,
     pub tech_lines: J,
     pub tables: tables::Tables,
     pub store: cache::Store,
     /// What besides the file decides what pass one makes of it, for the
     /// cache's key: the reading and the settings `prepare` takes.
     pub context: String,
+    /// The reading alone, which is what Python keys a read save by.
+    pub reading_context: String,
 }
 
 fn bytes_list(v: &J) -> Vec<Vec<u8>> {
@@ -118,6 +125,17 @@ fn string_list(v: &J) -> Vec<String> {
 
 /// The parts of the spec that decide what pass one makes of a save, as one
 /// short digest: the reading, and what `prepare` is told.
+fn reading_context_of(j: &J) -> String {
+    let mut text = String::new();
+    j.at("reading").write(&mut text);
+    let (mut a, mut b) = (0xcbf2_9ce4_8422_2325u64, 0x9e37_79b9_7f4a_7c15u64);
+    for &c in text.as_bytes() {
+        a = (a ^ c as u64).wrapping_mul(0x0000_0100_0000_01b3);
+        b = (b.rotate_left(5) ^ c as u64).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+    format!("{:016x}{:016x}", a, b)
+}
+
 fn context_of(j: &J) -> String {
     let mut text = String::new();
     j.at("reading").write(&mut text);
@@ -193,6 +211,7 @@ fn parse_run(j: &J) -> Run {
         mod_signature: j.at("mod_signature").as_str().map(|s| s.to_string()),
         mod_file: j.at("mod_file").as_str().map(|s| s.to_string()),
         protocol: j.at("protocol").truthy(),
+        own_refusals: j.at("own_refusals").truthy(),
         tech_lines: j.at("tech_lines").clone(),
         tables,
         store: cache::Store {
@@ -201,6 +220,7 @@ fn parse_run(j: &J) -> Run {
             on: j.at("cache").at("on").truthy(),
         },
         context: context_of(j),
+        reading_context: reading_context_of(j),
     }
 }
 
@@ -310,26 +330,90 @@ fn load<'a>(path: &str, raw: &'a mut Vec<u8>) -> std::io::Result<Bytes<'a>> {
     Ok(Bytes::Buffer(&raw[..]))
 }
 
-/// One save read whole, the way `--record` reads it; Err says why the
-/// engine hands the run back.
-pub fn read_save(path: &str, reading: &Reading, raw: &mut Vec<u8>) -> Result<Save, String> {
-    let before = stamp(path);
-    let raw = load(path, raw).map_err(|e| format!("cannot read {}: {}", path, e))?;
-    if stamp(path) != before {
-        return Err(format!("{} changed while it was being read", path));
+/// A save not read: skipped with Python's sentence, the way the Python
+/// skips a file it refuses, or the run handed back.
+pub enum Refused {
+    Skip(String),
+    Back(String),
+}
+
+/// `str(OSError)`: `[Errno 2] No such file or directory: '/the/path'`.
+pub fn os_error_text(e: &std::io::Error, path: &str) -> String {
+    let text = e.to_string();
+    let strerror = match text.rfind(" (os error ") {
+        Some(i) => text[..i].to_string(),
+        None => text,
+    };
+    #[cfg(windows)]
+    let (errno, strerror) = match e.raw_os_error() {
+        // The C runtime's numbers and words, which are what Python's open()
+        // raises with, for the Windows errors a file open meets.
+        Some(2) | Some(3) => (2, "No such file or directory".to_string()),
+        Some(5) | Some(32) | Some(33) => (13, "Permission denied".to_string()),
+        Some(n) => (n, strerror),
+        None => (0, strerror),
+    };
+    #[cfg(not(windows))]
+    let errno = e.raw_os_error().unwrap_or(0);
+    format!("[Errno {}] {}: {}", errno, strerror, crate::engine::modread::py_repr(path))
+}
+
+/// One save read whole, the way `--record` reads it: read again once if it
+/// changed while it was read, as Python does, and refused in Python's words
+/// if it changes again.
+pub fn read_save(path: &str, reading: &Reading, raw: &mut Vec<u8>) -> Result<Save, Refused> {
+    match read_once(path, reading, raw, false) {
+        Err(Refused::Back(why)) if why == CHANGED => match read_once(path, reading, raw, true) {
+            Err(Refused::Back(why)) if why == CHANGED => Err(Refused::Skip(format!(
+                "{} changed while it was being read. It is probably the file the game is writing \
+                 to right now; read the copies the keeper makes instead.", path))),
+            other => other,
+        },
+        other => other,
     }
+}
+
+const CHANGED: &str = "changed while it was being read";
+
+fn read_once(path: &str, reading: &Reading, raw: &mut Vec<u8>, again: bool) -> Result<Save, Refused> {
+    let before = stamp(path);
+    // A second read is a plain one: a file that changes under a mapping
+    // can take the process down with it.
+    let raw = if again {
+        std::fs::read(path).map(|v| {
+            *raw = v;
+            Bytes::Buffer(&raw[..])
+        })
+    } else {
+        load(path, raw)
+    }.map_err(|e| Refused::Skip(os_error_text(&e, path)))?;
+    if stamp(path) != before {
+        return Err(Refused::Back(CHANGED.into()));
+    }
+    // `_refuse_unless_whole`, in its order and its words.
     if raw.starts_with(b"PK") {
-        return Err(format!("{} is a zip archive", path));
+        return Err(Refused::Skip(format!(
+            "{} is a zip archive. Extract it, or re-save the game in debug mode to get plaintext.",
+            path)));
     }
     let head = &raw[..raw.len().min(4096)];
     let has = |needle: &[u8]| head.windows(needle.len()).any(|w| w == needle);
+    if !(has(b"date=") || has(b"date =")) {
+        return Err(Refused::Skip(format!(
+            "{} does not look like a plaintext Vic2 save (no `date=` in the header). If it is \
+             binary, launch Victoria 2 in debug mode and re-save.", path)));
+    }
     let tail = &raw[raw.len().saturating_sub(256)..];
     let end = tail.iter().rposition(|c| !b" \t\n\r\x0b\x0c".contains(c));
-    if !(has(b"date=") || has(b"date =")) || end.map(|i| tail[i]) != Some(b'}') {
-        return Err(format!("{} is not a whole save", path));
+    if end.map(|i| tail[i]) != Some(b'}') {
+        return Err(Refused::Skip(format!(
+            "{} stops part-way through, so it was cut short: the game crashed while writing it, \
+             or is writing it right now. If this is the game's own save folder, read the copies \
+             the keeper makes instead.", path)));
     }
     let text: &[u8] = &raw[..];
-    let blocks = top_level_blocks(text).ok_or_else(|| format!("{} is not laid out flat", path))?;
+    let blocks = top_level_blocks(text)
+        .ok_or_else(|| Refused::Back(format!("{} is not laid out flat", path)))?;
     let mut date = String::new();
     let mut player = String::new();
     let head_end = blocks.first().map(|b| b.1).unwrap_or(0).min(text.len());
@@ -387,14 +471,14 @@ pub fn read_save(path: &str, reading: &Reading, raw: &mut Vec<u8>) -> Result<Sav
         }
     }
     let rest = model::read_rest(text, &blocks)
-        .map_err(|_| format!("{}: the wars or the market hold something only Python reads", path))?;
+        .map_err(|_| Refused::Back(format!("{}: the wars or the market hold something only Python reads", path)))?;
     let save = model::build(basename(path).to_string(), date, player, &scan, &countries, rest)
-        .map_err(|_| format!("{}: the record could not be built", path))?;
+        .map_err(|_| Refused::Back(format!("{}: the record could not be built", path)))?;
     // Again after the scan, not only after the read: a mapped file is read
     // as it is scanned, and one the game rewrote meanwhile would be half of
     // each. Python reads it again, and says so if it changes a second time.
     if stamp(path) != before {
-        return Err(format!("{} changed while it was being read", path));
+        return Err(Refused::Back(CHANGED.into()));
     }
     Ok(save)
 }
@@ -529,7 +613,7 @@ pub fn decline(why: &str) -> ! {
 /// The mod: read from its folder -- or from what the last run kept of the
 /// same files -- or from the JSON a check wrote of the one Python read.
 fn load_mod(mod_path: &Option<String>, signature: &Option<String>, mod_file: &Option<String>,
-            store: &cache::Store) -> Mod {
+            store: &cache::Store) -> D<Mod> {
     let j = match (mod_path, mod_file) {
         (_, Some(file)) => {
             let text = std::fs::read_to_string(file)
@@ -541,7 +625,7 @@ fn load_mod(mod_path: &Option<String>, signature: &Option<String>, mod_file: &Op
             match slot.as_ref().and_then(cache::mod_load) {
                 Some(j) => j,
                 None => {
-                    let j = read_mod(path);
+                    let j = read_mod(path)?;
                     if let Some(slot) = &slot {
                         cache::mod_store(slot, &j);
                     }
@@ -551,11 +635,11 @@ fn load_mod(mod_path: &Option<String>, signature: &Option<String>, mod_file: &Op
         }
         (None, None) => decline("no mod was named"),
     };
-    Mod::from_json(&j).unwrap_or_else(|Decline(why)| decline(&why))
+    Mod::from_json(&j)
 }
 
-/// The mod folder read (`modread`), or the run handed back.
-fn read_mod(path: &str) -> J {
+/// The mod folder read (`modread`).
+fn read_mod(path: &str) -> D<J> {
     // Its patterns go a frame deeper for each way a step of a repeat
     // could end; a stack of its own gives them room.
     let path = path.to_string();
@@ -564,8 +648,7 @@ fn read_mod(path: &str) -> J {
         .unwrap_or_else(|e| decline(&format!("cannot start the mod reader: {}", e)))
         .join();
     match got {
-        Ok(Ok(j)) => j,
-        Ok(Err(Decline(why))) => decline(&format!("the mod: {}", why)),
+        Ok(got) => got,
         Err(_) => decline("the mod reader stopped"),
     }
 }
@@ -580,7 +663,7 @@ pub fn bench(args: &[String]) {
     let (mut t_read, mut t_prep) = (0.0, 0.0);
     for f in run.files.iter().take(n) {
         let t = std::time::Instant::now();
-        let save = read_save(f, &run.reading, &mut raw).unwrap();
+        let save = read_save(f, &run.reading, &mut raw).unwrap_or_else(|_| panic!("{} was not read", f));
         t_read += t.elapsed().as_secs_f64();
         let t = std::time::Instant::now();
         let tags = keys_of(&save);
@@ -674,11 +757,16 @@ pub fn run_spec(spec_j: &J, dump: Option<String>) -> Option<report::Outcome> {
     let verbose = !run.quiet;
     let slots: Vec<Option<(String, String)>> =
         run.files.iter().map(|f| run.store.slot(f, &run.context)).collect();
-    let todo = slots.iter().filter(|s| s.as_ref().is_none_or(|s| !std::path::Path::new(&s.0).is_file())).count();
-    // As the Python's invention pass said it: nothing when every save was
-    // read before, and every save, a line each, when any was not.
-    let say_each = verbose && todo > 0;
-    if say_each {
+    // As the Python's invention pass says it: nothing when it found the
+    // campaign read before, and otherwise a line a save, after "Reading N"
+    // for the saves it had not read under this reading.
+    let marks: Vec<Option<String>> =
+        run.files.iter().map(|f| run.store.read_marker(f, &run.reading_context)).collect();
+    let todo = marks.iter().filter(|m| m.as_ref().is_none_or(|m| !std::path::Path::new(m).is_file())).count();
+    let campaign = run.store.campaign_marker(&run.files, &run.reading_context);
+    let campaign_read = campaign.as_ref().is_some_and(|c| std::path::Path::new(c).is_file());
+    let say_each = verbose && !campaign_read;
+    if say_each && todo > 0 {
         crate::outln!("Reading {} save(s) on {} cores.", todo, workers);
     }
     // The mod, and the map's bitmap it names, read on a thread of their own
@@ -689,15 +777,16 @@ pub fn run_spec(spec_j: &J, dump: Option<String>) -> Option<report::Outcome> {
         let (signature, store) = (run.mod_signature.clone(), run.store.clone());
         let (scale, want_map) = (run.map_scale, !run.no_html);
         std::thread::spawn(move || {
-            let mut m = load_mod(&mod_path, &signature, &mod_file, &store);
+            let mut m = load_mod(&mod_path, &signature, &mod_file, &store)?;
             if want_map {
                 m.raster = Some(crate::engine::mapflags::province_raster(&m.map_bmp, &m.map_csv, scale));
             }
-            m
+            Ok(m)
         })
     };
     let mut pres: Vec<Option<Pre>> = (0..n).map(|_| None).collect();
     let mut failed: Option<String> = None;
+    let mut skipped: Vec<String> = Vec::new();
     let mut done = 0usize;
     thread_local!(static RAW: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) });
     in_order(n, workers, |i| {
@@ -714,7 +803,10 @@ pub fn run_spec(spec_j: &J, dump: Option<String>) -> Option<report::Outcome> {
             if raw.capacity() > 96 << 20 {
                 *raw = Vec::new();
             }
-            got.map(|save| {
+            got.map_err(|refused| match refused {
+                Refused::Skip(why) if run.own_refusals => Refused::Skip(why),
+                Refused::Skip(why) | Refused::Back(why) => Refused::Back(why),
+            }).map(|save| {
                 let tags = keys_of(&save);
                 let pre = finish::prepare(save.meta, save.nations, tags, &run.spec);
                 if let Some(slot) = &slots[i] {
@@ -745,7 +837,20 @@ pub fn run_spec(spec_j: &J, dump: Option<String>) -> Option<report::Outcome> {
                 say(&format!("@progress {} {}", done, n));
                 pres[i] = Some(pre);
             }
-            Err(why) => {
+            Err(Refused::Skip(why)) => {
+                // `parse_saves_stream`: the file is named and passed over.
+                // Read one at a time, the Python had already begun the
+                // line that says so, and it is left unfinished.
+                if say_each && failed.is_none() && workers <= 1 {
+                    crate::engine::out::write(true, format!("  reading {} ...", basename(&run.files[i])));
+                }
+                let line = format!("  skipped {}: {}", basename(&run.files[i]), why);
+                if !campaign_read {
+                    crate::errln!("{}", line);
+                }
+                skipped.push(line);
+            }
+            Err(Refused::Back(why)) => {
                 if failed.is_none() {
                     failed = Some(why);
                 }
@@ -755,17 +860,51 @@ pub fn run_spec(spec_j: &J, dump: Option<String>) -> Option<report::Outcome> {
     if let Some(why) = failed {
         decline(&why);
     }
-    let pres: Vec<Pre> = pres.into_iter().map(|p| p.unwrap()).collect();
+    // The saves that were read, and where they sit among the files.
+    let kept: Vec<usize> = (0..n).filter(|&i| pres[i].is_some()).collect();
+    for &i in &kept {
+        if let Some(m) = &marks[i] {
+            run.store.mark(m);
+        }
+    }
+    if let Some(c) = &campaign {
+        run.store.mark(c);
+    }
+    let files: Vec<String> = kept.iter().map(|&i| run.files[i].clone()).collect();
+    let pres: Vec<Pre> = pres.into_iter().flatten().collect();
+    let n = pres.len();
     phase("pass one: saves read and prepared");
 
     // The campaign's inventions, settled against the mod.
-    let mut m = mod_job.join().unwrap_or_else(|_| decline("the mod could not be read"));
+    let mut m = match mod_job.join().unwrap_or_else(|_| decline("the mod could not be read")) {
+        Ok(m) => m,
+        // A mod Python raises over is refused when Python asks for it,
+        // which is now, with every save read once.
+        Err(d) => match modread::raised_sentence(&d) {
+            Some(sentence) if run.own_refusals => {
+                out::release();
+                return Some(report::Outcome { html: None, refused: Vec::new(),
+                                              run_error: Some(sentence.to_string()) });
+            }
+            _ => decline(&format!("the mod: {}", d.0.trim_start_matches('\u{1}'))),
+        },
+    };
     let held: Vec<&[rules::Held]> = pres.iter().map(|p| p.held.as_slice()).collect();
     phase("mod loaded");
     let live = rules::settle_campaign(&mut m, &held);
     phase("inventions settled");
     if verbose {
-        crate::engine::report::say_mod(&m, &live, &held, &run.files);
+        crate::engine::report::say_mod(&m, &live, &held, &files);
+    }
+    // The second pass read every file again, and named each refused one
+    // again as it went past.
+    for line in &skipped {
+        crate::errln!("{}", line);
+    }
+    if pres.is_empty() {
+        out::release();
+        return Some(report::Outcome { html: None, refused: Vec::new(),
+                                      run_error: Some("No saves could be read.".into()) });
     }
 
     // Pass two: every save finished.

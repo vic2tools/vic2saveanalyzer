@@ -657,9 +657,18 @@ fn run(mut args: Args) -> R<i32> {
         Ok(false) => return refuse(format!(
             "{} has no technologies/ or inventions/ folder. Point --mod-path at the folder that \
              contains them (the mod root, or the Victoria 2 install folder for vanilla).", root)),
-        Err(e) => hand_back(&e.0),
+        Err(e) => match modread::raised_sentence(&e) {
+            Some(sentence) => return refuse(sentence),
+            None => hand_back(&e.0),
+        },
     }
-    let head = modread::head(&root).unwrap_or_else(|e| hand_back(&e.0));
+    let head = match modread::head(&root) {
+        Ok(h) => h,
+        Err(e) => match modread::raised_sentence(&e) {
+            Some(sentence) => return refuse(sentence),
+            None => hand_back(&e.0),
+        },
+    };
 
     // `mod_defaults`: the regiment size and the mobilizable pops, the
     // mod's unless the command line said.
@@ -791,8 +800,12 @@ fn run(mut args: Args) -> R<i32> {
         ("mod_path".into(), J::Str(root.clone())),
         ("mod_signature".into(), J::Str(signature.clone())),
         ("protocol".into(), J::Bool(false)),
+        ("own_refusals".into(), J::Bool(true)),
     ]);
     let done = crate::engine::run_spec(&spec, None).expect("a report run returns what it wrote");
+    if let Some(sentence) = done.run_error {
+        return refuse(sentence);
+    }
     if done.html.is_some() && done.refused.is_empty() {
         write_stamp(&args.out, &stamp);
     }

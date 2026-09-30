@@ -5,10 +5,12 @@ Hold the Rust front end of a run (`vic2scan analyze`) to the Python's.
 A run from the command line is now done by the scanner from the start --
 finding the saves, settling the game and the mod, the stamp, the dates --
 and what it does not do it hands back before saying anything. So every
-case here is run twice, the Rust way and with `VIC2_NO_FRONT=1`, and the two
-must agree on everything a person sees: what was printed to stdout and to
-stderr, the exit status, and every file written but the stamp, which each
-way takes of itself.
+case here is run twice, the Rust way and all in Python (`VIC2_NO_ENGINE=1`),
+and the two must agree on everything a person sees: what was printed to
+stdout and to stderr, the exit status, and every file written but the
+stamp, which each way takes of itself. The page is compared by what it
+carries (`enginecheck.page`): its compressed parts are two compressors'
+output.
 
 The cases are the edges of the front end: every refusal it words, a single
 save, a folder with none, two saves of one date, `~` and `$VAR` in paths, a
@@ -32,6 +34,7 @@ sys.path.insert(0, os.path.join(HERE, "testkit"))
 import matching                                            # noqa: E402
 import savefmt                                             # noqa: E402
 from edges import a_save                                   # noqa: E402
+from enginecheck import page                               # noqa: E402
 from outcome import SKIPPED                                # noqa: E402
 
 BIN = os.path.join(HERE, "scanner", "target", "release",
@@ -45,6 +48,11 @@ def world(holding):
                                    pop_per_regiment=2000,
                                    pops=["farmers", "labourers", "craftsmen", "soldiers",
                                          "aristocrats", "bankers"])
+    # A trigger holding lists where one value belongs, which Python judges
+    # by their repr: nobody is tagged "['a']", so NOT holds for everyone.
+    with open(os.path.join(mod, "common", "triggered_modifiers.txt"), "w") as fh:
+        fh.write("listy = {\n\tmobilisation_size = 0.01\n\ttrigger = {\n"
+                 "\t\tNOT = { tag = { a } tag = { b c } }\n\t}\n}\n")
     saves = os.path.join(holding, "saves")
     os.makedirs(saves)
     for i, date in enumerate(("1880.1.1", "1881.1.1", "1881.7.1", "1882.1.1")):
@@ -63,12 +71,17 @@ def run(argv, cwd, env, out):
 
 
 def files_of(folder):
-    """{name: bytes} of what a run left, the stamp aside."""
+    """{name: what it holds} of what a run left, the stamp aside, the page
+    as what it carries."""
     got = {}
     if os.path.isdir(folder):
         for name in sorted(os.listdir(folder)):
             path = os.path.join(folder, name)
-            if name != "report.stamp" and os.path.isfile(path):
+            if name == "report.html":
+                got[name] = page(folder)
+            elif name == "report.data.gz":
+                got[name] = "read with the page"
+            elif name != "report.stamp" and os.path.isfile(path):
                 with open(path, "rb") as fh:
                     got[name] = fh.read()
     return got
@@ -96,6 +109,62 @@ def main():
         os.makedirs(nothing)
         with open(os.path.join(nothing, "readme.txt"), "w") as fh:
             fh.write("not a save")
+        # Good saves among files the reader refuses, each in Python's words.
+        mixed = os.path.join(holding, "mixed")
+        shutil.copytree(saves, mixed)
+        with open(os.path.join(mixed, "0a_zip.v2"), "wb") as fh:
+            fh.write(b"PK\x03\x04" + b"\0" * 100)
+        open(os.path.join(mixed, "0b_empty.v2"), "w").close()
+        with open(os.path.join(saves, "3.v2"), "rb") as fh:
+            whole = fh.read()
+        with open(os.path.join(mixed, "1b_cut.v2"), "wb") as fh:
+            fh.write(whole[:len(whole) // 2])
+        os.makedirs(os.path.join(mixed, "2b_folder.v2"))
+        locked_save = os.path.join(mixed, "2c_locked.v2")
+        shutil.copyfile(os.path.join(saves, "0.v2"), locked_save)
+        os.chmod(locked_save, 0)
+        refused_only = os.path.join(holding, "refused")
+        os.makedirs(refused_only)
+        for name in ("0a_zip.v2", "0b_empty.v2", "1b_cut.v2"):
+            shutil.copyfile(os.path.join(mixed, name), os.path.join(refused_only, name))
+        # A war the scanner used to hand back: a block where a name belongs,
+        # a battle whose numbers Python spells its own way, a goal fulfilled
+        # by a block.
+        odd = os.path.join(holding, "odd")
+        os.makedirs(odd)
+        odd_war = ["active_war=", "{",
+                   '\tname={ first="The" second="Odd War" }',
+                   '\toriginal_attacker="ENG"', '\toriginal_defender={ "FRA" }',
+                   '\tattacker="ENG"', '\tdefender="FRA"', '\tattacker={ x=1 }',
+                   "\thistory=", "\t{", "\t\t1880.6.1=", "\t\t{",
+                   '\t\t\tadd_attacker="ENG"', "\t\t\tadd_defender={ a=b }",
+                   "\t\t\tbattle=", "\t\t\t{", '\t\t\t\tname={ 1 2 }', "\t\t\t\tlocation=1_2",
+                   "\t\t\t\tresult={ yes }",
+                   "\t\t\t\tattacker=", "\t\t\t\t{", '\t\t\t\t\tcountry="ENG"',
+                   "\t\t\t\t\tleader={ n=1 }", "\t\t\t\t\tlosses=1_000", "\t\t\t\t\tinfantry= 2_000 ",
+                   "\t\t\t\t}", "\t\t\t}", "\t\t}", "\t}",
+                   "\twar_goal=", "\t{", '\t\tcasus_belli={ a="b\'c" }', '\t\tactor="ENG"',
+                   '\t\treceiver="FRA"', "\t\tis_fulfilled={ yes }", "\t\tdate=1880.6.1", "\t}",
+                   "\taction=\"1880.5.1\"", "}"]
+        for i, date in enumerate(("1880.1.1", "1881.1.1")):
+            a_save(os.path.join(odd, "%d.v2" % i), date, tags=TAGS, wars=odd_war)
+        # Mods Python refuses, each a copy of the good one with one fault.
+        def faulty(name, rel, text, append=True):
+            where = os.path.join(game, "mod", name)
+            shutil.copytree(mod, where)
+            target = os.path.join(where, rel)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "ab" if append else "wb") as fh:
+                fh.write(text.encode("latin-1"))
+            return where
+        bad_define = faulty("BadDefine", "common/defines.lua",
+                            "NDefines = { POP_SIZE_PER_REGIMENT = 1.2.3, }\n", append=False)
+        bad_ship = faulty("BadShip", "units/frigate.txt",
+                          "frigate = {\n\ttype = naval\n\thull = -\n}\n", append=False)
+        bad_region = faulty("BadRegion", "map/region.txt", "XX_1 = { 1 \xb2 }\n", append=False)
+        # With a bitmap and a definition of its own, the map read is its own.
+        with open(os.path.join(bad_region, "map", "provinces.bmp"), "wb") as fh:
+            fh.write(b"BM")
         afile = os.path.join(holding, "afile")
         with open(afile, "w") as fh:
             fh.write("x")
@@ -138,6 +207,15 @@ def main():
             ("rebuilt on purpose", [saves, "--rebuild"] + M, "again"),
             ("a setting changed since", [saves, "--min-pop", "3000"] + M, "changed"),
             ("a save touched since", [saves] + M, "touched"),
+            ("saves it refuses", [mixed] + M, None),
+            ("saves it refuses, quiet", [mixed, "-q"] + M, None),
+            ("saves it refuses, one at a time", [mixed, "-j", "1"] + M, None),
+            ("nothing but saves it refuses", [refused_only] + M, None),
+            ("saves it refuses, rebuilt", [mixed, "--rebuild"] + M, "again"),
+            ("a war with blocks where names belong", [odd] + M, None),
+            ("a define that is not a number", [saves, "--mod-path", bad_define], None),
+            ("a ship stat that is not a number", [saves, "--mod-path", bad_ship], None),
+            ("a region naming a superscript", [saves, "--mod-path", bad_region], None),
             ("a diagnostic", [saves, "--explain-mob", "ENG"] + M, "handed back"),
             ("a peek", [saves, "--peek"] + M, "handed back"),
         ]
@@ -166,10 +244,10 @@ def main():
                 env["TMPDIR"] = os.path.join(place, "tmp")
                 os.makedirs(env["TMPDIR"])
                 log = os.path.join(place, "front.log")
+                env.pop("VIC2_NO_FRONT", None)
                 if way == "python":
-                    env["VIC2_NO_FRONT"] = "1"
+                    env["VIC2_NO_ENGINE"] = "1"
                 else:
-                    env.pop("VIC2_NO_FRONT", None)
                     env["VIC2_FRONT_LOG"] = log
                 full = list(argv) if how == "own-out" else list(argv) + ["--out", out]
                 if how == "locked":
@@ -221,6 +299,10 @@ def main():
         print("\n%d of %d cases differ" % (bad, len(cases)))
         return 1 if bad else 0
     finally:
+        try:
+            os.chmod(locked_save, stat.S_IREAD | stat.S_IWRITE)
+        except (OSError, NameError):
+            pass
         shutil.rmtree(holding, ignore_errors=True)
 
 
