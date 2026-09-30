@@ -845,7 +845,7 @@ fn unreadable(trigger: &J, m: &Mod) -> bool {
     false
 }
 
-fn thousands(n: i64) -> String {
+pub fn thousands(n: i64) -> String {
     let s = n.unsigned_abs().to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {

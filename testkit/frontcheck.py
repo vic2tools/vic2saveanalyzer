@@ -258,7 +258,14 @@ def main():
             ("saves laid out another way", [walked] + M, None),
             ("saves laid out another way, one at a time", [walked, "-j", "1"] + M, None),
             ("a diagnostic", [saves, "--explain-mob", "ENG"] + M, "handed back"),
-            ("a peek", [saves, "--peek"] + M, "handed back"),
+            ("a peek", [saves, "--peek"] + M, None),
+            ("a peek at a save laid out another way", [walked, "--peek"] + M, None),
+            ("a peek at the fullest save", [os.path.join(holding, "furnished.v2"), "--peek"], None),
+            ("a peek at a file Python refuses", [refused_only, "--peek"] + M, "handed back"),
+            ("a peek beside a diagnostic", [saves, "--peek", "--explain-mob", "ENG"] + M, None),
+            ("verified", [saves, "--verify"] + M, None),
+            ("verified, laid out another way", [walked, "--verify", "-j", "1"], None),
+            ("verified among files Python refuses", [mixed, "--verify"] + M, "handed back"),
         ]
         bad = 0
         # The mod's signature, which keys the engine's copy of the mod and

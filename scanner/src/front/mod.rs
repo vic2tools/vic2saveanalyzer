@@ -23,6 +23,7 @@
 // `int()` of an infinity, a number past 64 bits), and there the Python,
 // doing the run again, says again what had been said.
 
+pub mod diagnose;
 pub mod pypath;
 
 use crate::engine::modread;
@@ -609,10 +610,32 @@ pub fn main(argv: &[String]) -> ! {
 fn run(mut args: Args, protocol: bool) -> R<i32> {
     // What is still Python's is handed back before anything is said or
     // looked at, so the Python says all of it once.
-    if args.peek || args.cross || args.verify || args.asked() {
-        hand_back("a diagnostic, --peek, --verify or --cross is read in Python");
+    if (args.cross || args.asked()) && !args.peek {
+        hand_back("a diagnostic or --cross is read in Python");
     }
     let (_saves_path, files) = saves_in(&args)?;
+    // `--peek` and `--verify` come before anything else is settled, as in
+    // `_main`. A file Python would refuse raises out of either, which is
+    // Python's to say.
+    if args.peek {
+        if files.is_empty() || !diagnose::whole(&files[0]) {
+            hand_back("--peek of a file Python refuses");
+        }
+        diagnose::peek(&files[0]);
+        return Ok(0);
+    }
+    if args.cross {
+        hand_back("--cross is read in Python");
+    }
+    if args.verify {
+        if !files.iter().all(|f| diagnose::whole(f)) {
+            hand_back("--verify of a file Python refuses");
+        }
+        return match diagnose::verify_all(&files, args.jobs) {
+            Ok(()) => Ok(0),
+            Err(why) => hand_back(&why),
+        };
+    }
 
     // `_on_the_game`.
     let (mod_path, game) = settle_game(args.mod_path.as_deref(), args.game_root.as_deref())?;
