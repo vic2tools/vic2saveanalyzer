@@ -610,8 +610,8 @@ pub fn main(argv: &[String]) -> ! {
 fn run(mut args: Args, protocol: bool) -> R<i32> {
     // What is still Python's is handed back before anything is said or
     // looked at, so the Python says all of it once.
-    if (args.cross || args.asked()) && !args.peek {
-        hand_back("a diagnostic or --cross is read in Python");
+    if args.cross && !args.peek {
+        hand_back("--cross is read in Python");
     }
     let (_saves_path, files) = saves_in(&args)?;
     // `--peek` and `--verify` come before anything else is settled, as in
@@ -764,7 +764,20 @@ fn run(mut args: Args, protocol: bool) -> R<i32> {
         w
     });
 
-    forget_stamp(&args.out);
+    // `explain`: which of the four, in the order Python asks.
+    let ask = if let Some(t) = &args.explain_mob_pool {
+        Some(("explain_mob_pool", t.clone()))
+    } else if args.check_inventions {
+        Some(("check_inventions", String::new()))
+    } else if let Some(t) = &args.inventions {
+        Some(("inventions", t.clone()))
+    } else {
+        args.explain_mob.as_ref().map(|t| ("explain_mob", t.clone()))
+    };
+    // A diagnostic rewrites nothing, so the stamp stays where it is.
+    if ask.is_none() {
+        forget_stamp(&args.out);
+    }
     let mut finish_mob = mob_types.clone();
     finish_mob.sort();
     finish_mob.dedup();
@@ -820,6 +833,16 @@ fn run(mut args: Args, protocol: bool) -> R<i32> {
         ("mod_signature".into(), J::Str(signature.clone())),
         ("protocol".into(), J::Bool(protocol)),
         ("own_refusals".into(), J::Bool(true)),
+        ("diagnose".into(), match &ask {
+            None => J::Null,
+            Some((kind, tag)) => J::Obj(vec![
+                ("kind".into(), J::Str(kind.to_string())),
+                ("tag".into(), J::Str(tag.clone())),
+                ("pop_per_regiment".into(), J::Int(pop_per_regiment)),
+                ("mob_types".into(), strs(&mob_types)),
+                ("include_occupied".into(), J::Bool(args.mob_include_occupied)),
+            ]),
+        }),
     ]);
     let done = crate::engine::run_spec(&spec, None).expect("a report run returns what it wrote");
     if let Some(sentence) = done.run_error {

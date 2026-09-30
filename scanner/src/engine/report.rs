@@ -800,7 +800,7 @@ pub fn say_mod(m: &Mod, live: &FxSet<String>, held: &[&[rules::Held]], files: &[
 }
 
 /// `modrules._unreadable`.
-fn unreadable(trigger: &J, m: &Mod) -> bool {
+pub(crate) fn unreadable(trigger: &J, m: &Mod) -> bool {
     if !matches!(trigger, J::Obj(_)) {
         return false;
     }

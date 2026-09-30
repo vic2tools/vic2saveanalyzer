@@ -105,6 +105,8 @@ pub struct Mod {
     pub tech_mob: FxMap<String, f64>,
     pub nv_mob: FxMap<String, f64>,
     pub tech_count: i64,
+    /// Every technology the mod defines (`--check-inventions`).
+    pub technologies: FxSet<String>,
     /// What the map and the flags need of the mod's files, worked out by
     /// the Python that read it.
     pub colours: FxMap<String, String>,
@@ -231,6 +233,7 @@ impl Mod {
             tech_mob: floats(j.at("tech_mob")),
             nv_mob: floats(j.at("nv_mob")),
             tech_count: j.at("tech_count").int(),
+            technologies: strings(j.at("technologies")).into_iter().collect(),
             colours: texts(j.at("colours")),
             sea: j.at("sea").list().iter().map(|x| x.int()).collect(),
             positions: j.at("positions").list().iter().map(|p| {

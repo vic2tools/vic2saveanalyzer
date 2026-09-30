@@ -587,8 +587,17 @@ saves it had read are in its cache), a refusal comes back as the
 Python as before. `testkit/window.py` drives exactly that. It also means
 the window no longer meets the Python-hosted engine's doubled first pass.
 
-Still ahead: the diagnostics and `--cross`, which are handed back to
-Python, whole, before a word.
+The diagnostics are answered in Rust too. `--peek` and `--verify`
+(`front/diagnose.rs`) read the save as Python does and print what it
+prints; `--verify` over the 1870s campaign takes 2.7 s where the Python took
+35.8. `--explain-mob`, `--explain-mob-pool`, `--inventions` and
+`--check-inventions` (`engine/explain.rs`) come where the report would,
+after the first pass and the mod said, off the campaign's invention records
+and the last save read again whole. Held to the pure Python by
+`frontcheck.py` (59 cases) and, on the 1870s campaign under the real mod,
+eleven of them by hand, every one the same.
+
+Still ahead: `--cross`, handed back to Python, whole, before a word.
 
 ### The engine reads the mod itself, 2026-09-29
 

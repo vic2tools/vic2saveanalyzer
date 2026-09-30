@@ -2014,6 +2014,22 @@ pub fn head(path: &str) -> D<Head> {
     Ok(Reader::new(path).head_parts()?.0)
 }
 
+/// `mod_reader.invention_files(path)`: {invention: the file it is defined
+/// in}, the first file in load order that defines it.
+pub fn invention_files(path: &str) -> D<OMap<String, String>> {
+    let r = Reader::new(path);
+    let mut out: OMap<String, String> = OMap::new();
+    for (fname, target) in r.resolved_files("inventions")? {
+        for (name, _b) in r.clausewitz(&target)?.iter() {
+            let name = l1(name);
+            if !out.contains_key(&name) {
+                out.set(name, fname.clone());
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// `mod_reader.has_rules(path)`: whether there are technologies or
 /// inventions to read.
 pub fn has_rules(path: &str) -> D<bool> {

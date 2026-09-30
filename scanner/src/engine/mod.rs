@@ -27,6 +27,7 @@
 pub mod cache;
 pub mod dates;
 pub mod dump;
+pub mod explain;
 pub mod finish;
 pub mod mapflags;
 pub mod market;
@@ -106,6 +107,8 @@ pub struct Run {
     /// run handed back (Python hosting the engine, which reads only its
     /// stdout).
     pub own_refusals: bool,
+    /// One of the four diagnostics, answered instead of the report.
+    pub ask: Option<explain::Ask>,
     pub tech_lines: J,
     pub tables: tables::Tables,
     pub store: cache::Store,
@@ -213,6 +216,7 @@ fn parse_run(j: &J) -> Run {
         mod_file: j.at("mod_file").as_str().map(|s| s.to_string()),
         protocol: j.at("protocol").truthy(),
         own_refusals: j.at("own_refusals").truthy(),
+        ask: explain::Ask::from_json(j.at("diagnose")),
         tech_lines: j.at("tech_lines").clone(),
         tables,
         store: cache::Store {
@@ -926,6 +930,12 @@ pub fn run_spec(spec_j: &J, dump: Option<String>) -> Option<report::Outcome> {
         out::release();
         return Some(report::Outcome { html: None, refused: Vec::new(),
                                       run_error: Some("No saves could be read.".into()) });
+    }
+    // A diagnostic is answered off the campaign as it stands, and ends the
+    // run: no report, no tables.
+    if let Some(ask) = &run.ask {
+        let said = explain::answer(ask, &m, &live, &pres, &files, &run.reading);
+        return Some(report::Outcome { html: None, refused: Vec::new(), run_error: said.err() });
     }
 
     // Pass two: every save finished.
