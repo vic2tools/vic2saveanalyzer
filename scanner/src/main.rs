@@ -25,7 +25,9 @@ mod clause;
 mod country;
 mod deflate;
 mod engine;
+mod front;
 mod jsonr;
+mod md5;
 mod omap;
 mod pickle;
 mod province;
@@ -126,6 +128,12 @@ fn main() {
     if args[1] == "report" {
         engine::main(&args);
         return;
+    }
+    if args[1] == "mod-signature" {
+        front::signature_main(&args);
+    }
+    if args[1] == "analyze" {
+        front::main(&args);
     }
     if args[1] == "mod-export" && args.len() == 3 {
         engine::modread::main(&args);

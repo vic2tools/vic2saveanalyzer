@@ -682,11 +682,88 @@ def main(run=None):
     One run, as `run` declares it or as the command line does, for a
     command line: a run refused ends the process with its sentence and a
     non-zero status, which is how the command line has always said no.
+
+    A run from the command line is handed to the scanner's `analyze` mode
+    first (`_front`), which does an ordinary report the whole way in Rust;
+    what it hands back is done here as it always was.
     """
     try:
+        if run is None:
+            run = Run.from_command_line(command_line())
+            status = _front(run)
+            if status is not None:
+                sys.exit(status)
         return _run(run)
     except RunError as refused:
         sys.exit(str(refused))
+
+
+def _front(run):
+    """
+    The run done by the scanner (`vic2scan analyze`): its exit status, or
+    None when there is no scanner or it handed the run back, having said
+    nothing. `VIC2_NO_FRONT` or `VIC2_NO_ENGINE` keeps the run here.
+    """
+    if os.environ.get("VIC2_NO_FRONT") or os.environ.get("VIC2_NO_ENGINE"):
+        return None
+    import fastscan
+    binary = fastscan.available()
+    if not binary:
+        return None
+    import dataclasses
+    import json
+    import subprocess
+    import tempfile
+    import engine
+    fd, path = tempfile.mkstemp(prefix="vic2_run_", suffix=".json")
+    refused = path[:-len(".json")] + ".refused"
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(dataclasses.asdict(run)))
+        sys.stdout.flush()
+        sys.stderr.flush()
+        argv = [binary, "analyze", "--run", path, "--refused", refused]
+        if sys.stdout is sys.__stdout__ and sys.stderr is sys.__stderr__:
+            status = subprocess.call(argv, creationflags=fastscan._no_window())
+        else:
+            # Someone is catching what this prints -- a check running the
+            # analyzer in its own process -- and a child's output would go
+            # past them to the real streams, so it is passed on through.
+            status = _relayed(argv, fastscan._no_window())
+        if status == REFUSED:
+            # A run refused, in its sentence, raised as it always was.
+            with open(refused, encoding="utf-8") as fh:
+                raise RunError(fh.read())
+    finally:
+        for leftover in (path, refused):
+            try:
+                os.remove(leftover)
+            except OSError:
+                pass
+    return None if status == engine.DECLINED else status
+
+
+# The status `vic2scan analyze` exits with when it refused the run and wrote
+# the sentence to the file it was given.
+REFUSED = 4
+
+
+def _relayed(argv, flags):
+    """Run `argv`, its output written to `sys.stdout` and `sys.stderr`."""
+    import subprocess
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            creationflags=flags)
+
+    def copy(source, target):
+        for line in iter(source.readline, b""):
+            target.write(line.decode("utf-8", "replace"))
+        source.close()
+
+    err = threading.Thread(target=copy, args=(proc.stderr, sys.stderr), daemon=True)
+    err.start()
+    copy(proc.stdout, sys.stdout)
+    err.join()
+    return proc.wait()
 
 
 def _run(run=None):

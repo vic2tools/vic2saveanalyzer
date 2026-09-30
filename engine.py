@@ -207,6 +207,8 @@ def spec(args, files, reading, finish, head, pop_columns, cross_payload=None):
     return {
         "files": list(files),
         "out": args.out,
+        # This process reads the `@progress`, `@ready` and `@done` lines.
+        "protocol": True,
         "reading": {
             "pop_types": sorted(reading.pop_types),
             "mob_types": sorted(reading.mob_types),

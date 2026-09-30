@@ -705,7 +705,7 @@ fn write_outputs(out: &str, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]
             Ok(()) => paths.push(shown),
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => refused.push(shown),
             Err(e) => {
-                eprintln!("cannot write {}: {}", shown, e);
+                crate::errln!("cannot write {}: {}", shown, e);
                 std::process::exit(1);
             }
         }
@@ -727,12 +727,12 @@ fn line(out: &mut String, vals: &[Val]) {
 pub fn say_mod(m: &Mod, live: &FxSet<String>, held: &[&[rules::Held]], files: &[String]) {
     let seq = &m.invention_sequence;
     match m.index_base {
-        None => println!("\nInvention indices could not be decoded from {} inventions; falling back \
+        None => crate::outln!("\nInvention indices could not be decoded from {} inventions; falling back \
                           to requirement matching, which overstates unlucky nations.", seq.len()),
         Some(base) => {
             let every: Vec<&rules::Held> = held.iter().flat_map(|h| h.iter()).collect();
             let (bad, total) = rules::violations(m, &rules::holdings(&every), base);
-            println!("\nInvention indices decoded against {} inventions (base {}): {} of {} \
+            crate::outln!("\nInvention indices decoded against {} inventions (base {}): {} of {} \
                       nation-invention pairs are unreachable ({:.1}%).", seq.len(), base, bad, total,
                      bad as f64 / total as f64 * 100.0);
             let top = seq.len() as i64 + base - 1;
@@ -760,14 +760,14 @@ pub fn say_mod(m: &Mod, live: &FxSet<String>, held: &[&[rules::Held]], files: &[
             }
             if !odd.is_empty() {
                 let lost: i64 = odd.iter().map(|o| o.2).sum();
-                println!("  {} of {} saves name inventions past the end of that array, so {} of {} \
+                crate::outln!("  {} of {} saves name inventions past the end of that array, so {} of {} \
                           holdings ({:.1}%) cannot be read:", odd.len(), held.len(), lost, seen,
                          lost as f64 / seen as f64 * 100.0);
                 odd.sort_by(|a, b| a.0.cmp(&b.0));
                 for (name, count, gone, lo, hi) in &odd {
-                    println!("    {}: {} indices, {}..{} ({} holdings)", name, count, lo, hi, gone);
+                    crate::outln!("    {}: {} indices, {}..{} ({} holdings)", name, count, lo, hi, gone);
                 }
-                println!("  Those saves were written by a different build than --mod-path -- \
+                crate::outln!("  Those saves were written by a different build than --mod-path -- \
                           another version of the mod, or one over the top of it. Their ship stats \
                           and mobilisation size are short by whatever those inventions grant; the \
                           rest of the campaign is unaffected.");
@@ -775,7 +775,7 @@ pub fn say_mod(m: &Mod, live: &FxSet<String>, held: &[&[rules::Held]], files: &[
         }
     }
     let rules_ = &m.invention_rules;
-    println!("\nMod scan: {} techs ({} grant mobilisation_size), {} inventions grant it ({} \
+    crate::outln!("\nMod scan: {} techs ({} grant mobilisation_size), {} inventions grant it ({} \
               obtainable), {} event modifiers, {} triggered modifiers.", m.tech_count,
              m.tech_mob.len(), rules_.len(), live.len(), m.event_mob.len(),
              m.triggered_mob.iter().filter(|t| t.size != 0.0).count());
@@ -783,19 +783,19 @@ pub fn say_mod(m: &Mod, live: &FxSet<String>, held: &[&[rules::Held]], files: &[
         .filter(|t| t.size != 0.0 && unreadable(&t.trigger, m))
         .map(|t| t.name.as_str()).collect();
     if !skipped.is_empty() {
-        println!("  triggered modifiers left out, because their trigger asks something this cannot \
+        crate::outln!("  triggered modifiers left out, because their trigger asks something this cannot \
                   answer: {}", skipped.join(", "));
     }
     let mut techs: Vec<(&String, &f64)> = m.tech_mob.iter().collect();
     techs.sort_by(|a, b| a.0.cmp(b.0));
     for (t, v) in techs {
-        println!("  tech       {:<44} +{:.3}", t, v);
+        crate::outln!("  tech       {:<44} +{:.3}", t, v);
     }
     let mut names: Vec<&String> = rules_.keys().collect();
     names.sort();
     for n in names {
         let mark = if live.contains(n.as_str()) { "" } else { "   (unobtainable)" };
-        println!("  invention  {:<44} +{:.3}{}", n, rules_.get(n.as_str()).unwrap().size, mark);
+        crate::outln!("  invention  {:<44} +{:.3}{}", n, rules_.get(n.as_str()).unwrap().size, mark);
     }
 }
 
@@ -858,7 +858,7 @@ fn thousands(n: i64) -> String {
 }
 
 fn say_summary(c: &Campaign, prices: &[PriceRow], paths: &[String]) {
-    println!("\n{} nation-rows across {} saves.", c.rows.len(), c.parsed.len());
+    crate::outln!("\n{} nation-rows across {} saves.", c.rows.len(), c.parsed.len());
     if !prices.is_empty() {
         let mut months: Vec<&String> = Vec::new();
         let mut seen: FxSet<&String> = FxSet::default();
@@ -869,30 +869,37 @@ fn say_summary(c: &Campaign, prices: &[PriceRow], paths: &[String]) {
         }
         months.sort_by(|a, b| date_key(a).cmp(&date_key(b)));
         let goods: FxSet<&String> = prices.iter().map(|r| &r.2).collect();
-        println!("{} dated price points, {} to {}, {} goods.", months.len(), months[0],
+        crate::outln!("{} dated price points, {} to {}, {} goods.", months.len(), months[0],
                  months[months.len() - 1], goods.len());
     }
     let latest = &c.parsed[c.parsed.len() - 1].meta.date;
     let mut latest_rows: Vec<&Row> = c.rows.iter().filter(|r| &r.date == latest).collect();
     latest_rows.sort_by(|a, b| b.nat.total_pop.cmp(&a.nat.total_pop));
-    println!("\nLargest nations at {}:", latest);
-    println!("  {:<5}{:>12}{:>9}{:>7}{:>7}{:>7}", "tag", "pop", "accept%", "lit", "brig", "ships");
+    crate::outln!("\nLargest nations at {}:", latest);
+    crate::outln!("  {:<5}{:>12}{:>9}{:>7}{:>7}{:>7}", "tag", "pop", "accept%", "lit", "brig", "ships");
     for r in latest_rows.iter().take(8) {
-        println!("  {:<5}{:>12}{:>9.1}{:>6.1}%{:>7}{:>7}", r.nat.tag, thousands(r.nat.total_pop),
+        crate::outln!("  {:<5}{:>12}{:>9.1}{:>6.1}%{:>7}{:>7}", r.nat.tag, thousands(r.nat.total_pop),
                  r.accepted_pct, r.avg_literacy * 100.0, r.nat.brigades, r.nat.ships);
     }
-    println!("\nComputed mobilisation sizes at {} (check these against the in-game military panel):",
+    crate::outln!("\nComputed mobilisation sizes at {} (check these against the in-game military panel):",
              latest);
     for r in latest_rows.iter().take(10) {
-        println!("  {}: {:.2}%", r.nat.tag, r.mobilisation_size * 100.0);
+        crate::outln!("  {}: {:.2}%", r.nat.tag, r.mobilisation_size * 100.0);
     }
-    println!("\nWrote:");
+    crate::outln!("\nWrote:");
     for p in paths {
-        println!("  {}", p);
+        crate::outln!("  {}", p);
     }
 }
 
-pub fn run(run: &Run, m: &Mod, live: &FxSet<String>, spent: Vec<Spent>) {
+/// What a run left on disk: the report, if one was built, and the tables
+/// that could not be written.
+pub struct Outcome {
+    pub html: Option<String>,
+    pub refused: Vec<String>,
+}
+
+pub fn run(run: &Run, m: &Mod, live: &FxSet<String>, spent: Vec<Spent>) -> Outcome {
     let c = walk(spent);
     crate::engine::phase("walked");
     let metas: Vec<&Meta> = c.parsed.iter().map(|k| &k.meta).collect();
@@ -923,6 +930,7 @@ pub fn run(run: &Run, m: &Mod, live: &FxSet<String>, spent: Vec<Spent>) {
     say(&format!("@done html={} refused={}", html_path.is_some() as i32,
                  refused.iter().map(|p| crate::engine::basename(p).to_string())
                      .collect::<Vec<_>>().join("\t")));
+    Outcome { html: html_path, refused }
 }
 
 /// `build_html` and `build_report`: the page, written; its path.
@@ -984,7 +992,7 @@ fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]
     }
     if let Some(mp) = &map {
         if mp.derived > 0 && !run.quiet {
-            println!("map/positions.txt anchors no army counter for {} of the provinces holding \
+            crate::outln!("map/positions.txt anchors no army counter for {} of the provinces holding \
                       troops; those markers sit at the middle of the province instead.", mp.derived);
         }
     }
@@ -1096,7 +1104,7 @@ fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]
     let html = if run.split {
         let data_name = "report.data.gz";
         std::fs::write(std::path::Path::new(&run.out).join(data_name), &packed)
-            .unwrap_or_else(|e| { eprintln!("cannot write {}: {}", data_name, e); std::process::exit(1); });
+            .unwrap_or_else(|e| { crate::errln!("cannot write {}: {}", data_name, e); std::process::exit(1); });
         fill(t.template.replace("__DATA__", "").replace("__DATAURL__", data_name)
              .replace("__STATES__", "[]"))
     } else {
@@ -1109,7 +1117,7 @@ fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]
     let path = std::path::Path::new(&run.out).join("report.html");
     crate::engine::phase("page filled");
     std::fs::write(&path, html.as_bytes())
-        .unwrap_or_else(|e| { eprintln!("cannot write {}: {}", path.display(), e); std::process::exit(1); });
+        .unwrap_or_else(|e| { crate::errln!("cannot write {}: {}", path.display(), e); std::process::exit(1); });
     path.to_string_lossy().to_string()
 }
 

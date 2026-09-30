@@ -1947,6 +1947,66 @@ fn set_pair(out: &mut Vec<(String, J)>, key: String, value: J) {
     }
 }
 
+/// What reading a save needs of a mod (`mod_reader.ModHead`): the strata
+/// of its pop types, the reforms a save must carry, the defines a brigade
+/// count uses and the state each province belongs to.
+pub struct Head {
+    pub strata: OMap<String, Vec<u8>>,
+    pub reform_names: Set,
+    pub defines: OMap<Vec<u8>, f64>,
+    pub province_regions: OMap<i64, Vec<u8>>,
+}
+
+type Triggers = Vec<(Vec<u8>, f64, f64, Option<(Top, usize)>)>;
+
+impl Reader {
+    /// `_head`, in its order: the strata, the reforms, the triggers, the
+    /// defines, the regions -- and the three read on the way that the whole
+    /// mod keeps as well.
+    fn head_parts(&self) -> D<(Head, OMap<(Vec<u8>, Vec<u8>), f64>, Triggers, OMap<Vec<u8>, Vec<i64>>)> {
+        let strata = self.read_poptypes()?;
+        let (reform_sizes, reform_groups) = self.reform_mob()?;
+        let triggers = self.triggered_mob()?;
+        let mut asked = HashSet::new();
+        for (_n, _s, _i, t) in &triggers {
+            if let Some((top, i)) = t {
+                if let Some(tr) = get(&top[*i].1, b"trigger") {
+                    trigger_conditions(tr, &mut asked);
+                }
+            }
+        }
+        let mut watched: Set = reform_sizes.keys().map(|(g, _o)| g.clone()).collect();
+        for g in &reform_groups {
+            if asked.contains(g) {
+                watched.insert(g.clone());
+            }
+        }
+        let defines = self.read_defines()?;
+        let regions = self.regions()?;
+        let mut province_regions: OMap<i64, Vec<u8>> = OMap::new();
+        for (name, ids) in regions.iter() {
+            for pid in ids {
+                if !province_regions.contains_key(pid) {
+                    province_regions.set(*pid, name.clone());
+                }
+            }
+        }
+        Ok((Head { strata, reform_names: watched, defines, province_regions }, reform_sizes, triggers, regions))
+    }
+}
+
+/// `mod_reader.mod_head(path)`, for a path made absolute.
+pub fn head(path: &str) -> D<Head> {
+    Ok(Reader::new(path).head_parts()?.0)
+}
+
+/// `mod_reader.has_rules(path)`: whether there are technologies or
+/// inventions to read.
+pub fn has_rules(path: &str) -> D<bool> {
+    let r = Reader::new(path);
+    Ok(!r.resolved_files("technologies")?.is_empty() || !r.resolved_files("inventions")?.is_empty())
+}
+
 /// The mod at `path` -- absolute, as `_mod_root` makes it -- as
 /// `export_mod(load_mod(path))` has it.
 pub fn export(path: &str) -> D<J> {
@@ -2017,35 +2077,8 @@ pub fn export(path: &str) -> D<J> {
         return no(format!("{} has no technologies/ or inventions/ folder", path));
     }
 
-    // `_head`, in its order: the strata, the reforms, the triggers, the
-    // defines, the regions.
-    let strata = r.read_poptypes()?;
-    let (reform_sizes, reform_groups) = r.reform_mob()?;
-    let triggers = r.triggered_mob()?;
-    let mut asked = HashSet::new();
-    for (_n, _s, _i, t) in &triggers {
-        if let Some((top, i)) = t {
-            if let Some(tr) = get(&top[*i].1, b"trigger") {
-                trigger_conditions(tr, &mut asked);
-            }
-        }
-    }
-    let mut watched: Set = reform_sizes.keys().map(|(g, _o)| g.clone()).collect();
-    for g in &reform_groups {
-        if asked.contains(g) {
-            watched.insert(g.clone());
-        }
-    }
-    let defines = r.read_defines()?;
-    let regions = r.regions()?;
-    let mut province_regions: OMap<i64, Vec<u8>> = OMap::new();
-    for (name, ids) in regions.iter() {
-        for pid in ids {
-            if !province_regions.contains_key(pid) {
-                province_regions.set(*pid, name.clone());
-            }
-        }
-    }
+    let (head, reform_sizes, triggers, regions) = r.head_parts()?;
+    let Head { strata, reform_names: watched, defines, province_regions } = head;
 
     let judged: HashSet<&Vec<u8>> = triggers.iter().map(|t| &t.0).collect();
     let event_mob: OMap<Vec<u8>, f64> = event_mob.iter().filter(|(k, _)| !judged.contains(k))

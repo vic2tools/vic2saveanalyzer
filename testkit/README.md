@@ -49,6 +49,7 @@ python3 testkit/crossrows.py                     # no saves needed
 python3 testkit/record.py                        # no saves needed
 python3 testkit/caching.py                       # no saves needed
 python3 testkit/modread.py [--mod "/path/to/mod"] # no saves needed
+python3 testkit/frontcheck.py                    # no saves needed
 python3 testkit/window.py "/path/to/saves"
 python3 testkit/spawned.py "/path/to/saves"
 python3 testkit/smoke.py "/path/to/saves" --mod "/path/to/mod"
@@ -63,6 +64,12 @@ reads a world written to be awkward (a mod over a game, names differing
 only in case, Windows-1252 localisation with its gaps, a block where a
 name belongs, `1_000`), then that world damaged at random a few hundred
 times, and the real mod when `--mod` names one.
+
+**`frontcheck.py`** holds the scanner's `analyze` mode -- a command-line
+run done in Rust from the start -- to the Python: thirty cases run both
+ways (the second with `VIC2_NO_FRONT=1`) must print the same, exit the
+same and write the same files, and the Rust must have made every one of
+them itself but the two it hands back.
 
 **`savefmt.py`** writes save-shaped text, and is the only place in here
 that knows the format. The tab depth *is* the format — both the reader and

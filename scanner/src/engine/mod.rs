@@ -32,6 +32,7 @@ pub mod mapflags;
 pub mod market;
 pub mod model;
 pub mod modread;
+pub mod out;
 pub mod report;
 pub mod rules;
 pub mod tables;
@@ -96,6 +97,9 @@ pub struct Run {
     /// next run; None when Python did not work it out.
     pub mod_signature: Option<String>,
     pub mod_file: Option<String>,
+    /// Whether a host reads `@progress` and the rest: Python, which starts
+    /// the engine with a spec (`engine.spec`), does.
+    pub protocol: bool,
     pub tech_lines: J,
     pub tables: tables::Tables,
     pub store: cache::Store,
@@ -188,6 +192,7 @@ fn parse_run(j: &J) -> Run {
         mod_path: j.at("mod_path").as_str().map(|s| s.to_string()),
         mod_signature: j.at("mod_signature").as_str().map(|s| s.to_string()),
         mod_file: j.at("mod_file").as_str().map(|s| s.to_string()),
+        protocol: j.at("protocol").truthy(),
         tech_lines: j.at("tech_lines").clone(),
         tables,
         store: cache::Store {
@@ -494,16 +499,30 @@ where
     });
 }
 
-/// A line for the analyzer to read: progress, and the like.
-pub fn say(line: &str) {
-    let out = std::io::stdout();
-    let mut out = out.lock();
-    let _ = writeln!(out, "{}", line);
-    let _ = out.flush();
+/// A line in the file `VIC2_FRONT_LOG` names, for the checks that need to
+/// know whether a run was made here or handed back.
+pub fn front_log(line: &str) {
+    if let Some(path) = std::env::var_os("VIC2_FRONT_LOG") {
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = writeln!(f, "{}", line);
+        }
+    }
 }
 
-fn decline(why: &str) -> ! {
-    eprintln!("engine: {}", why);
+/// A line for the host to read: progress, and the like.
+pub fn say(line: &str) {
+    out::protocol(line);
+}
+
+/// Hand the run back. What it has said so far is dropped with it when it
+/// was being held (`out`); the checks that require the engine see why.
+pub fn decline(why: &str) -> ! {
+    front_log(&format!("handed back: {}", why));
+    if std::env::var_os("VIC2_ENGINE_REQUIRED").is_some() {
+        eprintln!("engine: {}", why);
+    } else {
+        crate::errln!("engine: {}", why);
+    }
     std::process::exit(DECLINED);
 }
 
@@ -636,8 +655,15 @@ pub fn main(args: &[String]) {
         std::process::exit(2);
     });
     let dump = args.iter().position(|a| a == "--dump").and_then(|i| args.get(i + 1)).cloned();
+    run_spec(&spec_j, dump);
+}
+
+/// A run as `engine.spec` declares it. None when `dump` was asked for
+/// instead of the report; a run handed back never returns.
+pub fn run_spec(spec_j: &J, dump: Option<String>) -> Option<report::Outcome> {
     phase("start");
-    let run = parse_run(&spec_j);
+    let run = parse_run(spec_j);
+    out::set_protocol(run.protocol);
     let n = run.files.len();
     let biggest = run.files.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len())
         .max().unwrap_or(0);
@@ -653,7 +679,7 @@ pub fn main(args: &[String]) {
     // read before, and every save, a line each, when any was not.
     let say_each = verbose && todo > 0;
     if say_each {
-        println!("Reading {} save(s) on {} cores.", todo, workers);
+        crate::outln!("Reading {} save(s) on {} cores.", todo, workers);
     }
     // The mod, and the map's bitmap it names, read on a thread of their own
     // while the saves are: the mod arrives while they are being read, and
@@ -703,16 +729,16 @@ pub fn main(args: &[String]) {
                 done += 1;
                 if say_each && failed.is_none() {
                     if cached && workers <= 1 {
-                        println!("  {} ... cached, {}", basename(&run.files[i]), pre.meta.date);
+                        crate::outln!("  {} ... cached, {}", basename(&run.files[i]), pre.meta.date);
                     } else if workers > 1 {
-                        println!("  [{}/{}] {} ... {}", done, n, basename(&run.files[i]), pre.meta.date);
+                        crate::outln!("  [{}/{}] {} ... {}", done, n, basename(&run.files[i]), pre.meta.date);
                     } else {
                         let months: FxSet<&str> = pre.meta.market.as_ref()
                             .map(|m| m.history.iter().map(|h| h.0.as_str()).collect())
                             .unwrap_or_default();
                         let extra = if months.is_empty() { String::new() }
                                     else { format!(", {} months of prices", months.len()) };
-                        println!("  reading {} ... {}, {} nations{}", basename(&run.files[i]),
+                        crate::outln!("  reading {} ... {}, {} nations{}", basename(&run.files[i]),
                                  pre.meta.date, pre.nations.len(), extra);
                     }
                 }
@@ -765,9 +791,11 @@ pub fn main(args: &[String]) {
     phase("pass two: saves finished");
     if let Some(folder) = dump {
         crate::engine::dump::write(&folder, &spent, &m, &live);
-        return;
+        return None;
     }
-    crate::engine::report::run(&run, &m, &live, spent);
+    // Nothing from here on hands the run back.
+    out::release();
+    Some(crate::engine::report::run(&run, &m, &live, spent))
 }
 
 /// The keys a save's nations are held under: the owner tags the provinces

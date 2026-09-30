@@ -504,6 +504,52 @@ occupied; only that third one took anything.
 
 ## Speed
 
+### A run from the command line is made in Rust, 2026-09-30
+
+`python3 vic2_analyzer.py ...` now parses its command line as it always did
+and then hands the run to the scanner's `analyze` mode
+(`scanner/src/front/`), which does the rest of an ordinary report in Rust:
+finds the saves, settles the game and the mod (`settle_game` and every
+sentence it refuses with), takes the stamp and answers "nothing has
+changed" when it can, reads the mod's head (`modread::head`), puts the
+saves in date order and keeps one a date (and says so on stderr), and runs
+the engine in the same process. Paths are Python's: `~`, `$VAR` and
+`%VAR%`, `..` folded, drives and roots on Windows (`front/pypath.rs`); the
+mod's signature is Python's MD5 over the same walk (`md5.rs`).
+
+What it does not do yet -- the four diagnostics, `--cross`, `--peek`,
+`--verify`, and every run the engine hands back -- it hands back with status
+3, and `vic2_analyzer.main` goes on in Python. So that the Python can say
+everything once, what the Rust prints is held (`engine/out.rs`) until the
+run can no longer be handed back, which is after the second pass. A run it
+refuses it hands to Python as the sentence (status 4 and a file), and the
+Python raises the `RunError` it always raised, so a caller in the same
+process -- `edges.py`, and the window later -- sees what it always saw.
+`VIC2_NO_FRONT=1` keeps a run in Python from the start.
+
+Its own stamp: the saves, the mod's signature and every setting that
+changes the report, as Python's, but the program is named by a hash of the
+scanner's sources and the page template taken at build time
+(`VIC2_BUILD_ID`, `build.rs`) rather than by the Python files. That is also
+the engine's cache version when it runs this way.
+
+`testkit/frontcheck.py` runs 32 cases both ways -- every refusal, one save,
+two saves of one date, `~` and `$VAR`, a relative path, the settings, a
+table open elsewhere, "nothing has changed", a setting changed and a save
+touched since -- and they print, exit and write the same; the Rust made all
+but the two it hands back, and its mod signature is Python's.
+
+| 265 saves | the Python in front | Rust in front | rounds |
+|---|---:|---:|---|
+| truly cold | 5.23 s (4.81-5.25) | **5.16 s** (5.16-5.16) | 3 |
+| rebuild from a warm cache | 1.42 s (1.40-1.43) | **1.39 s** (1.38-1.39) | 3 |
+| nothing changed | 93 ms | **72 ms** | 4 |
+
+Still ahead: the hand-backs (saves the scanner refuses or cannot lay out,
+names that are blocks, mods Python would raise over), after which nothing
+need be held and the output streams again; the diagnostics; `--cross`; and
+the window running the binary.
+
 ### The engine reads the mod itself, 2026-09-29
 
 The report engine now reads the mod folder (`scanner/src/engine/modread.rs`)

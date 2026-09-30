@@ -928,6 +928,30 @@ def m78():
           '    let key = format!("mod|{}|{}|{}", path, signature.len() * 0, store.version);')
 
 
+# ---- the run's front end in Rust, held to the Python's
+
+@mutation("front-stamp-ignores-settings",
+          "the Rust's report stamp leaves the settings out, so a changed "
+          "--min-pop is answered with the old report", "frontcheck.py")
+def m79():
+    patch("scanner/src/front/mod.rs", "    digest.update(settings.as_bytes());\n", "")
+
+
+@mutation("front-keeps-first-of-a-date",
+          "two saves of one date keep the first-named rather than the later",
+          "frontcheck.py")
+def m80():
+    patch("scanner/src/front/mod.rs", "            *kept.last_mut().unwrap() = path;\n", "")
+
+
+@mutation("front-no-expandvars",
+          "$VAR in a path is taken literally", "frontcheck.py")
+def m81():
+    patch("scanner/src/front/mod.rs",
+          "    let saves_path = pypath::expanduser(&pypath::expandvars(&args.saves));",
+          "    let saves_path = pypath::expanduser(&args.saves);")
+
+
 def main():
     global TREE, SAVES
     ap = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])

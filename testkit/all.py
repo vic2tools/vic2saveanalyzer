@@ -90,6 +90,7 @@ def main():
         ("the engine's mod reader against the Python",
          [os.path.join(KIT, "modread.py"), "--rounds", "300"]
          + (["--mod", args.mod] if args.mod else [])),
+        ("the run's front end against the Python", [os.path.join(KIT, "frontcheck.py")]),
         ("the engine's number formatting", [os.path.join(KIT, "enginefmt.py"),
          os.path.join(HERE, "scanner", "target", "release", "vic2scan" + (".exe" if os.name == "nt" else "")), "20000"]),
         ("the engine's compression", [os.path.join(KIT, "enginecompress.py"),
