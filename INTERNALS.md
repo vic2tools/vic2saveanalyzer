@@ -504,6 +504,64 @@ occupied; only that third one took anything.
 
 ## Speed
 
+### The engine reads the mod itself, 2026-09-29
+
+The report engine now reads the mod folder (`scanner/src/engine/modread.rs`)
+rather than being handed Python's read of it as JSON. Python reads only the
+head a save is read under (the pop types, the reforms a save must carry, the
+defines, the regions: a few milliseconds), takes the mod's signature for the
+stamp as before, and names the folder and the signature in the spec. The
+engine reads the rest on the thread that decodes the map, while the saves
+are read, and keeps what it read as `enginemod_*.pkl` under that signature,
+so an unchanged mod is read once. A run the engine hands back reads the mod
+in Python as it always did (`_open_mod`, after the engine's block), and a
+mod Python would raise over is handed back.
+
+`mod_reader.py` reads most of a mod with regular expressions, and what they
+match at the edges -- a quote left open, a name that runs into a longer
+word, whitespace that crosses a line -- is part of what it reads. So the
+patterns are carried over as written and run by `scanner/src/pyre.rs`, a
+backtracking matcher with Python's semantics over latin-1 text: `\w` takes
+the latin-1 letters, `\s` takes `\x1c`-`\x1f`, `\x85` and `\xa0`,
+alternatives are tried leftmost first and repeats in Python's order. The
+rest is copied rule for rule: the tree `parse_block` builds; `float()` and
+`int()` with their underscores and the spaces they trim; `str.isdigit()`
+taking the superscripts `int()` then refuses; localisation decoded as
+Windows-1252 with its five undefined bytes, split by `splitlines()`; the
+repr Python keeps when a block sits where a name belongs; dict order.
+
+It is held to the Python as text: `vic2scan mod-export FOLDER` against
+`json.dumps(export_mod(load_mod(FOLDER)))` (`testkit/modexport.py`, which is
+the old `engine.export_mod`). Identical on the real mod, the game read as
+vanilla and the Downloads copy of the mod. `testkit/modread.py` runs the
+patterns against `re`, a world written to be awkward and 300 damaged copies
+of it; outside the suite, 1,500 damaged copies of that world and 480 of the
+real game and mod (copied into a scratch folder, never linked) found no
+difference, and every folder Python raised over was handed back. The
+matcher met 866,000 random cases against `re` with none different.
+
+| 265 saves | before (`7ec68d4`) | after | rounds |
+|---|---:|---:|---|
+| truly cold | 5.18 s (4.78-5.19) | **5.10 s** (5.10-5.11) | 3 |
+| rebuild from a warm cache | 1.46 s (1.45-1.47) | **1.42 s** (1.41-1.42) | 3 |
+
+Reading this mod: Python 0.43-0.63 s, the engine 0.09-0.11 s. What little
+the run gains is Python no longer writing the mod out and the engine no
+longer waiting for it; the larger gain is for later, when Python leaves the
+run altogether.
+
+Dead end: reading the mod on every run with no copy kept. The warm rebuild
+went from 1.43 s to 1.52: the mod thread, reading a tenth of a second of
+mod and then the bitmap with sixteen scanning threads beside it, finished
+130 ms after the saves. Kept under Python's signature, it arrives first.
+
+A mistake, caught: the first run of the pattern comparison passed on
+nothing. `cargo` was not on that shell's path, so the build printed one
+line that the filter on its output hid, the old binary did not know the
+self-test, and the harness paired its one empty line of output with the
+first of 111,000 cases. The harness and `modread.py` now require an answer
+for every case.
+
 ### The report is built in Rust, 2026-09-29
 
 Everything a run does once the mod is read is now done by the scanner's
@@ -524,7 +582,8 @@ How the two meet:
   are the only copies and an edit reaches the engine without a rebuild.
 - **The mod** (`engine.export_mod`): its rules, names and the map's and
   the flags' inputs as JSON, handed over on the engine's stdin while it is
-  already reading the saves (an uncached mod takes most of a second).
+  already reading the saves (an uncached mod takes most of a second). Since
+  replaced: the engine reads the folder itself (the entry above).
 - **Lines back**: `@progress`, `@ready` when report.html is on disk (the
   tables are still being written), `@done` with any table it could not
   write; everything else is printed as the Python would have printed it.

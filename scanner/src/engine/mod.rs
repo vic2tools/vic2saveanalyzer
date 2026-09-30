@@ -13,9 +13,8 @@
 //
 // SPEC is what `engine.spec` writes: the saves in report order, how each is
 // read, how each nation is finished, and where the report goes. The mod
-// comes as a second JSON file (`engine.export_mod`): named in the spec as
-// `mod_file`, or, while Python is still reading it, as one line on stdin
-// once it is written -- the saves are read in the meantime.
+// folder is named there too (`mod_path`), and read here (`modread`) on a
+// thread of its own while the saves are.
 //
 // Every save is read on every core (`prepare`, pass one), the campaign's
 // inventions are settled, every save is finished (`finish`, pass two), and
@@ -32,6 +31,7 @@ pub mod finish;
 pub mod mapflags;
 pub mod market;
 pub mod model;
+pub mod modread;
 pub mod report;
 pub mod rules;
 pub mod tables;
@@ -45,7 +45,7 @@ use crate::pickle::{FxMap, FxSet};
 use crate::province::{read_province, top_level_blocks, Interner, PopulationRules, Scan};
 use rules::{Decline, Mod};
 use crate::text::{latin1, tag_bytes, to_int_b, trim_b, unquote_b};
-use std::io::{BufRead, Read, Write};
+use std::io::{Read, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 
@@ -89,6 +89,12 @@ pub struct Run {
     pub quiet: bool,
     pub jobs: Option<i64>,
     pub cross: Option<String>,
+    /// The mod folder, read here (`modread`); or, for the checks that hand
+    /// the engine a mod Python read, `mod_file`, that mod as JSON.
+    pub mod_path: Option<String>,
+    /// `mod_reader.mod_signature` of it, which keys the read kept for the
+    /// next run; None when Python did not work it out.
+    pub mod_signature: Option<String>,
     pub mod_file: Option<String>,
     pub tech_lines: J,
     pub tables: tables::Tables,
@@ -179,6 +185,8 @@ fn parse_run(j: &J) -> Run {
         quiet: j.at("quiet").truthy(),
         jobs: if j.at("jobs").is_null() { None } else { Some(j.at("jobs").int()) },
         cross: j.at("cross").as_str().map(|s| s.to_string()),
+        mod_path: j.at("mod_path").as_str().map(|s| s.to_string()),
+        mod_signature: j.at("mod_signature").as_str().map(|s| s.to_string()),
         mod_file: j.at("mod_file").as_str().map(|s| s.to_string()),
         tech_lines: j.at("tech_lines").clone(),
         tables,
@@ -499,23 +507,48 @@ fn decline(why: &str) -> ! {
     std::process::exit(DECLINED);
 }
 
-/// The mod, from the spec's `mod_file` or from the path Python sends on
-/// stdin once it has written it.
-fn load_mod(mod_file: &Option<String>) -> Mod {
-    let path = match mod_file {
-        Some(p) => p.clone(),
-        None => {
-            let mut line = String::new();
-            if std::io::stdin().lock().read_line(&mut line).is_err() || line.trim().is_empty() {
-                decline("no mod was handed over");
-            }
-            line.trim_end_matches(['\n', '\r']).to_string()
+/// The mod: read from its folder -- or from what the last run kept of the
+/// same files -- or from the JSON a check wrote of the one Python read.
+fn load_mod(mod_path: &Option<String>, signature: &Option<String>, mod_file: &Option<String>,
+            store: &cache::Store) -> Mod {
+    let j = match (mod_path, mod_file) {
+        (_, Some(file)) => {
+            let text = std::fs::read_to_string(file)
+                .unwrap_or_else(|e| decline(&format!("cannot read the mod export {}: {}", file, e)));
+            jsonr::parse(&text).unwrap_or_else(|e| decline(&format!("mod export: {}", e)))
         }
+        (Some(path), None) => {
+            let slot = cache::mod_slot(store, path, signature.as_deref());
+            match slot.as_ref().and_then(cache::mod_load) {
+                Some(j) => j,
+                None => {
+                    let j = read_mod(path);
+                    if let Some(slot) = &slot {
+                        cache::mod_store(slot, &j);
+                    }
+                    j
+                }
+            }
+        }
+        (None, None) => decline("no mod was named"),
     };
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| decline(&format!("cannot read the mod export {}: {}", path, e)));
-    let j = jsonr::parse(&text).unwrap_or_else(|e| decline(&format!("mod export: {}", e)));
     Mod::from_json(&j).unwrap_or_else(|Decline(why)| decline(&why))
+}
+
+/// The mod folder read (`modread`), or the run handed back.
+fn read_mod(path: &str) -> J {
+    // Its patterns go a frame deeper for each way a step of a repeat
+    // could end; a stack of its own gives them room.
+    let path = path.to_string();
+    let got = std::thread::Builder::new().stack_size(256 << 20)
+        .spawn(move || modread::export(&path))
+        .unwrap_or_else(|e| decline(&format!("cannot start the mod reader: {}", e)))
+        .join();
+    match got {
+        Ok(Ok(j)) => j,
+        Ok(Err(Decline(why))) => decline(&format!("the mod: {}", why)),
+        Err(_) => decline("the mod reader stopped"),
+    }
 }
 
 /// `vic2scan bench-engine SPEC N`: the first N saves read one at a time,
@@ -626,9 +659,11 @@ pub fn main(args: &[String]) {
     // while the saves are: the mod arrives while they are being read, and
     // the bitmap is twelve million pixels nothing else needs until the page.
     let mod_job = {
-        let (mod_file, scale, want_map) = (run.mod_file.clone(), run.map_scale, !run.no_html);
+        let (mod_path, mod_file) = (run.mod_path.clone(), run.mod_file.clone());
+        let (signature, store) = (run.mod_signature.clone(), run.store.clone());
+        let (scale, want_map) = (run.map_scale, !run.no_html);
         std::thread::spawn(move || {
-            let mut m = load_mod(&mod_file);
+            let mut m = load_mod(&mod_path, &signature, &mod_file, &store);
             if want_map {
                 m.raster = Some(crate::engine::mapflags::province_raster(&m.map_bmp, &m.map_csv, scale));
             }

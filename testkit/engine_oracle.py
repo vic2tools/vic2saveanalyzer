@@ -12,6 +12,7 @@ sys.path.insert(0, TREE)
 os.chdir(TREE)
 import vic2_analyzer as va
 import engine
+import modexport
 import spending
 
 def main():
@@ -87,7 +88,7 @@ def main():
     s["mod_file"] = os.path.join(out, "mod.json")
     s["out"] = os.path.join(out, "rust_report")
     json.dump(s, open(os.path.join(out, "spec.json"), "w"), separators=(",", ":"))
-    json.dump(engine.export_mod(mod), open(os.path.join(out, "mod.json"), "w"), separators=(",", ":"))
+    json.dump(modexport.export_mod(mod), open(os.path.join(out, "mod.json"), "w"), separators=(",", ":"))
     print("saves:", len(items))
 
 

@@ -30,6 +30,7 @@ mod omap;
 mod pickle;
 mod province;
 mod pyfmt;
+mod pyre;
 mod record;
 mod text;
 
@@ -124,6 +125,14 @@ fn main() {
     }
     if args[1] == "report" {
         engine::main(&args);
+        return;
+    }
+    if args[1] == "mod-export" && args.len() == 3 {
+        engine::modread::main(&args);
+        return;
+    }
+    if args[1] == "selftest-re" {
+        pyre::selftest();
         return;
     }
     if args[1] == "selftest-deflate" && args.len() == 4 {

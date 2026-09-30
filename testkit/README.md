@@ -48,10 +48,21 @@ python3 testkit/mobrate.py                       # no saves needed
 python3 testkit/crossrows.py                     # no saves needed
 python3 testkit/record.py                        # no saves needed
 python3 testkit/caching.py                       # no saves needed
+python3 testkit/modread.py [--mod "/path/to/mod"] # no saves needed
 python3 testkit/window.py "/path/to/saves"
 python3 testkit/spawned.py "/path/to/saves"
 python3 testkit/smoke.py "/path/to/saves" --mod "/path/to/mod"
 ```
+
+**`modread.py`** holds the report engine's mod reader
+(`scanner/src/engine/modread.rs`) to `mod_reader.py`: what the Rust makes
+of a folder must be, as JSON text, what `modexport.export_mod` makes of
+Python's `Mod`, and a folder Python raises over must be one the Rust
+declines. It runs the reader's regular expressions against Python's `re`,
+reads a world written to be awkward (a mod over a game, names differing
+only in case, Windows-1252 localisation with its gaps, a block where a
+name belongs, `1_000`), then that world damaged at random a few hundred
+times, and the real mod when `--mod` names one.
 
 **`savefmt.py`** writes save-shaped text, and is the only place in here
 that knows the format. The tab depth *is* the format — both the reader and

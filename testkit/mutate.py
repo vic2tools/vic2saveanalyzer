@@ -15,6 +15,10 @@ It edits the tree it is pointed at and reverts with `git checkout` between
 mutations, so **point it at a worktree, never at the tree you are working
 in**. It refuses to run anywhere that has uncommitted changes.
 
+A bug put back in `scanner/` is built before its check runs (`cargo build
+--release` in the tree), and the scanner as committed is copied back after,
+so the next mutation starts from it.
+
 Copy the scanner in first. A fresh worktree has no `scanner/target/`, so
 every save is read in Python -- four times slower, and `parity.py` has
 nothing to compare against.
@@ -30,6 +34,7 @@ whether it would fail on the code it is supposed to reject.
 """
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 
@@ -42,6 +47,21 @@ SAVES = ""
 
 def revert():
     subprocess.run(["git", "checkout", "--", "."], cwd=TREE, check=True)
+
+
+def scanner_touched():
+    """Whether the mutation put back is in the Rust, which must be rebuilt."""
+    out = subprocess.run(["git", "diff", "--name-only"], cwd=TREE,
+                         capture_output=True, text=True).stdout
+    return any(line.startswith("scanner/") for line in out.splitlines())
+
+
+def build_scanner():
+    """Build the tree's scanner. Returns (built, what cargo said)."""
+    cargo = shutil.which("cargo") or os.path.expanduser("~/.cargo/bin/cargo")
+    done = subprocess.run([cargo, "build", "--release"], cwd=os.path.join(TREE, "scanner"),
+                          capture_output=True, text=True)
+    return done.returncode == 0, done.stderr[-2000:]
 
 
 def patch(path, old, new, count=1):
@@ -809,6 +829,80 @@ def m70():
     patch("engine.py", "                os.remove(path)", "                pass")
 
 
+# ---- the engine's mod reader, which is Rust held to mod_reader.py
+
+@mutation("modread-ascii-words",
+          "the pattern matcher's \\w takes ASCII only, where Python's takes the "
+          "latin-1 letters too", "modread.py", ("--rounds", "40"))
+def m71():
+    patch("scanner/src/pyre.rs",
+          "        | 0xb9 | 0xba | 0xbc..=0xbe | 0xc0..=0xd6 | 0xd8..=0xf6 | 0xf8..=0xff)",
+          "        | 0xb9 | 0xba | 0xbc..=0xbe)")
+
+
+@mutation("modread-lazy-is-greedy",
+          "a lazy repeat is tried longest first", "modread.py", ("--rounds", "40"))
+def m72():
+    patch("scanner/src/pyre.rs", "                            for c in *min..=run {",
+          "                            for c in (*min..=run).rev() {")
+
+
+@mutation("modread-file-case-counted-twice",
+          "the Rust reads a mod's Army_Tech.txt beside the game's army_tech.txt",
+          "modread.py", ("--rounds", "40"))
+def m73():
+    patch("scanner/src/engine/modread.rs",
+          "                chosen.set(lower(&name), (name, full));",
+          "                chosen.set(name.clone(), (name, full));")
+
+
+@mutation("modread-no-underscores",
+          "the Rust's float() refuses 1_000, which Python reads as a thousand",
+          "modread.py", ("--rounds", "40"))
+def m74():
+    patch("scanner/src/engine/modread.rs",
+          "    let t = no_underscores(num_trim(s))?;",
+          "    let t = num_trim(s).to_vec();")
+
+
+@mutation("modread-block-name-empty",
+          "a block where a flag type belongs reads as nothing, where Python "
+          "keeps its repr", "modread.py", ("--rounds", "40"))
+def m75():
+    patch("scanner/src/engine/modread.rs",
+          "                Some(v) => unquote(unquote(&str_of(v))).to_vec(),",
+          "                Some(V::Str(v)) => unquote(v).to_vec(),\n"
+          "                Some(_) => Vec::new(),")
+
+
+@mutation("modread-ellipsis-is-space",
+          "the localisation's 0x85 is stripped as a space, where Windows-1252 "
+          "makes it an ellipsis", "modread.py", ("--rounds", "40"))
+def m76():
+    patch("scanner/src/engine/modread.rs",
+          "    let sp = |c: u8| matches!(c, 0x09..=0x0d | 0x1c..=0x20 | 0xa0);",
+          "    let sp = |c: u8| matches!(c, 0x09..=0x0d | 0x1c..=0x20 | 0x85 | 0xa0);")
+
+
+@mutation("modread-last-name-wins",
+          "a name defined twice in the localisation takes the later one",
+          "modread.py", ("--rounds", "40"))
+def m77():
+    patch("scanner/src/engine/modread.rs",
+          "            if wanted.contains(&l.key) && !out.contains_key(&l.key) {",
+          "            if wanted.contains(&l.key) {")
+
+
+@mutation("modread-kept-copy-unsigned",
+          "the engine keeps its read of a mod without the mod's signature in "
+          "the key, so an edited mod is served from the old read",
+          "modread.py", ("--rounds", "1"))
+def m78():
+    patch("scanner/src/engine/cache.rs",
+          '    let key = format!("mod|{}|{}|{}", path, signature, store.version);',
+          '    let key = format!("mod|{}|{}|{}", path, signature.len() * 0, store.version);')
+
+
 def main():
     global TREE, SAVES
     ap = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])
@@ -832,6 +926,12 @@ def main():
         print("note: no scanner in %s, so parity.py compares Python with "
               "Python. Copy scanner/target/release/vic2scan in first.\n" % TREE)
     chosen = [m for m in MUTATIONS if not args.names or m[0] in args.names]
+    # The scanner as committed, to put back after each bug put into it.
+    binary = os.path.join(TREE, "scanner/target/release/vic2scan")
+    pristine = binary + ".pristine"
+    if os.path.exists(binary):
+        shutil.copyfile(binary, pristine)
+        shutil.copymode(binary, pristine)
 
     # Every check first runs on the tree with no bug in it, and has to pass.
     # A check that fails anyway fails for some reason of its own, and then
@@ -868,10 +968,24 @@ def main():
             print("%-34s %-10s %s" % (name, "NOAPPLY", e))
             results.append((name, "NOAPPLY", bug, catcher, ""))
             continue
+        # A bug put back in the Rust is only there once it is built, and
+        # the scanner the other checks use is put back after.
+        rust = scanner_touched()
+        if rust:
+            built, said = build_scanner()
+            if not built:
+                print("%-34s %-10s %s" % (name, "NOAPPLY", "does not build:\n" + said))
+                results.append((name, "NOAPPLY", bug, catcher, ""))
+                revert()
+                shutil.copyfile(pristine, binary)
+                continue
         try:
             passed, out = check(catcher, argv_for(extra))
         except subprocess.TimeoutExpired:
             passed, out = True, "TIMEOUT"
+        if rust:
+            revert()
+            shutil.copyfile(pristine, binary)
         verdict = "BLIND" if passed else "caught"
         print("%-34s %-10s %s  [%s]" % (name, verdict, bug, catcher))
         results.append((name, verdict, bug, catcher, out))

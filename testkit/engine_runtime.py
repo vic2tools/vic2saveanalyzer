@@ -68,13 +68,12 @@ class EngineRuntime(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(quiet=True)
             with patch("engine.spec", return_value={}), \
-                 patch("engine.export_mod", return_value={}), \
                  patch("engine.tempfile.gettempdir", return_value=tmp), \
                  patch("fastscan.available", return_value="fake-scanner"), \
                  patch("engine.subprocess.Popen", side_effect=launch):
                 with self.assertRaises(Stopped):
                     engine.run_report(args, [], SimpleNamespace(pop_types=[]),
-                                      None, None, {}, None, lambda *a: None,
+                                      None, None, "/no/mod", None, None, lambda *a: None,
                                       lambda *a: None, stop)
             self.assertEqual(len(children), 1)
             self.assertIsNotNone(children[0].returncode)

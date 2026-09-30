@@ -388,6 +388,7 @@ keep_struct!(Pre { meta, nations, chunk, held });
 
 /// Where the entries live, what version of the program made them, and
 /// whether this run may use them.
+#[derive(Clone)]
 pub struct Store {
     pub dir: String,
     pub version: String,
@@ -396,13 +397,17 @@ pub struct Store {
 
 /// A 128-bit name for a key: two independent 64-bit hashes, in hex.
 fn name_of(key: &str) -> String {
+    format!("engine_{}.pkl", hash_of(key))
+}
+
+fn hash_of(key: &str) -> String {
     let mut a: u64 = 0xcbf2_9ce4_8422_2325;
     let mut b: u64 = 0x8422_2325_cbf2_9ce4;
     for &c in key.as_bytes() {
         a = (a ^ c as u64).wrapping_mul(0x0000_0100_0000_01b3);
         b = (b.rotate_left(5) ^ c as u64).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
     }
-    format!("engine_{:016x}{:016x}.pkl", a, b)
+    format!("{:016x}{:016x}", a, b)
 }
 
 impl Store {
@@ -451,5 +456,55 @@ impl Store {
         if written.is_err() || std::fs::rename(&temporary, &slot.0).is_err() {
             let _ = std::fs::remove_file(&temporary);
         }
+    }
+}
+
+// ------------------------------------------------------------- the mod
+
+const MOD_MAGIC: &[u8] = b"V2ENGM01";
+
+/// Where the mod read from `path` is kept, when Python has signed its files
+/// (`mod_reader.mod_signature`, which it takes for the stamp anyway): keyed
+/// by the folder, every file's size and time, and this program's version.
+/// Kept whatever `--no-cache` says, as Python keeps its own read of a mod.
+pub fn mod_slot(store: &Store, path: &str, signature: Option<&str>) -> Option<(String, String)> {
+    let signature = signature?;
+    if store.dir.is_empty() || store.version.is_empty() {
+        return None;
+    }
+    let key = format!("mod|{}|{}|{}", path, signature, store.version);
+    let file = std::path::Path::new(&store.dir).join(format!("enginemod_{}.pkl", hash_of(&key)));
+    Some((file.to_string_lossy().to_string(), key))
+}
+
+/// The mod as it was read, or None: missing, from another key, or damaged.
+pub fn mod_load(slot: &(String, String)) -> Option<crate::jsonr::J> {
+    let raw = std::fs::read(&slot.0).ok()?;
+    let body = raw.strip_prefix(MOD_MAGIC)?;
+    let n = u32::from_le_bytes(body.get(..4)?.try_into().ok()?) as usize;
+    let key = body.get(4..4 + n)?;
+    if key != slot.1.as_bytes() {
+        return None;
+    }
+    let text = std::str::from_utf8(&body[4 + n..]).ok()?;
+    crate::jsonr::parse(text).ok()
+}
+
+/// Keep the mod as it was read. A failure costs the next run the read.
+pub fn mod_store(slot: &(String, String), mod_json: &crate::jsonr::J) {
+    let mut text = String::new();
+    mod_json.write(&mut text);
+    let mut out = MOD_MAGIC.to_vec();
+    out.extend_from_slice(&(slot.1.len() as u32).to_le_bytes());
+    out.extend_from_slice(slot.1.as_bytes());
+    out.extend_from_slice(text.as_bytes());
+    if let Some(dir) = std::path::Path::new(&slot.0).parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let temporary = format!("{}.{}.tmp", slot.0, std::process::id());
+    let written = std::fs::File::create(&temporary)
+        .and_then(|mut f| f.write_all(&out).and_then(|_| f.flush()));
+    if written.is_err() || std::fs::rename(&temporary, &slot.0).is_err() {
+        let _ = std::fs::remove_file(&temporary);
     }
 }

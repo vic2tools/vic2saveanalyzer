@@ -87,6 +87,9 @@ def main():
         ("matching a campaign to its mod", [os.path.join(KIT, "matching.py")]),
         ("mod reading and caching", [os.path.join(KIT, "modcache.py")]),
         ("the engine process and test fixtures", [os.path.join(KIT, "engine_runtime.py")]),
+        ("the engine's mod reader against the Python",
+         [os.path.join(KIT, "modread.py"), "--rounds", "300"]
+         + (["--mod", args.mod] if args.mod else [])),
         ("the engine's number formatting", [os.path.join(KIT, "enginefmt.py"),
          os.path.join(HERE, "scanner", "target", "release", "vic2scan" + (".exe" if os.name == "nt" else "")), "20000"]),
         ("the engine's compression", [os.path.join(KIT, "enginecompress.py"),

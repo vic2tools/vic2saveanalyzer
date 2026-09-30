@@ -489,6 +489,25 @@ def _open_mod(args, signature):
         raise RunError(str(exc)) from exc
 
 
+def _mod_head(args):
+    """
+    What reading a save needs of the mod (`mod_reader.ModHead`), for a run
+    the engine makes, which reads the rest of the mod itself; `NO_MOD` with
+    no mod asked for. A folder with nothing to read is refused here, in
+    the words `load_mod` gives, as `_open_mod` refuses it.
+    """
+    from mod_reader import NO_MOD, has_rules, load_mod, mod_head
+    if not args.mod_path:
+        return NO_MOD
+    try:
+        if has_rules(args.mod_path):
+            return mod_head(args.mod_path)
+        # Nothing it could be read from, so this refuses it in those words.
+        return load_mod(args.mod_path)
+    except (OSError, ValueError) as exc:
+        raise RunError(str(exc)) from exc
+
+
 def _on_the_game(args):
     """
     (the run with its mod settled on an installed Victoria II, a line saying
@@ -776,8 +795,15 @@ def _main(run=None):
     if not use_engine:
         start_forkserver()
 
-    mod, known, loading = _open_mod(args, signature)
-    use_engine = use_engine and bool(known)
+    # The engine reads the mod itself, beside the saves, and all a save
+    # needs of it here is the head. A run the engine hands back reads the
+    # rest then (`_open_mod`, below the engine's block).
+    mod = loading = None
+    if use_engine:
+        known = _mod_head(args)
+        use_engine = bool(known)
+    if not use_engine:
+        mod, known, loading = _open_mod(args, signature)
     map_ahead = None if use_engine else _map_ahead(args)
     # The run as the mod settles it, because the rest of a single-campaign
     # run reads these two off it -- the finishing spec, the reading below,
@@ -839,21 +865,24 @@ def _main(run=None):
 
     if use_engine:
         # Everything from here to the last table, in the engine. It reads
-        # the saves while the mod finishes loading, and hands the run back
-        # -- before writing anything -- when it meets what only this
-        # program reads, and then the run goes on below as it always did.
+        # the mod and the saves at once, and hands the run back -- before
+        # writing anything -- when it meets what only this program reads,
+        # and then the run goes on below as it always did, with the mod
+        # read here.
         forget_stamp(args.out)
+        from mod_reader import _mod_root
         got = engine.run_report(
             args, files, reading, finishing.finish_spec(args, known, None, wanted),
-            known, mod if mod is not None else loading, cross_payload,
+            known, _mod_root(args.mod_path), signature, cross_payload,
             tell_progress, _tell_report_ready, stop_if_asked)
         if got is not None:
-            html_path, refused, _loaded = got
+            html_path, refused = got
             if html_path and not refused:
                 write_stamp(args.out, stamp)
             if refused:
                 raise RunError(_refused_message(refused, html_path))
             return
+        mod, _known, loading = _open_mod(args, signature)
 
     live = None
     if known:
