@@ -559,7 +559,7 @@ fn flags_for(m: &Mod, parsed: &[Kept1], book: &Book) -> (String, String) {
     (gp, fj)
 }
 
-fn growth_series(readings: &[(&str, Option<f64>)], span: f64) -> OMap<String, f64> {
+pub fn growth_series(readings: &[(&str, Option<f64>)], span: f64) -> OMap<String, f64> {
     let mut out = OMap::new();
     let mut anchor: Option<(&str, f64)> = None;
     for &(date, value) in readings {
@@ -581,7 +581,7 @@ fn growth_series(readings: &[(&str, Option<f64>)], span: f64) -> OMap<String, f6
     out
 }
 
-fn gain_series(readings: &[(&str, Option<f64>)]) -> OMap<String, f64> {
+pub fn gain_series(readings: &[(&str, Option<f64>)]) -> OMap<String, f64> {
     let mut out = OMap::new();
     let mut last: Option<f64> = None;
     for &(date, value) in readings {
@@ -900,6 +900,17 @@ pub struct Outcome {
     /// The run refused, in the sentence Python raises: every save refused,
     /// a mod Python cannot read.
     pub run_error: Option<String>,
+    /// One campaign of a `--cross` run, read for the comparison.
+    pub cross_part: Option<CrossPart>,
+}
+
+/// What `run_cross` keeps of one campaign: its finished rows as (date, the
+/// nation's key, each metric's value), and the names its nations go by.
+pub struct CrossPart {
+    pub rows: Vec<(String, String, Vec<Option<f64>>)>,
+    /// (tag, name) where the mod's localisation names a nation other than
+    /// by its tag, in the order the saves give them.
+    pub names: Vec<(String, String)>,
 }
 
 pub fn run(run: &Run, m: &Mod, live: &FxSet<String>, spent: Vec<Spent>) -> Outcome {
@@ -933,7 +944,7 @@ pub fn run(run: &Run, m: &Mod, live: &FxSet<String>, spent: Vec<Spent>) -> Outco
     say(&format!("@done html={} refused={}", html_path.is_some() as i32,
                  refused.iter().map(|p| crate::engine::basename(p).to_string())
                      .collect::<Vec<_>>().join("\t")));
-    Outcome { html: html_path, refused, run_error: None }
+    Outcome { html: html_path, refused, run_error: None, cross_part: None }
 }
 
 /// `build_html` and `build_report`: the page, written; its path.

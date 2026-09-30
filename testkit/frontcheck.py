@@ -21,6 +21,7 @@ relative path, the settings that change the spec, a table open elsewhere,
 """
 
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -87,11 +88,49 @@ def reflow(data, rnd, how):
     return b"".join(out)
 
 
+def cross_world(holding):
+    """
+    A game with two mods a letter apart and campaigns that test the survey:
+    one only the second fits, one both fit, one nothing fits, two folders
+    of one name, one too deep to count, and a save whose event flags say
+    it came from another game. (the game, the folder of campaigns)
+    """
+    tags8 = ["ENG", "FRA", "PRU", "RUS", "AUS", "TUR", "SPA", "USA"]
+    game = matching.a_game(os.path.join(holding, "xgame"))
+    matching.a_mod(os.path.join(game, "mod", "Alpha"), tags=tags8, provinces=range(1, 41))
+    matching.a_mod(os.path.join(game, "mod", "Beta"), tags=tags8 + ["NEW"], provinces=range(1, 41))
+    top = os.path.join(holding, "xcampaigns")
+
+    def campaign(rel, tags, dates, flags=None):
+        folder = os.path.join(top, *rel.split("/"))
+        os.makedirs(folder, exist_ok=True)
+        for i, date in enumerate(dates):
+            parts = [savefmt.head(date, player=tags[0], flags=flags[i] if flags else ())]
+            for pid in range(1, 41):
+                parts.append(savefmt.province(pid, tags[(pid - 1) % len(tags)],
+                                              [savefmt.pop("farmers", pid, 1000 + pid * 7 + i)]))
+            for k, tag in enumerate(tags):
+                parts.append(savefmt.country(tag, techs=["flintlock_rifles"], inventions=[1],
+                                             capital=k + 1))
+            savefmt.write(os.path.join(folder, "s%d.v2" % i), *parts)
+
+    campaign("onlybeta", ["ENG", "FRA", "NEW"], ["1880.1.1", "1881.1.1", "1882.1.1"])
+    campaign("both", ["ENG", "FRA"], ["1880.1.1", "1880.7.1", "1881.1.1", "1881.7.1"],
+             flags=[["f%d" % k for k in range(8)]] + [["g%d" % k for k in range(8)]] * 3)
+    campaign("none", ["ZZZ", "ENG"], ["1880.1.1", "1881.1.1"])
+    campaign("a/run", ["ENG", "PRU"], ["1885.1.1", "1886.1.1"])
+    campaign("b/run", ["PRU", "RUS"], ["1885.1.1"])
+    campaign("d1/d2/d3/d4/d5/d6/deep", ["ENG"], ["1890.1.1"])
+    return game, top
+
+
 def run(argv, cwd, env, out):
     """(status, stdout, stderr) of one run, the out folder's path made OUT."""
     done = subprocess.run([sys.executable, os.path.join(HERE, "vic2_analyzer.py")] + argv,
                           capture_output=True, text=True, cwd=cwd, env=env, timeout=300)
-    clean = lambda t: t.replace(out, "OUT")
+    # The core count follows the memory free that moment, by the same rule
+    # both ways, so it is not compared.
+    clean = lambda t: re.sub(r"(save\(s\) on )\d+( cores)", r"\1N\2", t.replace(out, "OUT"))
     return done.returncode, clean(done.stdout), clean(done.stderr)
 
 
@@ -210,6 +249,8 @@ def main():
         away = os.path.join(holding, "elsewhere", "mod", "Away")
         shutil.copytree(mod, away)
 
+        xgame, xtop = cross_world(holding)
+        X = [xtop, "--cross", "--game-root", xgame]
         M = ["--mod-path", mod]
         cases = [
             ("a report", [saves] + M, None),
@@ -268,6 +309,19 @@ def main():
             ("the inventions a nation holds", [saves, "--inventions", "FRA"] + M, None),
             ("the invention decode checked", [saves, "--check-inventions"] + M, None),
             ("a diagnostic among saves it refuses", [mixed, "--explain-mob", "PRU"] + M, None),
+            ("campaigns compared", X, None),
+            ("campaigns compared, quiet", X + ["-q"], None),
+            ("campaigns compared, one named primary", X + ["--primary", "BOTH"], None),
+            ("campaigns compared, a primary not there", X + ["--primary", "nope"], None),
+            ("campaigns compared under one mod",
+             [xtop, "--cross", "--mod-path", os.path.join(xgame, "mod", "Beta")], None),
+            ("campaigns compared, one named",
+             X + ["--campaign-mod", "none=" + os.path.join(xgame, "mod", "Beta")], None),
+            ("campaigns compared, one named wrongly",
+             X + ["--campaign-mod", "none=" + holding], None),
+            ("campaigns compared, no game named", [xtop, "--cross"], None),
+            ("campaigns compared, again", X, "again"),
+            ("campaigns compared, a diagnostic", X + ["--explain-mob", "ENG"], None),
             ("a diagnostic of a nation not there", [saves, "--explain-mob", "XXX"] + M, None),
             ("two diagnostics at once",
              [saves, "--explain-mob", "ENG", "--inventions", "FRA"] + M, None),
@@ -281,6 +335,15 @@ def main():
             ("verified among files Python refuses", [mixed, "--verify"] + M, "handed back"),
         ]
         bad = 0
+        temps = []
+        # What --cross reads a save for, found by hand-written scanners, held
+        # to the patterns they stand for on the saves here and on random text.
+        sniffed = subprocess.run([BIN, "selftest-sniff"] + sorted(
+            os.path.join(r, f) for r, _d, fs in os.walk(xtop) for f in fs) + [full],
+            capture_output=True, text=True)
+        print(sniffed.stdout.strip())
+        if sniffed.returncode:
+            bad += 1
         # The mod's signature, which keys the engine's copy of the mod and
         # goes into the stamp: Python's MD5 over the same walk.
         import mod_reader
@@ -302,8 +365,10 @@ def main():
                 env.pop("VIC2_ENGINE_REQUIRED", None)
                 env["VIC2FRONT"] = holding
                 env["HOME"] = holding
-                env["TMPDIR"] = os.path.join(place, "tmp")
-                os.makedirs(env["TMPDIR"])
+                # Short: Python's worker pool opens a socket in it, and a path
+                # past 108 bytes makes it read one save at a time instead.
+                env["TMPDIR"] = tempfile.mkdtemp(prefix="vf", dir="/tmp" if os.name != "nt" else None)
+                temps.append(env["TMPDIR"])
                 log = os.path.join(place, "front.log")
                 env.pop("VIC2_NO_FRONT", None)
                 if way == "python":
@@ -333,6 +398,10 @@ def main():
                     with open(log) as fh:
                         got["log"] = fh.read().strip().splitlines()[-1:]
             (rs, rfiles), (py, pfiles) = got["rust"], got["python"]
+            if how == "handed back" and "Traceback" in py[2]:
+                # Python's own crash, both ways: its traceback carries line
+                # numbers inside the worker pool that depend on timing.
+                rs, py = rs[:2], py[:2]
             same = rs == py and rfiles == pfiles
             # A case the Rust handed back compares the Python with itself.
             # A refusal is written for Python to raise (status 4), which
@@ -360,6 +429,8 @@ def main():
         print("\n%d of %d cases differ" % (bad, len(cases)))
         return 1 if bad else 0
     finally:
+        for t in locals().get("temps", ()):
+            shutil.rmtree(t, ignore_errors=True)
         try:
             os.chmod(locked_save, stat.S_IREAD | stat.S_IWRITE)
         except (OSError, NameError):

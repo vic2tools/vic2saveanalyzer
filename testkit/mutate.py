@@ -970,6 +970,22 @@ def m83():
           '                        let colonial = false;')
 
 
+@mutation("cross-last-fit-wins",
+          "of the mods that fit a campaign, the one it leaves most unused wins",
+          "frontcheck.py")
+def m84():
+    patch("scanner/src/front/cross.rs",
+          "    fits.sort_by(|a, b| a.partial_cmp(b).unwrap());\n    let (_r, label, root) = fits.remove(0);",
+          "    fits.sort_by(|a, b| a.partial_cmp(b).unwrap());\n    let (_r, label, root) = fits.pop().unwrap();")
+
+
+@mutation("cross-flags-never-break",
+          "a save from another game is never named, however many event flags it lacks",
+          "frontcheck.py")
+def m85():
+    patch("scanner/src/front/cross.rs", "        if worst >= 6 {", "        if worst >= 600 {")
+
+
 def main():
     global TREE, SAVES
     ap = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])

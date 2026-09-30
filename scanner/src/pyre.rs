@@ -55,6 +55,7 @@ pub struct Re {
     multiline: bool,
     /// The characters a match can begin with, when that is known.
     first: Option<Box<Set>>,
+    ascii: bool,
 }
 
 pub struct Match {
@@ -84,6 +85,8 @@ impl Match {
 const NONE: (usize, usize) = (usize::MAX, usize::MAX);
 
 struct Parser<'p> {
+    /// A bytes pattern's classes: `\s`, `\w`, `\d` and `\b` ASCII only.
+    ascii: bool,
     p: &'p [u8],
     i: usize,
     groups: usize,
@@ -196,7 +199,7 @@ impl<'p> Parser<'p> {
                     b'b' => Node::WordB,
                     b'B' => Node::NotWordB,
                     b'Z' => Node::EndZ,
-                    _ => Node::Set(Box::new(escape_set(e))),
+                    _ => Node::Set(Box::new(escape_set(e, self.ascii))),
                 }
             }
             _ => Node::Set(Box::new(one(c))),
@@ -221,7 +224,7 @@ impl<'p> Parser<'p> {
             if c == b'\\' {
                 let e = self.peek().unwrap();
                 self.i += 1;
-                let set = escape_set(e);
+                let set = escape_set(e, self.ascii);
                 for (k, v) in set.iter().enumerate() {
                     s[k] |= *v;
                 }
@@ -252,7 +255,17 @@ fn one(c: u8) -> Set {
     s
 }
 
-fn escape_set(e: u8) -> Set {
+/// `\s` of a bytes pattern: ASCII whitespace.
+fn ascii_space(c: u8) -> bool {
+    matches!(c, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
+}
+
+/// `\w` of a bytes pattern.
+fn ascii_word(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_'
+}
+
+fn escape_set(e: u8, ascii: bool) -> Set {
     let mut s = [false; 256];
     let by = |f: fn(u8) -> bool, neg: bool| {
         let mut s = [false; 256];
@@ -262,10 +275,10 @@ fn escape_set(e: u8) -> Set {
         s
     };
     match e {
-        b's' => by(space, false),
-        b'S' => by(space, true),
-        b'w' => by(word, false),
-        b'W' => by(word, true),
+        b's' => by(if ascii { ascii_space } else { space }, false),
+        b'S' => by(if ascii { ascii_space } else { space }, true),
+        b'w' => by(if ascii { ascii_word } else { word }, false),
+        b'W' => by(if ascii { ascii_word } else { word }, true),
         b'd' => by(|c| c.is_ascii_digit(), false),
         b'D' => by(|c| c.is_ascii_digit(), true),
         b'n' => one(b'\n'),
@@ -315,11 +328,20 @@ impl Re {
     /// A pattern with a name from a mod's files in it, whose characters are
     /// latin-1 bytes like the text's.
     pub fn bytes(pattern: &[u8], multiline: bool, dotall: bool) -> Re {
-        let mut p = Parser { p: pattern, i: 0, groups: 0, dotall };
+        Re::build(pattern, multiline, dotall, false)
+    }
+
+    /// A Python bytes pattern (`rb"..."`), whose classes are ASCII.
+    pub fn ascii(pattern: &str, multiline: bool, dotall: bool) -> Re {
+        Re::build(pattern.as_bytes(), multiline, dotall, true)
+    }
+
+    fn build(pattern: &[u8], multiline: bool, dotall: bool, ascii: bool) -> Re {
+        let mut p = Parser { ascii, p: pattern, i: 0, groups: 0, dotall };
         let alts = p.alts();
         assert!(p.i == pattern.len(), "pattern: stray ) in {}", String::from_utf8_lossy(pattern));
         let first = if alts.len() == 1 { firsts(&alts[0]).map(Box::new) } else { None };
-        Re { alts, groups: p.groups, multiline, first }
+        Re { alts, groups: p.groups, multiline, first, ascii }
     }
 
     /// `pattern.match(text, pos)`.
@@ -337,7 +359,7 @@ impl Re {
             end = q;
             true
         };
-        let m = M { t: text, multiline: self.multiline };
+        let m = M { t: text, multiline: self.multiline, ascii: self.ascii };
         for alt in &self.alts {
             if m.seq(alt, 0, pos, caps, &mut done) {
                 let mut caps = caps.clone();
@@ -399,11 +421,12 @@ impl Re {
 struct M<'t> {
     t: &'t [u8],
     multiline: bool,
+    ascii: bool,
 }
 
 impl<'t> M<'t> {
     fn is_word(&self, p: usize) -> bool {
-        p < self.t.len() && word(self.t[p])
+        p < self.t.len() && if self.ascii { ascii_word(self.t[p]) } else { word(self.t[p]) }
     }
 
     fn seq(&self, nodes: &[Node], mut i: usize, mut p: usize, caps: &mut Vec<(usize, usize)>,
@@ -625,7 +648,11 @@ pub fn selftest() {
         let text: Vec<u8> = (0..hex.len() / 2)
             .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).unwrap())
             .collect();
-        let re = Re::with(pat, flags.contains('M'), flags.contains('S'));
+        let re = if flags.contains('A') {
+            Re::ascii(pat, flags.contains('M'), flags.contains('S'))
+        } else {
+            Re::with(pat, flags.contains('M'), flags.contains('S'))
+        };
         let mut first = true;
         for m in re.find_all(&text) {
             if !first {

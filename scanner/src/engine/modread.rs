@@ -2014,6 +2014,51 @@ pub fn head(path: &str) -> D<Head> {
     Ok(Reader::new(path).head_parts()?.0)
 }
 
+/// What `cross._mod_facts` knows of a folder: the tags it lists, the pop
+/// types it defines, its technologies, how many inventions its array holds
+/// and the provinces its map defines. The last three are empty where
+/// reading them raised, as Python's `except Exception` leaves them; the
+/// first two raise out, as Python's do.
+pub struct Facts {
+    pub tags: Vec<String>,
+    pub pops: Vec<String>,
+    pub techs: Vec<String>,
+    pub inventions: i64,
+    pub provinces: Vec<i64>,
+}
+
+pub fn facts(root: &str) -> D<Facts> {
+    let r = Reader::new(root);
+    let techs = (|| -> D<Vec<String>> {
+        let mut out = Vec::new();
+        for (_n, target) in r.resolved_files("technologies")? {
+            for (name, _b) in r.clausewitz(&target)?.iter() {
+                out.push(l1(name));
+            }
+        }
+        Ok(out)
+    })().unwrap_or_default();
+    let provinces = (|| -> D<Vec<i64>> {
+        let target = r.resolved_file(&["map", "definition.csv"]);
+        let raw = std::fs::read(&target).or_else(|_| no("no definition.csv"))?;
+        let mut out = Vec::new();
+        // Text mode: a line ends at \n, \r or \r\n.
+        let text: Vec<u8> = raw.iter().map(|&c| if c == b'\r' { b'\n' } else { c }).collect();
+        for line in text.split(|&c| c == b'\n') {
+            let first = line.split(|&c| c == b';').next().unwrap_or(b"");
+            let head = strip(first);
+            if digit_word(head)? {
+                out.push(py_int(head)?.unwrap_or(0));
+            }
+        }
+        Ok(out)
+    })().unwrap_or_default();
+    let inventions = (|| -> D<i64> { Ok(r.invention_sequence()?.len() as i64) })().unwrap_or(0);
+    let tags = r.country_entries()?.iter().map(|(t, _)| l1(t)).collect();
+    let pops = r.read_poptypes()?.keys().cloned().collect();
+    Ok(Facts { tags, pops, techs, inventions, provinces })
+}
+
 /// `mod_reader.invention_files(path)`: {invention: the file it is defined
 /// in}, the first file in load order that defines it.
 pub fn invention_files(path: &str) -> D<OMap<String, String>> {

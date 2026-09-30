@@ -14,6 +14,15 @@
 // for rule: `~` and `$HOME`, `%USERPROFILE%` and `${VAR}`, `..` folded
 // away, two leading slashes kept on POSIX, drives and roots on Windows.
 
+#[cfg(windows)]
+pub const SEP: char = '\\';
+#[cfg(not(windows))]
+pub const SEP: char = '/';
+#[cfg(windows)]
+pub const SEP_STR: &str = "\\";
+#[cfg(not(windows))]
+pub const SEP_STR: &str = "/";
+
 fn env(name: &str) -> Option<String> {
     if name.is_empty() || name.contains('=') || name.contains('\0') {
         return None;

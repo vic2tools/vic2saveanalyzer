@@ -129,6 +129,9 @@ fn main() {
         engine::main(&args);
         return;
     }
+    if args[1] == "selftest-sniff" {
+        front::cross::selftest(&args[2..]);
+    }
     if args[1] == "mod-signature" {
         front::signature_main(&args);
     }

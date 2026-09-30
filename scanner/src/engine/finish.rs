@@ -270,7 +270,8 @@ pub fn prepare(meta: Meta, nations: Vec<Nation>, keys: Vec<String>, spec: &Spec)
     let mut out = Vec::with_capacity(pairs.len());
     for (tag, mut nat) in pairs {
         held.push(Held { tag: tag.clone(), record_tag: nat.tag.clone(),
-                         tech_list: nat.tech_list.clone(), invention_ids: nat.invention_ids.clone() });
+                         tech_list: nat.tech_list.clone(), invention_ids: nat.invention_ids.clone(),
+                         government: nat.government.clone() });
         let kept = spec.keeps(&tag, &nat);
         let mut pre = PreNation { tag: tag.clone(), nat: Nation::default(), kept,
                                   is_player: false, buckets: Vec::new(), pool: 0, entries: 0,
@@ -358,6 +359,8 @@ impl Val<'_> {
 
 /// A finished nation's row of the main table: `spending.save_rows`'s dict.
 pub struct Row {
+    /// The key the save's dict holds the nation under.
+    pub key: String,
     pub date: String,
     pub year: String,
     pub is_player: bool,
@@ -621,6 +624,7 @@ pub fn finish(pre: Pre, spec: &Spec, m: &Mod, live: Option<&FxSet<String>>) -> D
         let mut accepted: Vec<&String> = nat.accepted_cultures.iter().collect();
         accepted.sort();
         let row = Row {
+            key: tag.clone(),
             date: date.clone(),
             year: year.clone(),
             is_player,

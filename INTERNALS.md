@@ -597,7 +597,23 @@ and the last save read again whole. Held to the pure Python by
 `frontcheck.py` (59 cases) and, on the 1870s campaign under the real mod,
 eleven of them by hand, every one the same.
 
-Still ahead: `--cross`, handed back to Python, whole, before a word.
+And `--cross` (`front/cross.rs`): the campaign folders found as
+`os.walk` finds them, each matched to a mod by what its last two saves name
+(tags, pop types, technologies, the map, the invention array) or named with
+`--campaign-mod`/`--mod-path`, the survey and its notes printed as Python
+prints them, each campaign read by the engine once and quietly, the
+comparison block built as `series_payload` builds it, and then the primary
+campaign's report with the block in it. What the sniff looks for in a
+save -- six patterns over forty megabytes -- is found by hand-written
+scanners (`vic2scan selftest-sniff` holds them to the patterns); the
+general matcher took 1.5 s a save there, Python's C engine 0.2. On six,
+six and three copied saves of the two campaigns: 1.4 s against the
+Python's 3.3, the same text, tables and page. `frontcheck.py` adds a world
+of two mods a letter apart and campaigns only one fits, both fit and none
+fits, two folders of one name, one too deep, and a save from another game.
+
+Nothing the command line or the window asks for is handed to Python now
+but what would crash the Python itself.
 
 ### The engine reads the mod itself, 2026-09-29
 

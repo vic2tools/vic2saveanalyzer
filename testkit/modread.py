@@ -64,6 +64,13 @@ PATTERNS = [
     ("", r"color\s*=\s*\{\s*(\d+)\s+(\d+)\s+(\d+)\s*\}"), ("", r"sea_starts\s*=\s*\{([^}]*)\}"),
     ("", r"change_tag(?:_no_core_switch)?\s*=\s*([A-Z0-9]{3})\b"),
     ("", r"(?<![\w_])tag\s*=\s*([A-Z0-9]{3})\b"),
+    # What --cross sniffs a save for, and savehead reads off its head (a
+    # bytes pattern, "A": its classes are ASCII).
+    ("", r"\n([A-Z][A-Z0-9]{2})=\r?\n\{"), ("", r"\n\t\t([a-z_]+)=\r?\n\t\t\{"),
+    ("", r"active_inventions=\s*\{([^}]*)\}"), ("S", r"\n\ttechnology=\r?\n\t\{(.*?)\n\t\}"),
+    ("", r"\n\t\t(\w+)=\s*\{"), ("", r"\n(\d+)=\r?\n\{\r?\n\tname="),
+    ("A", r'(date|player|start_date)\s*=\s*"([^"]*)"'), ("AMS", r"^flags=\s*\{(.*?)^\}"),
+    ("AM", r"^\s*([A-Za-z_]\w*)\s*="), ("A", r'date\s*=\s*"([\d.]+)"'),
     # And a few that make a repeat's steps end in more than one place.
     ("", r"(?:a|ab)*b"), ("", r"(?:a|ab)*?b"), ("", r"((?:a|ab)*)(b+)"),
 ]
@@ -71,11 +78,16 @@ BITS = ["NOT", "limit", "tag", "invention", "chance", "base", "modifier", "facto
         "party", "war_policy", "color", "sea_starts", "change_tag", "_no_core_switch", "type",
         "ENG", "A1B", "abc", "a", "ab", "b", "x_y", "1", "0", "12", "-3.5", ".", "-", "=", "{",
         "}", " ", "\t", "\n", "\r\n", "\r", '"', "#", "--", "\x1c", "\x85", "\xa0", "\xe9",
-        "\xb2", "\xd7", "\xaa", "\xff", "_", "a.b"]
+        "\xb2", "\xd7", "\xaa", "\xff", "_", "a.b", "\n\t\t", "\n\t", "\r\n", "\n{",
+        "active_inventions", "technology", "flags", "date", "player", "start_date", "name",
+        "\n\tname=", "=\n\t{", "\n\t}", "1836.1.1", "\x0b", "\x1c"]
 SNIPPETS = ["NOT = { invention = foo }", "limit = {", "chance = { base = 5",
             "modifier = { factor = -0.5 NOT = { invention = bar } }", "type = naval",
             'ENG = "countries/England.txt"', "color = { 12 34 56 }", "sea_starts = { 1 2 3 }",
-            "change_tag = GER", "tag = SAR", "abc = 1", "x = {a b}", "\n", " = ", "{ ", " }"]
+            "change_tag = GER", "tag = SAR", "abc = 1", "x = {a b}", "\n", " = ", "{ ", " }",
+            "\nENG=\r\n{", "\n\t\tfarmers=\n\t\t{", "active_inventions={ 1 2 }",
+            "\n\ttechnology=\n\t{\n\t\tx={1 0}\n\t}", "\n12=\n{\n\tname=", 'date="1836.1.1"',
+            "flags=\n{\n\ta=yes\n}", "\nflags=\n{\n\tb_c=yes\n}\n", 'player="ENG"']
 
 
 def patterns(rnd, rounds):
@@ -95,9 +107,11 @@ def patterns(rnd, rounds):
     bad = 0
     for (flags, pat, text), answer in zip(cases, got):
         f = (re.M if "M" in flags else 0) | (re.S if "S" in flags else 0)
+        compiled, subject = ((re.compile(pat.encode(), f), text.encode("latin-1"))
+                             if "A" in flags else (re.compile(pat, f), text))
         want = ";".join(" ".join("-" if m.span(g)[0] < 0 else "%d,%d" % m.span(g)
                                  for g in range(m.re.groups + 1))
-                        for m in re.compile(pat, f).finditer(text))
+                        for m in compiled.finditer(subject))
         if want != answer:
             bad += 1
             if bad <= 3:

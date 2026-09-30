@@ -376,12 +376,18 @@ def differences(a, b):
             with open(pa, "rb") as fa, open(pb, "rb") as fb:
                 if fa.read() != fb.read():
                     wrong.append("%s differs" % name)
+    # How many cores a read takes follows the memory free that moment, by
+    # the same rule both ways, so that one number is not compared.
+    cores = re.compile(r"(save\(s\) on )\d+( cores)")
     for stream in ("stdout", "stderr"):
-        x = a[stream].replace(a["out"], "OUT")
-        y = b[stream].replace(b["out"], "OUT")
+        x = cores.sub(r"\1N\2", a[stream].replace(a["out"], "OUT"))
+        y = cores.sub(r"\1N\2", b[stream].replace(b["out"], "OUT"))
         if x != y:
-            wrong.append("printed %s differs:\n      python %r\n      engine %r"
-                         % (stream, x[-400:], y[-400:]))
+            j = next((j for j, (p, q) in enumerate(zip(x, y)) if p != q), min(len(x), len(y)))
+            wrong.append("printed %s differs at %d:\n      python %r\n      engine %r\n"
+                         "      engine's stderr ends %r"
+                         % (stream, j, x[max(0, j - 200):j + 200], y[max(0, j - 200):j + 200],
+                            b["stderr"][-600:]))
     return wrong
 
 

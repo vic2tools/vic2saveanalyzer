@@ -23,6 +23,7 @@
 // `int()` of an infinity, a number past 64 bits), and there the Python,
 // doing the run again, says again what had been said.
 
+pub mod cross;
 pub mod diagnose;
 pub mod pypath;
 
@@ -368,6 +369,18 @@ fn stamp_matches(outdir: &str, stamp: &str) -> bool {
     }
 }
 
+/// `already_built`: the report on disk is this run's, said aloud.
+fn already_built(args: &Args, stamp: &str) -> bool {
+    if args.rebuild || args.no_html || args.asked() || !stamp_matches(&args.out, stamp) {
+        return false;
+    }
+    if !args.quiet {
+        crate::outln!("Nothing has changed since this was built. Opening it as it is.\n\nWrote:\n  {}",
+                      join(&args.out, "report.html"));
+    }
+    true
+}
+
 fn write_stamp(outdir: &str, stamp: &str) {
     if stamp.is_empty() {
         return;
@@ -608,15 +621,10 @@ pub fn main(argv: &[String]) -> ! {
 }
 
 fn run(mut args: Args, protocol: bool) -> R<i32> {
-    // What is still Python's is handed back before anything is said or
-    // looked at, so the Python says all of it once.
-    if args.cross && !args.peek {
-        hand_back("--cross is read in Python");
-    }
-    let (_saves_path, files) = saves_in(&args)?;
-    // `--peek` and `--verify` come before anything else is settled, as in
-    // `_main`. A file Python would refuse raises out of either, which is
-    // Python's to say.
+    let verbose = !args.quiet;
+    let (saves_path, mut files) = saves_in(&args)?;
+    // `--peek` comes before anything else is settled, as in `_main`. A file
+    // Python would refuse raises out of it, which is Python's to say.
     if args.peek {
         if files.is_empty() || !diagnose::whole(&files[0]) {
             hand_back("--peek of a file Python refuses");
@@ -624,10 +632,33 @@ fn run(mut args: Args, protocol: bool) -> R<i32> {
         diagnose::peek(&files[0]);
         return Ok(0);
     }
+
+    // Several campaigns at once, each under the mod it was played on; the
+    // report that follows is the primary campaign's, with the comparison
+    // in it. Stamped over every campaign, before any is read.
+    let mut stamp: Option<String> = None;
+    let mut cross_payload: Option<String> = None;
     if args.cross {
-        hand_back("--cross is read in Python");
+        let found = cross::survey_cross(&saves_path, &args, verbose)?;
+        let taken = cross::cross_stamp(&found, &args);
+        if !args.verify && already_built(&args, &taken) {
+            return Ok(0);
+        }
+        let (payload, primary_files, primary_mod) =
+            cross::run_cross(&saves_path, &found, &args, verbose, protocol)?;
+        args.mod_path = primary_mod;
+        files = primary_files;
+        if files.is_empty() {
+            return refuse(format!("--cross found no campaigns under {}", saves_path));
+        }
+        stamp = Some(taken);
+        cross_payload = payload;
     }
+
     if args.verify {
+        if args.cross {
+            hand_back("--verify of a --cross campaign");
+        }
         if !files.iter().all(|f| diagnose::whole(f)) {
             hand_back("--verify of a file Python refuses");
         }
@@ -637,12 +668,16 @@ fn run(mut args: Args, protocol: bool) -> R<i32> {
         };
     }
 
-    // `_on_the_game`.
-    let (mod_path, game) = settle_game(args.mod_path.as_deref(), args.game_root.as_deref())?;
-    let settled = format!("Victoria II at {}, {}", game,
-        if modread::is_install(&mod_path) { "unmodded.".to_string() }
-        else { format!("with {}.", basename(&pypath::normpath(&mod_path))) });
-    args.mod_path = Some(mod_path);
+    // `_on_the_game`: a `--cross` run settled each campaign's mod as it
+    // surveyed them.
+    let mut settled = String::new();
+    if !args.cross {
+        let (mod_path, game) = settle_game(args.mod_path.as_deref(), args.game_root.as_deref())?;
+        settled = format!("Victoria II at {}, {}", game,
+            if modread::is_install(&mod_path) { "unmodded.".to_string() }
+            else { format!("with {}.", basename(&pypath::normpath(&mod_path))) });
+        args.mod_path = Some(mod_path);
+    }
 
     if let Err(e) = std::fs::create_dir_all(&args.out) {
         let text = e.to_string();
@@ -653,49 +688,131 @@ fn run(mut args: Args, protocol: bool) -> R<i32> {
         return refuse(format!("Cannot write to {}\n{}. Choose somewhere else with --out.",
                               args.out, strerror));
     }
-    let verbose = !args.quiet;
     if verbose {
         crate::outln!("Found {} save(s).", files.len());
-        crate::outln!("{}", settled);
+        if !settled.is_empty() {
+            crate::outln!("{}", settled);
+        }
     }
 
-    let signature = mod_signature(args.mod_path.as_deref());
-    let stamp = report_stamp(&files, &args, &signature);
-    if !(args.rebuild || args.no_html || args.asked()) && stamp_matches(&args.out, &stamp) {
-        if verbose {
-            crate::outln!("Nothing has changed since this was built. Opening it as it is.\n\nWrote:\n  {}",
-                          join(&args.out, "report.html"));
+    let mut signature = None;
+    let stamp = match stamp {
+        Some(s) => s,
+        None => {
+            let sig = mod_signature(args.mod_path.as_deref());
+            let s = report_stamp(&files, &args, &sig);
+            signature = Some(sig);
+            s
         }
+    };
+    if already_built(&args, &stamp) {
         return Ok(0);
     }
 
-    // `_mod_head`: what reading a save needs of the mod.
-    let root = mod_root(args.mod_path.as_deref().unwrap());
-    match modread::has_rules(&root) {
-        Ok(true) => {}
-        Ok(false) => return refuse(format!(
-            "{} has no technologies/ or inventions/ folder. Point --mod-path at the folder that \
-             contains them (the mod root, or the Victoria 2 install folder for vanilla).", root)),
-        Err(e) => match modread::raised_sentence(&e) {
-            Some(sentence) => return refuse(sentence),
-            None => hand_back(&e.0),
-        },
-    }
-    let head = match modread::head(&root) {
-        Ok(h) => h,
-        Err(e) => match modread::raised_sentence(&e) {
-            Some(sentence) => return refuse(sentence),
-            None => hand_back(&e.0),
-        },
+    let set = match setup(&args, args.mod_path.as_deref().unwrap()) {
+        Ok(set) => set,
+        Err(Settle::Refused(why)) => return refuse(why),
+        Err(Settle::Back(why)) => hand_back(&why),
     };
+    if verbose {
+        let mut extra: Vec<&String> = set.head.strata.keys()
+            .filter(|n| !VANILLA_POP_TYPES.contains(&n.as_str())).collect();
+        extra.sort();
+        crate::outln!("defines.lua: POP_SIZE_PER_REGIMENT={}", set.pop_per_regiment);
+        crate::outln!("poptypes/: mobilizable = {}{}", set.mob_types.join(" "),
+            if extra.is_empty() { String::new() } else {
+                format!("; mod-only pop types read: {}",
+                        extra.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" "))
+            });
+    }
 
-    // `mod_defaults`: the regiment size and the mobilizable pops, the
-    // mod's unless the command line said.
+    let dates = dates_of(&files);
+    let files = in_date_order(files, dates);
+    // `explain`: which of the four, in the order Python asks.
+    let ask = if let Some(t) = &args.explain_mob_pool {
+        Some(("explain_mob_pool", t.clone()))
+    } else if args.check_inventions {
+        Some(("check_inventions", String::new()))
+    } else if let Some(t) = &args.inventions {
+        Some(("inventions", t.clone()))
+    } else {
+        args.explain_mob.as_ref().map(|t| ("explain_mob", t.clone()))
+    };
+    // A diagnostic rewrites nothing, so the stamp stays where it is.
+    if ask.is_none() {
+        forget_stamp(&args.out);
+    }
+    let mut spec = spec_for(&args, &set, &files, protocol);
+    if let J::Obj(pairs) = &mut spec {
+        let mut put = |k: &str, v: J| match pairs.iter_mut().find(|(n, _)| n == k) {
+            Some(slot) => slot.1 = v,
+            None => pairs.push((k.to_string(), v)),
+        };
+        put("mod_signature", signature.as_ref().map_or(J::Null, |s| J::Str(s.clone())));
+        put("cross", cross_payload.map_or(J::Null, J::Str));
+        put("diagnose", match &ask {
+            None => J::Null,
+            Some((kind, tag)) => J::Obj(vec![
+                ("kind".into(), J::Str(kind.to_string())),
+                ("tag".into(), J::Str(tag.clone())),
+                ("pop_per_regiment".into(), J::Int(set.pop_per_regiment)),
+                ("mob_types".into(), strs(&set.mob_types)),
+                ("include_occupied".into(), J::Bool(args.mob_include_occupied)),
+            ]),
+        });
+    }
+    let done = crate::engine::run_spec(&spec, None).expect("a report run returns what it wrote");
+    if let Some(sentence) = done.run_error {
+        return refuse(sentence);
+    }
+    if done.html.is_some() && done.refused.is_empty() {
+        write_stamp(&args.out, &stamp);
+    }
+    if !done.refused.is_empty() {
+        let names: Vec<String> = done.refused.iter().map(|p| basename(p)).collect();
+        return refuse(format!(
+            "\nCould not write {}: open in another program -- on Windows a table open in Excel is \
+             locked -- or not writable here. Close it and run again.{}",
+            names.join(", "),
+            if done.html.is_some() { " The report itself was written." } else { "" }));
+    }
+    Ok(0)
+}
+
+/// What a campaign is read under: the mod folder made absolute, its head,
+/// and the regiment size and mobilizable pops the run settles on.
+pub(crate) struct Setup {
+    pub root: String,
+    pub head: modread::Head,
+    pub pop_per_regiment: i64,
+    pub mob_types: Vec<String>,
+}
+
+pub(crate) enum Settle {
+    /// A sentence Python refuses the run with.
+    Refused(String),
+    /// Something Python would raise out of.
+    Back(String),
+}
+
+/// `_mod_head` and `mod_defaults`, for the mod at `mod_path`.
+pub(crate) fn setup(args: &Args, mod_path: &str) -> Result<Setup, Settle> {
+    let root = mod_root(mod_path);
+    let said = |e: crate::engine::rules::Decline| match modread::raised_sentence(&e) {
+        Some(sentence) => Settle::Refused(sentence.to_string()),
+        None => Settle::Back(e.0),
+    };
+    if !modread::has_rules(&root).map_err(said)? {
+        return Err(Settle::Refused(format!(
+            "{} has no technologies/ or inventions/ folder. Point --mod-path at the folder that \
+             contains them (the mod root, or the Victoria 2 install folder for vanilla).", root)));
+    }
+    let head = modread::head(&root).map_err(said)?;
     let pop_per_regiment = match args.pop_per_regiment {
         Some(n) => n,
         None => match head.defines.get(&b"POP_SIZE_PER_REGIMENT".to_vec()) {
             Some(v) if v.is_finite() && v.abs() < 9.0e18 => v.trunc() as i64,
-            Some(_) => hand_back("POP_SIZE_PER_REGIMENT is not a number an int can hold"),
+            Some(_) => return Err(Settle::Back("POP_SIZE_PER_REGIMENT is not a number an int can hold".into())),
             None => POP_SIZE_PER_REGIMENT,
         },
     };
@@ -713,18 +830,12 @@ fn run(mut args: Args, protocol: bool) -> R<i32> {
             from_mod
         }
     };
-    if verbose {
-        let mut extra: Vec<&String> = head.strata.keys()
-            .filter(|n| !VANILLA_POP_TYPES.contains(&n.as_str())).collect();
-        extra.sort();
-        crate::outln!("defines.lua: POP_SIZE_PER_REGIMENT={}", pop_per_regiment);
-        crate::outln!("poptypes/: mobilizable = {}{}", mob_types.join(" "),
-            if extra.is_empty() { String::new() } else {
-                format!("; mod-only pop types read: {}",
-                        extra.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" "))
-            });
-    }
+    Ok(Setup { root, head, pop_per_regiment, mob_types })
+}
 
+/// The engine's spec for reading `files` under `set` (`engine.spec`).
+pub(crate) fn spec_for(args: &Args, set: &Setup, files: &[String], protocol: bool) -> J {
+    let head = &set.head;
     // `reading_for`.
     let mut pop_types: Vec<String> = VANILLA_POP_TYPES.iter().map(|s| s.to_string()).collect();
     for name in head.strata.keys() {
@@ -733,7 +844,7 @@ fn run(mut args: Args, protocol: bool) -> R<i32> {
         }
     }
     pop_types.sort();
-    let mut reading_mob = mob_types.clone();
+    let mut reading_mob = set.mob_types.clone();
     reading_mob.sort();
     let reform_keys: Vec<String> = head.reform_names.iter().map(|r| modread::l1(r)).collect();
     let mut regions: Vec<(i64, String)> = head.province_regions.iter()
@@ -754,35 +865,17 @@ fn run(mut args: Args, protocol: bool) -> R<i32> {
         };
         groups.push(J::List(vec![J::Int(*pid), J::Int(rep)]));
     }
-
-    let dates = dates_of(&files);
-    let files = in_date_order(files, dates);
     let wanted = args.tags.as_ref().filter(|t| !t.is_empty()).map(|t| {
         let mut w = t.clone();
         w.sort();
         w.dedup();
         w
     });
-
-    // `explain`: which of the four, in the order Python asks.
-    let ask = if let Some(t) = &args.explain_mob_pool {
-        Some(("explain_mob_pool", t.clone()))
-    } else if args.check_inventions {
-        Some(("check_inventions", String::new()))
-    } else if let Some(t) = &args.inventions {
-        Some(("inventions", t.clone()))
-    } else {
-        args.explain_mob.as_ref().map(|t| ("explain_mob", t.clone()))
-    };
-    // A diagnostic rewrites nothing, so the stamp stays where it is.
-    if ask.is_none() {
-        forget_stamp(&args.out);
-    }
-    let mut finish_mob = mob_types.clone();
+    let mut finish_mob = set.mob_types.clone();
     finish_mob.sort();
     finish_mob.dedup();
-    let spec = J::Obj(vec![
-        ("files".into(), strs(&files)),
+    J::Obj(vec![
+        ("files".into(), strs(files)),
         ("out".into(), J::Str(args.out.clone())),
         ("reading".into(), J::Obj(vec![
             ("pop_types".into(), strs(&pop_types)),
@@ -794,7 +887,7 @@ fn run(mut args: Args, protocol: bool) -> R<i32> {
         ])),
         ("finish".into(), J::Obj(vec![
             ("rate".into(), J::Float(args.mob_rate)),
-            ("pop_per_regiment".into(), J::Int(pop_per_regiment)),
+            ("pop_per_regiment".into(), J::Int(set.pop_per_regiment)),
             ("mob_types".into(), strs(&finish_mob)),
             ("include_occupied".into(), J::Bool(args.mob_include_occupied)),
             ("player_nations".into(), match &args.player_nations {
@@ -829,35 +922,10 @@ fn run(mut args: Args, protocol: bool) -> R<i32> {
             ("version".into(), J::Str(env!("VIC2_BUILD_ID").to_string())),
             ("on".into(), J::Bool(!args.no_cache)),
         ])),
-        ("mod_path".into(), J::Str(root.clone())),
-        ("mod_signature".into(), J::Str(signature.clone())),
+        ("mod_path".into(), J::Str(set.root.clone())),
+        ("mod_signature".into(), J::Null),
         ("protocol".into(), J::Bool(protocol)),
         ("own_refusals".into(), J::Bool(true)),
-        ("diagnose".into(), match &ask {
-            None => J::Null,
-            Some((kind, tag)) => J::Obj(vec![
-                ("kind".into(), J::Str(kind.to_string())),
-                ("tag".into(), J::Str(tag.clone())),
-                ("pop_per_regiment".into(), J::Int(pop_per_regiment)),
-                ("mob_types".into(), strs(&mob_types)),
-                ("include_occupied".into(), J::Bool(args.mob_include_occupied)),
-            ]),
-        }),
-    ]);
-    let done = crate::engine::run_spec(&spec, None).expect("a report run returns what it wrote");
-    if let Some(sentence) = done.run_error {
-        return refuse(sentence);
-    }
-    if done.html.is_some() && done.refused.is_empty() {
-        write_stamp(&args.out, &stamp);
-    }
-    if !done.refused.is_empty() {
-        let names: Vec<String> = done.refused.iter().map(|p| basename(p)).collect();
-        return refuse(format!(
-            "\nCould not write {}: open in another program -- on Windows a table open in Excel is \
-             locked -- or not writable here. Close it and run again.{}",
-            names.join(", "),
-            if done.html.is_some() { " The report itself was written." } else { "" }));
-    }
-    Ok(0)
+        ("diagnose".into(), J::Null),
+    ])
 }

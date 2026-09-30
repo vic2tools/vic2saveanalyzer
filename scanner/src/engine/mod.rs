@@ -109,6 +109,8 @@ pub struct Run {
     pub own_refusals: bool,
     /// One of the four diagnostics, answered instead of the report.
     pub ask: Option<explain::Ask>,
+    /// One campaign of a `--cross` run: read once, quietly, for its rows.
+    pub cross_part: bool,
     pub tech_lines: J,
     pub tables: tables::Tables,
     pub store: cache::Store,
@@ -217,6 +219,7 @@ fn parse_run(j: &J) -> Run {
         protocol: j.at("protocol").truthy(),
         own_refusals: j.at("own_refusals").truthy(),
         ask: explain::Ask::from_json(j.at("diagnose")),
+        cross_part: j.at("cross_part").truthy(),
         tech_lines: j.at("tech_lines").clone(),
         tables,
         store: cache::Store {
@@ -892,7 +895,9 @@ pub fn run_spec(spec_j: &J, dump: Option<String>) -> Option<report::Outcome> {
             run.store.mark(m);
         }
     }
-    if let Some(c) = &campaign {
+    // Python's campaign entry is made by the invention pass of a report,
+    // which one campaign of a comparison does not have.
+    if let Some(c) = campaign.as_ref().filter(|_| !run.cross_part) {
         run.store.mark(c);
     }
     let files: Vec<String> = kept.iter().map(|&i| run.files[i].clone()).collect();
@@ -909,7 +914,8 @@ pub fn run_spec(spec_j: &J, dump: Option<String>) -> Option<report::Outcome> {
             Some(sentence) if run.own_refusals => {
                 out::release();
                 return Some(report::Outcome { html: None, refused: Vec::new(),
-                                              run_error: Some(sentence.to_string()) });
+                                              run_error: Some(sentence.to_string()),
+                                              cross_part: None });
             }
             _ => decline(&format!("the mod: {}", d.0.trim_start_matches('\u{1}'))),
         },
@@ -922,21 +928,34 @@ pub fn run_spec(spec_j: &J, dump: Option<String>) -> Option<report::Outcome> {
         crate::engine::report::say_mod(&m, &live, &held, &files);
     }
     // The second pass read every file again, and named each refused one
-    // again as it went past.
-    for line in &skipped {
-        crate::errln!("{}", line);
+    // again as it went past. A campaign of a comparison is read once.
+    if !run.cross_part {
+        for line in &skipped {
+            crate::errln!("{}", line);
+        }
+    }
+    if pres.is_empty() && run.cross_part {
+        return Some(report::Outcome { html: None, refused: Vec::new(), run_error: None,
+                                      cross_part: None });
     }
     if pres.is_empty() {
         out::release();
         return Some(report::Outcome { html: None, refused: Vec::new(),
-                                      run_error: Some("No saves could be read.".into()) });
+                                      run_error: Some("No saves could be read.".into()), cross_part: None });
     }
     // A diagnostic is answered off the campaign as it stands, and ends the
     // run: no report, no tables.
     if let Some(ask) = &run.ask {
         let said = explain::answer(ask, &m, &live, &pres, &files, &run.reading);
-        return Some(report::Outcome { html: None, refused: Vec::new(), run_error: said.err() });
+        return Some(report::Outcome { html: None, refused: Vec::new(), run_error: said.err(),
+                                      cross_part: None });
     }
+
+    // What `--cross` names each nation by: every nation of every save, in
+    // order, with its government.
+    let held_names: Vec<(String, String)> = pres.iter()
+        .flat_map(|p| p.held.iter().map(|h| (h.tag.clone(), h.government.clone())))
+        .collect();
 
     // Pass two: every save finished.
     let mut spent: Vec<Option<Spent>> = (0..n).map(|_| None).collect();
@@ -965,7 +984,37 @@ pub fn run_spec(spec_j: &J, dump: Option<String>) -> Option<report::Outcome> {
     }
     // Nothing from here on hands the run back.
     out::release();
+    if run.cross_part {
+        return Some(report::Outcome { html: None, refused: Vec::new(), run_error: None,
+                                      cross_part: Some(cross_part(&run, &m, &held_names, &spent)) });
+    }
     Some(crate::engine::report::run(&run, &m, &live, spent))
+}
+
+/// One campaign of a `--cross` run, as `campaign_rows` and `run_cross`
+/// keep it.
+fn cross_part(run: &Run, m: &Mod, held: &[(String, String)], spent: &[Spent]) -> report::CrossPart {
+    let keys: Vec<&str> = run.tables.metrics.iter().map(|k| k.0.as_str()).collect();
+    let mut rows = Vec::new();
+    for s in spent {
+        for r in &s.rows {
+            rows.push((r.date.clone(), r.key.clone(), keys.iter().map(|k| r.get(k).float()).collect()));
+        }
+    }
+    // `name_for(tag, government, localisation)`, where it names the nation
+    // other than by its tag.
+    let mut names = Vec::new();
+    for (tag, government) in held {
+        let label = if !government.is_empty() {
+            m.localisation.get(&format!("{}_{}", tag, government)).filter(|s| !s.is_empty()).cloned()
+        } else { None };
+        let label = label.or_else(|| m.localisation.get(tag).filter(|s| !s.is_empty()).cloned())
+            .unwrap_or_else(|| tag.clone());
+        if label != *tag {
+            names.push((tag.clone(), label));
+        }
+    }
+    report::CrossPart { rows, names }
 }
 
 /// The keys a save's nations are held under: the owner tags the provinces

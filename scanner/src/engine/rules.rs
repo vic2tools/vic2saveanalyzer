@@ -770,6 +770,8 @@ pub struct Held {
     pub record_tag: String,
     pub tech_list: Vec<String>,
     pub invention_ids: Vec<i64>,
+    /// What `--cross` names a nation by, with the mod's localisation.
+    pub government: String,
 }
 
 /// `attainable_inventions(mod, all_nations)`.

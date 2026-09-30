@@ -32,7 +32,7 @@ use crate::pickle::{FxMap, FxSet};
 use crate::pyfmt::Num;
 use std::io::Write;
 
-const MAGIC: &[u8; 8] = b"V2ENGC01";
+const MAGIC: &[u8; 8] = b"V2ENGC02";
 
 pub struct W {
     out: Vec<u8>,
@@ -300,7 +300,7 @@ keep_struct!(Goal { casus_belli, actor, receiver, province, added, fulfilled });
 keep_struct!(FirstGoal { casus_belli, actor, receiver, province });
 keep_struct!(War { name, active, start, end, original_attacker, original_defender, attackers,
                    defenders, fighting, joins, leaves, goals, goal, battles });
-keep_struct!(Held { tag, record_tag, tech_list, invention_ids });
+keep_struct!(Held { tag, record_tag, tech_list, invention_ids, government });
 
 impl Keep for Market {
     fn put(&self, w: &mut W) {

@@ -147,7 +147,7 @@ impl Tables {
         }
     }
 
-    fn builtin(pop_columns: &[String], template: String) -> Tables {
+    pub fn builtin(pop_columns: &[String], template: String) -> Tables {
         let main: Vec<String> = BASE_COLUMNS.iter().map(|s| s.to_string())
             .chain(pop_columns.iter().map(|t| format!("pop_{}", t)))
             .chain(std::iter::once("accepted_cultures".to_string())).collect();

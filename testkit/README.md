@@ -67,7 +67,7 @@ times, and the real mod when `--mod` names one.
 
 **`frontcheck.py`** holds the scanner's `analyze` mode -- a command-line
 run done in Rust from the start -- to the Python: thirty cases run both
-ways (the second with `VIC2_NO_FRONT=1`) must print the same, exit the
+ways (the second all in Python, `VIC2_NO_ENGINE=1`) must print the same, exit the
 same and write the same files, and the Rust must have made every one of
 them itself but the two it hands back.
 
