@@ -23,8 +23,13 @@
 
 mod clause;
 mod country;
+mod deflate;
+mod engine;
+mod jsonr;
+mod omap;
 mod pickle;
 mod province;
+mod pyfmt;
 mod record;
 mod text;
 
@@ -108,6 +113,22 @@ fn main() {
         eprintln!("usage: vic2scan <save.v2> [--pop-types a,b] [--mob-types a,b]\n\
                    \x20      vic2scan --serve [--pop-types a,b] [--mob-types a,b]");
         std::process::exit(2);
+    }
+    if args[1] == "selftest-fmt" {
+        pyfmt::selftest();
+        return;
+    }
+    if args[1] == "bench-engine" {
+        engine::bench(&args);
+        return;
+    }
+    if args[1] == "report" {
+        engine::main(&args);
+        return;
+    }
+    if args[1] == "selftest-deflate" && args.len() == 4 {
+        deflate::selftest(&args[2], &args[3]);
+        return;
     }
     let mut lists = Lists {
         pop_types: Vec::new(),

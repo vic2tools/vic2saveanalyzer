@@ -30,7 +30,7 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ANALYZER = os.path.join(HERE, "vic2_analyzer.py")
 
 
-def cases(saves, mod, out, analyzer):
+def cases(saves, mod, out, analyzer, game=None):
     """
     (name, argv, wants) for everything worth running, quiet and loud.
 
@@ -56,6 +56,9 @@ def cases(saves, mod, out, analyzer):
     right answer.
     """
     base = [sys.executable, analyzer, saves, "--out", out]
+    if game:
+        base += ["--game-root", game]
+    without_game = [sys.executable, analyzer, saves, "--out", out]
     unchanged = "Nothing has changed"
     got = [
         ("plain, quiet", base + ["-q"], []),
@@ -82,10 +85,10 @@ def cases(saves, mod, out, analyzer):
                                           "--rebuild", "-q"], []),
         ("pop per regiment", base + ["--pop-per-regiment", "1000",
                                      "--rebuild", "-q"], []),
-        ("explain mob needs a mod", base + ["--explain-mob", "ENG"],
-         ["refuses", "needs --mod-path"]),
-        ("inventions needs a mod", base + ["--inventions", "ENG"],
-         ["refuses", "needs --mod-path"]),
+        ("unmodded, explain mob", base + ["--explain-mob", "ENG"],
+         ["Mobilisation size for ENG", "TOTAL"]),
+        ("inventions needs an install", without_game + ["--inventions", "ENG"],
+         ["refuses", "Say where Victoria II is installed"]),
         ("explain mob pool", base + ["--explain-mob-pool", "ENG"],
          ["Mobilization pool for ENG", "not:" + unchanged]),
         ("peek", base + ["--peek"], []),
@@ -195,7 +198,15 @@ def main():
     xout = os.path.join(holding, "xout")
     xin = os.path.join(holding, "campaigns")
     try:
-        todo = cases(args.saves, args.mod, out, args.analyzer)
+        import matching
+        game = matching.a_vanilla(os.path.join(holding, "vanilla"))
+        todo = cases(args.saves, args.mod, out, args.analyzer, game)
+        # Explicit mods carry their own install; do not pair them with the
+        # synthetic vanilla install used by the otherwise mod-free cases.
+        for _name, argv, _wants in todo:
+            if "--mod-path" in argv:
+                at = argv.index("--game-root")
+                del argv[at:at + 2]
         todo += cross_cases(args.saves, args.mod, xout, xin,
                             args.analyzer)
         if args.only:

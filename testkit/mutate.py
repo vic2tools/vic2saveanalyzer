@@ -283,8 +283,8 @@ def m15():
           "caching.py")
 def m16():
     patch("readsave.py",
-          '         + "|" + ",".join(sorted(mob_types)))',
-          '         + "")')
+          '         + "|" + ",".join(sorted(mob_types))',
+          '         + ""')
 
 
 # ---- the parse cache key, which hashed six files named by hand and not the
@@ -578,21 +578,19 @@ def m39():
 # ---- a mod kept away from its game was read with nothing beneath it
 
 @mutation("mod-forgets-its-game",
-          "the mod reader ignores the install a mod folder was paired with, "
-          "so a mod outside the game has no map, no flags and inherits "
-          "nothing", "modcache.py")
+          "the mod reader ignores the install containing its mod folder",
+          "modcache.py")
 def m57():
-    patch("mod_reader.py",
-          '    given = getattr(path, "game", None)\n    if given:\n'
-          '        return given\n', "")
+    patch("mod_reader.py", "    return root\n\n\ndef _map_source",
+          "    return None\n\n\ndef _map_source")
 
 
 @mutation("run-never-pairs-a-game",
-          "a run reads its mod as it finds it, so a mod unpacked away from "
-          "the game is read with no game at all, told or found", "edges.py")
+          "the run ignores the game and mod validation", "edges.py")
 def m58():
-    patch("vic2_analyzer.py", "    return replace(args, mod_path=paired)\n",
-          "    return args\n")
+    patch("vic2_analyzer.py",
+          "        mod_path, game = settle_game(args.mod_path, args.game_root)",
+          "        mod_path, game = args.mod_path or args.game_root, args.game_root")
 
 
 # ---- a war's detail was drawn by nothing any check ever clicked
@@ -788,6 +786,27 @@ def m66():
     patch("mod_reader.py",
           '        f"{os.path.abspath(target)}|{info.st_size}|{info.st_mtime_ns}|{version}"',
           '        f"{os.path.abspath(target)}|{version}"')
+
+
+@mutation("engine-callback-error-lost",
+          "the engine relay silently drops callback failures", "engine_runtime.py")
+def m68():
+    patch("engine.py", "        if self.failure is not None:\n            raise self.failure",
+          "        if False:\n            raise self.failure")
+
+
+@mutation("fixture-writes-through-link",
+          "a test fixture truncates a real file through a symlink", "engine_runtime.py")
+def m69():
+    patch("testkit/matching.py", "        if os.path.islink(check):",
+          "        if False:")
+
+
+
+@mutation("engine-leaks-handoff-files",
+          "a stopped engine leaves its mod and settings files behind", "engine_runtime.py")
+def m70():
+    patch("engine.py", "                os.remove(path)", "                pass")
 
 
 def main():

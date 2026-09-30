@@ -123,6 +123,9 @@ def build():
                # reached only from inside functions, in both the window and the
                # analyzer, so the scan has nothing at module level to follow
                "cross", "state_history",
+               # the report engine's side of the analyzer: what hands a run
+               # to the scanner's `report` mode and the mod to it
+               "engine",
                # saves are read on several cores, and the machinery for that is
                # reached through function-level imports
                "multiprocessing", "multiprocessing.spawn",

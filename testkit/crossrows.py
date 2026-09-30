@@ -34,6 +34,11 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# What is checked here is the report's own finishing, which this watches: Python's, which a run the report
+# engine hands back still goes through. The engine is held to Python by
+# `enginecheck.py`.
+os.environ["VIC2_NO_ENGINE"] = "1"
 sys.path.insert(0, HERE)
 
 import matching                                            # noqa: E402

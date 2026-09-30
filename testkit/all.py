@@ -37,8 +37,14 @@ from outcome import SKIPPED                                 # noqa: E402
 def run(name, argv, why=""):
     """One check. (name, ok, skipped, seconds, output)."""
     began = time.monotonic()
-    done = subprocess.run([sys.executable] + argv, capture_output=True,
-                          text=True, cwd=HERE)
+    try:
+        done = subprocess.run([sys.executable] + argv, capture_output=True,
+                              text=True, cwd=HERE, timeout=900)
+    except subprocess.TimeoutExpired as exc:
+        output = exc.stdout or b""
+        if isinstance(output, bytes):
+            output = output.decode("utf-8", "replace")
+        return name, False, False, time.monotonic() - began, output + "\nTimed out after 900 seconds", why
     took = time.monotonic() - began
     out = done.stdout + done.stderr
     # A check that cannot run all of itself here says so with its exit
@@ -80,6 +86,11 @@ def main():
         ("what the executable carries", [os.path.join(KIT, "packing.py")]),
         ("matching a campaign to its mod", [os.path.join(KIT, "matching.py")]),
         ("mod reading and caching", [os.path.join(KIT, "modcache.py")]),
+        ("the engine process and test fixtures", [os.path.join(KIT, "engine_runtime.py")]),
+        ("the engine's number formatting", [os.path.join(KIT, "enginefmt.py"),
+         os.path.join(HERE, "scanner", "target", "release", "vic2scan" + (".exe" if os.name == "nt" else "")), "20000"]),
+        ("the engine's compression", [os.path.join(KIT, "enginecompress.py"),
+         os.path.join(HERE, "scanner", "target", "release", "vic2scan" + (".exe" if os.name == "nt" else ""))]),
         ("the map's province bitmap", [os.path.join(KIT, "raster.py")]),
         ("save caching and projections", [os.path.join(KIT, "caching.py")]),
         ("a machine with no workers", [os.path.join(KIT, "noworkers.py")]),
@@ -120,6 +131,9 @@ def main():
                 ("the window", [os.path.join(KIT, "window.py"), args.saves]),
                 ("the way Windows starts workers",
                  [os.path.join(KIT, "spawned.py"), args.saves]
+                 + (["--mod", args.mod] if args.mod else [])),
+                ("the report engine against the Python",
+                 [os.path.join(KIT, "enginecheck.py"), args.saves]
                  + (["--mod", args.mod] if args.mod else [])),
             ]
             if not args.quick:

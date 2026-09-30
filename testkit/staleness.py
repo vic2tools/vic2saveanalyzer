@@ -177,8 +177,20 @@ def cross_campaigns():
 
 
 def unfinished_runs():
-    """[what went wrong] when a run rewrites the files and does not finish."""
+    """[what went wrong] when a run rewrites the files and does not finish,
+    made by the report engine and in Python (`ways.py`)."""
     sys.path.insert(0, os.path.join(HERE, "testkit"))
+    import ways
+    wrong = []
+    for way, _env in ways.WAYS:
+        wrong += ["%s (%s)" % (w, way) for w in _unfinished_runs(way)]
+    return wrong
+
+
+def _unfinished_runs(way):
+    """`unfinished_runs`, one way."""
+    sys.path.insert(0, os.path.join(HERE, "testkit"))
+    import ways
     import matching
     import savefmt
 
@@ -197,7 +209,7 @@ def unfinished_runs():
                 savefmt.country("FRA", culture="french", capital=2))
         out = os.path.join(holding, "out")
         table = os.path.join(out, "nations_timeseries.csv")
-        env = dict(os.environ, TMPDIR=holding)
+        env = ways.env(way, dict(os.environ, TMPDIR=holding), strict=True)
         game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
 
         def run(*extra):
@@ -228,7 +240,7 @@ def unfinished_runs():
             again = run("--tags", "ENG")
             fine = "Nothing has changed" not in again.stdout
             print("  %-48s %s" % ("a locked table, then the run before it again",
-                                  "rebuilt" if fine else "FAILED"))
+                                  "rebuilt" if fine else "FAILED") + " (%s)" % way)
             if not fine:
                 wrong.append("after a run that could not write a table, the "
                              "run before it was answered with that run's "
@@ -237,7 +249,7 @@ def unfinished_runs():
         again = run("--tags", "ENG")
         fine = "Nothing has changed" not in again.stdout
         print("  %-48s %s" % ("--no-html, then the run before it again",
-                              "rebuilt" if fine else "FAILED"))
+                              "rebuilt" if fine else "FAILED") + " (%s)" % way)
         if not fine:
             wrong.append("after --no-html rewrote the tables, the run before "
                          "it was answered as if they were its own")
@@ -247,9 +259,21 @@ def unfinished_runs():
 
 
 def leftover_tables():
-    """[what went wrong] when a table in the folder is from an earlier run."""
+    """[what went wrong] when a table in the folder is from an earlier run,
+    made by the report engine and in Python (`ways.py`)."""
+    sys.path.insert(0, os.path.join(HERE, "testkit"))
+    import ways
+    wrong = []
+    for way, _env in ways.WAYS:
+        wrong += ["%s (%s)" % (w, way) for w in _leftover_tables(way)]
+    return wrong
+
+
+def _leftover_tables(way):
+    """`leftover_tables`, one way."""
     import csv
     sys.path.insert(0, os.path.join(HERE, "testkit"))
+    import ways
     import matching
     import savefmt
 
@@ -270,7 +294,7 @@ def leftover_tables():
                 savefmt.country("ENG", blocks=[fleet]),
                 savefmt.country("FRA", culture="french", capital=2))
         out = os.path.join(holding, "out")
-        env = dict(os.environ, TMPDIR=holding)
+        env = ways.env(way, dict(os.environ, TMPDIR=holding), strict=True)
         game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
         for extra in ([], ["--tags", "FRA"]):
             subprocess.run([sys.executable, os.path.join(HERE, "vic2_analyzer.py"),
@@ -289,7 +313,7 @@ def leftover_tables():
                 wrong.append("%s still holds %s from the run before, beside "
                              "tables of FRA alone" % (name, " ".join(others)))
         print("  %-48s %s" % ("a rerun with nothing for one of the tables",
-                              "FAILED" if wrong else "all from this run"))
+                              "FAILED" if wrong else "all from this run") + " (%s)" % way)
         return wrong
     finally:
         shutil.rmtree(holding, ignore_errors=True)

@@ -104,8 +104,18 @@ def a_game(root):
     A mod is only read inside one: the analyzer refuses a mod anywhere but
     an install's mod folder, the way the game only loads mods from there.
     """
+    # Fixture builders must never write through a link into real inputs.
+    target = os.path.abspath(os.path.join(root, "map", "default.map"))
+    check = target
+    while True:
+        if os.path.islink(check):
+            raise ValueError("refusing to write a fixture through a symlink: " + check)
+        parent = os.path.dirname(check)
+        if parent == check:
+            break
+        check = parent
     os.makedirs(os.path.join(root, "map"), exist_ok=True)
-    open(os.path.join(root, "map", "default.map"), "w").close()
+    open(target, "w").close()
     return root
 
 

@@ -768,10 +768,17 @@ def _main(run=None):
         stamp = report_stamp(files, args, signature)
     if already_built(args, stamp):
         return 0
-    start_forkserver()
+    # The report engine does the rest of an ordinary run in Rust, and needs
+    # neither Python's workers nor its map decoded ahead; a run it hands
+    # back starts both where they are wanted.
+    import engine
+    use_engine = engine.usable(args)
+    if not use_engine:
+        start_forkserver()
 
     mod, known, loading = _open_mod(args, signature)
-    map_ahead = _map_ahead(args)
+    use_engine = use_engine and bool(known)
+    map_ahead = None if use_engine else _map_ahead(args)
     # The run as the mod settles it, because the rest of a single-campaign
     # run reads these two off it -- the finishing spec, the reading below,
     # the two printed lines, and `explain.py`. `run_cross` asks the same
@@ -829,6 +836,24 @@ def _main(run=None):
 
     parse_options = dict(use_cache=not args.no_cache, reading=reading,
                          jobs=args.jobs)
+
+    if use_engine:
+        # Everything from here to the last table, in the engine. It reads
+        # the saves while the mod finishes loading, and hands the run back
+        # -- before writing anything -- when it meets what only this
+        # program reads, and then the run goes on below as it always did.
+        forget_stamp(args.out)
+        got = engine.run_report(
+            args, files, reading, finishing.finish_spec(args, known, None, wanted),
+            known, mod if mod is not None else loading, cross_payload,
+            tell_progress, _tell_report_ready, stop_if_asked)
+        if got is not None:
+            html_path, refused, _loaded = got
+            if html_path and not refused:
+                write_stamp(args.out, stamp)
+            if refused:
+                raise RunError(_refused_message(refused, html_path))
+            return
 
     live = None
     if known:
@@ -937,11 +962,16 @@ def _main(run=None):
     if verbose:
         _say_summary(rows, parsed, price_rows, bool(mod), paths)
     if refused:
-        raise RunError("\nCould not write %s: open in another program -- on "
-                 "Windows a table open in Excel is locked -- or not "
-                 "writable here. Close it and run again.%s"
-                 % (", ".join(os.path.basename(p) for p in refused),
-                    " The report itself was written." if html_path else ""))
+        raise RunError(_refused_message(refused, html_path))
+
+
+def _refused_message(refused, html_path):
+    """What a run says when a table could not be written."""
+    return ("\nCould not write %s: open in another program -- on "
+            "Windows a table open in Excel is locked -- or not "
+            "writable here. Close it and run again.%s"
+            % (", ".join(os.path.basename(p) for p in refused),
+               " The report itself was written." if html_path else ""))
 
 
 if __name__ == "__main__":

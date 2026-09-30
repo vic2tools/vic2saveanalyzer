@@ -57,7 +57,7 @@ def build(how, saves, out, mod, holding):
     os.makedirs(cache)
     return subprocess.run(argv, capture_output=True, text=True, cwd=HERE,
                           env={**os.environ, "TMPDIR": cache, "TEMP": cache,
-                               "TMP": cache})
+                               "TMP": cache, "VIC2_NO_ENGINE": "1"})
 
 
 def fingerprints(folder):
@@ -82,6 +82,10 @@ def main():
 
     holding = tempfile.mkdtemp(prefix="vic2spawn")
     try:
+        if not args.mod:
+            sys.path.insert(0, os.path.join(HERE, "testkit"))
+            import matching
+            args.mod = matching.a_vanilla(os.path.join(holding, "game"))
         made = {}
         for how in ("fork", "spawn"):
             if how not in __import__("multiprocessing").get_all_start_methods():

@@ -276,7 +276,7 @@ pub fn to_int(v: Option<&V>, default: i64) -> R<i64> {
 /// `unquote(str(value))` where value came from `.get(key, "")`: a string,
 /// or the default for a missing key. Anything else is a block where a name
 /// belongs, and Python would have kept its repr.
-fn name(v: Option<&V>) -> R<Vec<u8>> {
+pub(crate) fn name(v: Option<&V>) -> R<Vec<u8>> {
     match v {
         None => Ok(Vec::new()),
         Some(V::Str(s)) => Ok(unquote(s).to_vec()),
@@ -285,7 +285,7 @@ fn name(v: Option<&V>) -> R<Vec<u8>> {
 }
 
 /// `str(value).lower() == "yes"`.
-fn yes(v: Option<&V>) -> R<bool> {
+pub(crate) fn yes(v: Option<&V>) -> R<bool> {
     match v {
         None => Ok(false),
         Some(V::Str(s)) => Ok(s.eq_ignore_ascii_case(b"yes")),
@@ -294,7 +294,7 @@ fn yes(v: Option<&V>) -> R<bool> {
 }
 
 /// `as_list(value)`.
-fn as_list(v: Option<&V>) -> Vec<&V> {
+pub(crate) fn as_list(v: Option<&V>) -> Vec<&V> {
     match v {
         None => Vec::new(),
         Some(V::List(x)) | Some(V::Multi(x)) => x.iter().collect(),
@@ -314,7 +314,7 @@ fn k(x: &[u8]) -> Key {
 
 const I32_WRAP: i64 = (1i64 << 32) / 1000;
 
-fn unwrap_overflow(n: i64) -> i64 {
+pub(crate) fn unwrap_overflow(n: i64) -> i64 {
     if n < 0 { n + I32_WRAP } else { n }
 }
 
@@ -343,7 +343,7 @@ fn side(v: Option<&V>) -> R<P> {
 
 /// `^\d{3,4}\.\d{1,2}\.\d{1,2}$`. A key ending in a newline, which `$`
 /// would also let through, is refused: no save writes one.
-fn dated(key: &[u8]) -> R<bool> {
+pub(crate) fn dated(key: &[u8]) -> R<bool> {
     if key.last() == Some(&b'\n') {
         return Err(());
     }
@@ -356,7 +356,7 @@ fn dated(key: &[u8]) -> R<bool> {
 }
 
 /// `dates.date_key` for a key `dated` accepted.
-fn date_key(d: &[u8]) -> (i64, i64, i64) {
+pub(crate) fn date_key(d: &[u8]) -> (i64, i64, i64) {
     let mut it = d.split(|&c| c == b'.').map(|p| {
         p.iter().fold(0i64, |a, &c| a * 10 + (c - b'0') as i64)
     });
@@ -528,7 +528,7 @@ pub fn read_war(v: &V, active: bool) -> R<Option<P>> {
 /// `int(p)` for one part of a `YYYY.M.D` date: Ok(None) is the ValueError
 /// `shift_months` catches. Signs are Python's; spaces and underscores, which
 /// `int()` also takes, are refused.
-fn py_int(p: &[u8]) -> R<Option<i64>> {
+pub(crate) fn py_int(p: &[u8]) -> R<Option<i64>> {
     if p.iter().any(|&c| py_space(c) || c == b'_') {
         return Err(());
     }
@@ -548,7 +548,7 @@ fn py_int(p: &[u8]) -> R<Option<i64>> {
 }
 
 /// `readsave.shift_months(date, back)`.
-fn shift_months(date: &[u8], back: i64) -> R<Vec<u8>> {
+pub(crate) fn shift_months(date: &[u8], back: i64) -> R<Vec<u8>> {
     let parts: Vec<&[u8]> = date.split(|&c| c == b'.').collect();
     if parts.len() != 3 {
         return Ok(Vec::new());

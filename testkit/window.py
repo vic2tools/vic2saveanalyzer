@@ -79,7 +79,7 @@ def a_full_run(root, app, saves, out):
 
     app.on_progress = counted
     began = time.monotonic()
-    app.work(saves, "", out)
+    app.work(saves, "", out, game_root=app.game.get())
     took = time.monotonic() - began
 
     # Let the window's own pump move the queue into the log widget, the way
@@ -156,7 +156,7 @@ def a_stopped_run(root, app, saves, out):
     app.open_after.set(False)
     app.stop.set()                       # as if Stop were pressed at once
     try:
-        app.work(saves, "", out)
+        app.work(saves, "", out, game_root=app.game.get())
     finally:
         app.stop.clear()
         vic2_analyzer.set_cancel_check(None)
@@ -185,7 +185,7 @@ def a_refused_run(root, app, holding):
     app.show_report = lambda path: None
     app.open_after.set(False)
     gone = os.path.join(holding, "no such folder")
-    app.work(gone, "", os.path.join(holding, "three"))
+    app.work(gone, "", os.path.join(holding, "three"), game_root=app.game.get())
     for _ in range(20):
         root.update()
         time.sleep(0.02)
@@ -216,7 +216,9 @@ def a_start_keeps_other_settings(app, holding):
     real = settings.ANALYZER
     settings.ANALYZER = os.path.join(holding, "settings.json")
     saves = os.path.join(holding, "keep-saves")
-    mod = os.path.join(holding, "keep-mod")
+    import matching
+    game = matching.a_game(os.path.join(holding, "keep-game"))
+    mod = os.path.join(game, "mod", "keep-mod")
     os.makedirs(saves)
     os.makedirs(os.path.join(mod, "common"))
     open(os.path.join(saves, "a.v2"), "w").write('date="1836.1.1"\n')
@@ -225,6 +227,7 @@ def a_start_keeps_other_settings(app, holding):
     try:
         settings.remember(github_token="ghp_kept", report_host="https://kept")
         app.saves.set(saves)
+        app.game.set(game)
         app.mod.set(mod)
         app.out.set(os.path.join(holding, "keep-out"))
         app.start()
@@ -305,6 +308,13 @@ def main():
     root, app = made
     holding = tempfile.mkdtemp(prefix="vic2window")
     try:
+        import matching
+        app.game.set(matching.a_vanilla(os.path.join(holding, "game")))
+        # Unexpected dialogs fail immediately instead of hanging the suite.
+        from tkinter import messagebox
+        def unexpected_dialog(*args, **kwargs):
+            raise AssertionError("unexpected dialog: %r" % (args,))
+        messagebox.showerror = unexpected_dialog
         out = os.path.join(holding, "out")
         wrong = a_full_run(root, app, saves, out)
         import gui
