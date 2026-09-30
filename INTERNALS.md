@@ -578,7 +578,17 @@ Python itself -- `int()` of an infinity, a number past 64 bits, a state
 block that is a list -- is still handed back where it is met, and there the
 Python, starting over, says again what had been said.
 
-Still ahead: the diagnostics; `--cross`; and the window running the binary.
+The window runs it too (`analyze`, which the window calls, hands the run
+to `vic2scan analyze --protocol` first): the scanner's lines reach the log
+as they are printed, `@progress` moves the bar, `@ready` opens the report
+while the tables are still being written, Stop kills the scanner (whatever
+saves it had read are in its cache), a refusal comes back as the
+`RunError` the window has always shown, and a run handed back is done in
+Python as before. `testkit/window.py` drives exactly that. It also means
+the window no longer meets the Python-hosted engine's doubled first pass.
+
+Still ahead: the diagnostics and `--cross`, which are handed back to
+Python, whole, before a word.
 
 ### The engine reads the mod itself, 2026-09-29
 

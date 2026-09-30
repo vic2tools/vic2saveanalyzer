@@ -628,7 +628,12 @@ def analyze(run, cancel=None, progress=None, ready=None):
     set_progress(progress)
     set_report_ready(ready)
     try:
-        return _run(run)
+        status = _front(run, hosted=True)
+        if status is None:
+            return _run(run)
+        if status:
+            raise RuntimeError("the scanner stopped with status %s" % status)
+        return status
     finally:
         set_cancel_check(None)
         set_progress(None)
@@ -698,11 +703,15 @@ def main(run=None):
         sys.exit(str(refused))
 
 
-def _front(run):
+def _front(run, hosted=False):
     """
     The run done by the scanner (`vic2scan analyze`): its exit status, or
     None when there is no scanner or it handed the run back, having said
     nothing. `VIC2_NO_FRONT` or `VIC2_NO_ENGINE` keeps the run here.
+
+    `hosted` is the window's run: the scanner's lines go to `sys.stdout`
+    and `sys.stderr` as they come, its progress and "the report is on disk"
+    to the callbacks `analyze` set, and the Stop button kills it.
     """
     if os.environ.get("VIC2_NO_FRONT") or os.environ.get("VIC2_NO_ENGINE"):
         return None
@@ -723,13 +732,16 @@ def _front(run):
         sys.stdout.flush()
         sys.stderr.flush()
         argv = [binary, "analyze", "--run", path, "--refused", refused]
-        if sys.stdout is sys.__stdout__ and sys.stderr is sys.__stderr__:
+        if hosted:
+            argv.append("--protocol")
+        if not hosted and sys.stdout is sys.__stdout__ and sys.stderr is sys.__stderr__:
             status = subprocess.call(argv, creationflags=fastscan._no_window())
         else:
-            # Someone is catching what this prints -- a check running the
-            # analyzer in its own process -- and a child's output would go
-            # past them to the real streams, so it is passed on through.
-            status = _relayed(argv, fastscan._no_window())
+            # Someone is catching what this prints -- the window's log, or a
+            # check running the analyzer in its own process -- and a child's
+            # output would go past them to the real streams, so it is passed
+            # on through.
+            status = _relayed(argv, fastscan._no_window(), hosted)
         if status == REFUSED:
             # A run refused, in its sentence, raised as it always was.
             with open(refused, encoding="utf-8") as fh:
@@ -742,28 +754,66 @@ def _front(run):
                 pass
     return None if status == engine.DECLINED else status
 
-
 # The status `vic2scan analyze` exits with when it refused the run and wrote
 # the sentence to the file it was given.
 REFUSED = 4
 
 
-def _relayed(argv, flags):
-    """Run `argv`, its output written to `sys.stdout` and `sys.stderr`."""
+def _relayed(argv, flags, hosted=False):
+    """
+    Run `argv`, its output written to `sys.stdout` and `sys.stderr` as it
+    comes, and its status. Hosted, the protocol lines go to the progress and
+    report-ready callbacks instead, and a Stop asked for kills it and raises
+    `Cancelled` -- every save it had read by then is in the engine's cache.
+    """
     import subprocess
     proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             creationflags=flags)
+    failed = []
 
-    def copy(source, target):
-        for line in iter(source.readline, b""):
-            target.write(line.decode("utf-8", "replace"))
-        source.close()
+    def copy(source, target, lines):
+        try:
+            for raw in iter(source.readline, b""):
+                line = raw.decode("utf-8", "replace")
+                if lines and line.startswith("@"):
+                    word, _, rest = line.rstrip("\r\n").partition(" ")
+                    if word == "@progress":
+                        done, total = rest.split()[:2]
+                        tell_progress(int(done), int(total))
+                        continue
+                    if word == "@ready":
+                        _tell_report_ready(rest)
+                        continue
+                    if word == "@done":
+                        continue
+                target.write(line)
+        except Exception as exc:                     # noqa: BLE001
+            failed.append(exc)
+        finally:
+            source.close()
 
-    err = threading.Thread(target=copy, args=(proc.stderr, sys.stderr), daemon=True)
-    err.start()
-    copy(proc.stdout, sys.stdout)
-    err.join()
-    return proc.wait()
+    threads = [threading.Thread(target=copy, args=(proc.stdout, sys.stdout, hosted), daemon=True),
+               threading.Thread(target=copy, args=(proc.stderr, sys.stderr, False), daemon=True)]
+    for t in threads:
+        t.start()
+    try:
+        while threads[0].is_alive():
+            threads[0].join(0.1)
+            if hosted:
+                stop_if_asked()
+    except BaseException:
+        if proc.poll() is None:
+            proc.kill()
+        for t in threads:
+            t.join()
+        proc.wait()
+        raise
+    for t in threads:
+        t.join()
+    status = proc.wait()
+    if failed:
+        raise failed[0]
+    return status
 
 
 def _run(run=None):

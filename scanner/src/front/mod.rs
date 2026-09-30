@@ -8,7 +8,7 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 //
-//     vic2scan analyze --run RUN.json [--refused FILE]
+//     vic2scan analyze --run RUN.json [--refused FILE] [--protocol]
 //
 // RUN is the `run.Run` Python's command line made (`dataclasses.asdict`).
 // From it this does what `_main` does for an ordinary report: finds the
@@ -567,7 +567,11 @@ fn strs(v: &[String]) -> J {
 
 /// `vic2scan analyze --run RUN.json`.
 pub fn main(argv: &[String]) -> ! {
-    out::set_protocol(false);
+    out::quiet_declines();
+    // `--protocol`: a host (the window) reads `@progress`, `@ready` and
+    // `@done` off stdout among the lines it shows.
+    let protocol = argv.iter().any(|a| a == "--protocol");
+    out::set_protocol(protocol);
     let args = match (argv.get(2).map(|s| s.as_str()), argv.get(3)) {
         (Some("--run"), Some(file)) => {
             let text = std::fs::read_to_string(file)
@@ -581,7 +585,7 @@ pub fn main(argv: &[String]) -> ! {
     // which raises it as the `RunError` it always raised) gets the sentence
     // in that file and status 4; otherwise it is said, and the status is 1.
     let refused_to = argv.iter().position(|a| a == "--refused").and_then(|i| argv.get(i + 1));
-    let code = match run(args) {
+    let code = match run(args, protocol) {
         Ok(code) => code,
         Err(RunError(why)) => match refused_to {
             Some(file) => match std::fs::write(file, why.as_bytes()) {
@@ -602,7 +606,7 @@ pub fn main(argv: &[String]) -> ! {
     std::process::exit(code);
 }
 
-fn run(mut args: Args) -> R<i32> {
+fn run(mut args: Args, protocol: bool) -> R<i32> {
     // What is still Python's is handed back before anything is said or
     // looked at, so the Python says all of it once.
     if args.peek || args.cross || args.verify || args.asked() {
@@ -791,7 +795,7 @@ fn run(mut args: Args) -> R<i32> {
         ])),
         ("mod_path".into(), J::Str(root.clone())),
         ("mod_signature".into(), J::Str(signature.clone())),
-        ("protocol".into(), J::Bool(false)),
+        ("protocol".into(), J::Bool(protocol)),
         ("own_refusals".into(), J::Bool(true)),
     ]);
     let done = crate::engine::run_spec(&spec, None).expect("a report run returns what it wrote");

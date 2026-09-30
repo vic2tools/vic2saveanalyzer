@@ -624,7 +624,7 @@ pub fn decline(why: &str) -> ! {
     front_log(&format!("handed back: {}", why));
     if std::env::var_os("VIC2_ENGINE_REQUIRED").is_some() {
         eprintln!("engine: {}", why);
-    } else if out::protocol_on() {
+    } else if out::say_declines() {
         // Python hosting the engine keeps its stderr for when it fails.
         crate::errln!("engine: {}", why);
     }

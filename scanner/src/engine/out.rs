@@ -22,6 +22,7 @@ use std::sync::Mutex;
 
 static HELD: Mutex<Option<Vec<(bool, String)>>> = Mutex::new(None);
 static PROTOCOL: AtomicBool = AtomicBool::new(true);
+static QUIET_DECLINES: AtomicBool = AtomicBool::new(false);
 
 fn emit(to_stdout: bool, text: &str) {
     if to_stdout {
@@ -62,8 +63,15 @@ pub fn set_protocol(on: bool) {
     PROTOCOL.store(on, Ordering::Relaxed);
 }
 
-pub fn protocol_on() -> bool {
-    PROTOCOL.load(Ordering::Relaxed)
+/// Whether a run handed back says why on stderr: only to `engine.py`,
+/// which keeps the engine's stderr for its own error, and not through the
+/// front end, whose stderr is the person's.
+pub fn say_declines() -> bool {
+    !QUIET_DECLINES.load(Ordering::Relaxed)
+}
+
+pub fn quiet_declines() {
+    QUIET_DECLINES.store(true, Ordering::Relaxed);
 }
 
 /// One line for the host: `@progress`, `@ready`, `@done`.
