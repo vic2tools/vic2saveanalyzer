@@ -1,0 +1,5 @@
+
+=== awkward.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 0 regiments, 0 ships, 3,500 people.
+

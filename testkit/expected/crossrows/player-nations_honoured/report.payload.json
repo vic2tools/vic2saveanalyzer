@@ -1,0 +1,5113 @@
+{
+ "dates": [
+  "1870.1.1",
+  "1875.1.1",
+  "1880.1.1"
+ ],
+ "years": [
+  1870.0,
+  1875.0,
+  1880.0
+ ],
+ "tags": [
+  "ENG",
+  "FRA",
+  "PRU"
+ ],
+ "tagNames": {
+  "ENG": "ENG",
+  "FRA": "FRA",
+  "PRU": "PRU"
+ },
+ "cultureNames": {},
+ "names": {},
+ "metrics": [
+  {
+   "key": "total_pop",
+   "label": "Total population",
+   "fmt": "count"
+  },
+  {
+   "key": "accepted_pop",
+   "label": "Accepted-culture population",
+   "fmt": "count"
+  },
+  {
+   "key": "accepted_pct",
+   "label": "Accepted share",
+   "fmt": "percent"
+  },
+  {
+   "key": "primary_culture_pop",
+   "label": "Primary-culture population",
+   "fmt": "count"
+  },
+  {
+   "key": "avg_literacy",
+   "label": "Average literacy",
+   "fmt": "fraction"
+  },
+  {
+   "key": "avg_literacy_stated",
+   "label": "Literacy in own states",
+   "fmt": "fraction"
+  },
+  {
+   "key": "life_unmet",
+   "label": "Population with life needs unmet",
+   "fmt": "count"
+  },
+  {
+   "key": "life_unmet_pct",
+   "label": "Life needs unmet",
+   "fmt": "percent"
+  },
+  {
+   "key": "starving",
+   "label": "Starving population",
+   "fmt": "count"
+  },
+  {
+   "key": "starving_pct",
+   "label": "Starving share",
+   "fmt": "percent"
+  },
+  {
+   "key": "brigades",
+   "label": "Brigades (all)",
+   "fmt": "count"
+  },
+  {
+   "key": "regular_brigades",
+   "label": "Standing brigades",
+   "fmt": "count"
+  },
+  {
+   "key": "mobilized_brigades",
+   "label": "Mobilized brigades",
+   "fmt": "count"
+  },
+  {
+   "key": "mobilizing",
+   "label": "Mobilizing (queued)",
+   "fmt": "count"
+  },
+  {
+   "key": "brigade_cap",
+   "label": "Brigade cap",
+   "fmt": "count"
+  },
+  {
+   "key": "mobilization_pool",
+   "label": "Mobilizable population",
+   "fmt": "count"
+  },
+  {
+   "key": "mobilization_brigades",
+   "label": "Mobilization ceiling",
+   "fmt": "count"
+  },
+  {
+   "key": "ships",
+   "label": "Ships",
+   "fmt": "count"
+  },
+  {
+   "key": "factory_levels",
+   "label": "Factory levels",
+   "fmt": "count"
+  },
+  {
+   "key": "factory_count",
+   "label": "Factories",
+   "fmt": "count"
+  },
+  {
+   "key": "naval_base_levels",
+   "label": "Naval base levels",
+   "fmt": "count"
+  },
+  {
+   "key": "ports",
+   "label": "Provinces with a naval base",
+   "fmt": "count"
+  },
+  {
+   "key": "max_naval_base",
+   "label": "Largest naval base",
+   "fmt": "count"
+  },
+  {
+   "key": "railroad_levels",
+   "label": "Railroad levels",
+   "fmt": "count"
+  },
+  {
+   "key": "techs",
+   "label": "Technologies",
+   "fmt": "count"
+  },
+  {
+   "key": "prestige",
+   "label": "Prestige",
+   "fmt": "count"
+  },
+  {
+   "key": "provinces",
+   "label": "Provinces",
+   "fmt": "count"
+  },
+  {
+   "key": "states",
+   "label": "States",
+   "fmt": "count"
+  },
+  {
+   "key": "treasury",
+   "label": "Treasury",
+   "fmt": "count"
+  },
+  {
+   "key": "tax_base",
+   "label": "Tax base",
+   "fmt": "count"
+  },
+  {
+   "key": "avg_consciousness",
+   "label": "Average consciousness",
+   "fmt": "decimal"
+  },
+  {
+   "key": "avg_militancy",
+   "label": "Average militancy",
+   "fmt": "decimal"
+  },
+  {
+   "key": "infamy",
+   "label": "Infamy",
+   "fmt": "decimal"
+  },
+  {
+   "key": "pop_poor",
+   "label": "Poor strata",
+   "fmt": "count"
+  },
+  {
+   "key": "pop_middle",
+   "label": "Middle strata",
+   "fmt": "count"
+  },
+  {
+   "key": "pop_rich",
+   "label": "Rich strata",
+   "fmt": "count"
+  },
+  {
+   "key": "pop_growth",
+   "label": "Population growth (%/yr)",
+   "fmt": "percent",
+   "rate": 1
+  },
+  {
+   "key": "accepted_growth",
+   "label": "Accepted-culture growth (%/yr)",
+   "fmt": "percent",
+   "rate": 1
+  },
+  {
+   "key": "pop_gain",
+   "label": "Population gain (per save)",
+   "fmt": "count",
+   "delta": 1
+  },
+  {
+   "key": "accepted_gain",
+   "label": "Accepted-culture gain (per save)",
+   "fmt": "count",
+   "delta": 1
+  }
+ ],
+ "series": {
+  "ENG": {
+   "total_pop": [
+    40500.0,
+    44550.0,
+    48600.0
+   ],
+   "accepted_pop": [
+    38000.0,
+    41800.0,
+    45600.0
+   ],
+   "accepted_pct": [
+    93.83,
+    93.83,
+    93.83
+   ],
+   "primary_culture_pop": [
+    38000.0,
+    41800.0,
+    45600.0
+   ],
+   "avg_literacy": [
+    0.4,
+    0.4,
+    0.4
+   ],
+   "avg_literacy_stated": [
+    0.4,
+    0.4,
+    0.4
+   ],
+   "life_unmet": [
+    40500.0,
+    44550.0,
+    48600.0
+   ],
+   "life_unmet_pct": [
+    100.0,
+    100.0,
+    100.0
+   ],
+   "starving": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "starving_pct": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "brigades": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "regular_brigades": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "mobilized_brigades": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "mobilizing": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "brigade_cap": [
+    3.0,
+    3.0,
+    3.0
+   ],
+   "mobilization_pool": [
+    36000.0,
+    39600.0,
+    43200.0
+   ],
+   "mobilization_brigades": [
+    16.0,
+    16.0,
+    20.0
+   ],
+   "ships": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "factory_levels": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "factory_count": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "naval_base_levels": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "ports": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "max_naval_base": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "railroad_levels": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "techs": [
+    5.0,
+    5.0,
+    5.0
+   ],
+   "prestige": [
+    10.0,
+    10.0,
+    10.0
+   ],
+   "provinces": [
+    3.0,
+    3.0,
+    3.0
+   ],
+   "states": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "treasury": [
+    100.0,
+    100.0,
+    100.0
+   ],
+   "tax_base": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "avg_consciousness": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "avg_militancy": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "infamy": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "pop_poor": [
+    40500.0,
+    44550.0,
+    48600.0
+   ],
+   "pop_middle": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "pop_rich": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "pop_growth": [
+    null,
+    1.9245,
+    1.7555
+   ],
+   "accepted_growth": [
+    null,
+    1.9245,
+    1.7555
+   ],
+   "pop_gain": [
+    null,
+    4050.0,
+    4050.0
+   ],
+   "accepted_gain": [
+    null,
+    3800.0,
+    3800.0
+   ]
+  },
+  "FRA": {
+   "total_pop": [
+    22000.0,
+    24200.0,
+    26400.0
+   ],
+   "accepted_pop": [
+    22000.0,
+    24200.0,
+    26400.0
+   ],
+   "accepted_pct": [
+    100.0,
+    100.0,
+    100.0
+   ],
+   "primary_culture_pop": [
+    22000.0,
+    24200.0,
+    26400.0
+   ],
+   "avg_literacy": [
+    0.4,
+    0.4,
+    0.4
+   ],
+   "avg_literacy_stated": [
+    0.4,
+    0.4,
+    0.4
+   ],
+   "life_unmet": [
+    22000.0,
+    24200.0,
+    26400.0
+   ],
+   "life_unmet_pct": [
+    100.0,
+    100.0,
+    100.0
+   ],
+   "starving": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "starving_pct": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "brigades": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "regular_brigades": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "mobilized_brigades": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "mobilizing": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "brigade_cap": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "mobilization_pool": [
+    22000.0,
+    24200.0,
+    26400.0
+   ],
+   "mobilization_brigades": [
+    10.0,
+    11.0,
+    12.0
+   ],
+   "ships": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "factory_levels": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "factory_count": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "naval_base_levels": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "ports": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "max_naval_base": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "railroad_levels": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "techs": [
+    2.0,
+    2.0,
+    2.0
+   ],
+   "prestige": [
+    10.0,
+    10.0,
+    10.0
+   ],
+   "provinces": [
+    2.0,
+    2.0,
+    2.0
+   ],
+   "states": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "treasury": [
+    100.0,
+    100.0,
+    100.0
+   ],
+   "tax_base": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "avg_consciousness": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "avg_militancy": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "infamy": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "pop_poor": [
+    22000.0,
+    24200.0,
+    26400.0
+   ],
+   "pop_middle": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "pop_rich": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "pop_growth": [
+    null,
+    1.9245,
+    1.7555
+   ],
+   "accepted_growth": [
+    null,
+    1.9245,
+    1.7555
+   ],
+   "pop_gain": [
+    null,
+    2200.0,
+    2200.0
+   ],
+   "accepted_gain": [
+    null,
+    2200.0,
+    2200.0
+   ]
+  },
+  "PRU": {
+   "total_pop": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "accepted_pop": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "accepted_pct": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "primary_culture_pop": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "avg_literacy": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "avg_literacy_stated": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "life_unmet": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "life_unmet_pct": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "starving": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "starving_pct": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "brigades": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "regular_brigades": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "mobilized_brigades": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "mobilizing": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "brigade_cap": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "mobilization_pool": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "mobilization_brigades": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "ships": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "factory_levels": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "factory_count": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "naval_base_levels": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "ports": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "max_naval_base": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "railroad_levels": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "techs": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "prestige": [
+    10.0,
+    10.0,
+    10.0
+   ],
+   "provinces": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "states": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "treasury": [
+    100.0,
+    100.0,
+    100.0
+   ],
+   "tax_base": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "avg_consciousness": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "avg_militancy": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "infamy": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "pop_poor": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "pop_middle": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "pop_rich": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "pop_growth": [
+    null,
+    null,
+    null
+   ],
+   "accepted_growth": [
+    null,
+    null,
+    null
+   ],
+   "pop_gain": [
+    null,
+    0.0,
+    0.0
+   ],
+   "accepted_gain": [
+    null,
+    0.0,
+    0.0
+   ]
+  }
+ },
+ "facts": {
+  "1870.1.1": {
+   "ENG": {
+    "mobilisation_size": 0.5,
+    "is_mobilized": 0,
+    "primary_culture": "british",
+    "is_player": 0,
+    "soldiers_noncolonial": 2000,
+    "army_techs": 2,
+    "navy_techs": 1
+   },
+   "FRA": {
+    "mobilisation_size": 0.5,
+    "is_mobilized": 0,
+    "primary_culture": "french",
+    "is_player": 1,
+    "soldiers_noncolonial": 0,
+    "army_techs": 2,
+    "navy_techs": 0
+   },
+   "PRU": {
+    "mobilisation_size": 0.0,
+    "is_mobilized": 0,
+    "primary_culture": "prussian",
+    "is_player": 0,
+    "soldiers_noncolonial": 0,
+    "army_techs": 0,
+    "navy_techs": 0
+   }
+  },
+  "1875.1.1": {
+   "ENG": {
+    "mobilisation_size": 0.5,
+    "is_mobilized": 0,
+    "primary_culture": "british",
+    "is_player": 0,
+    "soldiers_noncolonial": 2200,
+    "army_techs": 2,
+    "navy_techs": 1
+   },
+   "FRA": {
+    "mobilisation_size": 0.5,
+    "is_mobilized": 0,
+    "primary_culture": "french",
+    "is_player": 1,
+    "soldiers_noncolonial": 0,
+    "army_techs": 2,
+    "navy_techs": 0
+   },
+   "PRU": {
+    "mobilisation_size": 0.0,
+    "is_mobilized": 0,
+    "primary_culture": "prussian",
+    "is_player": 0,
+    "soldiers_noncolonial": 0,
+    "army_techs": 0,
+    "navy_techs": 0
+   }
+  },
+  "1880.1.1": {
+   "ENG": {
+    "mobilisation_size": 0.5,
+    "is_mobilized": 0,
+    "primary_culture": "british",
+    "is_player": 0,
+    "soldiers_noncolonial": 2400,
+    "army_techs": 2,
+    "navy_techs": 1
+   },
+   "FRA": {
+    "mobilisation_size": 0.5,
+    "is_mobilized": 0,
+    "primary_culture": "french",
+    "is_player": 1,
+    "soldiers_noncolonial": 0,
+    "army_techs": 2,
+    "navy_techs": 0
+   },
+   "PRU": {
+    "mobilisation_size": 0.0,
+    "is_mobilized": 0,
+    "primary_culture": "prussian",
+    "is_player": 0,
+    "soldiers_noncolonial": 0,
+    "army_techs": 0,
+    "navy_techs": 0
+   }
+  }
+ },
+ "factKeys": [
+  "accepted_pct",
+  "accepted_pop",
+  "avg_consciousness",
+  "avg_literacy",
+  "avg_literacy_stated",
+  "avg_militancy",
+  "brigade_cap",
+  "brigades",
+  "factory_levels",
+  "life_unmet",
+  "life_unmet_pct",
+  "mobilization_brigades",
+  "mobilization_pool",
+  "mobilized_brigades",
+  "mobilizing",
+  "prestige",
+  "provinces",
+  "regular_brigades",
+  "ships",
+  "starving",
+  "starving_pct",
+  "techs",
+  "total_pop"
+ ],
+ "ships": {},
+ "crews": {},
+ "shipTypes": [],
+ "brigades": {},
+ "regimentTypes": [],
+ "techOrder": [
+  "post_napoleonic_thought",
+  "strategic_mobility",
+  "point_defense_system",
+  "deep_defense_system",
+  "infiltration",
+  "flintlock_rifles",
+  "muzzle_loaded_rifles",
+  "breech_loaded_rifles",
+  "machine_guns",
+  "bolt_action_rifles",
+  "bronze_muzzle_loaded_artillery",
+  "iron_muzzle_loaded_artillery",
+  "iron_breech_loaded_artillery",
+  "steel_breech_loaded_artillery",
+  "indirect_artillery_fire",
+  "military_staff_system",
+  "military_plans",
+  "military_statistics",
+  "military_logistics",
+  "military_directionism",
+  "army_command_principle",
+  "army_professionalism",
+  "army_decision_making",
+  "army_risk_management",
+  "army_nco_training",
+  "post_nelsonian_thought",
+  "battleship_column_doctrine",
+  "raider_group_doctrine",
+  "blue_and_brown_water_schools",
+  "high_sea_battle_fleet",
+  "clipper_design",
+  "steamers",
+  "iron_steamers",
+  "steel_steamers",
+  "steam_turbine_ships",
+  "naval_design_bureaus",
+  "fire_control_systems",
+  "weapon_platforms",
+  "main_armament",
+  "advanced_naval_design",
+  "alphabetic_flag_signaling",
+  "naval_plans",
+  "naval_statistics",
+  "naval_logistics",
+  "naval_directionism",
+  "the_command_principle",
+  "naval_professionalism",
+  "naval_decision_making",
+  "naval_risk_management",
+  "naval_nco_training",
+  "iron_working",
+  "the_stirrup"
+ ],
+ "techMeta": [
+  [
+   "army",
+   "Doctrine"
+  ],
+  [
+   "army",
+   "Doctrine"
+  ],
+  [
+   "army",
+   "Doctrine"
+  ],
+  [
+   "army",
+   "Doctrine"
+  ],
+  [
+   "army",
+   "Doctrine"
+  ],
+  [
+   "army",
+   "Small arms"
+  ],
+  [
+   "army",
+   "Small arms"
+  ],
+  [
+   "army",
+   "Small arms"
+  ],
+  [
+   "army",
+   "Small arms"
+  ],
+  [
+   "army",
+   "Small arms"
+  ],
+  [
+   "army",
+   "Artillery"
+  ],
+  [
+   "army",
+   "Artillery"
+  ],
+  [
+   "army",
+   "Artillery"
+  ],
+  [
+   "army",
+   "Artillery"
+  ],
+  [
+   "army",
+   "Artillery"
+  ],
+  [
+   "army",
+   "Military science"
+  ],
+  [
+   "army",
+   "Military science"
+  ],
+  [
+   "army",
+   "Military science"
+  ],
+  [
+   "army",
+   "Military science"
+  ],
+  [
+   "army",
+   "Military science"
+  ],
+  [
+   "army",
+   "Leadership"
+  ],
+  [
+   "army",
+   "Leadership"
+  ],
+  [
+   "army",
+   "Leadership"
+  ],
+  [
+   "army",
+   "Leadership"
+  ],
+  [
+   "army",
+   "Leadership"
+  ],
+  [
+   "navy",
+   "Naval doctrine"
+  ],
+  [
+   "navy",
+   "Naval doctrine"
+  ],
+  [
+   "navy",
+   "Naval doctrine"
+  ],
+  [
+   "navy",
+   "Naval doctrine"
+  ],
+  [
+   "navy",
+   "Naval doctrine"
+  ],
+  [
+   "navy",
+   "Hulls"
+  ],
+  [
+   "navy",
+   "Hulls"
+  ],
+  [
+   "navy",
+   "Hulls"
+  ],
+  [
+   "navy",
+   "Hulls"
+  ],
+  [
+   "navy",
+   "Hulls"
+  ],
+  [
+   "navy",
+   "Naval engineering"
+  ],
+  [
+   "navy",
+   "Naval engineering"
+  ],
+  [
+   "navy",
+   "Naval engineering"
+  ],
+  [
+   "navy",
+   "Naval engineering"
+  ],
+  [
+   "navy",
+   "Naval engineering"
+  ],
+  [
+   "navy",
+   "Naval science"
+  ],
+  [
+   "navy",
+   "Naval science"
+  ],
+  [
+   "navy",
+   "Naval science"
+  ],
+  [
+   "navy",
+   "Naval science"
+  ],
+  [
+   "navy",
+   "Naval science"
+  ],
+  [
+   "navy",
+   "Naval leadership"
+  ],
+  [
+   "navy",
+   "Naval leadership"
+  ],
+  [
+   "navy",
+   "Naval leadership"
+  ],
+  [
+   "navy",
+   "Naval leadership"
+  ],
+  [
+   "navy",
+   "Naval leadership"
+  ],
+  [
+   "other",
+   "Other"
+  ],
+  [
+   "other",
+   "Other"
+  ]
+ ],
+ "techsBy": {
+  "ENG": {
+   "1870.1.1": [
+    0,
+    5,
+    30,
+    50,
+    51
+   ],
+   "1875.1.1": [
+    0,
+    5,
+    30,
+    50,
+    51
+   ],
+   "1880.1.1": [
+    0,
+    5,
+    30,
+    50,
+    51
+   ]
+  },
+  "FRA": {
+   "1870.1.1": [
+    0,
+    5
+   ],
+   "1875.1.1": [
+    0,
+    5
+   ],
+   "1880.1.1": [
+    0,
+    5
+   ]
+  }
+ },
+ "worldPop": {
+  "1870.1.1": 62500,
+  "1875.1.1": 68750,
+  "1880.1.1": 75000
+ },
+ "pops": {
+  "ENG": {
+   "1870.1.1": {
+    "craftsmen": 9000,
+    "farmers": 19000,
+    "labourers": 7000,
+    "serfs": 3500,
+    "soldiers": 2000
+   },
+   "1875.1.1": {
+    "craftsmen": 9900,
+    "farmers": 20900,
+    "labourers": 7700,
+    "serfs": 3850,
+    "soldiers": 2200
+   },
+   "1880.1.1": {
+    "craftsmen": 10800,
+    "farmers": 22800,
+    "labourers": 8400,
+    "serfs": 4200,
+    "soldiers": 2400
+   }
+  },
+  "FRA": {
+   "1870.1.1": {
+    "farmers": 11000,
+    "labourers": 5000,
+    "serfs": 6000
+   },
+   "1875.1.1": {
+    "farmers": 12100,
+    "labourers": 5500,
+    "serfs": 6600
+   },
+   "1880.1.1": {
+    "farmers": 13200,
+    "labourers": 6000,
+    "serfs": 7200
+   }
+  }
+ },
+ "popTypes": [
+  "craftsmen",
+  "farmers",
+  "labourers",
+  "serfs",
+  "soldiers"
+ ],
+ "cultures": {
+  "ENG": {
+   "1870.1.1": [
+    [
+     "british",
+     38000,
+     1
+    ],
+    [
+     "irish",
+     2500,
+     0
+    ]
+   ],
+   "1875.1.1": [
+    [
+     "british",
+     41800,
+     1
+    ],
+    [
+     "irish",
+     2750,
+     0
+    ]
+   ],
+   "1880.1.1": [
+    [
+     "british",
+     45600,
+     1
+    ],
+    [
+     "irish",
+     3000,
+     0
+    ]
+   ]
+  },
+  "FRA": {
+   "1870.1.1": [
+    [
+     "french",
+     22000,
+     1
+    ]
+   ],
+   "1875.1.1": [
+    [
+     "french",
+     24200,
+     1
+    ]
+   ],
+   "1880.1.1": [
+    [
+     "french",
+     26400,
+     1
+    ]
+   ]
+  }
+ },
+ "colours": [
+  "#E7C464",
+  "#D4553F",
+  "#8FB98C",
+  "#8FA8C8",
+  "#D48FA8",
+  "#B5A85C",
+  "#B48FC0",
+  "#EADFC2",
+  "#6FA8A0",
+  "#E09A4C",
+  "#9BAF6F",
+  "#A87FA0"
+ ],
+ "map": null,
+ "basePrices": {},
+ "greatPowers": {},
+ "flags": {},
+ "technology": {
+  "tree": {
+   "army": [
+    {
+     "area": "army_tech",
+     "techs": [
+      {
+       "key": "flintlock_rifles",
+       "year": 1836,
+       "cost": 100,
+       "effects": [
+        [
+         "Mobilisation size",
+         "0.500"
+        ]
+       ],
+       "inventions": [],
+       "name": "Flintlock rifles"
+      },
+      {
+       "key": "post_napoleonic_thought",
+       "year": 1836,
+       "cost": 100,
+       "effects": [],
+       "inventions": [],
+       "name": "Post napoleonic thought"
+      },
+      {
+       "key": "clipper_design",
+       "year": 1836,
+       "cost": 100,
+       "effects": [],
+       "inventions": [],
+       "name": "Clipper design"
+      },
+      {
+       "key": "the_stirrup",
+       "year": 1836,
+       "cost": 100,
+       "effects": [],
+       "inventions": [],
+       "name": "The stirrup"
+      },
+      {
+       "key": "iron_working",
+       "year": 1836,
+       "cost": 100,
+       "effects": [],
+       "inventions": [],
+       "name": "Iron working"
+      }
+     ],
+     "label": "Army tech"
+    }
+   ]
+  },
+  "categories": {
+   "army": "Army"
+  }
+ },
+ "wars": [],
+ "succession": {},
+ "priceDates": [],
+ "priceYears": [],
+ "prices": {},
+ "goods": [],
+ "goodCategory": {},
+ "categoryLabels": {
+  "military": "Military",
+  "industrial": "Industrial",
+  "raw": "Raw materials",
+  "consumer": "Consumer",
+  "other": "Other"
+ },
+ "movement": {},
+ "snapshot": {},
+ "snapshotDates": [],
+ "naval": null,
+ "supply": {},
+ "growthSpan": 0.25,
+ "cross": {
+  "campaigns": [
+   {
+    "name": "alpha",
+    "mod": "mod-alpha",
+    "saves": 3,
+    "from": 1870.0,
+    "to": 1880.0,
+    "dates": [
+     [
+      1870.0,
+      "1870.1.1"
+     ],
+     [
+      1875.0,
+      "1875.1.1"
+     ],
+     [
+      1880.0,
+      "1880.1.1"
+     ]
+    ]
+   },
+   {
+    "name": "beta",
+    "mod": "mod-beta",
+    "saves": 2,
+    "from": 1871.0,
+    "to": 1876.0,
+    "dates": [
+     [
+      1871.0,
+      "1871.1.1"
+     ],
+     [
+      1876.0,
+      "1876.1.1"
+     ]
+    ]
+   }
+  ],
+  "tags": [
+   "ENG",
+   "FRA",
+   "PRU"
+  ],
+  "tagNames": {
+   "ENG": "ENG",
+   "FRA": "FRA",
+   "PRU": "PRU"
+  },
+  "metrics": [
+   {
+    "key": "total_pop",
+    "label": "Total population",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "accepted_pop",
+    "label": "Accepted-culture population",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "accepted_pct",
+    "label": "Accepted share",
+    "fmt": "percent",
+    "rulebound": false
+   },
+   {
+    "key": "primary_culture_pop",
+    "label": "Primary-culture population",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "avg_literacy",
+    "label": "Average literacy",
+    "fmt": "fraction",
+    "rulebound": false
+   },
+   {
+    "key": "avg_literacy_stated",
+    "label": "Literacy in own states",
+    "fmt": "fraction",
+    "rulebound": false
+   },
+   {
+    "key": "life_unmet",
+    "label": "Population with life needs unmet",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "life_unmet_pct",
+    "label": "Life needs unmet",
+    "fmt": "percent",
+    "rulebound": false
+   },
+   {
+    "key": "starving",
+    "label": "Starving population",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "starving_pct",
+    "label": "Starving share",
+    "fmt": "percent",
+    "rulebound": false
+   },
+   {
+    "key": "brigades",
+    "label": "Brigades (all)",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "regular_brigades",
+    "label": "Standing brigades",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "mobilized_brigades",
+    "label": "Mobilized brigades",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "mobilizing",
+    "label": "Mobilizing (queued)",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "brigade_cap",
+    "label": "Brigade cap",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "mobilization_pool",
+    "label": "Mobilizable population",
+    "fmt": "count",
+    "rulebound": true
+   },
+   {
+    "key": "mobilization_brigades",
+    "label": "Mobilization ceiling",
+    "fmt": "count",
+    "rulebound": true
+   },
+   {
+    "key": "ships",
+    "label": "Ships",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "factory_levels",
+    "label": "Factory levels",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "factory_count",
+    "label": "Factories",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "naval_base_levels",
+    "label": "Naval base levels",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "ports",
+    "label": "Provinces with a naval base",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "max_naval_base",
+    "label": "Largest naval base",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "railroad_levels",
+    "label": "Railroad levels",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "techs",
+    "label": "Technologies",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "prestige",
+    "label": "Prestige",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "provinces",
+    "label": "Provinces",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "states",
+    "label": "States",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "treasury",
+    "label": "Treasury",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "tax_base",
+    "label": "Tax base",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "avg_consciousness",
+    "label": "Average consciousness",
+    "fmt": "decimal",
+    "rulebound": false
+   },
+   {
+    "key": "avg_militancy",
+    "label": "Average militancy",
+    "fmt": "decimal",
+    "rulebound": false
+   },
+   {
+    "key": "infamy",
+    "label": "Infamy",
+    "fmt": "decimal",
+    "rulebound": false
+   },
+   {
+    "key": "pop_poor",
+    "label": "Poor strata",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "pop_middle",
+    "label": "Middle strata",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "pop_rich",
+    "label": "Rich strata",
+    "fmt": "count",
+    "rulebound": false
+   },
+   {
+    "key": "pop_growth",
+    "label": "Population growth (%/yr)",
+    "fmt": "percent",
+    "rate": 1,
+    "rulebound": false
+   },
+   {
+    "key": "accepted_growth",
+    "label": "Accepted-culture growth (%/yr)",
+    "fmt": "percent",
+    "rate": 1,
+    "rulebound": false
+   },
+   {
+    "key": "pop_gain",
+    "label": "Population gain (per save)",
+    "fmt": "count",
+    "delta": 1,
+    "rulebound": false
+   },
+   {
+    "key": "accepted_gain",
+    "label": "Accepted-culture gain (per save)",
+    "fmt": "count",
+    "delta": 1,
+    "rulebound": false
+   }
+  ],
+  "series": [
+   {
+    "ENG": {
+     "total_pop": [
+      [
+       1870.0,
+       0.0,
+       40500.0
+      ],
+      [
+       1875.0,
+       5.0,
+       44550.0
+      ],
+      [
+       1880.0,
+       10.0,
+       48600.0
+      ]
+     ],
+     "accepted_pop": [
+      [
+       1870.0,
+       0.0,
+       38000.0
+      ],
+      [
+       1875.0,
+       5.0,
+       41800.0
+      ],
+      [
+       1880.0,
+       10.0,
+       45600.0
+      ]
+     ],
+     "accepted_pct": [
+      [
+       1870.0,
+       0.0,
+       93.83
+      ],
+      [
+       1875.0,
+       5.0,
+       93.83
+      ],
+      [
+       1880.0,
+       10.0,
+       93.83
+      ]
+     ],
+     "primary_culture_pop": [
+      [
+       1870.0,
+       0.0,
+       38000.0
+      ],
+      [
+       1875.0,
+       5.0,
+       41800.0
+      ],
+      [
+       1880.0,
+       10.0,
+       45600.0
+      ]
+     ],
+     "avg_literacy": [
+      [
+       1870.0,
+       0.0,
+       0.4
+      ],
+      [
+       1875.0,
+       5.0,
+       0.4
+      ],
+      [
+       1880.0,
+       10.0,
+       0.4
+      ]
+     ],
+     "avg_literacy_stated": [
+      [
+       1870.0,
+       0.0,
+       0.4
+      ],
+      [
+       1875.0,
+       5.0,
+       0.4
+      ],
+      [
+       1880.0,
+       10.0,
+       0.4
+      ]
+     ],
+     "life_unmet": [
+      [
+       1870.0,
+       0.0,
+       40500.0
+      ],
+      [
+       1875.0,
+       5.0,
+       44550.0
+      ],
+      [
+       1880.0,
+       10.0,
+       48600.0
+      ]
+     ],
+     "life_unmet_pct": [
+      [
+       1870.0,
+       0.0,
+       100.0
+      ],
+      [
+       1875.0,
+       5.0,
+       100.0
+      ],
+      [
+       1880.0,
+       10.0,
+       100.0
+      ]
+     ],
+     "starving": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "starving_pct": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "brigades": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "regular_brigades": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "mobilized_brigades": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "mobilizing": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "brigade_cap": [
+      [
+       1870.0,
+       0.0,
+       3.0
+      ],
+      [
+       1875.0,
+       5.0,
+       3.0
+      ],
+      [
+       1880.0,
+       10.0,
+       3.0
+      ]
+     ],
+     "mobilization_pool": [
+      [
+       1870.0,
+       0.0,
+       36000.0
+      ],
+      [
+       1875.0,
+       5.0,
+       39600.0
+      ],
+      [
+       1880.0,
+       10.0,
+       43200.0
+      ]
+     ],
+     "mobilization_brigades": [
+      [
+       1870.0,
+       0.0,
+       16.0
+      ],
+      [
+       1875.0,
+       5.0,
+       16.0
+      ],
+      [
+       1880.0,
+       10.0,
+       20.0
+      ]
+     ],
+     "ships": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "factory_levels": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "factory_count": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "naval_base_levels": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "ports": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "max_naval_base": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "railroad_levels": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "techs": [
+      [
+       1870.0,
+       0.0,
+       5.0
+      ],
+      [
+       1875.0,
+       5.0,
+       5.0
+      ],
+      [
+       1880.0,
+       10.0,
+       5.0
+      ]
+     ],
+     "prestige": [
+      [
+       1870.0,
+       0.0,
+       10.0
+      ],
+      [
+       1875.0,
+       5.0,
+       10.0
+      ],
+      [
+       1880.0,
+       10.0,
+       10.0
+      ]
+     ],
+     "provinces": [
+      [
+       1870.0,
+       0.0,
+       3.0
+      ],
+      [
+       1875.0,
+       5.0,
+       3.0
+      ],
+      [
+       1880.0,
+       10.0,
+       3.0
+      ]
+     ],
+     "states": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "treasury": [
+      [
+       1870.0,
+       0.0,
+       100.0
+      ],
+      [
+       1875.0,
+       5.0,
+       100.0
+      ],
+      [
+       1880.0,
+       10.0,
+       100.0
+      ]
+     ],
+     "tax_base": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "avg_consciousness": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "avg_militancy": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "infamy": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "pop_poor": [
+      [
+       1870.0,
+       0.0,
+       40500.0
+      ],
+      [
+       1875.0,
+       5.0,
+       44550.0
+      ],
+      [
+       1880.0,
+       10.0,
+       48600.0
+      ]
+     ],
+     "pop_middle": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "pop_rich": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "pop_growth": [
+      [
+       1875.0,
+       5.0,
+       1.9245
+      ],
+      [
+       1880.0,
+       10.0,
+       1.7555
+      ]
+     ],
+     "accepted_growth": [
+      [
+       1875.0,
+       5.0,
+       1.9245
+      ],
+      [
+       1880.0,
+       10.0,
+       1.7555
+      ]
+     ],
+     "pop_gain": [
+      [
+       1875.0,
+       5.0,
+       4050.0
+      ],
+      [
+       1880.0,
+       10.0,
+       4050.0
+      ]
+     ],
+     "accepted_gain": [
+      [
+       1875.0,
+       5.0,
+       3800.0
+      ],
+      [
+       1880.0,
+       10.0,
+       3800.0
+      ]
+     ]
+    },
+    "FRA": {
+     "total_pop": [
+      [
+       1870.0,
+       0.0,
+       22000.0
+      ],
+      [
+       1875.0,
+       5.0,
+       24200.0
+      ],
+      [
+       1880.0,
+       10.0,
+       26400.0
+      ]
+     ],
+     "accepted_pop": [
+      [
+       1870.0,
+       0.0,
+       22000.0
+      ],
+      [
+       1875.0,
+       5.0,
+       24200.0
+      ],
+      [
+       1880.0,
+       10.0,
+       26400.0
+      ]
+     ],
+     "accepted_pct": [
+      [
+       1870.0,
+       0.0,
+       100.0
+      ],
+      [
+       1875.0,
+       5.0,
+       100.0
+      ],
+      [
+       1880.0,
+       10.0,
+       100.0
+      ]
+     ],
+     "primary_culture_pop": [
+      [
+       1870.0,
+       0.0,
+       22000.0
+      ],
+      [
+       1875.0,
+       5.0,
+       24200.0
+      ],
+      [
+       1880.0,
+       10.0,
+       26400.0
+      ]
+     ],
+     "avg_literacy": [
+      [
+       1870.0,
+       0.0,
+       0.4
+      ],
+      [
+       1875.0,
+       5.0,
+       0.4
+      ],
+      [
+       1880.0,
+       10.0,
+       0.4
+      ]
+     ],
+     "avg_literacy_stated": [
+      [
+       1870.0,
+       0.0,
+       0.4
+      ],
+      [
+       1875.0,
+       5.0,
+       0.4
+      ],
+      [
+       1880.0,
+       10.0,
+       0.4
+      ]
+     ],
+     "life_unmet": [
+      [
+       1870.0,
+       0.0,
+       22000.0
+      ],
+      [
+       1875.0,
+       5.0,
+       24200.0
+      ],
+      [
+       1880.0,
+       10.0,
+       26400.0
+      ]
+     ],
+     "life_unmet_pct": [
+      [
+       1870.0,
+       0.0,
+       100.0
+      ],
+      [
+       1875.0,
+       5.0,
+       100.0
+      ],
+      [
+       1880.0,
+       10.0,
+       100.0
+      ]
+     ],
+     "starving": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "starving_pct": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "brigades": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "regular_brigades": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "mobilized_brigades": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "mobilizing": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "brigade_cap": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "mobilization_pool": [
+      [
+       1870.0,
+       0.0,
+       22000.0
+      ],
+      [
+       1875.0,
+       5.0,
+       24200.0
+      ],
+      [
+       1880.0,
+       10.0,
+       26400.0
+      ]
+     ],
+     "mobilization_brigades": [
+      [
+       1870.0,
+       0.0,
+       10.0
+      ],
+      [
+       1875.0,
+       5.0,
+       11.0
+      ],
+      [
+       1880.0,
+       10.0,
+       12.0
+      ]
+     ],
+     "ships": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "factory_levels": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "factory_count": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "naval_base_levels": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "ports": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "max_naval_base": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "railroad_levels": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "techs": [
+      [
+       1870.0,
+       0.0,
+       2.0
+      ],
+      [
+       1875.0,
+       5.0,
+       2.0
+      ],
+      [
+       1880.0,
+       10.0,
+       2.0
+      ]
+     ],
+     "prestige": [
+      [
+       1870.0,
+       0.0,
+       10.0
+      ],
+      [
+       1875.0,
+       5.0,
+       10.0
+      ],
+      [
+       1880.0,
+       10.0,
+       10.0
+      ]
+     ],
+     "provinces": [
+      [
+       1870.0,
+       0.0,
+       2.0
+      ],
+      [
+       1875.0,
+       5.0,
+       2.0
+      ],
+      [
+       1880.0,
+       10.0,
+       2.0
+      ]
+     ],
+     "states": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "treasury": [
+      [
+       1870.0,
+       0.0,
+       100.0
+      ],
+      [
+       1875.0,
+       5.0,
+       100.0
+      ],
+      [
+       1880.0,
+       10.0,
+       100.0
+      ]
+     ],
+     "tax_base": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "avg_consciousness": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "avg_militancy": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "infamy": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "pop_poor": [
+      [
+       1870.0,
+       0.0,
+       22000.0
+      ],
+      [
+       1875.0,
+       5.0,
+       24200.0
+      ],
+      [
+       1880.0,
+       10.0,
+       26400.0
+      ]
+     ],
+     "pop_middle": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "pop_rich": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "pop_growth": [
+      [
+       1875.0,
+       5.0,
+       1.9245
+      ],
+      [
+       1880.0,
+       10.0,
+       1.7555
+      ]
+     ],
+     "accepted_growth": [
+      [
+       1875.0,
+       5.0,
+       1.9245
+      ],
+      [
+       1880.0,
+       10.0,
+       1.7555
+      ]
+     ],
+     "pop_gain": [
+      [
+       1875.0,
+       5.0,
+       2200.0
+      ],
+      [
+       1880.0,
+       10.0,
+       2200.0
+      ]
+     ],
+     "accepted_gain": [
+      [
+       1875.0,
+       5.0,
+       2200.0
+      ],
+      [
+       1880.0,
+       10.0,
+       2200.0
+      ]
+     ]
+    },
+    "PRU": {
+     "total_pop": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "accepted_pop": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "accepted_pct": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "primary_culture_pop": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "avg_literacy": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "avg_literacy_stated": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "life_unmet": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "life_unmet_pct": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "starving": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "starving_pct": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "brigades": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "regular_brigades": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "mobilized_brigades": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "mobilizing": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "brigade_cap": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "mobilization_pool": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "mobilization_brigades": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "ships": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "factory_levels": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "factory_count": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "naval_base_levels": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "ports": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "max_naval_base": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "railroad_levels": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "techs": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "prestige": [
+      [
+       1870.0,
+       0.0,
+       10.0
+      ],
+      [
+       1875.0,
+       5.0,
+       10.0
+      ],
+      [
+       1880.0,
+       10.0,
+       10.0
+      ]
+     ],
+     "provinces": [
+      [
+       1870.0,
+       0.0,
+       1.0
+      ],
+      [
+       1875.0,
+       5.0,
+       1.0
+      ],
+      [
+       1880.0,
+       10.0,
+       1.0
+      ]
+     ],
+     "states": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "treasury": [
+      [
+       1870.0,
+       0.0,
+       100.0
+      ],
+      [
+       1875.0,
+       5.0,
+       100.0
+      ],
+      [
+       1880.0,
+       10.0,
+       100.0
+      ]
+     ],
+     "tax_base": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "avg_consciousness": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "avg_militancy": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "infamy": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "pop_poor": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "pop_middle": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "pop_rich": [
+      [
+       1870.0,
+       0.0,
+       0.0
+      ],
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "pop_gain": [
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ],
+     "accepted_gain": [
+      [
+       1875.0,
+       5.0,
+       0.0
+      ],
+      [
+       1880.0,
+       10.0,
+       0.0
+      ]
+     ]
+    }
+   },
+   {
+    "ENG": {
+     "total_pop": [
+      [
+       1871.0,
+       0.0,
+       33300.0
+      ],
+      [
+       1876.0,
+       5.0,
+       37000.0
+      ]
+     ],
+     "accepted_pop": [
+      [
+       1871.0,
+       0.0,
+       31050.0
+      ],
+      [
+       1876.0,
+       5.0,
+       34500.0
+      ]
+     ],
+     "accepted_pct": [
+      [
+       1871.0,
+       0.0,
+       93.24
+      ],
+      [
+       1876.0,
+       5.0,
+       93.24
+      ]
+     ],
+     "primary_culture_pop": [
+      [
+       1871.0,
+       0.0,
+       31050.0
+      ],
+      [
+       1876.0,
+       5.0,
+       34500.0
+      ]
+     ],
+     "avg_literacy": [
+      [
+       1871.0,
+       0.0,
+       0.4
+      ],
+      [
+       1876.0,
+       5.0,
+       0.4
+      ]
+     ],
+     "avg_literacy_stated": [
+      [
+       1871.0,
+       0.0,
+       0.4
+      ],
+      [
+       1876.0,
+       5.0,
+       0.4
+      ]
+     ],
+     "life_unmet": [
+      [
+       1871.0,
+       0.0,
+       33300.0
+      ],
+      [
+       1876.0,
+       5.0,
+       37000.0
+      ]
+     ],
+     "life_unmet_pct": [
+      [
+       1871.0,
+       0.0,
+       100.0
+      ],
+      [
+       1876.0,
+       5.0,
+       100.0
+      ]
+     ],
+     "starving": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "starving_pct": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "brigades": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "regular_brigades": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "mobilized_brigades": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "mobilizing": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "brigade_cap": [
+      [
+       1871.0,
+       0.0,
+       1.0
+      ],
+      [
+       1876.0,
+       5.0,
+       1.0
+      ]
+     ],
+     "mobilization_pool": [
+      [
+       1871.0,
+       0.0,
+       29250.0
+      ],
+      [
+       1876.0,
+       5.0,
+       32500.0
+      ]
+     ],
+     "mobilization_brigades": [
+      [
+       1871.0,
+       0.0,
+       2.0
+      ],
+      [
+       1876.0,
+       5.0,
+       2.0
+      ]
+     ],
+     "ships": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "factory_levels": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "factory_count": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "naval_base_levels": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "ports": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "max_naval_base": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "railroad_levels": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "techs": [
+      [
+       1871.0,
+       0.0,
+       5.0
+      ],
+      [
+       1876.0,
+       5.0,
+       5.0
+      ]
+     ],
+     "prestige": [
+      [
+       1871.0,
+       0.0,
+       10.0
+      ],
+      [
+       1876.0,
+       5.0,
+       10.0
+      ]
+     ],
+     "provinces": [
+      [
+       1871.0,
+       0.0,
+       3.0
+      ],
+      [
+       1876.0,
+       5.0,
+       3.0
+      ]
+     ],
+     "states": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "treasury": [
+      [
+       1871.0,
+       0.0,
+       100.0
+      ],
+      [
+       1876.0,
+       5.0,
+       100.0
+      ]
+     ],
+     "tax_base": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "avg_consciousness": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "avg_militancy": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "infamy": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "pop_poor": [
+      [
+       1871.0,
+       0.0,
+       33300.0
+      ],
+      [
+       1876.0,
+       5.0,
+       37000.0
+      ]
+     ],
+     "pop_middle": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "pop_rich": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "pop_growth": [
+      [
+       1876.0,
+       5.0,
+       2.1296
+      ]
+     ],
+     "accepted_growth": [
+      [
+       1876.0,
+       5.0,
+       2.1296
+      ]
+     ],
+     "pop_gain": [
+      [
+       1876.0,
+       5.0,
+       3700.0
+      ]
+     ],
+     "accepted_gain": [
+      [
+       1876.0,
+       5.0,
+       3450.0
+      ]
+     ]
+    },
+    "FRA": {
+     "total_pop": [
+      [
+       1871.0,
+       0.0,
+       14400.0
+      ],
+      [
+       1876.0,
+       5.0,
+       16000.0
+      ]
+     ],
+     "accepted_pop": [
+      [
+       1871.0,
+       0.0,
+       14400.0
+      ],
+      [
+       1876.0,
+       5.0,
+       16000.0
+      ]
+     ],
+     "accepted_pct": [
+      [
+       1871.0,
+       0.0,
+       100.0
+      ],
+      [
+       1876.0,
+       5.0,
+       100.0
+      ]
+     ],
+     "primary_culture_pop": [
+      [
+       1871.0,
+       0.0,
+       14400.0
+      ],
+      [
+       1876.0,
+       5.0,
+       16000.0
+      ]
+     ],
+     "avg_literacy": [
+      [
+       1871.0,
+       0.0,
+       0.4
+      ],
+      [
+       1876.0,
+       5.0,
+       0.4
+      ]
+     ],
+     "avg_literacy_stated": [
+      [
+       1871.0,
+       0.0,
+       0.4
+      ],
+      [
+       1876.0,
+       5.0,
+       0.4
+      ]
+     ],
+     "life_unmet": [
+      [
+       1871.0,
+       0.0,
+       14400.0
+      ],
+      [
+       1876.0,
+       5.0,
+       16000.0
+      ]
+     ],
+     "life_unmet_pct": [
+      [
+       1871.0,
+       0.0,
+       100.0
+      ],
+      [
+       1876.0,
+       5.0,
+       100.0
+      ]
+     ],
+     "starving": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "starving_pct": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "brigades": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "regular_brigades": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "mobilized_brigades": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "mobilizing": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "brigade_cap": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "mobilization_pool": [
+      [
+       1871.0,
+       0.0,
+       14400.0
+      ],
+      [
+       1876.0,
+       5.0,
+       16000.0
+      ]
+     ],
+     "mobilization_brigades": [
+      [
+       1871.0,
+       0.0,
+       1.0
+      ],
+      [
+       1876.0,
+       5.0,
+       1.0
+      ]
+     ],
+     "ships": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "factory_levels": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "factory_count": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "naval_base_levels": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "ports": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "max_naval_base": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "railroad_levels": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "techs": [
+      [
+       1871.0,
+       0.0,
+       2.0
+      ],
+      [
+       1876.0,
+       5.0,
+       2.0
+      ]
+     ],
+     "prestige": [
+      [
+       1871.0,
+       0.0,
+       10.0
+      ],
+      [
+       1876.0,
+       5.0,
+       10.0
+      ]
+     ],
+     "provinces": [
+      [
+       1871.0,
+       0.0,
+       2.0
+      ],
+      [
+       1876.0,
+       5.0,
+       2.0
+      ]
+     ],
+     "states": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "treasury": [
+      [
+       1871.0,
+       0.0,
+       100.0
+      ],
+      [
+       1876.0,
+       5.0,
+       100.0
+      ]
+     ],
+     "tax_base": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "avg_consciousness": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "avg_militancy": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "infamy": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "pop_poor": [
+      [
+       1871.0,
+       0.0,
+       14400.0
+      ],
+      [
+       1876.0,
+       5.0,
+       16000.0
+      ]
+     ],
+     "pop_middle": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "pop_rich": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "pop_growth": [
+      [
+       1876.0,
+       5.0,
+       2.1296
+      ]
+     ],
+     "accepted_growth": [
+      [
+       1876.0,
+       5.0,
+       2.1296
+      ]
+     ],
+     "pop_gain": [
+      [
+       1876.0,
+       5.0,
+       1600.0
+      ]
+     ],
+     "accepted_gain": [
+      [
+       1876.0,
+       5.0,
+       1600.0
+      ]
+     ]
+    },
+    "PRU": {
+     "total_pop": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "accepted_pop": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "accepted_pct": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "primary_culture_pop": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "avg_literacy": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "avg_literacy_stated": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "life_unmet": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "life_unmet_pct": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "starving": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "starving_pct": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "brigades": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "regular_brigades": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "mobilized_brigades": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "mobilizing": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "brigade_cap": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "mobilization_pool": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "mobilization_brigades": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "ships": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "factory_levels": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "factory_count": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "naval_base_levels": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "ports": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "max_naval_base": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "railroad_levels": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "techs": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "prestige": [
+      [
+       1871.0,
+       0.0,
+       10.0
+      ],
+      [
+       1876.0,
+       5.0,
+       10.0
+      ]
+     ],
+     "provinces": [
+      [
+       1871.0,
+       0.0,
+       1.0
+      ],
+      [
+       1876.0,
+       5.0,
+       1.0
+      ]
+     ],
+     "states": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "treasury": [
+      [
+       1871.0,
+       0.0,
+       100.0
+      ],
+      [
+       1876.0,
+       5.0,
+       100.0
+      ]
+     ],
+     "tax_base": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "avg_consciousness": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "avg_militancy": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "infamy": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "pop_poor": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "pop_middle": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "pop_rich": [
+      [
+       1871.0,
+       0.0,
+       0.0
+      ],
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "pop_gain": [
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ],
+     "accepted_gain": [
+      [
+       1876.0,
+       5.0,
+       0.0
+      ]
+     ]
+    }
+   }
+  ]
+ }
+}

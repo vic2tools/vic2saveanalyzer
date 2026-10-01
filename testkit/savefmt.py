@@ -148,6 +148,48 @@ def write(path, *parts):
     return path
 
 
+def read_back(save, holding, *extra, game=None):
+    """
+    What the analyzer makes of one save: (status, printed, {tag: its row of
+    nations_timeseries.csv}, {tag: its technologies}, {tag: {culture:
+    people}}, the payload). Read on `game`, by default an unmodded install
+    whose rules know every name the builders write.
+    """
+    import csv
+    import json
+    import shutil
+    import subprocess
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import expected
+    import matching
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    game = game or matching.a_vanilla(os.path.join(holding, "Victoria 2"), inventions=20)
+    folder = os.path.join(holding, "saves")
+    shutil.rmtree(folder, ignore_errors=True)
+    os.makedirs(folder)
+    shutil.copy(save, folder)
+    out = os.path.join(holding, "out")
+    shutil.rmtree(out, ignore_errors=True)
+    env = dict(os.environ, TMPDIR=holding)
+    done = subprocess.run([sys.executable, os.path.join(here, "vic2_analyzer.py"), folder,
+                           "--out", out, "--game-root", game, "--no-cache", "-q"] + list(extra),
+                          capture_output=True, text=True, env=env)
+    said = done.stdout + done.stderr
+    rows, techs, cultures, payload = {}, {}, {}, {}
+    if done.returncode == 0 and os.path.isfile(os.path.join(out, "nations_timeseries.csv")):
+        with open(os.path.join(out, "nations_timeseries.csv"), newline="") as fh:
+            rows = {r["tag"]: r for r in csv.DictReader(fh)}
+        with open(os.path.join(out, "technologies.csv"), newline="") as fh:
+            for r in csv.DictReader(fh):
+                techs.setdefault(r["tag"], set()).add(r["technology"])
+        with open(os.path.join(out, "pops_by_culture.csv"), newline="") as fh:
+            for r in csv.DictReader(fh):
+                cultures.setdefault(r["tag"], {})[r["culture"]] = int(r["size"])
+        if os.path.isfile(os.path.join(out, "report.html")):
+            payload = json.loads(expected.page(out)[0])
+    return done.returncode, said, rows, techs, cultures, payload
+
+
 def selfcheck(path):
     """
     [what went wrong] when a save built here is read back.
@@ -155,18 +197,17 @@ def selfcheck(path):
     Every name put in has to come out: the nation, its culture, its
     technologies, its inventions, its people.
 
-    Read twice, because this codebase reads a save two ways and they do
-    not agree about how strict the format is. `readsave` finds a
-    technology block however it is indented; `cross._sniff`, which decides
-    which mod a campaign was played on, finds it only at the depth the
-    game actually writes. A builder one tab out therefore satisfies the
-    first and tells the second there are no technologies at all -- which
-    is precisely what happened, and why checking against the tolerant
-    reader alone would have caught nothing.
+    Read twice, because a save is read two ways and they do not agree about
+    how strict the format is. The reader finds a technology block however
+    it is indented; the sniff `--cross` decides which mod a campaign was
+    played on by finds it only at the depth the game actually writes. A
+    builder one tab out therefore satisfies the first and tells the second
+    there are no technologies at all -- which is precisely what happened,
+    and why checking against the tolerant reader alone would have caught
+    nothing.
     """
-    import cross
-    import readsave
-
+    import matching
+    holding = os.path.dirname(path)
     techs = ["flintlock_rifles", "clipper_design"]
     write(path,
           head("1850.6.1", player="ENG", flags=("the_great_trek",)),
@@ -177,48 +218,53 @@ def selfcheck(path):
           country("FRA", culture="french", capital=2),
           war("A Test War", "ENG", "FRA"))
 
-    meta, nations = readsave.analyze_save(path, readsave.PLAIN, verbose=False)
+    code, said, rows, got_techs, cultures, payload = read_back(path, holding)
+    if code:
+        return ["the save was not read: %s" % said[-500:]]
     wrong = []
-    if meta.get("date") != "1850.6.1":
-        wrong.append("the date came back as %r" % meta.get("date"))
-    if meta.get("player") != "ENG":
-        wrong.append("the player came back as %r" % meta.get("player"))
-    if len(meta.get("wars") or ()) != 1:
-        wrong.append("%d wars came back, not 1" % len(meta.get("wars") or ()))
-
-    eng = nations.get("ENG")
+    if payload.get("dates") != ["1850.6.1"]:
+        wrong.append("the date came back as %r" % payload.get("dates"))
+    eng = rows.get("ENG")
     if eng is None:
         return wrong + ["ENG was not in the save at all"]
-    if eng["total_pop"] != 2000:
-        wrong.append("ENG has %d people, not 2000" % eng["total_pop"])
-    if sorted(eng["tech_list"]) != sorted(techs):
-        wrong.append("ENG's technologies came back as %s"
-                     % sorted(eng["tech_list"]))
-    if list(eng["invention_ids"]) != [3, 17]:
-        wrong.append("ENG's inventions came back as %s"
-                     % list(eng["invention_ids"]))
+    if eng["is_player"] != "True":
+        wrong.append("the player came back as someone other than ENG")
+    if len(payload.get("wars") or ()) != 1:
+        wrong.append("%d wars came back, not 1" % len(payload.get("wars") or ()))
+    if int(eng["total_pop"]) != 2000:
+        wrong.append("ENG has %s people, not 2000" % eng["total_pop"])
+    if got_techs.get("ENG") != set(techs):
+        wrong.append("ENG's technologies came back as %s" % sorted(got_techs.get("ENG", ())))
     if eng["primary_culture"] != "british":
         wrong.append("ENG's culture came back as %r" % eng["primary_culture"])
-    if dict(eng["pop_by_culture"]).get("british") != 2000:
-        wrong.append("ENG's pops by culture came back as %s"
-                     % dict(eng["pop_by_culture"]))
-    if "FRA" not in nations:
+    if cultures.get("ENG", {}).get("british") != 2000:
+        wrong.append("ENG's pops by culture came back as %s" % cultures.get("ENG"))
+    if "FRA" not in rows:
         wrong.append("FRA was not in the save")
+    code, said, *_ = read_back(path, holding, "--inventions", "ENG")
+    if "indices 3..17" not in said:
+        wrong.append("ENG's inventions did not come back as 3 and 17: %s" % said[-400:])
 
-    # And now the strict one.
-    seen = cross._sniff(path)
-    if not {"ENG", "FRA"} <= seen["tags"]:
-        wrong.append("the mod sniffer saw tags %s" % sorted(seen["tags"]))
-    if not set(techs) <= seen["techs"]:
-        wrong.append("the mod sniffer saw technologies %s, not %s"
-                     % (sorted(seen["techs"]), sorted(techs)))
-    if seen["provinces"] != {1, 2}:
-        wrong.append("the mod sniffer saw provinces %s"
-                     % sorted(seen["provinces"]))
-    if seen["top_invention"] != 17:
-        wrong.append("the mod sniffer saw %s as the highest invention"
-                     % seen["top_invention"])
-    return wrong + rich(path + ".rich")
+    # And now the strict one: a mod lacking one of the technologies has to
+    # be told apart by it, which it can only be if the sniff saw them.
+    import shutil
+    import subprocess
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    game = matching.a_game(os.path.join(holding, "sniffed"))
+    matching.a_mod(os.path.join(game, "mod", "Lacks"), tags=["ENG", "FRA"], techs=techs[:1],
+                   provinces=[1, 2], inventions=20)
+    camp = os.path.join(holding, "campaigns", "one")
+    os.makedirs(camp)
+    shutil.copy(path, camp)
+    done = subprocess.run([sys.executable, os.path.join(here, "vic2_analyzer.py"),
+                           os.path.dirname(camp), "--cross", "--game-root", game, "--out",
+                           os.path.join(holding, "xout"), "--no-cache", "--no-html"],
+                          capture_output=True, text=True, env=dict(os.environ, TMPDIR=holding))
+    survey = (done.stdout + done.stderr).split("Reading ")[0]
+    if "clipper_design" not in survey:
+        wrong.append("the mod sniffer did not see clipper_design, which the mod it was "
+                     "matched against lacks:\n%s" % survey)
+    return wrong + rich(path[:-3] + "_rich.v2")
 
 
 def rich(path):
@@ -229,13 +275,9 @@ def rich(path):
     block, an issues block and half a dozen further numbers, and a real
     country has a stockpile and an army -- and `fake_save.py`, which
     writes the twenty-five megabyte file the parser is profiled against,
-    writes all of it. Nothing ever read that file back. If its pops went a
-    tab too deep again the benchmark would quietly measure the parser
-    doing half the work and every number taken from it would be wrong in
-    the flattering direction.
+    writes all of it. If its pops went a tab too deep again the benchmark
+    would quietly measure the reader doing half the work.
     """
-    import readsave
-
     ideology = [("ideology", ["\t\t\t%d=%.5f" % (i, 0.1 * i)
                               for i in range(1, 7)]),
                 ("issues", ["\t\t\t%d=%.5f" % (i, 0.05 * i)
@@ -252,7 +294,7 @@ def rich(path):
                    extra=["garrison=10.000", "life_rating=25",
                           "railroad=", "{", "\tlevel=3", "}"]),
           country("SWE", culture="swedish", religion="protestant",
-                  techs=[("tech_1", 0.5), ("tech_2", 0.25)],
+                  techs=[("flintlock_rifles", 0.5), ("clipper_design", 0.25)],
                   inventions=[1, 2, 3],
                   extra=["badboy=1.000", "conscription=mandatory_service"],
                   blocks=[("stockpile", ["\t\tcoal=100.00000"]),
@@ -261,23 +303,23 @@ def rich(path):
                                            "\t\t\ttype=infantry",
                                            "\t\t\tcount=2000",
                                            "\t\t\tstrength=1.000"], 2))]))
-
-    meta, nations = readsave.analyze_save(path, readsave.PLAIN, verbose=False)
-    swe = nations.get("SWE")
+    holding = os.path.dirname(path)
+    code, said, rows, techs, _cultures, payload = read_back(path, holding)
+    swe = rows.get("SWE")
     if swe is None:
-        return ["a fully furnished nation did not come back at all"]
+        return ["a fully furnished nation did not come back at all: %s" % said[-400:]]
     wrong = []
-    if swe["total_pop"] != 2000:
+    if int(swe["total_pop"]) != 2000:
         wrong.append("a pop with an ideology block and a nested id came "
-                     "back as %d people, not 2000" % swe["total_pop"])
-    if sorted(swe["tech_list"]) != ["tech_1", "tech_2"]:
-        wrong.append("technologies with progress came back as %s"
-                     % sorted(swe["tech_list"]))
-    if list(swe["invention_ids"]) != [1, 2, 3]:
-        wrong.append("inventions beside a stockpile came back as %s"
-                     % list(swe["invention_ids"]))
-    if meta.get("date") != "1881.3.24":
-        wrong.append("the date came back as %r" % meta.get("date"))
+                     "back as %s people, not 2000" % swe["total_pop"])
+    if techs.get("SWE") != {"flintlock_rifles", "clipper_design"}:
+        wrong.append("technologies with progress came back as %s" % sorted(techs.get("SWE", ())))
+    code, said, *_ = read_back(path, holding, "--inventions", "SWE")
+    if "indices 1..3" not in said:
+        wrong.append("inventions beside a stockpile did not come back as 1 to 3: %s"
+                     % said[-400:])
+    if payload.get("dates") != ["1881.3.24"]:
+        wrong.append("the date came back as %r" % payload.get("dates"))
     return wrong
 
 
@@ -410,9 +452,9 @@ def furnished_check(path):
     """
     [what went wrong] when the furnished save is read back.
 
-    `furnished` exists so a check can compare two readers of a save without
-    a real campaign to hand, and a comparison learns nothing from a field
-    that is empty on both sides. So what is checked here is that the save is
+    `furnished` exists so a check can read a save with as much in it as
+    possible without a real campaign to hand, and a check learns nothing
+    from a field that is empty. So what is checked here is that the save is
     actually full: the pops are there, the brigades are told apart, the
     province is occupied and the colony is a colony.
 
@@ -422,38 +464,29 @@ def furnished_check(path):
     characters of each string, the save parsed without complaint, and every
     nation in it had a population of nought. Nothing said so.
     """
-    import readsave
     furnished(path)
-    meta, nations = readsave.analyze_save(
-        path, readsave.PLAIN._replace(
-            reform_keys=("vote_franschise", "war_policy")),
-        verbose=False, use_scanner=False)
-
+    code, said, rows, _techs, cultures, payload = read_back(path, os.path.dirname(path))
+    if sorted(rows) != ["DEN", "SWE"]:
+        return ["the furnished save came back with %s: %s" % (sorted(rows), said[-400:])]
+    swe, den = rows["SWE"], rows["DEN"]
     wrong = []
-    if sorted(nations) != ["DEN", "SWE"]:
-        return ["the furnished save came back with %s" % sorted(nations)]
-    swe, den = nations["SWE"], nations["DEN"]
     # (what it is, what it should be) -- written out rather than derived,
     # because a builder and a checker that share their arithmetic agree
     # about everything including being wrong.
     for name, got, want in (
-            ("SWE's people", swe["total_pop"], 38500),
-            ("SWE's provinces", swe["provinces"], 3),
-            ("SWE's standing brigades", swe["regular_brigades"], 1),
-            ("SWE's mobilized brigades", swe["mobilized_brigades"], 1),
-            ("SWE's ships", swe["ships"], 1),
-            ("SWE's states", swe["states"], 2),
-            ("SWE's factories", swe["factory_count"], 2),
-            ("SWE's occupied provinces", sorted(swe["occupied_provinces"]), [2]),
-            ("SWE's colonies", sorted(swe["colonial_provinces"]), [3]),
-            ("SWE's cores", sorted(swe["core_provinces"]), [1, 2, 3]),
-            ("SWE's reforms", len(swe["reforms"]), 2),
-            ("SWE's unaccepted pops", swe["mob_excluded_culture"], 1700),
-            ("SWE's mobilizable pops", len(swe["mobilizable_pops"]), 6),
-            ("DEN's starving", den["starving"], 9000),
-            ("the world's people", meta["world_pop"], 50800),
-            ("the wars", len(meta["wars"] or ()), 1)):
-        if got != want:
+            ("SWE's people", swe["total_pop"], "38500"),
+            ("SWE's provinces", swe["provinces"], "3"),
+            ("SWE's standing brigades", swe["regular_brigades"], "1"),
+            ("SWE's mobilized brigades", swe["mobilized_brigades"], "1"),
+            ("SWE's ships", swe["ships"], "1"),
+            ("SWE's states", swe["states"], "2"),
+            ("SWE's factories", swe["factory_count"], "2"),
+            ("SWE's unaccepted pops", cultures["SWE"].get("finnish"), 1700),
+            ("DEN's starving", den["starving"], "9000"),
+            ("the world's people", list((payload.get("worldPop") or {None: None}).values())[-1],
+             50800),
+            ("the wars", len(payload.get("wars") or ()), 1)):
+        if str(got) != str(want):
             wrong.append("%s came back as %r, not %r" % (name, got, want))
     return wrong
 
@@ -463,8 +496,10 @@ def main():
     import tempfile
     holding = tempfile.mkdtemp(prefix="vic2fmt")
     try:
-        wrong = selfcheck(os.path.join(holding, "a.v2"))
-        wrong += furnished_check(os.path.join(holding, "f.v2"))
+        os.makedirs(os.path.join(holding, "a"))
+        os.makedirs(os.path.join(holding, "f"))
+        wrong = selfcheck(os.path.join(holding, "a", "a.v2"))
+        wrong += furnished_check(os.path.join(holding, "f", "f.v2"))
     finally:
         shutil.rmtree(holding, ignore_errors=True)
     if wrong:

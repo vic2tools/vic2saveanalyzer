@@ -1,0 +1,3 @@
+  skipped broken.v2: HOLDING/saves/broken.v2 stops part-way through, so it was cut short: the game crashed while writing it, or is writing it right now. If this is the game's own save folder, read the copies the keeper makes instead.
+  skipped broken.v2: HOLDING/saves/broken.v2 stops part-way through, so it was cut short: the game crashed while writing it, or is writing it right now. If this is the game's own save folder, read the copies the keeper makes instead.
+No saves could be read.

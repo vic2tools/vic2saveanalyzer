@@ -1,0 +1,43 @@
+Campaigns found under HOLDING/campaigns:
+  alpha                    3 saves  ->  mod-alpha   (as told)
+  beta                     2 saves  ->  mod-beta   (as told)
+Reading alpha (3 saves) under mod-alpha
+Reading beta (2 saves) under mod-beta
+Cross-campaign: 2 campaigns, 3 nations in two or more of them.
+The rest of the report is alpha.
+Found 3 save(s).
+defines.lua: POP_SIZE_PER_REGIMENT=1000
+poptypes/: mobilizable = farmers; mod-only pop types read: serfs
+Reading 3 save(s) on N cores.
+  reading a0.v2 ... 1870.1.1, 3 nations
+  reading a1.v2 ... 1875.1.1, 3 nations
+  reading a2.v2 ... 1880.1.1, 3 nations
+
+Invention indices decoded against 2 inventions (base 1): 0 of 6 nation-invention pairs are unreachable (0.0%).
+
+Mod scan: 5 techs (1 grant mobilisation_size), 0 inventions grant it (0 obtainable), 0 event modifiers, 0 triggered modifiers.
+  tech       flintlock_rifles                             +0.500
+
+9 nation-rows across 3 saves.
+
+Largest nations at 1880.1.1:
+  tag           pop  accept%    lit   brig  ships
+  ENG        48,600     93.8  40.0%      0      0
+  FRA        26,400    100.0  40.0%      0      0
+  PRU             0      0.0   0.0%      0      0
+
+Computed mobilisation sizes at 1880.1.1 (check these against the in-game military panel):
+  ENG: 50.00%
+  FRA: 50.00%
+  PRU: 0.00%
+
+Wrote:
+  OUT/report.html
+  OUT/nations_timeseries.csv
+  OUT/prices.csv
+  OUT/market_snapshot.csv
+  OUT/ships_by_type.csv
+  OUT/brigades_by_type.csv
+  OUT/technologies.csv
+  OUT/pops_by_type.csv
+  OUT/pops_by_culture.csv

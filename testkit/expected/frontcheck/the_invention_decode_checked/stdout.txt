@@ -1,0 +1,27 @@
+Found 4 save(s).
+Victoria II at HOLDING/game, with Mod.
+defines.lua: POP_SIZE_PER_REGIMENT=2000
+poptypes/: mobilizable = aristocrats bankers craftsmen farmers labourers; mod-only pop types read: bankers
+Reading 4 save(s) on N cores.
+  [1/4] 0.v2 ... 1880.1.1
+  [2/4] 1.v2 ... 1881.1.1
+  [3/4] 2.v2 ... 1881.7.1
+  [4/4] 3.v2 ... 1882.1.1
+
+Invention indices decoded against 2 inventions (base 1): 0 of 12 nation-invention pairs are unreachable (0.0%).
+
+Mod scan: 5 techs (1 grant mobilisation_size), 0 inventions grant it (0 obtainable), 0 event modifiers, 1 triggered modifiers.
+  tech       flintlock_rifles                             +0.050
+
+Checking 2 inventions against 4 saves.
+  only 1 indices are held often enough to say anything about. Run this on a whole campaign.
+  1 indices held often enough to judge
+
+  offset      confirmed   granted   suspect  unjudged
+  -2                  0         0         0         1
+  -1                  0         0         0         1
+  as used             0         0         0         1   <-- the decode in use
+  +1                  0         0         0         1
+  +2                  0         0         0         1
+
+  Offset -2 confirms more indices than the one in use. The base is probably wrong.

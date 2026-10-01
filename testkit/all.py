@@ -60,6 +60,9 @@ def main():
     ap.add_argument("--mod", default="", help="a mod folder, if there is one")
     ap.add_argument("--quick", action="store_true",
                     help="leave out the checks that take minutes")
+    ap.add_argument("--update-expected", action="store_true",
+                    help="record what the program answers now as the answers the checks "
+                         "hold it to, after a deliberate change")
     args = ap.parse_args()
 
     holding = tempfile.mkdtemp(prefix="vic2all")
@@ -73,36 +76,53 @@ def main():
         # nothing, and one of them did pass for the wrong reason once.
         ("the save-builder the tests use", [os.path.join(KIT, "savefmt.py")]),
         ("names read before they exist", [os.path.join(KIT, "tooearly.py")]),
-        ("the record both readers fill",
-         [os.path.join(KIT, "record.py")]),
-        ("awkward save layouts", [os.path.join(KIT, "awkward.py")]),
-        ("awkward country blocks", [os.path.join(KIT, "countries.py")]),
+        ("the shapes a save can take", [os.path.join(KIT, "saveshapes.py")]),
         ("the keeper", [os.path.join(KIT, "keeping.py")]),
         ("one game's saves told from another's",
          [os.path.join(KIT, "histories.py")]),
         ("campaigns nobody has", [os.path.join(KIT, "edges.py")]),
-        ("state population and literacy", [os.path.join(KIT, "population_states.py")]),
+        ("damaged saves", [os.path.join(KIT, "mangled.py")]),
         ("sharing a report", [os.path.join(KIT, "sharing.py")]),
         ("what the executable carries", [os.path.join(KIT, "packing.py")]),
         ("matching a campaign to its mod", [os.path.join(KIT, "matching.py")]),
-        ("mod reading and caching", [os.path.join(KIT, "modcache.py")]),
         ("the engine process and test fixtures", [os.path.join(KIT, "engine_runtime.py")]),
-        ("the engine's mod reader against the Python",
-         [os.path.join(KIT, "modread.py"), "--rounds", "300"]
+        ("the mod reader", [os.path.join(KIT, "modread.py")]
          + (["--mod", args.mod] if args.mod else [])),
-        ("the run's front end against the Python", [os.path.join(KIT, "frontcheck.py")]),
+        ("the run's front end", [os.path.join(KIT, "frontcheck.py")]),
         ("the engine's number formatting", [os.path.join(KIT, "enginefmt.py"),
          os.path.join(HERE, "scanner", "target", "release", "vic2scan" + (".exe" if os.name == "nt" else "")), "20000"]),
         ("the engine's compression", [os.path.join(KIT, "enginecompress.py"),
          os.path.join(HERE, "scanner", "target", "release", "vic2scan" + (".exe" if os.name == "nt" else ""))]),
         ("the map's province bitmap", [os.path.join(KIT, "raster.py")]),
-        ("save caching and projections", [os.path.join(KIT, "caching.py")]),
-        ("a machine with no workers", [os.path.join(KIT, "noworkers.py")]),
+        ("what the engine keeps between runs", [os.path.join(KIT, "caching.py")]),
         ("what can make a report stale", [os.path.join(KIT, "staleness.py")]),
         ("the mobilisation rate rule", [os.path.join(KIT, "mobrate.py")]),
         ("the cross block against the report",
          [os.path.join(KIT, "crossrows.py")]),
     ]
+
+    if args.update_expected:
+        # The checks held to recorded answers, each told to write what the
+        # program answers now as its record. For after a deliberate change:
+        # `git diff testkit/expected` then shows what it changed.
+        recorded = [("frontcheck.py",), ("crossrows.py",), ("saveshapes.py",),
+                    ("mangled.py",),
+                    ("modread.py",) + (("--mod", args.mod) if args.mod else ()),
+                    ("enginecheck.py",) + ((args.saves,) if args.saves else ())
+                    + (("--mod", args.mod) if args.mod else ())]
+        bad = 0
+        for script, *rest in recorded:
+            done = subprocess.run([sys.executable, os.path.join(KIT, script)] + list(rest)
+                                  + ["--update"], capture_output=True, text=True, cwd=HERE)
+            ok = done.returncode in (0, SKIPPED)
+            bad += not ok
+            print("  %-16s %s" % (script, "recorded" if ok else "FAILED"))
+            if not ok:
+                print((done.stdout + done.stderr)[-3000:])
+        print("\nsee `git diff testkit/expected`; the real campaign's answers are in %s"
+              % os.environ.get("VIC2_EXPECTED_REAL", "~/.cache/vic2speed/expected-real"))
+        shutil.rmtree(holding, ignore_errors=True)
+        return 1 if bad else 0
 
     try:
         if args.saves and os.path.isdir(args.saves):
@@ -120,11 +140,7 @@ def main():
                         for f in sorted(os.listdir(args.saves))
                         if f.endswith(".v2")), "")
             checks += [
-                ("damaged saves", [os.path.join(KIT, "mangled.py"), one, "4"]),
-                ("the scanner against the parser",
-                 [os.path.join(KIT, "parity.py"), args.saves, "8"]),
-                ("the war book, folded two ways",
-                 [os.path.join(KIT, "warfold.py"), args.saves]),
+                ("a real save, damaged", [os.path.join(KIT, "mangled.py"), one, "4"]),
                 ("the numbers against each other",
                  [os.path.join(KIT, "invariants.py"), table, report]),
                 ("the payload split", [os.path.join(KIT, "facts.py"), report]),
@@ -133,10 +149,7 @@ def main():
                 ("state history decoded in the browser",
                  [os.path.join(KIT, "state_history_ui.py"), report]),
                 ("the window", [os.path.join(KIT, "window.py"), args.saves]),
-                ("the way Windows starts workers",
-                 [os.path.join(KIT, "spawned.py"), args.saves]
-                 + (["--mod", args.mod] if args.mod else [])),
-                ("the report engine against the Python",
+                ("the report engine against its recorded answers",
                  [os.path.join(KIT, "enginecheck.py"), args.saves]
                  + (["--mod", args.mod] if args.mod else [])),
             ]

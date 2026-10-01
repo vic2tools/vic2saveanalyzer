@@ -1,0 +1,10 @@
+Found 3 save(s).
+Victoria II at HOLDING/game, with Mod.
+defines.lua: POP_SIZE_PER_REGIMENT=2000
+poptypes/: mobilizable = aristocrats bankers craftsmen farmers labourers; mod-only pop types read: bankers
+Reading 3 save(s) on N cores.
+
+Invention indices could not be decoded from 2 inventions; falling back to requirement matching, which overstates unlucky nations.
+
+Mod scan: 5 techs (1 grant mobilisation_size), 0 inventions grant it (0 obtainable), 0 event modifiers, 1 triggered modifiers.
+  tech       flintlock_rifles                             +0.050

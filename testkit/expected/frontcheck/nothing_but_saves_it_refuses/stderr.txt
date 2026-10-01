@@ -1,0 +1,7 @@
+  skipped 1b_cut.v2: HOLDING/refused/1b_cut.v2 stops part-way through, so it was cut short: the game crashed while writing it, or is writing it right now. If this is the game's own save folder, read the copies the keeper makes instead.
+  skipped 0a_zip.v2: HOLDING/refused/0a_zip.v2 is a zip archive. Extract it, or re-save the game in debug mode to get plaintext.
+  skipped 0b_empty.v2: HOLDING/refused/0b_empty.v2 does not look like a plaintext Vic2 save (no `date=` in the header). If it is binary, launch Victoria 2 in debug mode and re-save.
+  skipped 1b_cut.v2: HOLDING/refused/1b_cut.v2 stops part-way through, so it was cut short: the game crashed while writing it, or is writing it right now. If this is the game's own save folder, read the copies the keeper makes instead.
+  skipped 0a_zip.v2: HOLDING/refused/0a_zip.v2 is a zip archive. Extract it, or re-save the game in debug mode to get plaintext.
+  skipped 0b_empty.v2: HOLDING/refused/0b_empty.v2 does not look like a plaintext Vic2 save (no `date=` in the header). If it is binary, launch Victoria 2 in debug mode and re-save.
+No saves could be read.

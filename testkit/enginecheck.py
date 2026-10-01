@@ -25,22 +25,18 @@ two different compressors and only what they hold has to agree.
 """
 
 import argparse
-import base64
-import gzip
-import hashlib
 import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
-import zlib
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "testkit"))
 
+import expected                                            # noqa: E402
 from outcome import SKIPPED                                 # noqa: E402
 
 TRIGGERED = """
@@ -123,6 +119,7 @@ unciv_nation = {
 RUNS = [
     ("as it comes", []),
     ("verbose", ["VERBOSE"]),
+    ("verbose, one at a time", ["VERBOSE", "-j", "1"]),
     ("a few nations", ["--tags", "ENG", "FRA", "RUS", "CHI"]),
     ("small nations dropped", ["--min-pop", "4000000"]),
     ("players named", ["--player-nations", "ENG", "RUS"]),
@@ -137,6 +134,16 @@ RUNS = [
     # has to make what a run with no cache makes.
     ("out of the engine's cache", ["CACHED"]),
     ("out of the engine's cache, verbose", ["CACHED", "VERBOSE"]),
+    # What the diagnostics make of a real campaign, and --cross over it cut
+    # in two.
+    ("where a mobilisation size comes from", ["VERBOSE", "--explain-mob", "NET"]),
+    ("a mobilization pool", ["VERBOSE", "--explain-mob-pool", "ENG"]),
+    ("the inventions a nation holds", ["VERBOSE", "--inventions", "FRA"]),
+    ("the invention decode checked", ["VERBOSE", "--check-inventions"]),
+    ("a peek", ["VERBOSE", "--peek"]),
+    ("verified", ["VERBOSE", "--verify"]),
+    ("campaigns compared", ["CROSS"]),
+    ("campaigns compared, verbose", ["CROSS", "VERBOSE"]),
 ]
 
 
@@ -178,7 +185,7 @@ def copies_of(src, dst, skip=()):
             shutil.copy2(source, target)
 
 
-def a_world(holding, mod, saves, every):
+def a_world(holding, mod, saves, every, extra_modifier):
     """
     (a game, the mod in it, a folder of saves): the install copied, the
     mod copied with the extra rules, and every `every`th save.
@@ -204,7 +211,6 @@ def a_world(holding, mod, saves, every):
     ours = os.path.join(world, "mod", os.path.basename(os.path.abspath(mod)))
     shutil.copytree(mod, ours, symlinks=False)
     common = os.path.join(ours, "common")
-    extra_modifier = a_modifier_someone_holds(saves)
 
     def append(name, text):
         # At the front: this mod's event_modifiers.txt ends without closing
@@ -234,6 +240,13 @@ def a_world(holding, mod, saves, every):
         target = os.path.join(folder, name)
         if not os.path.exists(target):
             shutil.copy2(os.path.join(os.path.abspath(saves), name), target)
+    # The same saves as two campaigns, for --cross: linked to the copies
+    # just made, never to the real ones.
+    kept = sorted(os.listdir(folder))
+    for part, names_in in (("early", kept[:len(kept) // 2]), ("late", kept[len(kept) // 2:])):
+        os.makedirs(os.path.join(holding, "cross", part))
+        for name in names_in:
+            os.link(os.path.join(folder, name), os.path.join(holding, "cross", part, name))
     return world, ours, folder
 
 
@@ -292,135 +305,65 @@ def an_edge_world(holding):
 
 
 def a_modifier_someone_holds(saves):
-    """The national modifier most nations of the last save hold, or None."""
-    import readsave
+    """
+    The national modifier most nations of the last save hold, or None: a
+    country block's `modifier = { modifier="..." }`, counted by occurrence.
+    """
     names = sorted(f for f in os.listdir(saves) if f.endswith(".v2"))
     if not names:
         return None
-    _meta, nations = readsave.analyze_save(os.path.join(saves, names[-1]),
-                                           readsave.PLAIN, verbose=False)
+    with open(os.path.join(saves, names[-1]), "rb") as fh:
+        text = fh.read().decode("latin-1")
     counts = {}
-    for nat in nations.values():
-        for m in nat.get("modifiers") or ():
-            counts[m] = counts.get(m, 0) + 1
+    for country in re.finditer(r"(?ms)^([A-Z][A-Z0-9]{2})=[ \t]*\r?\n\{(.*?)^\}", text):
+        for held in re.finditer(r'(?m)^\tmodifier=\s*\{\s*modifier="([^"]*)"', country[2]):
+            counts[held[1]] = counts.get(held[1], 0) + 1
     return max(sorted(counts), key=counts.get) if counts else None
 
 
-# ------------------------------------------------------------- comparing
+# ------------------------------------------------------------- running
 
-def png_pixels(uri):
-    raw = base64.b64decode(uri.split(",", 1)[1])
-    at, ihdr, idat = 8, b"", b""
-    while at < len(raw):
-        n = int.from_bytes(raw[at:at + 4], "big")
-        tag = raw[at + 4:at + 8]
-        if tag == b"IHDR":
-            ihdr = raw[at + 8:at + 8 + n]
-        elif tag == b"IDAT":
-            idat += raw[at + 8:at + 8 + n]
-        at += 12 + n
-    return "png:%s:%s" % (ihdr.hex(), hashlib.sha256(zlib.decompress(idat)).hexdigest())
-
-
-def chunk_text(b64):
-    return gzip.decompress(base64.b64decode(b64)).decode("utf-8")
-
-
-def page(folder):
-    """(the payload as normal JSON text, the state chunks, the page around them)."""
-    html = open(os.path.join(folder, "report.html"), encoding="utf-8").read()
-    packed = re.search(r'const PACKED = "([^"]*)"', html)[1]
-    if packed:
-        text = gzip.decompress(base64.b64decode(packed)).decode("utf-8")
-    else:
-        with open(os.path.join(folder, "report.data.gz"), "rb") as fh:
-            text = gzip.decompress(fh.read()).decode("utf-8")
-    data = json.loads(text)
-    if data.get("flags"):
-        data["flags"] = {k: png_pixels(v) for k, v in data["flags"].items()}
-    board = data.get("map")
-    if board and board.get("populationStateChunks"):
-        board["populationStateChunks"] = [[d, chunk_text(c)]
-                                          for d, c in board["populationStateChunks"]]
-    beside = re.search(r'const STATE_CHUNKS = (\[.*?\]);\n', html, re.S)
-    states = [[d, chunk_text(c)] for d, c in json.loads(beside[1])] if beside else []
-    shell = html.replace(packed, "<DATA>") if packed else html
-    if beside:
-        shell = shell.replace(beside[0], "<STATES>")
-    return json.dumps(data, separators=(",", ":")), json.dumps(states), shell
-
-
-def differences(a, b):
-    """[what differs] between two runs' output folders and printed text."""
-    wrong = []
-    names = sorted(set(os.listdir(a["out"])) | set(os.listdir(b["out"])))
-    for name in names:
-        if name in ("report.stamp",):
-            continue
-        pa, pb = os.path.join(a["out"], name), os.path.join(b["out"], name)
-        if not (os.path.exists(pa) and os.path.exists(pb)):
-            wrong.append("%s is written by only one of them" % name)
-            continue
-        if name == "report.html":
-            for what, x, y in zip(("the payload", "the state chunks", "the page"),
-                                  page(a["out"]), page(b["out"])):
-                if x != y:
-                    j = next((j for j, (p, q) in enumerate(zip(x, y)) if p != q),
-                             min(len(x), len(y)))
-                    wrong.append("%s differs at %d: python %r, engine %r"
-                                 % (what, j, x[max(0, j - 60):j + 60],
-                                    y[max(0, j - 60):j + 60]))
-        elif name == "report.data.gz":
-            continue                      # compared through report.html
-        else:
-            with open(pa, "rb") as fa, open(pb, "rb") as fb:
-                if fa.read() != fb.read():
-                    wrong.append("%s differs" % name)
-    # How many cores a read takes follows the memory free that moment, by
-    # the same rule both ways, so that one number is not compared.
-    cores = re.compile(r"(save\(s\) on )\d+( cores)")
-    for stream in ("stdout", "stderr"):
-        x = cores.sub(r"\1N\2", a[stream].replace(a["out"], "OUT"))
-        y = cores.sub(r"\1N\2", b[stream].replace(b["out"], "OUT"))
-        if x != y:
-            j = next((j for j, (p, q) in enumerate(zip(x, y)) if p != q), min(len(x), len(y)))
-            wrong.append("printed %s differs at %d:\n      python %r\n      engine %r\n"
-                         "      engine's stderr ends %r"
-                         % (stream, j, x[max(0, j - 200):j + 200], y[max(0, j - 200):j + 200],
-                            b["stderr"][-600:]))
-    return wrong
-
-
-def run(folder, world, mod, args, out, engine):
+def run(folder, mod, args, out, holding, python=False):
+    """One run's answer. `CACHED` fills a cache of its own first, so the run
+    answered is read entirely out of it."""
     env = dict(os.environ)
-    env.pop("VIC2_NO_ENGINE", None)
-    if not engine:
+    for key in ("VIC2_NO_ENGINE", "VIC2_NO_FRONT", "VIC2_ENGINE_REQUIRED"):
+        env.pop(key, None)
+    if python:
         env["VIC2_NO_ENGINE"] = "1"
     else:
         env["VIC2_ENGINE_REQUIRED"] = "1"
     quiet = [] if "VERBOSE" in args else ["-q"]
-    argv = [a for a in args if a not in ("VERBOSE", "CACHED")]
+    if "VERBOSE" in args and "-j" not in args:
+        # How many saves are read at once follows the memory free at the
+        # moment, and a verbose run says each save in the way that number
+        # decides, so a verbose run names it.
+        quiet = ["-j", "3"]
+    argv = [a for a in args if a not in ("VERBOSE", "CACHED", "CROSS")]
     cached = "CACHED" in args
+    if "CROSS" in args:
+        folder = os.path.join(os.path.dirname(folder), "cross")
+        argv.append("--cross")
+    env["TMPDIR"] = out + "-tmp"
+    os.makedirs(env["TMPDIR"], exist_ok=True)
+    command = ([folder, "--out", out, "--mod-path", mod, "--rebuild"]
+               + ([] if cached else ["--no-cache"]) + quiet + argv)
+    places = [(env["TMPDIR"], "TMP"), (holding, "HOLDING")]
     if cached:
-        # Each way a cache of its own, filled first, so the run compared is
-        # read entirely out of it: the engine's entries on one side, the
-        # Python's on the other, and what each prints for a campaign it has
-        # read before.
-        env["TMPDIR"] = out + "-tmp"
-        os.makedirs(env["TMPDIR"], exist_ok=True)
-    command = ([sys.executable, os.path.join(HERE, "vic2_analyzer.py"), folder, "--out", out,
-                "--mod-path", mod, "--rebuild"] + ([] if cached else ["--no-cache"])
-               + quiet + argv)
-    if cached:
-        subprocess.run(command, capture_output=True, text=True, cwd=HERE, env=env)
-    done = subprocess.run(command, capture_output=True, text=True, cwd=HERE, env=env)
-    return {"out": out, "code": done.returncode, "stdout": done.stdout,
-            "stderr": done.stderr}
+        expected.run(command, HERE, env, out, places)
+    got = expected.run(command, HERE, env, out, places)
+    shutil.rmtree(out, ignore_errors=True)
+    shutil.rmtree(env["TMPDIR"], ignore_errors=True)
+    return got
 
 
-def engine_ran(result):
-    """Whether the run went through the engine (the scanner answers `report`)."""
-    return result["code"] == 0
+def inputs_of(saves, every, mod):
+    """What the real record was made from: which saves, and how big."""
+    names = sorted(f for f in os.listdir(saves) if f.endswith(".v2"))
+    chosen = names[::every] + names[-1:]
+    return {"every": every, "mod": os.path.basename(os.path.abspath(mod)),
+            "saves": [[n, os.path.getsize(os.path.join(saves, n))]
+                      for n in dict.fromkeys(chosen)]}
 
 
 def main():
@@ -428,44 +371,73 @@ def main():
     ap.add_argument("saves", nargs="?", default="")
     ap.add_argument("--mod", default="")
     ap.add_argument("--every", type=int, default=17)
+    ap.add_argument("--update", action="store_true",
+                    help="write what the program answers now as the expected answers")
+    ap.add_argument("--python", action="store_true",
+                    help="with --update: take the answers from the Python (VIC2_NO_ENGINE)")
     args = ap.parse_args()
-    import fastscan
-    if not (args.saves and os.path.isdir(args.saves) and args.mod
-            and os.path.isdir(args.mod)):
-        print("needs a folder of saves and the mod they were played on")
-        return SKIPPED
-    if fastscan.available() is None:
-        print("needs the scanner built: the engine is the scanner's `report` mode")
+    binary = os.path.join(HERE, "scanner", "target", "release",
+                          "vic2scan" + (".exe" if os.name == "nt" else ""))
+    if not os.path.isfile(binary):
+        print("needs the scanner built")
         return SKIPPED
     holding = tempfile.mkdtemp(prefix="vic2engine")
     wrong = []
     real = {}
+    skipped = []
     try:
-        real = real_files(args.mod)
-        world, mod, folder = a_world(holding, args.mod, args.saves, args.every)
-        # A folder of its own: the helpers that build a small game write
-        # into `<holding>/game`, which in `holding` is the real install
-        # seen through links. Built there once, it emptied the real
-        # game's map/default.map.
-        edge_mod, edge_folder = an_edge_world(os.path.join(holding, "edges"))
         width = max(len(n) for n, _ in RUNS + SYNTHETIC_RUNS)
-        plan = ([(name, flags, folder, mod) for name, flags in RUNS]
-                + [(name, flags, edge_folder, edge_mod) for name, flags in SYNTHETIC_RUNS])
-        for name, flags, folder, mod in plan:
-            py = run(folder, world, mod, flags, os.path.join(holding, "py"), False)
-            rs = run(folder, world, mod, flags, os.path.join(holding, "rs"), True)
-            found = []
-            if py["code"] or rs["code"]:
-                found.append("exit %s (python) and %s (engine): %s"
-                             % (py["code"], rs["code"], (py["stderr"] + rs["stderr"])[-500:]))
-            else:
-                found = differences(py, rs)
-            print("  %-*s %s" % (width, name, "ok" if not found else "DIFFERS"))
-            for f in found:
-                print("      " + f[:600])
+        # The edge world first: it needs nothing but this tree. A folder of
+        # its own: the helpers that build a small game write into
+        # `<holding>/game`, and built beside a copy of the real install
+        # they once emptied the real game's map/default.map through a link.
+        edge_mod, edge_folder = an_edge_world(os.path.join(holding, "edges"))
+        book = expected.Book(expected.REPO, "enginecheck", args.update)
+        for name, flags in SYNTHETIC_RUNS:
+            got = run(edge_folder, edge_mod, flags, os.path.join(holding, "out"), holding,
+                      args.python)
+            found = book.hold(name, got)
+            expected.report(name, found, width)
             wrong += ["%s: %s" % (name, f) for f in found]
-            shutil.rmtree(py["out"], ignore_errors=True)
-            shutil.rmtree(rs["out"], ignore_errors=True)
+        book.finish()
+
+        # Then the real campaign, whose answers live outside the tree.
+        record = os.path.join(expected.REAL, "enginecheck")
+        manifest = os.path.join(record, "inputs.json")
+        if not (args.saves and os.path.isdir(args.saves) and args.mod
+                and os.path.isdir(args.mod)):
+            skipped.append("no saves and mod given, so the real campaign was not run")
+        elif not args.update and not os.path.isfile(manifest):
+            skipped.append("no answers are recorded for a real campaign in %s" % record)
+        else:
+            inputs = inputs_of(args.saves, args.every, args.mod)
+            if args.update:
+                inputs["modifier"] = a_modifier_someone_holds(args.saves)
+            else:
+                with open(manifest, encoding="utf-8") as fh:
+                    kept = json.load(fh)
+                inputs["modifier"] = kept.get("modifier")
+                if kept != inputs:
+                    skipped.append("the answers in %s were recorded from other saves or "
+                                   "another mod (%s), so the real campaign was not run"
+                                   % (record, ", ".join(k for k in inputs
+                                                        if kept.get(k) != inputs[k])))
+                    inputs = None
+            if inputs is not None:
+                real = real_files(args.mod)
+                world, mod, folder = a_world(holding, args.mod, args.saves, args.every,
+                                             inputs["modifier"])
+                book = expected.Book(expected.REAL, "enginecheck", args.update)
+                for name, flags in RUNS:
+                    got = run(folder, mod, flags, os.path.join(holding, "out"), holding,
+                              args.python)
+                    found = book.hold(name, got)
+                    expected.report(name, found, width)
+                    wrong += ["%s: %s" % (name, f) for f in found]
+                book.finish()
+                if args.update:
+                    with open(manifest, "w", encoding="utf-8") as fh:
+                        json.dump(inputs, fh, indent=1)
     finally:
         shutil.rmtree(holding, ignore_errors=True)
         touched = [path for path, was in real.items() if file_stamp(path) != was]
@@ -473,12 +445,17 @@ def main():
             print("THIS CHECK CHANGED THE REAL GAME OR MOD: %s" % ", ".join(touched[:5]))
             raise RuntimeError("fixture changed real inputs")
     print()
+    for why in skipped:
+        print(why)
     if wrong:
-        print("the engine and the Python disagree on %d thing(s)" % len(wrong))
+        print("%d thing(s) differ from the recorded answers" % len(wrong))
         return 1
-    print("the engine and the Python make the same report, the same tables and "
-          "say the same things, %d ways" % len(RUNS + SYNTHETIC_RUNS))
-    return 0
+    if args.update:
+        print("recorded")
+        return 0
+    print("the report engine gives the recorded answers, %d ways"
+          % (len(SYNTHETIC_RUNS) + (0 if skipped else len(RUNS))))
+    return SKIPPED if skipped and not args.update else 0
 
 
 if __name__ == "__main__":

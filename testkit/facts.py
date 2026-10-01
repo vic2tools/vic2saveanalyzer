@@ -8,19 +8,18 @@ payload. Only what `series` cannot supply travels now, and the page puts the
 rest back at boot.
 
 That means the report shows numbers that are not in the file it came in, and
-the loop that reconstructs them lives in the template while the pair it has
-to agree with lives in report.py. This checks the pair:
-
-    rebuild_facts(*thin_facts(facts, series), series) == facts
-
-against a built report if one is given, and against made-up shapes either
-way -- a nation that appears late, a measure only one nation has, a date
-with a single nation in it.
+the loop that puts them back lives in the template. This holds it to
+`rebuild_facts` here, its description in Python: on made-up shapes -- a
+nation that appears late, a measure only one nation has, an empty campaign
+-- thinned and rebuilt, and on a built report if one is given, where what
+comes back has to be every nation-save the series hold and every value the
+table beside it (`nations_timeseries.csv`, written straight from the
+finished nations) holds.
 
     python3 testkit/facts.py [path/to/report.html]
 
-The template's own loop is checked by `boots.py`, which opens the page in a
-browser: if the two drift, every table on it is empty or wrong.
+The template's own loop is run by quickjs where it is installed, and the
+page as a whole by `boots.py`, which opens it in a browser.
 """
 
 import base64
@@ -34,7 +33,47 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
 from outcome import SKIPPED                                 # noqa: E402
-from report import as_columns, rebuild_facts, thin_facts    # noqa: E402
+
+
+def rebuild_facts(facts, series, taken, dates):
+    """
+    Put the two back together, the way the page does at boot: what this
+    check holds the template's loop to. `series` is the shipped shape,
+    columns against `dates`.
+    """
+    out = {date: {tag: dict(vals) for tag, vals in by_tag.items()}
+           for date, by_tag in facts.items()}
+    for tag, metrics in series.items():
+        for key in taken:
+            column = metrics.get(key)
+            if not column:
+                continue
+            for i, value in enumerate(column):
+                if value is None:
+                    continue
+                out.setdefault(dates[i], {}).setdefault(tag, {})[key] = value
+    return out
+
+
+def as_columns(series, dates):
+    """{tag: {measure: {date: value}}} as the page carries it: columns
+    against `dates`, None where a nation has no value."""
+    return {tag: {m: [by.get(d) for d in dates] for m, by in measures.items()}
+            for tag, measures in series.items()}
+
+
+def thin_facts(facts, series):
+    """
+    The measures `series` can supply taken out of `facts`, as the report
+    ships them: (thin facts, the measures taken). Only a measure every
+    nation-save of `facts` has in `series` is taken.
+    """
+    taken = sorted({m for measures in series.values() for m in measures
+                    if all(m not in vals or series.get(tag, {}).get(m, {}).get(date) == vals[m]
+                           for date, by in facts.items() for tag, vals in by.items())})
+    thin = {date: {tag: {k: v for k, v in vals.items() if k not in taken}
+                   for tag, vals in by.items()} for date, by in facts.items()}
+    return thin, taken
 
 
 def made_up():
@@ -103,7 +142,9 @@ def the_template_loop():
     Taken from `template.py` rather than copied, so this cannot be testing
     a loop the report does not contain.
     """
-    from template import TEMPLATE
+    sys.path.insert(0, os.path.join(HERE, "testkit"))
+    from expected import template
+    TEMPLATE = template()
     found = re.search(r"for \(const tag in DATA\.series\) \{.*?\n\}\n",
                       TEMPLATE, re.S)
     return found.group(0) if found else None
@@ -133,10 +174,58 @@ def same_in_javascript(facts, series, taken, dates):
     return json.loads(ctx.eval("JSON.stringify(DATA.facts)"))
 
 
+def against_the_table(back, table):
+    """
+    1 if the rebuilt facts disagree with the table the same run wrote: every
+    nation-save in one is in the other, and every measure both carry has
+    the same value. The table is written straight from the finished
+    nations, so it is the answer the page has to arrive back at.
+    """
+    import csv
+    if not os.path.isfile(table):
+        print("  %-34s no table beside the report" % "")
+        return 0
+    with open(table, newline="") as fh:
+        rows = {(r["date"], r["tag"]): r for r in csv.DictReader(fh)}
+    pairs = {(d, t) for d, by in back.items() for t in by}
+    wrong = []
+    if pairs != set(rows):
+        wrong.append("%d nation-saves only in the page, %d only in the table"
+                     % (len(pairs - set(rows)), len(set(rows) - pairs)))
+    compared = 0
+    for (date, tag), row in sorted(rows.items()):
+        for key, value in back.get(date, {}).get(tag, {}).items():
+            if key not in row or isinstance(value, (dict, list)):
+                continue
+            compared += 1
+            # The page carries a flag as 1 or 0, the table as True or False.
+            text = {"True": "1", "False": "0"}.get(row[key], row[key])
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                same = str(value) == text or (value is None and text == "")
+            else:
+                try:
+                    same = float(text) == float(value)
+                except ValueError:
+                    same = False
+            if not same and len(wrong) < 5:
+                wrong.append("%s %s %s: the page has %r, the table %r"
+                             % (date, tag, key, value, text))
+    print("  %-34s %d values compared with %s" % ("rebuilt against the table", compared,
+                                                 os.path.basename(table)))
+    for w in wrong:
+        print("      " + w)
+    return 1 if wrong or not compared else 0
+
+
 def check(name, dates, facts, series):
-    """True if thinning and rebuilding gives back exactly what went in."""
+    """True if thinning and rebuilding gives back exactly what went in, by
+    the page's own loop where quickjs can run it."""
     thin, taken = thin_facts(facts, series)
     back = rebuild_facts(thin, as_columns(series, dates), taken, dates)
+    in_js = same_in_javascript(thin, as_columns(series, dates), taken, dates)
+    if in_js is not None and in_js != back:
+        print("  %s: the template's loop gives %r, not %r" % (name, in_js, back))
+        return False
     if back == facts:
         return True
     print("  %s: does NOT come back the same" % name)
@@ -192,16 +281,16 @@ def main():
             else:
                 print("  %-34s %d measures across %d saves"
                       % ("rebuilt from the report", len(measures), len(back)))
+            bad += against_the_table(back, os.path.join(os.path.dirname(path),
+                                                         "nations_timeseries.csv"))
             in_js = same_in_javascript(facts, series, keys, dates)
             if in_js is None:
                 print("  %-34s no quickjs here, so the template's own loop "
                       "was not run" % "")
             elif in_js == back:
-                print("  %-34s agrees with report.py, on this campaign"
-                      % "the template's own loop")
+                print("  %-34s agrees, on this campaign" % "the template's own loop")
             else:
-                print("      the loop in template.py and `rebuild_facts` "
-                      "do NOT agree")
+                print("      the loop in template.py and `rebuild_facts` do NOT agree")
                 bad += 1
 
     print()

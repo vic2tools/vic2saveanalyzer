@@ -1,37 +1,36 @@
-#!/usr/bin/env python3
 """
 The province bitmap as the map tab ships it, against a pixel-by-pixel
 reading of the same file.
 
-`province_raster` reads a row's pixels in bulk and looks up only runs, so
-what it can get wrong is at the edges of a run: a colour the map does not
-name, two colours naming one province, a run that carries on into the next
-row, the padding at the end of a row, and which pixels a scale samples. The
-bitmap here is small and made of exactly those.
+The map is read a row's pixels at a time and kept as runs, so what it can get
+wrong is at the edges of a run: a colour the map does not name, two colours
+naming one province, a run that carries on into the next row, the padding at
+the end of a row, and which pixels a scale samples. The bitmap here is small
+and made of exactly those. And the anchor an army is drawn at: where
+`positions.txt` places a province (its y measured from the bottom, as the
+bitmap is), and otherwise the province's first cell nearest the middle of
+its own cells, worked out here a cell at a time.
 
-And `raster_ahead`, which decodes it in another process while the saves are
-read: it has to leave the entry `province_raster` then finds, and start
-nothing when there is no map or the entry is already there.
+    python3 testkit/raster.py
 
-And the two other things the map takes from the map's files alone: the
-anchor for a province `positions.txt` does not place, worked out a stretch
-of a row at a time, and `positions.txt` itself, which is cached and has to
-be read again when it changes.
+A real run of the analyzer at four scales; what is compared is the `map`
+the page carries.
 """
 
-import atexit
-from itertools import groupby
+import json
 import os
 from pathlib import Path
 import shutil
 import struct
+import subprocess
 import sys
 import tempfile
-import unittest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import cacheio
-import mod_reader
+HERE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(HERE / "testkit"))
+import expected                                             # noqa: E402
+import matching                                             # noqa: E402
+import savefmt                                              # noqa: E402
 
 # (red, green, blue) -> province; 9 and 10 share province 5.
 NAMED = {(10, 20, 30): 1, (200, 0, 0): 2, (0, 200, 0): 3, (0, 0, 200): 4,
@@ -123,98 +122,88 @@ def anchors_by_hand(width, runs, wanted):
     return out
 
 
-class RasterTests(unittest.TestCase):
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="vic2raster")
-        self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
-        self.game = self.root / "game"
+POSITIONS = {1: (10.0, 12.0), 2: (5.5, 6.0)}
 
-    def test_every_scale_matches_a_pixel_by_pixel_reading(self):
+
+def a_world(holding, width, height):
+    """(the mod, a folder with one save whose armies stand in every province)."""
+    mod = matching.a_mod_in_a_game(str(holding), "Mapped")
+    rows = picture(width, height)
+    write_map(Path(mod), rows)
+    with open(os.path.join(mod, "map", "positions.txt"), "w") as fh:
+        # one by `unit`, one by `town` alone, and one that gives no anchor
+        fh.write("1 = { unit = { x = 10.000 y = 12.000 } }\n"
+                 "2 = { town = { x = 5.500 y = 6.000 } }\n"
+                 "3 = { rotation = 1 }\n")
+    saves = holding / "saves"
+    saves.mkdir()
+    army = lambda where: ("army", ['\t\tname="Army %d"' % where]
+                          + savefmt.nest("regiment", ['\t\t\tname="B"', "\t\t\ttype=infantry",
+                                                     "\t\t\tcount=1000", "\t\t\tstrength=3.000"], 2)
+                          + ["\t\tlocation=%d" % where])
+    savefmt.write(str(saves / "a.v2"), savefmt.head("1880.1.1"),
+                  *[savefmt.province(pid, "ENG", [savefmt.pop("farmers", pid, 1000)])
+                    for pid in range(1, 6)],
+                  savefmt.country("ENG", blocks=[army(pid) for pid in range(1, 6)]))
+    return mod, str(saves), rows
+
+
+def shipped(saves, mod, scale, holding):
+    """The map a run's page carries at `scale`."""
+    out = holding / ("out%d" % scale)
+    env = dict(os.environ, TMPDIR=str(holding / "tmp"))
+    for key in ("VIC2_NO_ENGINE", "VIC2_NO_FRONT"):
+        env.pop(key, None)
+    (holding / "tmp").mkdir(exist_ok=True)
+    done = subprocess.run([sys.executable, str(HERE / "vic2_analyzer.py"), saves, "--mod-path",
+                           mod, "--out", str(out), "--map-scale", str(scale), "-q", "--no-cache"],
+                          capture_output=True, text=True, env=env)
+    if done.returncode:
+        raise AssertionError("the run failed: %s" % (done.stdout + done.stderr)[-1500:])
+    return json.loads(expected.page(str(out))[0])["map"]
+
+
+def main():
+    holding = Path(tempfile.mkdtemp(prefix="vic2raster"))
+    wrong = []
+    try:
         # 23 wide leaves padding on every row; 19 high is not a multiple of
         # any scale above 1, so the last rows are never sampled.
-        rows = picture(23, 19)
-        write_map(self.game, rows)
+        mod, saves, rows = a_world(holding, 23, 19)
         for scale in (1, 2, 3, 5):
-            with self.subTest(scale=scale):
-                want = by_hand(rows, scale)
-                self.assertEqual(mod_reader.province_raster(str(self.game), scale),
-                                 want)
-                # and again, out of the cache entry the first call left
-                self.assertEqual(mod_reader.province_raster(str(self.game), scale),
-                                 want)
-
-    def test_the_process_ahead_leaves_the_entry_behind(self):
-        rows = picture(23, 19)
-        write_map(self.game, rows)
-        proc = mod_reader.raster_ahead(str(self.game), 1)
-        self.assertIsNotNone(proc)
-        proc.join(60)
-        self.assertEqual(proc.exitcode, 0)
-        slot = mod_reader._raster_slot(str(self.game / "map/provinces.bmp"),
-                                       str(self.game / "map/definition.csv"), 1)
-        self.assertEqual(cacheio.load(slot), by_hand(rows, 1))
-        self.assertEqual(cacheio.load(mod_reader._text_slot(slot)),
-                         spelled(by_hand(rows, 1)[2]))
-        # cached now, so there is nothing to start
-        self.assertIsNone(mod_reader.raster_ahead(str(self.game), 1))
-
-    def test_the_runs_are_spelled_as_the_page_reads_them(self):
-        rows = picture(23, 19)
-        write_map(self.game, rows)
-        for scale in (1, 3):
-            with self.subTest(scale=scale):
-                want = spelled(by_hand(rows, scale)[2])
-                self.assertEqual(mod_reader.raster_text(str(self.game), scale), want)
-                # and again, out of its cache entry
-                self.assertEqual(mod_reader.raster_text(str(self.game), scale), want)
-        self.assertEqual(mod_reader.raster_text(str(self.root / "nomap"), 1), "")
-
-    def test_anchors_match_a_cell_by_cell_reading(self):
-        # A crescent round a bay, a ring whose middle is not its own, a
-        # province split across the wrap of a row, and a tie between two
-        # columns equally near the middle.
-        width = 7
-        grid = ("1111111"
-                "1000001"
-                "1022201"
-                "1020201"
-                "1022200"
-                "3300000"
-                "0004400"
-                "0000003"
-                "3000000")
-        runs = [(int(c), sum(1 for _ in g)) for c, g in groupby(grid)]
-        for wanted in ({1}, {2}, {3}, {4}, {0, 1, 2, 3, 4}, {9}):
-            with self.subTest(wanted=wanted):
-                self.assertEqual(mod_reader.province_anchors(width, runs, wanted),
-                                 anchors_by_hand(width, runs, wanted))
-
-    def test_positions_are_read_again_when_the_file_changes(self):
-        write_map(self.game, picture(4, 4))
-        positions = self.game / "map/positions.txt"
-        positions.write_text("1 = { unit = { x = 10.000 y = 20.000 } }\n")
-        self.assertEqual(mod_reader.unit_positions(str(self.game)),
-                         {1: (10.0, 20.0)})
-        positions.write_text("1 = { unit = { x = 30.000 y = 40.000 } }\n"
-                             "2 = { town = { x = 5.000 y = 6.000 } }\n")
-        self.assertEqual(mod_reader.unit_positions(str(self.game)),
-                         {1: (30.0, 40.0), 2: (5.0, 6.0)})
-
-    def test_nothing_is_started_without_a_map(self):
-        self.game.mkdir()
-        self.assertIsNone(mod_reader.raster_ahead(str(self.game), 1))
+            got = shipped(saves, mod, scale, holding)
+            width, height, runs = by_hand(rows, scale)
+            said = []
+            if (got["w"], got["h"], got["scale"]) != (width, height, scale):
+                said.append("the map is %sx%s at %s, not %dx%d" % (got["w"], got["h"],
+                                                                    got["scale"], width, height))
+            text = got["runs"]
+            if text.startswith('"'):
+                text = json.loads(text)
+            if text != spelled(runs):
+                said.append("the runs differ:\n    shipped   %s\n    by hand   %s"
+                            % (text[:300], spelled(runs)[:300]))
+            full = height * scale
+            want = {str(pid): [round(x / scale, 1), round((full - y) / scale, 1)]
+                    for pid, (x, y) in POSITIONS.items()}
+            derived = anchors_by_hand(width, runs, {3, 4, 5})
+            want.update({str(p): v for p, v in derived.items()})
+            if got["spots"] != want:
+                said.append("the anchors are %s, not %s" % (got["spots"], want))
+            # A province no sampled cell falls in has no anchor at all.
+            if got["derived"] != len(derived):
+                said.append("%s provinces were said to be anchored by their shape, not %d"
+                            % (got["derived"], len(derived)))
+            print("  scale %d  %s" % (scale, "ok" if not said else "DIFFERS"))
+            for line in said:
+                print("      " + line)
+            wrong += said
+    finally:
+        shutil.rmtree(holding, ignore_errors=True)
+    print()
+    print("the map holds" if not wrong else "the map DIFFERS")
+    return 1 if wrong else 0
 
 
 if __name__ == "__main__":
-    # The cache goes where the temp folder is, and the process `raster_ahead`
-    # starts is made by a forkserver that knows only the environment -- so
-    # the folder is set there, before anything starts one. Here and not at
-    # the top, because the forkserver imports this file again. Removed at
-    # exit, and registered before multiprocessing registers its own clean-up
-    # inside it, so that it goes last.
-    cache = tempfile.mkdtemp(prefix="vic2rastercache")
-    atexit.register(shutil.rmtree, cache, ignore_errors=True)
-    os.environ["TMPDIR"] = cache
-    tempfile.tempdir = None
-    unittest.main()
+    sys.exit(main())

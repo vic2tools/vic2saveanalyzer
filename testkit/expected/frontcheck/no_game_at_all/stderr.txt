@@ -1,0 +1,1 @@
+Say where Victoria II is installed, with --game-root. The report is read on the game's own rules, or on a mod's when --mod-path names one inside the game's mod folder.

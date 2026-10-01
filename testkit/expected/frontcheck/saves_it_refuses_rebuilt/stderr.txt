@@ -1,0 +1,5 @@
+note: 1b_cut.v2, 3.v2 are all dated 1882.1.1, so only 3.v2 is read. Saves from two games in one folder? Keep each game in a folder of its own.
+  skipped 0a_zip.v2: HOLDING/mixed/0a_zip.v2 is a zip archive. Extract it, or re-save the game in debug mode to get plaintext.
+  skipped 0b_empty.v2: HOLDING/mixed/0b_empty.v2 does not look like a plaintext Vic2 save (no `date=` in the header). If it is binary, launch Victoria 2 in debug mode and re-save.
+  skipped 2b_folder.v2: [Errno 21] Is a directory: 'HOLDING/mixed/2b_folder.v2'
+  skipped 2c_locked.v2: [Errno 13] Permission denied: 'HOLDING/mixed/2c_locked.v2'

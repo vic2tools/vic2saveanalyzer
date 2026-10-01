@@ -1,0 +1,2 @@
+Cannot write to HOLDING/afile/out
+Not a directory. Choose somewhere else with --out.

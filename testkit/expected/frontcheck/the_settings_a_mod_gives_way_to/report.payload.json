@@ -1,0 +1,429 @@
+{
+ "dates": [],
+ "years": [],
+ "tags": [],
+ "tagNames": {},
+ "cultureNames": {},
+ "names": {},
+ "metrics": [],
+ "series": {},
+ "facts": {},
+ "factKeys": [],
+ "ships": {},
+ "crews": {},
+ "shipTypes": [],
+ "brigades": {},
+ "regimentTypes": [],
+ "techOrder": [
+  "post_napoleonic_thought",
+  "strategic_mobility",
+  "point_defense_system",
+  "deep_defense_system",
+  "infiltration",
+  "flintlock_rifles",
+  "muzzle_loaded_rifles",
+  "breech_loaded_rifles",
+  "machine_guns",
+  "bolt_action_rifles",
+  "bronze_muzzle_loaded_artillery",
+  "iron_muzzle_loaded_artillery",
+  "iron_breech_loaded_artillery",
+  "steel_breech_loaded_artillery",
+  "indirect_artillery_fire",
+  "military_staff_system",
+  "military_plans",
+  "military_statistics",
+  "military_logistics",
+  "military_directionism",
+  "army_command_principle",
+  "army_professionalism",
+  "army_decision_making",
+  "army_risk_management",
+  "army_nco_training",
+  "post_nelsonian_thought",
+  "battleship_column_doctrine",
+  "raider_group_doctrine",
+  "blue_and_brown_water_schools",
+  "high_sea_battle_fleet",
+  "clipper_design",
+  "steamers",
+  "iron_steamers",
+  "steel_steamers",
+  "steam_turbine_ships",
+  "naval_design_bureaus",
+  "fire_control_systems",
+  "weapon_platforms",
+  "main_armament",
+  "advanced_naval_design",
+  "alphabetic_flag_signaling",
+  "naval_plans",
+  "naval_statistics",
+  "naval_logistics",
+  "naval_directionism",
+  "the_command_principle",
+  "naval_professionalism",
+  "naval_decision_making",
+  "naval_risk_management",
+  "naval_nco_training"
+ ],
+ "techMeta": [
+  [
+   "army",
+   "Doctrine"
+  ],
+  [
+   "army",
+   "Doctrine"
+  ],
+  [
+   "army",
+   "Doctrine"
+  ],
+  [
+   "army",
+   "Doctrine"
+  ],
+  [
+   "army",
+   "Doctrine"
+  ],
+  [
+   "army",
+   "Small arms"
+  ],
+  [
+   "army",
+   "Small arms"
+  ],
+  [
+   "army",
+   "Small arms"
+  ],
+  [
+   "army",
+   "Small arms"
+  ],
+  [
+   "army",
+   "Small arms"
+  ],
+  [
+   "army",
+   "Artillery"
+  ],
+  [
+   "army",
+   "Artillery"
+  ],
+  [
+   "army",
+   "Artillery"
+  ],
+  [
+   "army",
+   "Artillery"
+  ],
+  [
+   "army",
+   "Artillery"
+  ],
+  [
+   "army",
+   "Military science"
+  ],
+  [
+   "army",
+   "Military science"
+  ],
+  [
+   "army",
+   "Military science"
+  ],
+  [
+   "army",
+   "Military science"
+  ],
+  [
+   "army",
+   "Military science"
+  ],
+  [
+   "army",
+   "Leadership"
+  ],
+  [
+   "army",
+   "Leadership"
+  ],
+  [
+   "army",
+   "Leadership"
+  ],
+  [
+   "army",
+   "Leadership"
+  ],
+  [
+   "army",
+   "Leadership"
+  ],
+  [
+   "navy",
+   "Naval doctrine"
+  ],
+  [
+   "navy",
+   "Naval doctrine"
+  ],
+  [
+   "navy",
+   "Naval doctrine"
+  ],
+  [
+   "navy",
+   "Naval doctrine"
+  ],
+  [
+   "navy",
+   "Naval doctrine"
+  ],
+  [
+   "navy",
+   "Hulls"
+  ],
+  [
+   "navy",
+   "Hulls"
+  ],
+  [
+   "navy",
+   "Hulls"
+  ],
+  [
+   "navy",
+   "Hulls"
+  ],
+  [
+   "navy",
+   "Hulls"
+  ],
+  [
+   "navy",
+   "Naval engineering"
+  ],
+  [
+   "navy",
+   "Naval engineering"
+  ],
+  [
+   "navy",
+   "Naval engineering"
+  ],
+  [
+   "navy",
+   "Naval engineering"
+  ],
+  [
+   "navy",
+   "Naval engineering"
+  ],
+  [
+   "navy",
+   "Naval science"
+  ],
+  [
+   "navy",
+   "Naval science"
+  ],
+  [
+   "navy",
+   "Naval science"
+  ],
+  [
+   "navy",
+   "Naval science"
+  ],
+  [
+   "navy",
+   "Naval science"
+  ],
+  [
+   "navy",
+   "Naval leadership"
+  ],
+  [
+   "navy",
+   "Naval leadership"
+  ],
+  [
+   "navy",
+   "Naval leadership"
+  ],
+  [
+   "navy",
+   "Naval leadership"
+  ],
+  [
+   "navy",
+   "Naval leadership"
+  ]
+ ],
+ "techsBy": {},
+ "worldPop": {
+  "1880.1.1": 9450,
+  "1881.1.1": 9450,
+  "1881.7.1": 9450,
+  "1882.1.1": 9450
+ },
+ "pops": {},
+ "popTypes": [],
+ "cultures": {},
+ "colours": [
+  "#E7C464",
+  "#D4553F",
+  "#8FB98C",
+  "#8FA8C8",
+  "#D48FA8",
+  "#B5A85C",
+  "#B48FC0",
+  "#EADFC2",
+  "#6FA8A0",
+  "#E09A4C",
+  "#9BAF6F",
+  "#A87FA0"
+ ],
+ "map": null,
+ "basePrices": {},
+ "greatPowers": {},
+ "flags": {},
+ "technology": {
+  "tree": {
+   "army": [
+    {
+     "area": "army_tech",
+     "techs": [
+      {
+       "key": "flintlock_rifles",
+       "year": 1836,
+       "cost": 100,
+       "effects": [
+        [
+         "Mobilisation size",
+         "0.050"
+        ]
+       ],
+       "inventions": [],
+       "name": "Flintlock rifles"
+      },
+      {
+       "key": "post_napoleonic_thought",
+       "year": 1836,
+       "cost": 100,
+       "effects": [],
+       "inventions": [],
+       "name": "Post napoleonic thought"
+      },
+      {
+       "key": "clipper_design",
+       "year": 1836,
+       "cost": 100,
+       "effects": [],
+       "inventions": [],
+       "name": "Clipper design"
+      },
+      {
+       "key": "the_stirrup",
+       "year": 1836,
+       "cost": 100,
+       "effects": [],
+       "inventions": [],
+       "name": "The stirrup"
+      },
+      {
+       "key": "iron_working",
+       "year": 1836,
+       "cost": 100,
+       "effects": [],
+       "inventions": [],
+       "name": "Iron working"
+      }
+     ],
+     "label": "Army tech"
+    }
+   ]
+  },
+  "categories": {
+   "army": "Army"
+  }
+ },
+ "wars": [
+  {
+   "name": "The Test War",
+   "start": "",
+   "end": "",
+   "active": true,
+   "attackers": [
+    "ENG"
+   ],
+   "defenders": [
+    "FRA"
+   ],
+   "attacker_parties": [
+    {
+     "tag": "ENG",
+     "joined": "",
+     "original": true,
+     "leads": true
+    }
+   ],
+   "defender_parties": [
+    {
+     "tag": "FRA",
+     "joined": "",
+     "original": true,
+     "leads": true
+    }
+   ],
+   "goal": {
+    "casus_belli": "",
+    "actor": "",
+    "receiver": "",
+    "province": 0
+   },
+   "losses": [
+    0,
+    0
+   ],
+   "side_losses": [
+    0,
+    0,
+    0
+   ],
+   "outcome": "",
+   "goals": [],
+   "dated": 0,
+   "battles": [],
+   "transfers": []
+  }
+ ],
+ "succession": {},
+ "priceDates": [],
+ "priceYears": [],
+ "prices": {},
+ "goods": [],
+ "goodCategory": {},
+ "categoryLabels": {
+  "military": "Military",
+  "industrial": "Industrial",
+  "raw": "Raw materials",
+  "consumer": "Consumer",
+  "other": "Other"
+ },
+ "movement": {},
+ "snapshot": {},
+ "snapshotDates": [],
+ "naval": null,
+ "supply": {},
+ "growthSpan": 0.25,
+ "cross": null
+}

@@ -1,337 +1,140 @@
 #!/usr/bin/env python3
-"""Cache reuse must preserve campaign data across file and option changes."""
+"""
+What the engine keeps between runs must never change what a run says.
 
-import csv
-import gc
+The report engine keeps every save it has read, the campaign's invention
+records and the mod it read, in the temp folder (`vic2_analyzer_cache`), so
+that a second run reads nothing it has read before. Each case here makes a
+run read out of that cache after something has changed under it, and holds
+it to a run made with `--no-cache` on the same saves: every table and what
+the page carries must be the same.
+
+- a save rewritten to the same size within the same second;
+- every entry in the cache damaged, and then cut in half;
+- the mobilizable pop types changed between two cached runs, which changes
+  what a save is read for;
+- a save's file replaced by another of the same name;
+- one save read at a time against several at once.
+
+    python3 testkit/caching.py
+"""
+
 import os
-from pathlib import Path
 import shutil
-import subprocess
 import sys
 import tempfile
-import unittest
-from unittest.mock import patch
 
-HERE = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(HERE))
-import fastscan
-import matching
-# The smallest thing `Mod` will make, from the check that already needed one.
-from mobrate import a_mod
-# The imports walked properly, off the syntax tree, including those made
-# inside a function -- the same walk that decides what the executable carries.
-from packing import reached
-import readfolder
-import readsave
-import savefmt
-import vic2_analyzer as analyzer
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(HERE, "testkit"))
+
+import expected                                            # noqa: E402
+import matching                                            # noqa: E402
+import savefmt                                             # noqa: E402
 
 
-class SaveCacheTests(unittest.TestCase):
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="vic2savecache")
-        self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
-        cache = patch.object(readfolder, "cache_dir",
-                             return_value=str(self.root / "vic2_analyzer_cache"))
-        cache.start()
-        self.addCleanup(cache.stop)
-        self.files = [str(self.root / f"{i}.v2") for i in range(2)]
-        for i in range(2):
-            self.write_save(i, i + 1)
-        # One profile says how a save is read: which pop types exist,
-        # which of them can mobilize, which scalars are reforms -- and
-        # it is the cache key, so a run cannot be keyed on settings it
-        # is not using.
-        reading = readsave.reading_for(None, None,
-                                       ("farmers", "craftsmen"))
-        self.options = dict(jobs=1, verbose=False, reading=reading)
-
-    def write_save(self, index, invention):
-        return savefmt.write(
-            self.files[index], savefmt.head(f"1880.{index + 1}.1"),
-            savefmt.province(1, "ENG", [savefmt.pop("farmers", 1, 1000),
-                                      savefmt.pop("craftsmen", 2, 2000)]),
-            savefmt.country("ENG", techs=["flintlock_rifles"], inventions=[invention]))
-
-    def test_summary_reuse_and_changed_campaign(self):
-        first = analyzer.campaign_inventions(self.files, **self.options)
-        self.assertEqual([p[1]["ENG"]["invention_ids"] for p in first], [[1], [2]])
-        with patch.object(analyzer, "parse_saves", side_effect=AssertionError("re-read")):
-            self.assertEqual(first, analyzer.campaign_inventions(self.files, **self.options))
-        self.write_save(1, 3)
-        changed = analyzer.campaign_inventions(self.files, **self.options)
-        self.assertEqual([p[1]["ENG"]["invention_ids"] for p in changed], [[1], [3]])
-
-    def test_packaged_cache_survives_scanner_reextraction(self):
-        with patch.object(sys, "frozen", True, create=True):
-            with patch.object(readfolder, "_scanner_fingerprint", return_value="first extraction"):
-                first = readfolder.parser_fingerprint()
-            with patch.object(readfolder, "_scanner_fingerprint", return_value="next extraction"):
-                self.assertEqual(first, readfolder.parser_fingerprint())
-
-    def test_same_size_edit_within_one_second(self):
-        path = self.files[0]
-        os.utime(path, ns=(1700000000100000000, 1700000000100000000))
-        first = analyzer.campaign_inventions([path], **self.options)
-        size = os.path.getsize(path)
-        self.write_save(0, 3)
-        os.utime(path, ns=(1700000000200000000, 1700000000200000000))
-        self.assertEqual(size, os.path.getsize(path))
-        second = analyzer.campaign_inventions([path], **self.options)
-        self.assertEqual(first[0][1]["ENG"]["invention_ids"], [1])
-        self.assertEqual(second[0][1]["ENG"]["invention_ids"], [3])
-
-    def test_corrupt_summary_recovers_and_no_cache_bypasses_it(self):
-        first = analyzer.campaign_inventions(self.files, **self.options)
-        slot, = (self.root / "vic2_analyzer_cache").glob("inventions_*.pkl")
-        slot.write_bytes(b"broken")
-        self.assertEqual(first, analyzer.campaign_inventions(self.files, **self.options))
-        with patch.object(analyzer, "parse_saves", wraps=analyzer.parse_saves) as read:
-            self.assertEqual(first, analyzer.campaign_inventions(
-                self.files, use_cache=False, **self.options))
-            read.assert_called_once()
-
-    def test_parallel_projection_and_invalid_file(self):
-        bad = self.root / "bad.v2"
-        bad.write_bytes(b"PK\x03\x04not a plaintext save")
-        files = [self.files[0], str(bad), self.files[1]]
-        serial = analyzer.campaign_inventions(files, use_cache=False, **self.options)
-        parallel = analyzer.campaign_inventions(
-            files, use_cache=False, **{**self.options, "jobs": 2})
-        self.assertEqual(serial, parallel)
-        self.assertEqual([p[0]["file"] for p in parallel], ["0.v2", "1.v2"])
-
-    def test_changing_mobilizable_types_matches_uncached_run(self):
-        game = matching.a_vanilla(str(self.root / "Victoria 2"))
-
-        def build(kind, output, cached=True):
-            args = [sys.executable, str(HERE / "vic2_analyzer.py"), self.files[0],
-                    "--out", str(self.root / output), "--no-html", "-q", "--jobs", "1",
-                    "--game-root", game, "--mob-types", kind]
-            if not cached:
-                args.append("--no-cache")
-            done = subprocess.run(args, capture_output=True, text=True,
-                                  env={**os.environ, "TMPDIR": str(self.root),
-                                       "TEMP": str(self.root), "TMP": str(self.root)})
-            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
-            with (self.root / output / "nations_timeseries.csv").open() as fh:
-                return next(csv.DictReader(fh))
-        farmers = build("farmers", "farmers")
-        craftsmen = build("craftsmen", "craftsmen")
-        self.assertEqual(craftsmen, build("craftsmen", "fresh", cached=False))
-        self.assertEqual(float(farmers["mobilization_pool"]), 1000)
-        self.assertEqual(float(craftsmen["mobilization_pool"]), 2000)
+def write_save(path, date, invention, craftsmen=2000):
+    return savefmt.write(
+        path, savefmt.head(date),
+        savefmt.province(1, "ENG", [savefmt.pop("farmers", 1, 1000),
+                                    savefmt.pop("craftsmen", 2, craftsmen)]),
+        savefmt.province(2, "FRA", [savefmt.pop("farmers", 3, 1500, culture="french")]),
+        savefmt.country("ENG", techs=["flintlock_rifles"], inventions=[invention]),
+        savefmt.country("FRA", culture="french", capital=2, techs=["flintlock_rifles"],
+                        inventions=[1]))
 
 
-# Run inside a copy of the program, where editing a file costs nothing: note
-# the key, then append a comment to each file in turn and note which of those
-# edits moved it.
-EDIT_EACH = r'''
-import os, sys
-here = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, here)
-import readfolder as reader
-before = reader.parser_fingerprint()
-moved = []
-for name in sorted(os.listdir(here)):
-    if not name.endswith(".py") or name == "edit_each.py":
-        continue
-    path = os.path.join(here, name)
-    with open(path, "rb") as fh:
-        was = fh.read()
-    with open(path, "ab") as fh:
-        fh.write(b"\n# edited\n")
+class World:
+    def __init__(self, holding):
+        self.holding = holding
+        self.game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
+        self.saves = os.path.join(holding, "saves")
+        os.makedirs(self.saves)
+        for i in range(3):
+            write_save(os.path.join(self.saves, "%d.v2" % i), "1880.%d.1" % (i + 1), 1)
+        self.tmp = os.path.join(holding, "tmp")
+        os.makedirs(self.tmp)
+
+    def run(self, *extra, cached=True):
+        """The tables and the page of one run (what it printed aside)."""
+        out = os.path.join(self.holding, "out")
+        env = dict(os.environ, TMPDIR=self.tmp, TEMP=self.tmp, TMP=self.tmp)
+        for key in ("VIC2_NO_ENGINE", "VIC2_NO_FRONT"):
+            env.pop(key, None)
+        got = expected.run([self.saves, "--out", out, "--game-root", self.game, "--rebuild",
+                            "-q"] + list(extra) + ([] if cached else ["--no-cache"]),
+                           self.holding, env, out, [(self.tmp, "TMP"), (self.holding, "HOLDING")])
+        shutil.rmtree(out, ignore_errors=True)
+        if got["status.txt"] != "0\n":
+            raise AssertionError("the run failed: %s" % (got["stdout.txt"] + got["stderr.txt"])[-1500:])
+        return {k: v for k, v in got.items() if k not in ("stdout.txt", "stderr.txt")}
+
+    def entries(self):
+        top = os.path.join(self.tmp, "vic2_analyzer_cache")
+        return [os.path.join(top, n) for n in sorted(os.listdir(top))] if os.path.isdir(top) else []
+
+
+def same(name, cached, fresh):
+    found = expected.differences(fresh, cached)
+    expected.report(name, found, 52)
+    return ["%s: %s" % (name, f) for f in found]
+
+
+def main():
+    holding = tempfile.mkdtemp(prefix="vic2caching")
+    wrong = []
     try:
-        if reader.parser_fingerprint() != before:
-            moved.append(name[:-3])
+        w = World(holding)
+        w.run()
+        wrong += same("a warm run against a fresh one", w.run(), w.run(cached=False))
+        if not w.entries():
+            wrong.append("the first run kept nothing, so nothing here was read from a cache")
+
+        path = os.path.join(w.saves, "0.v2")
+        os.utime(path, ns=(1700000000100000000, 1700000000100000000))
+        w.run()
+        size = os.path.getsize(path)
+        write_save(path, "1880.1.1", 2)
+        os.utime(path, ns=(1700000000200000000, 1700000000200000000))
+        if os.path.getsize(path) != size:
+            wrong.append("the edit was meant to keep the save's size")
+        wrong += same("a save rewritten, same size, same second", w.run(), w.run(cached=False))
+
+        for entry in w.entries():
+            with open(entry, "wb") as fh:
+                fh.write(b"broken cache")
+        wrong += same("every cache entry damaged", w.run(), w.run(cached=False))
+        w.run()
+        for entry in w.entries():
+            with open(entry, "rb") as fh:
+                data = fh.read()
+            with open(entry, "wb") as fh:
+                fh.write(data[:len(data) // 2])
+        wrong += same("every cache entry cut in half", w.run(), w.run(cached=False))
+
+        w.run("--mob-types", "farmers")
+        crafts = w.run("--mob-types", "craftsmen")
+        wrong += same("the mobilizable types changed between runs", crafts,
+                      w.run("--mob-types", "craftsmen", cached=False))
+        if crafts == w.run("--mob-types", "farmers"):
+            wrong.append("farmers and craftsmen gave the same tables: the case tests nothing")
+
+        moved = os.path.join(holding, "elsewhere.v2")
+        write_save(moved, "1880.2.1", 2, craftsmen=4321)
+        w.run()
+        os.replace(moved, os.path.join(w.saves, "1.v2"))
+        wrong += same("a save replaced by another of the same name", w.run(), w.run(cached=False))
+
+        wrong += same("one at a time against several at once", w.run("-j", "1", cached=False),
+                      w.run("-j", "3", cached=False))
     finally:
-        with open(path, "wb") as fh:
-            fh.write(was)
-print("BEFORE", before)
-print("MOVED", " ".join(moved))
-'''
-
-
-class ParserKeyTests(unittest.TestCase):
-    """
-    The parse cache key has to move whenever the code that fills an entry does.
-
-    It is a hash of source files, and the files used to be six names written
-    out by hand. `aadea15` then moved the fold that fills every parsed save
-    -- `fold_provinces`, `fold_country`, the rules table -- out of
-    `fastscan.py`, which was on the list, into `nation.py`, which was not.
-    Measured on 103 saves under a mod: warm the cache, change one fold rule,
-    run again. The report rebuilt, because its stamp hashes every file, and
-    rebuilt out of parses the old rule had made: `nations_timeseries.csv`
-    came out exactly as it was before the edit, and 1,999 of its 4,271 rows
-    differed from a `--no-cache` run of the same code. All 24 checks passed.
-
-    So this does not read the key's list of files. It edits each file of the
-    program in turn, in a copy, and watches which edits move the key. They
-    must be exactly the reader, everything it imports, and the two files that
-    write an entry. Not more, either: `explain.py` is kept out on purpose, and
-    a key that moved with every file would throw away a campaign's cached
-    saves for rewording a label in the report.
-    """
-
-    def test_the_key_moves_with_exactly_the_code_that_fills_it(self):
-        # What decides a cached save: reading one, and writing the entry.
-        wanted = reached("readsave") | {"readfolder", "cacheio"}
-        with tempfile.TemporaryDirectory(prefix="vic2key") as copy:
-            for name in os.listdir(HERE):
-                if name.endswith(".py"):
-                    shutil.copy2(HERE / name, os.path.join(copy, name))
-            probe = os.path.join(copy, "edit_each.py")
-            with open(probe, "w") as fh:
-                fh.write(EDIT_EACH)
-            done = subprocess.run([sys.executable, probe], cwd=copy,
-                                  capture_output=True, text=True)
-        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
-        said = dict(line.split(" ", 1) for line in done.stdout.splitlines()
-                    if " " in line)
-        self.assertTrue(said.get("BEFORE"),
-                        "the key came back empty, so nothing is being cached "
-                        "and nothing below means anything")
-        moved = set(said.get("MOVED", "").split())
-        self.assertIn("nation", wanted, "the walk no longer reaches nation.py, "
-                      "which fills every parsed save; the walk is wrong")
-        self.assertEqual(sorted(wanted - moved), [],
-                         "these files decide what a cached save holds, and "
-                         "editing them does not move the parse cache key -- "
-                         "an edit to them is served out of the old parses")
-        self.assertEqual(sorted(moved - wanted), [],
-                         "editing these moves the parse cache key although "
-                         "nothing that reads a save reaches them, so every "
-                         "edit to them throws every cached save away")
-
-
-class ReadingTests(unittest.TestCase):
-    """
-    What a save yields is decided by the reading it is read under, and by
-    nothing a previous read left behind.
-
-    Which pop types exist, which of them can mobilize and which country
-    scalars are reform choices are the mod's to say. They were three module
-    globals that every run, every campaign and every worker had to set, and
-    read back out to make the cache key; a set that only ever grew once
-    carried one mod's `bankers` into the next campaign, which read one
-    anyway "and then cached it under a key that said it had not". They are
-    an argument to `analyze_save` now. These hold both readers to it, here
-    and in the workers.
-    """
-
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="vic2reading")
-        self.addCleanup(self.temp.cleanup)
-        self.files = [os.path.join(self.temp.name, "%d.v2" % i)
-                      for i in range(2)]
-        for i, path in enumerate(self.files):
-            savefmt.write(
-                path, savefmt.head("1880.%d.1" % (i + 1)),
-                savefmt.province(1, "ENG", [
-                    savefmt.pop("farmers", 1, 1000),
-                    savefmt.pop("bankers", 2, 2000)]),
-                savefmt.country("ENG", extra=["slavery=yes_slavery"]))
-        self.modded = readsave.reading_for(
-            "/some/mod", a_mod(pop_types=["bankers"], reform_names=["slavery"]),
-            ("farmers", "bankers"))
-
-    def read(self, reading, use_scanner):
-        _meta, nations = readsave.analyze_save(
-            self.files[0], reading, verbose=False, use_scanner=use_scanner)
-        return nations["ENG"]
-
-    def test_the_reading_decides_and_nothing_is_left_over(self):
-        for use_scanner in (True, False):
-            with self.subTest(scanner=use_scanner):
-                first = self.read(self.modded, use_scanner)
-                plain = self.read(readsave.PLAIN, use_scanner)
-                again = self.read(self.modded, use_scanner)
-                self.assertEqual(dict(first["pop_by_type"]),
-                                 {"farmers": 1000, "bankers": 2000})
-                self.assertEqual(dict(first["reforms"]),
-                                 {"slavery": "yes_slavery"})
-                self.assertEqual(sorted(p[0] for p in first["mobilizable_pops"]),
-                                 ["bankers", "farmers"])
-                self.assertEqual(dict(plain["pop_by_type"]), {"farmers": 1000},
-                                 "the plain reading kept the mod's pop type")
-                self.assertEqual(dict(plain["reforms"]), {},
-                                 "the plain reading kept the mod's reform")
-                self.assertEqual(first, again,
-                                 "reading under another mod in between "
-                                 "changed what this reading makes of the save")
-
-    def test_workers_read_under_the_run_reading(self):
-        # Refused in this process, so a save read here rather than in a
-        # worker fails the test instead of passing it for the wrong reason.
-        refuse = patch.object(readfolder, "analyze_save",
-                              side_effect=AssertionError("read in the parent"))
-        with refuse:
-            got = list(readfolder.parse_saves_stream(
-                self.files, reading=self.modded, jobs=2, use_cache=False,
-                verbose=False))
-        self.assertEqual(len(got), 2)
-        for _meta, nations in got:
-            self.assertEqual(dict(nations["ENG"]["pop_by_type"]),
-                             {"farmers": 1000, "bankers": 2000})
-            self.assertEqual(dict(nations["ENG"]["reforms"]),
-                             {"slavery": "yes_slavery"})
-
-    def test_every_part_of_the_reading_moves_the_key(self):
-        base = readsave.reading_for("/a", a_mod(pop_types=["bankers"],
-                                                reform_names=["slavery"]),
-                                    ("farmers",))
-        for field, other in (("mod_path", "/b"),
-                             ("pop_types", base.pop_types + ("serfs",)),
-                             ("mob_types", ("labourers",)),
-                             ("reform_keys", ("voting_system",))):
-            with self.subTest(field=field):
-                self.assertNotEqual(base.fingerprint(),
-                                    base._replace(**{field: other}).fingerprint())
-
-    def test_no_mod_is_the_plain_reading(self):
-        self.assertEqual(readsave.reading_for(None, None,
-                                              readsave.MOBILIZABLE_TYPES),
-                         readsave.PLAIN)
-
-
-class ScannerLifetimeTests(unittest.TestCase):
-    def process(self, program):
-        proc = subprocess.Popen([sys.executable, "-c", program],
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        def cleanup():
-            if proc.poll() is None:
-                proc.kill()
-            proc.wait()
-            proc.stdout.close()
-            proc.stderr.close()
-        self.addCleanup(cleanup)
-        return proc
-
-    def test_collection_closes_pipes(self):
-        proc = self.process("print('head'); print('tail')")
-        running = fastscan.Running(proc, timeout=5)
-        self.assertEqual(running.line(), b"head")
-        self.assertEqual(running.remainder(), b"tail\n")
-        self.assertEqual(proc.returncode, 0)
-        self.assertTrue(proc.stdout.closed and proc.stderr.closed)
-
-    def test_abandoned_owner_is_not_kept_alive_by_watchdog(self):
-        proc = self.process("import time; time.sleep(60)")
-        running = fastscan.Running(proc, timeout=60)
-        del running
-        gc.collect()
-        proc.wait(timeout=2)
-        self.assertTrue(proc.stdout.closed and proc.stderr.closed)
-
-    def test_watchdog_interrupts_read(self):
-        proc = self.process("import time; time.sleep(60)")
-        running = fastscan.Running(proc, timeout=0.1)
-        self.assertEqual(running.remainder(), b"")
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertTrue(proc.stdout.closed and proc.stderr.closed)
+        shutil.rmtree(holding, ignore_errors=True)
+    print()
+    if wrong:
+        print("%d case(s) read something stale" % len(wrong))
+        return 1
+    print("what the engine keeps never changed what a run says")
+    return 0
 
 
 if __name__ == "__main__":
-    unittest.main()
+    sys.exit(main())

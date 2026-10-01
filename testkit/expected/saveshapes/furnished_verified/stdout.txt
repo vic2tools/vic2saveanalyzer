@@ -1,0 +1,5 @@
+
+=== furnished.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 2 regiments, 1 ships, 50,800 people.
+

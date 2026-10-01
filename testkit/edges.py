@@ -367,25 +367,17 @@ def _(folder, out):
 
 
 def main():
-    """Every case, made by the report engine and in Python (`ways.py`)."""
-    sys.path.insert(0, os.path.join(HERE, "testkit"))
-    import ways
-    from mod_reader import NO_MOD
-    bad = [] if not NO_MOD else ["NO_MOD must be false"]
-    for way, _env in ways.WAYS:
-        print("  made %s:" % ("by the report engine" if way == "engine" else "in Python"))
-        with ways.set_way(way):
-            bad += ["%s (%s)" % (b, way) for b in _cases()]
+    bad = _cases()
     print()
     if bad:
         print("FAILED: %s" % ", ".join(bad))
         return 1
-    print("every edge case either works or refuses in a sentence, both ways")
+    print("every edge case either works or refuses in a sentence")
     return 0
 
 
 def _cases():
-    """Every case, the way the environment says; the names of the bad ones."""
+    """Every case; the names of the bad ones."""
     only = sys.argv[1] if len(sys.argv) > 1 else ""
     width = max(len(n) for n, _ in CASES)
     bad = []

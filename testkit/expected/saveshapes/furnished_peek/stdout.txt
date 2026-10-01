@@ -1,0 +1,59 @@
+
+=== furnished.v2 ===
+
+Top-level scalars:
+  date=1881.3.24
+  player=SWE
+  government=3
+  start_date=1836.1.1
+
+Top-level blocks (6 total, distinct):
+  flags, <province>, <country>, active_war
+
+First province block (1) keys:
+  name                     scalar
+  owner                    scalar
+  controller               scalar
+  core                     scalar
+  naval_base               block
+  fort                     block
+  railroad                 block
+  garrison                 scalar
+  life_rating              scalar
+  farmers                  list  <- pop, culture=swedish, religion=protestant
+  labourers                block  <- pop, culture=swedish, religion=protestant
+  craftsmen                block  <- pop, culture=swedish, religion=protestant
+  soldiers                 block  <- pop, culture=swedish, religion=protestant
+  aristocrats              block  <- pop, culture=swedish, religion=protestant
+
+First country block (SWE) keys:
+  primary_culture          scalar
+  religion                 scalar
+  government               scalar
+  civilized                scalar
+  capital                  scalar
+  prestige                 list
+  money                    list
+  badboy                   scalar
+  tax_base                 scalar
+  war_exhaustion           scalar
+  revanchism               scalar
+  plurality                scalar
+  research_points          scalar
+  ruling_party             scalar
+  nationalvalue            scalar
+  mobilize                 scalar
+  human                    scalar
+  vote_franschise          scalar
+  war_policy               scalar
+  technology               block
+  active_inventions        list
+  culture                  list
+  flags                    block
+  modifier                 block
+  saved_country_supply     block
+  scheduled_mobilization   block
+  state                    list
+  army                     block
+  navy                     block
+

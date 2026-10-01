@@ -1,0 +1,1 @@
+note: a.v2, b.v2 are all dated 1880.1.1, so only b.v2 is read. Saves from two games in one folder? Keep each game in a folder of its own.

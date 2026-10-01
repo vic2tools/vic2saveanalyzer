@@ -1,0 +1,1 @@
+--cross needs --game-root (the Victoria 2 install folder, the one with mod/ inside) to work each campaign's mod out, --mod-path to read them all under one mod, or --campaign-mod to name them one at a time.

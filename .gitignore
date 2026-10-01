@@ -48,3 +48,6 @@ keeper.json
 # output, and the binary itself is carried into the executable rather than
 # tracked here.
 scanner/target/
+
+# Except the tables the checks are held to (testkit/expected.py).
+!testkit/expected/**/*.csv

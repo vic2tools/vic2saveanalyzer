@@ -32,10 +32,10 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "testkit"))
 
+import expected                                            # noqa: E402
 import matching                                            # noqa: E402
 import savefmt                                             # noqa: E402
 from edges import a_save                                   # noqa: E402
-from enginecheck import page                               # noqa: E402
 from outcome import SKIPPED                                # noqa: E402
 
 BIN = os.path.join(HERE, "scanner", "target", "release",
@@ -124,34 +124,14 @@ def cross_world(holding):
     return game, top
 
 
-def run(argv, cwd, env, out):
-    """(status, stdout, stderr) of one run, the out folder's path made OUT."""
-    done = subprocess.run([sys.executable, os.path.join(HERE, "vic2_analyzer.py")] + argv,
-                          capture_output=True, text=True, cwd=cwd, env=env, timeout=300)
-    # The core count follows the memory free that moment, by the same rule
-    # both ways, so it is not compared.
-    clean = lambda t: re.sub(r"(save\(s\) on )\d+( cores)", r"\1N\2", t.replace(out, "OUT"))
-    return done.returncode, clean(done.stdout), clean(done.stderr)
-
-
-def files_of(folder):
-    """{name: what it holds} of what a run left, the stamp aside, the page
-    as what it carries."""
-    got = {}
-    if os.path.isdir(folder):
-        for name in sorted(os.listdir(folder)):
-            path = os.path.join(folder, name)
-            if name == "report.html":
-                got[name] = page(folder)
-            elif name == "report.data.gz":
-                got[name] = "read with the page"
-            elif name != "report.stamp" and os.path.isfile(path):
-                with open(path, "rb") as fh:
-                    got[name] = fh.read()
-    return got
-
-
 def main():
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])
+    ap.add_argument("--update", action="store_true",
+                    help="write what the program answers now as the expected answers")
+    ap.add_argument("--python", action="store_true",
+                    help="with --update: take the answers from the Python (VIC2_NO_ENGINE)")
+    args = ap.parse_args()
     if not os.path.isfile(BIN):
         print("needs a built Rust scanner")
         return SKIPPED
@@ -336,6 +316,7 @@ def main():
         ]
         bad = 0
         temps = []
+        book = expected.Book(expected.REPO, "frontcheck", args.update)
         # What --cross reads a save for, found by hand-written scanners, held
         # to the patterns they stand for on the saves here and on random text.
         sniffed = subprocess.run([BIN, "selftest-sniff"] + sorted(
@@ -354,78 +335,68 @@ def main():
             if mine != theirs:
                 bad += 1
                 print("DIFFERS: the signature of %s: %s against %s" % (folder, mine, theirs))
+        width = max(len(n) for n, _a, _h in cases)
         for name, argv, how in cases:
-            got = {}
-            for way in ("rust", "python"):
-                place = os.path.join(holding, "case", name.replace(" ", "_"), way)
-                os.makedirs(place)
-                out = os.path.join(place, "out")
-                env = dict(os.environ)
-                env.pop("VIC2_NO_ENGINE", None)
-                env.pop("VIC2_ENGINE_REQUIRED", None)
-                env["VIC2FRONT"] = holding
-                env["HOME"] = holding
-                # Short: Python's worker pool opens a socket in it, and a path
-                # past 108 bytes makes it read one save at a time instead.
-                env["TMPDIR"] = tempfile.mkdtemp(prefix="vf", dir="/tmp" if os.name != "nt" else None)
-                temps.append(env["TMPDIR"])
-                log = os.path.join(place, "front.log")
-                env.pop("VIC2_NO_FRONT", None)
-                if way == "python":
-                    env["VIC2_NO_ENGINE"] = "1"
-                else:
-                    env["VIC2_FRONT_LOG"] = log
-                full = list(argv) if how == "own-out" else list(argv) + ["--out", out]
-                if how == "locked":
-                    os.makedirs(out)
-                    locked = os.path.join(out, "ships_by_type.csv")
-                    open(locked, "w").close()
-                    os.chmod(locked, stat.S_IREAD)
-                if how == "again":
-                    run([a for a in full if a not in ("-q", "--rebuild")], holding, env, out)
-                if how == "changed":
-                    run([a for a in full if a not in ("--min-pop", "3000")], holding, env, out)
-                if how == "touched":
-                    run(full, holding, env, out)
-                    touched = os.path.join(saves, "1.v2")
-                    st = os.stat(touched)
-                    os.utime(touched, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
-                said = run(full, holding, env, out)
-                got[way] = (said, files_of(out))
-                if how == "locked":
-                    os.chmod(locked, stat.S_IREAD | stat.S_IWRITE)
-                if way == "rust":
-                    with open(log) as fh:
-                        got["log"] = fh.read().strip().splitlines()[-1:]
-            (rs, rfiles), (py, pfiles) = got["rust"], got["python"]
-            if how == "handed back" and "Traceback" in py[2]:
-                # Python's own crash, both ways: its traceback carries line
-                # numbers inside the worker pool that depend on timing.
-                rs, py = rs[:2], py[:2]
-            same = rs == py and rfiles == pfiles
-            # A case the Rust handed back compares the Python with itself.
-            # A refusal is written for Python to raise (status 4), which
-            # the person sees as status 1.
-            logged = {"done: status 4": "done: status 1"}.get(got["log"][0] if got["log"] else "",
-                                                             got["log"][0] if got["log"] else "")
-            handed = logged != "done: status %d" % rs[0]
-            if handed != (how == "handed back"):
-                same = False
-                print("  the Rust %s %s: %s" % ("handed back" if handed else "made",
-                                               name, got["log"]))
-            if not same:
-                bad += 1
-                print("DIFFERS: %s" % name)
-                for label, a, b in (("status", rs[0], py[0]), ("stdout", rs[1], py[1]),
-                                    ("stderr", rs[2], py[2])):
-                    if a != b:
-                        print("  %s:\n    rust:   %r\n    python: %r" % (label, a, b))
-                if rfiles != pfiles:
-                    names = sorted(set(rfiles) | set(pfiles))
-                    print("  files that differ: %s" % [n for n in names
-                                                       if rfiles.get(n) != pfiles.get(n)])
+            place = os.path.join(holding, "case", expected.slug(name))
+            os.makedirs(place)
+            out = os.path.join(place, "out")
+            env = dict(os.environ)
+            for key in ("VIC2_NO_ENGINE", "VIC2_ENGINE_REQUIRED", "VIC2_NO_FRONT"):
+                env.pop(key, None)
+            env["VIC2FRONT"] = holding
+            env["HOME"] = holding
+            # Short: a worker pool's socket may live in it, and a path past
+            # 108 bytes is refused.
+            env["TMPDIR"] = tempfile.mkdtemp(prefix="vf", dir="/tmp" if os.name != "nt" else None)
+            temps.append(env["TMPDIR"])
+            log = os.path.join(place, "front.log")
+            if args.python:
+                env["VIC2_NO_ENGINE"] = "1"
             else:
-                print("same: %s (status %s, %d files)" % (name, rs[0], len(rfiles)))
+                env["VIC2_FRONT_LOG"] = log
+            full = list(argv) if how == "own-out" else list(argv) + ["--out", out]
+            places = [(env["TMPDIR"], "TMP"), (holding, "HOLDING")]
+            if how == "locked":
+                os.makedirs(out)
+                locked = os.path.join(out, "ships_by_type.csv")
+                open(locked, "w").close()
+                os.chmod(locked, stat.S_IREAD)
+            before = lambda a: expected.run(a, holding, env, out, places)
+            if how == "again":
+                before([a for a in full if a not in ("-q", "--rebuild")])
+            if how == "changed":
+                before([a for a in full if a not in ("--min-pop", "3000")])
+            if how == "touched":
+                before(full)
+                touched = os.path.join(saves, "1.v2")
+                st = os.stat(touched)
+                os.utime(touched, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+            got = expected.run(full, holding, env, out, places)
+            if how == "locked":
+                os.chmod(locked, stat.S_IREAD | stat.S_IWRITE)
+            if how == "handed back":
+                # Python's own crash: its traceback carries line numbers
+                # inside the worker pool that depend on timing.
+                got["stderr.txt"] = re.sub(r"(?s)Traceback.*", "<a Python traceback>\n",
+                                           got["stderr.txt"])
+            found = book.hold(name, got)
+            if not args.python:
+                # A case the Rust handed back would be the Python answering
+                # for it. A refusal is written for Python to raise (status
+                # 4), which the person sees as status 1.
+                with open(log) as fh:
+                    last = (fh.read().strip().splitlines() or [""])[-1]
+                logged = {"done: status 4": "done: status 1"}.get(last, last)
+                handed = logged != "done: status %s" % got["status.txt"].strip()
+                if handed != (how == "handed back"):
+                    found.append("the Rust %s this case: %r"
+                                 % ("handed back" if handed else "made", last))
+            if found:
+                bad += 1
+            expected.report(name, found, width)
+        gone = book.finish()
+        if gone:
+            print("dropped the record of %d cases no longer asked: %s" % (len(gone), gone))
         print("\n%d of %d cases differ" % (bad, len(cases)))
         return 1 if bad else 0
     finally:

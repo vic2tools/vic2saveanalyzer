@@ -504,6 +504,52 @@ occupied; only that third one took anything.
 
 ## Speed
 
+### The checks hold the Rust to recorded answers, 2026-10-01
+
+Until now the checks held the Rust to the Python by running each case both
+ways. With the Python fallback about to go, what it answered was written
+down first (`testkit/expected.py`): for every case the comparison checks
+ran -- the refusals, `--peek`, `--verify`, the four diagnostics, `--cross`,
+the settings -- the exit status, stdout and stderr, the nine tables and the
+page as what it carries (the payload as indented JSON with flags and state
+snapshots decoded, the state chunks, the page as its difference from the
+template). The synthetic cases are in `testkit/expected/`; the real
+campaign's (17 saves of the 1880s campaign under the real mod, chosen as
+`enginecheck.py` always chose them) are somebody's data and live in
+`~/.cache/vic2speed/expected-real`, with the saves they came from named in
+`inputs.json`. `python3 testkit/all.py --update-expected` writes the
+program's present answers over them after a deliberate change, and a check
+that disagrees prints the difference, cut to where it is.
+
+Recording them from the Python on 1 Oct, the checks that had tested the
+Python's own internals became runs through the Rust as well, and each new
+case was first recorded from the Python and then put to the Rust:
+`saveshapes.py` (the awkward save and country, the furnished save, states in
+a mod whose regions span lines, three layouts, each as a report, `--peek`
+and `--verify`), `mangled.py` (35 damaged copies of the furnished save),
+real diagnostics, `--peek`, `--verify` and `--cross` in `enginecheck.py`,
+1,000 damaged mod worlds in `modread.py`. The Rust gave the Python's answer
+in every one. Two answers were wrong in both, and were found by checks
+rewritten to say what the answer has to be rather than what the other side
+said: `--cross` printed every "may be from another game" note after the
+whole survey, under whichever campaign came last, and `--explain-mob`'s
+TOTAL was the unfloored sum (-95%) where the report shows the floored
+rate (0%).
+
+The comparisons that are random rather than recorded were run against the
+Python one last time, on 1 Oct, at a size the suite never runs them:
+
+| comparison | cases | differ |
+|---|---:|---:|
+| the mod reader against `mod_reader.py`, damaged worlds (seeds 300-20299, every seventh damaged three times over) | 20,000 (177 refused by both) | 0 |
+| `vic2scan selftest-re` against Python's `re` | 840,000 (272,036 with matches) | 0 |
+| `vic2scan selftest-sniff`, the hand-written sniffers against the patterns | 265 real saves and 40,000 random texts | 0 |
+| `vic2scan selftest-fmt` against Python's repr, `round`, `//`, `json.dumps`, `float()` | 18,078,681 | 0 |
+| `vic2scan selftest-deflate` against zlib, two real saves and a table among them | 14 inputs, 4 ways | 0 |
+
+The last four hold the Rust to Python's standard library, not to the
+analyzer's Python, so they stay in the suite as they were.
+
 ### A run from the command line is made in Rust, 2026-09-30
 
 `python3 vic2_analyzer.py ...` now parses its command line as it always did

@@ -1,0 +1,8 @@
+
+Mobilisation size for ENG at 1882.1.1:
+  tech               flintlock_rifles                               +5.00%
+  triggered modifier listy                                          +1.00%
+                     TOTAL                                            6.00%
+
+ENG has 1 techs and 1 active inventions; 2 sources grant it mobilisation size.
+Invention indices in save run 1..1; the mod defines 2 inventions, 0 of which grant mobilisation size.

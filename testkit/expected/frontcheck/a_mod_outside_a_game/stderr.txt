@@ -1,0 +1,1 @@
+HOLDING/elsewhere/mod/Away is not in a Victoria II install's mod folder. Put the mod -- its folder and its .mod file -- in the mod folder of the game it runs on, where the game loads it from, and point --mod-path at it there.

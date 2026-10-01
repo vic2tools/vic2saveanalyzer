@@ -1,0 +1,20 @@
+@@
+-    <div><div class="tb-label">Span</div><div class="tb-value mono">__SPAN__</div></div>
+-    <div><div class="tb-label">Saves</div><div class="tb-value mono">__SAVECOUNT__</div></div>
+-    <div><div class="tb-label">Nations</div><div class="tb-value mono">__NATIONCOUNT__</div></div>
++    <div><div class="tb-label">Span</div><div class="tb-value mono">—</div></div>
++    <div><div class="tb-label">Saves</div><div class="tb-value mono">0</div></div>
++    <div><div class="tb-label">Nations</div><div class="tb-value mono">0</div></div>
+@@
+-      <h2>World prices &middot; <span>__PRICESPAN__</span></h2>
++      <h2>World prices &middot; <span>no price data</span></h2>
+@@
+-const PACKED = "__DATA__";
++const PACKED = "<DATA>";
+@@
+-const PACKED_URL = "__DATAURL__";
++const PACKED_URL = "";
+@@
+-const STATE_CHUNKS = __STATES__;
+-
++<STATES>

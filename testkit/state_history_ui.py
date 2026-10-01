@@ -22,8 +22,35 @@ import tempfile
 import boots
 from outcome import SKIPPED
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from state_history import expand_map
+
+
+def unpack(chunk):
+    """
+    One state snapshot as it travels -- gzipped JSON of the words, the
+    layouts and each nation's rows -- restored here independently of the
+    page's own decoder, which is what this holds to it.
+    """
+    words, layouts, nations = json.loads(gzip.decompress(base64.b64decode(chunk)))
+    restored = {}
+    for tag, rows in nations.items():
+        states = restored[tag] = {}
+        for region, size, literacy, provinces, layout, counts in rows:
+            types, cultures = layouts[layout]
+            n = len(types)
+            states[words[region]] = [size, literacy,
+                {words[t]: count for t, count in zip(types, counts)},
+                [[words[c // 2], count, bool(c % 2)]
+                 for c, count in zip(cultures, counts[n:])], provinces]
+    return restored
+
+
+def expand_map(data):
+    """The map's snapshots, every one restored, under `populationStates`."""
+    if data and "populationStateChunks" in data:
+        states = data.setdefault("populationStates", {})
+        for date, chunk in data.pop("populationStateChunks"):
+            states[date] = unpack(chunk)
+    return data
 
 
 def check(path):
@@ -33,8 +60,7 @@ def check(path):
     html = Path(path).read_text()
     packed = re.search(r'const PACKED = "([^"]+)"', html)[1]
     data = json.loads(gzip.decompress(base64.b64decode(packed)))
-    # The snapshots travel beside the payload, not inside it (report.py,
-    # `_state_chunks`), and the page puts them back as this does.
+    # The snapshots travel beside the payload, not inside it , and the page puts them back as this does.
     beside = re.search(r'const STATE_CHUNKS = (\[.*?\]);\n', html, re.S)
     if beside and data.get('map'):
         chunks = json.loads(beside[1])

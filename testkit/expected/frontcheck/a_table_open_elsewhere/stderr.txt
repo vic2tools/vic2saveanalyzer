@@ -1,0 +1,2 @@
+
+Could not write ships_by_type.csv: open in another program -- on Windows a table open in Excel is locked -- or not writable here. Close it and run again. The report itself was written.

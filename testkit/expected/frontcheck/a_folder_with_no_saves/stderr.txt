@@ -1,0 +1,2 @@
+No .v2 files in HOLDING/nothing
+Point this at the folder that holds your saves, not at a single save.

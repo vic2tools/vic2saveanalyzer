@@ -1,0 +1,40 @@
+Found 4 save(s).
+Victoria II at HOLDING/game, with Mod.
+defines.lua: POP_SIZE_PER_REGIMENT=2000
+poptypes/: mobilizable = aristocrats bankers craftsmen farmers labourers; mod-only pop types read: bankers
+Reading 4 save(s) on N cores.
+  [1/4] 0.v2 ... 1881.3.24
+  [2/4] 1.v2 ... 1882.1.1
+  [3/4] 2.v2 ... 1883.1.1
+  [4/4] 3.v2 ... 1884.1.1
+
+Invention indices could not be decoded from 2 inventions; falling back to requirement matching, which overstates unlucky nations.
+
+Mod scan: 5 techs (1 grant mobilisation_size), 0 inventions grant it (0 obtainable), 0 event modifiers, 1 triggered modifiers.
+  tech       flintlock_rifles                             +0.050
+
+Mobilization pool for SWE at 1884.1.1 (3.v2)
+  primary culture   swedish
+  accepted cultures danish norwegian
+  pop types counted aristocrats bankers craftsmen farmers labourers
+  mobilisation size 6.00%   POP_SIZE_PER_REGIMENT 2000
+
+  eligible population         25,300 in 4 pop entries, 4 province/type slots
+  cultural split        1.00 pop entries per province/type slot
+  excluded: occupied province           7,000
+  excluded: colonial province           2,500
+  excluded: non-accepted culture        1,700
+
+  ceiling, grouped per pop                    0
+  ceiling, grouped per province and type      0   (+0)
+  no truncation at all                        1
+  standing brigades                           2  (1 of them mobilized, 1 queued)
+
+  Compare the two ceilings against the in-game military panel.
+
+  largest province/type slots
+      prov   manpower brigades
+         1        720        0
+         1        420        0
+         1        330        0
+         1         48        0

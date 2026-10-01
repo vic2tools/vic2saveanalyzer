@@ -1,0 +1,5 @@
+
+=== country.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 3 regiments, 1 ships, 8,000 people.
+

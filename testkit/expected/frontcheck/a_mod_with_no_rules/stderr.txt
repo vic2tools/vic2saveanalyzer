@@ -1,0 +1,1 @@
+HOLDING/bare/mod/Empty has no technologies/ or inventions/ folder. Point --mod-path at the folder that contains them (the mod root, or the Victoria 2 install folder for vanilla).

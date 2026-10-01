@@ -1,0 +1,31 @@
+Found 1 save(s).
+Victoria II at HOLDING/Victoria 2, unmodded.
+defines.lua: POP_SIZE_PER_REGIMENT=3000
+poptypes/: mobilizable = aristocrats craftsmen farmers labourers
+Reading 1 save(s) on N cores.
+  reading broken.v2 ... 1881.3.24, 2 nations
+
+Invention indices could not be decoded from 2 inventions; falling back to requirement matching, which overstates unlucky nations.
+
+Mod scan: 5 techs (0 grant mobilisation_size), 0 inventions grant it (0 obtainable), 0 event modifiers, 0 triggered modifiers.
+
+2 nation-rows across 1 saves.
+
+Largest nations at 1881.3.24:
+  tag           pop  accept%    lit   brig  ships
+  DEN        12,300    100.0  40.0%      0      0
+  SWE         2,500    100.0  40.0%      2      1
+
+Computed mobilisation sizes at 1881.3.24 (check these against the in-game military panel):
+  DEN: 0.00%
+  SWE: 0.00%
+
+Wrote:
+  OUT/nations_timeseries.csv
+  OUT/prices.csv
+  OUT/market_snapshot.csv
+  OUT/ships_by_type.csv
+  OUT/brigades_by_type.csv
+  OUT/technologies.csv
+  OUT/pops_by_type.csv
+  OUT/pops_by_culture.csv

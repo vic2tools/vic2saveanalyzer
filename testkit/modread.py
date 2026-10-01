@@ -38,8 +38,7 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "testkit"))
 
-import mod_reader as mr                                        # noqa: E402
-from modexport import export_mod                               # noqa: E402
+import expected                                                # noqa: E402
 from outcome import SKIPPED                                    # noqa: E402
 
 BIN = os.path.join(HERE, "scanner", "target", "release",
@@ -121,10 +120,13 @@ def patterns(rnd, rounds):
     return bad == 0 and matched > len(cases) // 10
 
 
-# ------------------------------------------------------------ the two sides
+# ------------------------------------------------------------ the answers
 
 def python_side(path):
-    """Python's export as text, or None and what it raised."""
+    """Python's export as text, or None and what it raised. Only while
+    recording from the Python (`--update --python`)."""
+    import mod_reader as mr
+    from modexport import export_mod
     try:
         return json.dumps(export_mod(mr._load_mod(mr._mod_root(path))),
                           separators=(",", ":")), None
@@ -132,43 +134,95 @@ def python_side(path):
         return None, "%s: %s" % (type(exc).__name__, exc)
 
 
+def mod_root(path):
+    """The folder a run reads as the mod: `path` itself, or the game it names."""
+    return os.path.abspath(os.path.expanduser(os.path.expandvars(path)))
+
+
 def rust_side(path):
-    run = subprocess.run([BIN, "mod-export", mr._mod_root(path)], capture_output=True)
+    run = subprocess.run([BIN, "mod-export", mod_root(path)], capture_output=True)
     return run.returncode, run.stdout.decode("utf-8").rstrip("\n"), run.stderr.decode("utf-8", "replace")
+
+
+def answer_of(path, python=False, holding=None):
+    """{"status": 0 and "export": the JSON text, or "status": 3 for a folder
+    that is refused}. Where the world was built (`holding`) is HOLDING."""
+    place = (lambda t: t.replace(json.dumps(holding)[1:-1], "HOLDING")) if holding else str
+    if python:
+        text, raised = python_side(path)
+        return {"status": 3} if raised is not None else {"status": 0, "export": place(text)}
+    code, out, err = rust_side(path)
+    if code == 0:
+        return {"status": 0, "export": place(out)}
+    if code == 3:
+        return {"status": 3}
+    return {"status": code, "said": err.strip()[-300:]}
+
+
+def base_of(name):
+    """The undamaged world a damaged one was made from."""
+    i = int(name.rsplit(" ", 1)[1])
+    return "the awkward mod" if i % 4 else "the awkward game"
+
+
+def packed(one, answers):
+    """
+    A damaged world's answer as it differs from its undamaged world's --
+    the fields that changed, and the ones that went -- so a thousand of them
+    are kept in the space of a few dozen. Kept whole if that would not give
+    back the same text.
+    """
+    if not one["world"].startswith("damaged world") or one["status"] != 0:
+        return one
+    base = next(a for a in answers if a["world"] == base_of(one["world"]))
+    a, b = json.loads(base["export"]), json.loads(one["export"])
+    if list(b) != [k for k in a if k in b]:
+        return one
+    delta = {"world": one["world"], "status": 0,
+             "changed": {k: v for k, v in b.items() if a.get(k) != v},
+             "gone": [k for k in a if k not in b]}
+    if unpacked(dict(delta), {base["world"]: base})["export"] != one["export"]:
+        return one
+    return delta
+
+
+def unpacked(one, known):
+    """`packed` undone, against the answers read so far."""
+    if "changed" not in one:
+        return one
+    base = json.loads(known[base_of(one["world"])]["export"])
+    for k in one.pop("gone"):
+        base.pop(k)
+    base.update(one.pop("changed"))
+    one["export"] = json.dumps(base, separators=(",", ":"))
+    return one
 
 
 def where(a, b):
     """The first field the two exports differ in, and around where."""
     ja, jb = json.loads(a), json.loads(b)
-    for key in ja:
-        if ja[key] != jb.get(key):
-            va, vb = json.dumps(ja[key]), json.dumps(jb.get(key))
+    for key in list(ja) + [k for k in jb if k not in ja]:
+        if ja.get(key) != jb.get(key):
+            va, vb = json.dumps(ja.get(key)), json.dumps(jb.get(key))
             i = next((i for i in range(min(len(va), len(vb))) if va[i] != vb[i]),
                      min(len(va), len(vb)))
-            return "%s: Python ...%s... Rust ...%s..." % (key, va[max(0, i - 120):i + 120],
-                                                          vb[max(0, i - 120):i + 120])
+            return "%s: expected ...%s... got ...%s..." % (key, va[max(0, i - 120):i + 120],
+                                                           vb[max(0, i - 120):i + 120])
     return "the same values, written differently"
 
 
-def same(path, say=True):
-    """Whether the two sides agree on one folder: "raised" when both refuse it."""
-    text, raised = python_side(path)
-    code, out, err = rust_side(path)
-    if raised is not None:
-        if code == 3:
-            return "raised"
-        print("%s: Python raised (%s) and the Rust %s" % (path, raised[:200],
-              "exited %d: %s" % (code, err.strip()[-200:]) if code else "read it"))
-        return False
-    if code != 0:
-        print("%s: the Rust exited %d: %s" % (path, code, err.strip()[-300:]))
-        return False
-    if out != text:
-        print("%s: %s" % (path, where(text, out)))
-        return False
-    if say:
-        print("same: %s (%d bytes)" % (path, len(text)))
-    return True
+def held(name, want, got):
+    """[what differs] between a recorded answer and the reader's."""
+    if want is None:
+        return ["%s: no answer is recorded (run with --update)" % name]
+    if want == got:
+        return []
+    if want["status"] != got["status"]:
+        return ["%s: expected %s, got %s" % (
+            name, "a refusal" if want["status"] == 3 else "an export",
+            "a refusal" if got["status"] == 3 else
+            "an export" if got["status"] == 0 else "status %d: %s" % (got["status"], got.get("said")))]
+    return ["%s: %s" % (name, where(want["export"], got["export"]))]
 
 
 # ------------------------------------------------------- an awkward world
@@ -369,7 +423,11 @@ def kept_copy(holding):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mod", default="")
-    ap.add_argument("--rounds", type=int, default=200)
+    ap.add_argument("--rounds", type=int, default=1000)
+    ap.add_argument("--update", action="store_true",
+                    help="write what the reader answers now as the expected answers")
+    ap.add_argument("--python", action="store_true",
+                    help="with --update: take the answers from the Python (mod_reader)")
     args = ap.parse_args()
     if not os.path.isfile(BIN):
         print("needs a built Rust scanner")
@@ -377,40 +435,79 @@ def main():
     rnd = random.Random(20260929)
     ok = patterns(rnd, 1500)
     holding = tempfile.mkdtemp(prefix="vic2modread")
-    # Python keeps parsed positions in its temp folder: this run's own.
     os.environ["TMPDIR"] = os.path.join(holding, "tmp")
     os.makedirs(os.environ["TMPDIR"])
     tempfile.tempdir = None
+    record = os.path.join(expected.REPO, "modread", "exports.jsonl")
+    want = {}
+    if os.path.isfile(record):
+        with open(record, encoding="utf-8") as fh:
+            for line in fh:
+                one = unpacked(json.loads(line), want)
+                want[one.pop("world")] = one
+    answers = []
+    wrong = []
+
+    def ask(name, path):
+        got = answer_of(path, args.python, holding)
+        answers.append(dict(world=name, **got))
+        if not args.update:
+            wrong.extend(held(name, want.get(name), got))
+        return got
+
     try:
         mod, game = world(os.path.join(holding, "pristine"))
-        ok &= bool(same(mod)) & bool(same(game))
+        ask("the awkward mod", mod)
+        ask("the awkward game", game)
         empty = os.path.join(holding, "pristine", "game", "mod", "Empty")
         os.makedirs(os.path.join(empty, "common"))
         # A mod with nothing of its own reads the game's rules.
-        ok &= bool(same(empty))
-        bad = raised = 0
+        ask("an empty mod", empty)
+        refused = 0
         for i in range(args.rounds):
             work = os.path.join(holding, "w")
             shutil.rmtree(work, ignore_errors=True)
             shutil.copytree(os.path.join(holding, "pristine"), work)
-            damage(work, random.Random(i))
+            rnd = random.Random(i)
+            damage(work, rnd)
+            if i % 7 == 0:
+                # heavier, which is what makes a reader refuse a folder
+                damage(work, rnd)
+                damage(work, rnd)
             target = os.path.join(work, "game", "mod", "E") if i % 4 else os.path.join(work, "game")
-            got = same(target, say=False)
-            raised += got == "raised"
-            if not got:
-                bad += 1
-                print("  (damaged world %d)" % i)
-                if bad >= 3:
-                    break
-        print("damaged worlds: %d read, %d refused by both, %d differ" % (i + 1, raised, bad))
-        ok &= bad == 0
+            refused += ask("damaged world %d" % i, target)["status"] == 3
+        print("the awkward world, an empty mod and %d damaged copies: %d refused, %d differ"
+              % (args.rounds, refused, len(wrong)))
+        for w in wrong[:5]:
+            print("  " + w)
+        ok &= not wrong
+        if args.update:
+            os.makedirs(os.path.dirname(record), exist_ok=True)
+            with open(record, "w", encoding="utf-8", newline="\n") as fh:
+                for one in answers:
+                    fh.write(json.dumps(packed(one, answers), separators=(",", ":")) + "\n")
+            print("recorded %d answers in %s" % (len(answers), record))
         ok &= kept_copy(os.path.join(holding, "kept"))
         if args.mod:
-            if os.path.isdir(args.mod):
-                ok &= bool(same(args.mod))
-            else:
+            # The real mod is somebody's install: its answer is kept out of
+            # the tree, and keyed by the mod's folder name.
+            real = os.path.join(expected.REAL, "modread",
+                                expected.slug(os.path.basename(os.path.abspath(args.mod))) + ".json")
+            if not os.path.isdir(args.mod):
                 print("no mod at %s" % args.mod)
                 ok = False
+            elif args.update:
+                os.makedirs(os.path.dirname(real), exist_ok=True)
+                with open(real, "w", encoding="utf-8") as fh:
+                    json.dump(answer_of(args.mod, args.python), fh)
+                print("recorded the real mod's answer in %s" % real)
+            elif not os.path.isfile(real):
+                print("no answer is recorded for the real mod in %s" % real)
+            else:
+                with open(real, encoding="utf-8") as fh:
+                    found = held(args.mod, json.load(fh), answer_of(args.mod))
+                print("the real mod: %s" % (found[0] if found else "as recorded"))
+                ok &= not found
     finally:
         shutil.rmtree(holding, ignore_errors=True)
     print("the mod reader holds" if ok else "the mod reader DIFFERS")

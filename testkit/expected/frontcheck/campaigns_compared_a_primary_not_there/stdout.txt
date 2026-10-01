@@ -1,0 +1,16 @@
+Campaigns found under HOLDING/xcampaigns:
+  a/run                    2 saves  ->  Alpha
+      note: 2 mods fit these saves; picked the one the campaign leaves least of unused. Name it with --mod-path, or in the window pick the mod itself instead of the folder, to settle it.
+  b/run                    1 saves  ->  Alpha
+      note: 2 mods fit these saves; picked the one the campaign leaves least of unused. Name it with --mod-path, or in the window pick the mod itself instead of the folder, to settle it.
+  both                     4 saves  ->  Alpha
+      note: 2 mods fit these saves; picked the one the campaign leaves least of unused. Name it with --mod-path, or in the window pick the mod itself instead of the folder, to settle it.
+  none                     2 saves  ->  Alpha
+      WARNING: nothing in HOLDING/xgame explains these saves. The closest is Alpha, and it does not match: 1 unknown tag (ZZZ). The numbers below are computed against a mod this campaign was not played on -- name the right one with --mod-path.
+  onlybeta                 3 saves  ->  Beta
+      note: s0.v2 disagrees with all 3 later saves by at least 8 event flags; it may be from another game
+Reading a/run (2 saves) under Alpha
+Reading b/run (1 saves) under Alpha
+Reading both (4 saves) under Alpha
+Reading none (2 saves) under Alpha
+Reading onlybeta (3 saves) under Beta

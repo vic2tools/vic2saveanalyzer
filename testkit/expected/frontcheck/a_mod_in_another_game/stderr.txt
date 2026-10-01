@@ -1,0 +1,1 @@
+HOLDING/game/mod/Mod is in the mod folder of HOLDING/game, not of HOLDING/bare. Point --game-root at the install the mod is in, or leave it out.

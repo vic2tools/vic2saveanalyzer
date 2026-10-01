@@ -1,0 +1,1288 @@
+{
+ "dates": [
+  "1870.1.1",
+  "1871.1.1",
+  "1872.1.1"
+ ],
+ "years": [
+  1870.0,
+  1871.0,
+  1872.0
+ ],
+ "tags": [
+  "ENG",
+  "FRA"
+ ],
+ "tagNames": {
+  "ENG": "ENG",
+  "FRA": "FRA"
+ },
+ "cultureNames": {},
+ "names": {},
+ "metrics": [
+  {
+   "key": "total_pop",
+   "label": "Total population",
+   "fmt": "count"
+  },
+  {
+   "key": "accepted_pop",
+   "label": "Accepted-culture population",
+   "fmt": "count"
+  },
+  {
+   "key": "accepted_pct",
+   "label": "Accepted share",
+   "fmt": "percent"
+  },
+  {
+   "key": "primary_culture_pop",
+   "label": "Primary-culture population",
+   "fmt": "count"
+  },
+  {
+   "key": "avg_literacy",
+   "label": "Average literacy",
+   "fmt": "fraction"
+  },
+  {
+   "key": "avg_literacy_stated",
+   "label": "Literacy in own states",
+   "fmt": "fraction"
+  },
+  {
+   "key": "life_unmet",
+   "label": "Population with life needs unmet",
+   "fmt": "count"
+  },
+  {
+   "key": "life_unmet_pct",
+   "label": "Life needs unmet",
+   "fmt": "percent"
+  },
+  {
+   "key": "starving",
+   "label": "Starving population",
+   "fmt": "count"
+  },
+  {
+   "key": "starving_pct",
+   "label": "Starving share",
+   "fmt": "percent"
+  },
+  {
+   "key": "brigades",
+   "label": "Brigades (all)",
+   "fmt": "count"
+  },
+  {
+   "key": "regular_brigades",
+   "label": "Standing brigades",
+   "fmt": "count"
+  },
+  {
+   "key": "mobilized_brigades",
+   "label": "Mobilized brigades",
+   "fmt": "count"
+  },
+  {
+   "key": "mobilizing",
+   "label": "Mobilizing (queued)",
+   "fmt": "count"
+  },
+  {
+   "key": "brigade_cap",
+   "label": "Brigade cap",
+   "fmt": "count"
+  },
+  {
+   "key": "mobilization_pool",
+   "label": "Mobilizable population",
+   "fmt": "count"
+  },
+  {
+   "key": "mobilization_brigades",
+   "label": "Mobilization ceiling",
+   "fmt": "count"
+  },
+  {
+   "key": "ships",
+   "label": "Ships",
+   "fmt": "count"
+  },
+  {
+   "key": "factory_levels",
+   "label": "Factory levels",
+   "fmt": "count"
+  },
+  {
+   "key": "factory_count",
+   "label": "Factories",
+   "fmt": "count"
+  },
+  {
+   "key": "naval_base_levels",
+   "label": "Naval base levels",
+   "fmt": "count"
+  },
+  {
+   "key": "ports",
+   "label": "Provinces with a naval base",
+   "fmt": "count"
+  },
+  {
+   "key": "max_naval_base",
+   "label": "Largest naval base",
+   "fmt": "count"
+  },
+  {
+   "key": "railroad_levels",
+   "label": "Railroad levels",
+   "fmt": "count"
+  },
+  {
+   "key": "techs",
+   "label": "Technologies",
+   "fmt": "count"
+  },
+  {
+   "key": "prestige",
+   "label": "Prestige",
+   "fmt": "count"
+  },
+  {
+   "key": "provinces",
+   "label": "Provinces",
+   "fmt": "count"
+  },
+  {
+   "key": "states",
+   "label": "States",
+   "fmt": "count"
+  },
+  {
+   "key": "treasury",
+   "label": "Treasury",
+   "fmt": "count"
+  },
+  {
+   "key": "tax_base",
+   "label": "Tax base",
+   "fmt": "count"
+  },
+  {
+   "key": "avg_consciousness",
+   "label": "Average consciousness",
+   "fmt": "decimal"
+  },
+  {
+   "key": "avg_militancy",
+   "label": "Average militancy",
+   "fmt": "decimal"
+  },
+  {
+   "key": "infamy",
+   "label": "Infamy",
+   "fmt": "decimal"
+  },
+  {
+   "key": "pop_poor",
+   "label": "Poor strata",
+   "fmt": "count"
+  },
+  {
+   "key": "pop_middle",
+   "label": "Middle strata",
+   "fmt": "count"
+  },
+  {
+   "key": "pop_rich",
+   "label": "Rich strata",
+   "fmt": "count"
+  },
+  {
+   "key": "pop_growth",
+   "label": "Population growth (%/yr)",
+   "fmt": "percent",
+   "rate": 1
+  },
+  {
+   "key": "accepted_growth",
+   "label": "Accepted-culture growth (%/yr)",
+   "fmt": "percent",
+   "rate": 1
+  },
+  {
+   "key": "pop_gain",
+   "label": "Population gain (per save)",
+   "fmt": "count",
+   "delta": 1
+  },
+  {
+   "key": "accepted_gain",
+   "label": "Accepted-culture gain (per save)",
+   "fmt": "count",
+   "delta": 1
+  }
+ ],
+ "series": {
+  "ENG": {
+   "total_pop": [
+    38200.0,
+    38214.0,
+    38207.0
+   ],
+   "accepted_pop": [
+    37500.0,
+    37512.0,
+    37506.0
+   ],
+   "accepted_pct": [
+    98.17,
+    98.16,
+    98.17
+   ],
+   "primary_culture_pop": [
+    37500.0,
+    37512.0,
+    37506.0
+   ],
+   "avg_literacy": [
+    0.4,
+    0.4,
+    0.4
+   ],
+   "avg_literacy_stated": [
+    0.4,
+    0.4,
+    0.4
+   ],
+   "life_unmet": [
+    38200.0,
+    38214.0,
+    38207.0
+   ],
+   "life_unmet_pct": [
+    100.0,
+    100.0,
+    100.0
+   ],
+   "starving": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "starving_pct": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "brigades": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "regular_brigades": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "mobilized_brigades": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "mobilizing": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "brigade_cap": [
+    16.0,
+    17.0,
+    17.0
+   ],
+   "mobilization_pool": [
+    16002.0,
+    16006.0,
+    16004.0
+   ],
+   "mobilization_brigades": [
+    8.0,
+    8.0,
+    8.0
+   ],
+   "ships": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "factory_levels": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "factory_count": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "naval_base_levels": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "ports": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "max_naval_base": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "railroad_levels": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "techs": [
+    5.0,
+    5.0,
+    5.0
+   ],
+   "prestige": [
+    10.0,
+    10.0,
+    10.0
+   ],
+   "provinces": [
+    3.0,
+    3.0,
+    3.0
+   ],
+   "states": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "treasury": [
+    100.0,
+    100.0,
+    100.0
+   ],
+   "tax_base": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "avg_consciousness": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "avg_militancy": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "infamy": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "pop_poor": [
+    38200.0,
+    38214.0,
+    38207.0
+   ],
+   "pop_middle": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "pop_rich": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "pop_growth": [
+    null,
+    0.0366,
+    -0.0183
+   ],
+   "accepted_growth": [
+    null,
+    0.032,
+    -0.016
+   ],
+   "pop_gain": [
+    null,
+    14.0,
+    -7.0
+   ],
+   "accepted_gain": [
+    null,
+    12.0,
+    -6.0
+   ]
+  },
+  "FRA": {
+   "total_pop": [
+    4000.0,
+    4002.0,
+    4001.0
+   ],
+   "accepted_pop": [
+    4000.0,
+    4002.0,
+    4001.0
+   ],
+   "accepted_pct": [
+    100.0,
+    100.0,
+    100.0
+   ],
+   "primary_culture_pop": [
+    4000.0,
+    4002.0,
+    4001.0
+   ],
+   "avg_literacy": [
+    0.4,
+    0.4,
+    0.4
+   ],
+   "avg_literacy_stated": [
+    0.4,
+    0.4,
+    0.4
+   ],
+   "life_unmet": [
+    4000.0,
+    4002.0,
+    4001.0
+   ],
+   "life_unmet_pct": [
+    100.0,
+    100.0,
+    100.0
+   ],
+   "starving": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "starving_pct": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "brigades": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "regular_brigades": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "mobilized_brigades": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "mobilizing": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "brigade_cap": [
+    2.0,
+    2.0,
+    2.0
+   ],
+   "mobilization_pool": [
+    3000.0,
+    3000.0,
+    3000.0
+   ],
+   "mobilization_brigades": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "ships": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "factory_levels": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "factory_count": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "naval_base_levels": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "ports": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "max_naval_base": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "railroad_levels": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "techs": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "prestige": [
+    10.0,
+    10.0,
+    10.0
+   ],
+   "provinces": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "states": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "treasury": [
+    100.0,
+    100.0,
+    100.0
+   ],
+   "tax_base": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "avg_consciousness": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "avg_militancy": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "infamy": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "pop_poor": [
+    4000.0,
+    4002.0,
+    4001.0
+   ],
+   "pop_middle": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "pop_rich": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "pop_growth": [
+    null,
+    0.05,
+    -0.025
+   ],
+   "accepted_growth": [
+    null,
+    0.05,
+    -0.025
+   ],
+   "pop_gain": [
+    null,
+    2.0,
+    -1.0
+   ],
+   "accepted_gain": [
+    null,
+    2.0,
+    -1.0
+   ]
+  }
+ },
+ "facts": {
+  "1870.1.1": {
+   "ENG": {
+    "mobilisation_size": 0.5,
+    "is_mobilized": 0,
+    "primary_culture": "british",
+    "is_player": 1,
+    "soldiers_noncolonial": 13498,
+    "army_techs": 2,
+    "navy_techs": 1
+   },
+   "FRA": {
+    "mobilisation_size": 0.5,
+    "is_mobilized": 0,
+    "primary_culture": "french",
+    "is_player": 0,
+    "soldiers_noncolonial": 1000,
+    "army_techs": 1,
+    "navy_techs": 0
+   }
+  },
+  "1871.1.1": {
+   "ENG": {
+    "mobilisation_size": 0.5,
+    "is_mobilized": 0,
+    "primary_culture": "british",
+    "is_player": 1,
+    "soldiers_noncolonial": 13506,
+    "army_techs": 2,
+    "navy_techs": 1
+   },
+   "FRA": {
+    "mobilisation_size": 0.5,
+    "is_mobilized": 0,
+    "primary_culture": "french",
+    "is_player": 0,
+    "soldiers_noncolonial": 1002,
+    "army_techs": 1,
+    "navy_techs": 0
+   }
+  },
+  "1872.1.1": {
+   "ENG": {
+    "mobilisation_size": 0.5,
+    "is_mobilized": 0,
+    "primary_culture": "british",
+    "is_player": 1,
+    "soldiers_noncolonial": 13502,
+    "army_techs": 2,
+    "navy_techs": 1
+   },
+   "FRA": {
+    "mobilisation_size": 0.5,
+    "is_mobilized": 0,
+    "primary_culture": "french",
+    "is_player": 0,
+    "soldiers_noncolonial": 1001,
+    "army_techs": 1,
+    "navy_techs": 0
+   }
+  }
+ },
+ "factKeys": [
+  "accepted_pct",
+  "accepted_pop",
+  "avg_consciousness",
+  "avg_literacy",
+  "avg_literacy_stated",
+  "avg_militancy",
+  "brigade_cap",
+  "brigades",
+  "factory_levels",
+  "life_unmet",
+  "life_unmet_pct",
+  "mobilization_brigades",
+  "mobilization_pool",
+  "mobilized_brigades",
+  "mobilizing",
+  "prestige",
+  "provinces",
+  "regular_brigades",
+  "ships",
+  "starving",
+  "starving_pct",
+  "techs",
+  "total_pop"
+ ],
+ "ships": {},
+ "crews": {},
+ "shipTypes": [],
+ "brigades": {},
+ "regimentTypes": [],
+ "techOrder": [
+  "post_napoleonic_thought",
+  "strategic_mobility",
+  "point_defense_system",
+  "deep_defense_system",
+  "infiltration",
+  "flintlock_rifles",
+  "muzzle_loaded_rifles",
+  "breech_loaded_rifles",
+  "machine_guns",
+  "bolt_action_rifles",
+  "bronze_muzzle_loaded_artillery",
+  "iron_muzzle_loaded_artillery",
+  "iron_breech_loaded_artillery",
+  "steel_breech_loaded_artillery",
+  "indirect_artillery_fire",
+  "military_staff_system",
+  "military_plans",
+  "military_statistics",
+  "military_logistics",
+  "military_directionism",
+  "army_command_principle",
+  "army_professionalism",
+  "army_decision_making",
+  "army_risk_management",
+  "army_nco_training",
+  "post_nelsonian_thought",
+  "battleship_column_doctrine",
+  "raider_group_doctrine",
+  "blue_and_brown_water_schools",
+  "high_sea_battle_fleet",
+  "clipper_design",
+  "steamers",
+  "iron_steamers",
+  "steel_steamers",
+  "steam_turbine_ships",
+  "naval_design_bureaus",
+  "fire_control_systems",
+  "weapon_platforms",
+  "main_armament",
+  "advanced_naval_design",
+  "alphabetic_flag_signaling",
+  "naval_plans",
+  "naval_statistics",
+  "naval_logistics",
+  "naval_directionism",
+  "the_command_principle",
+  "naval_professionalism",
+  "naval_decision_making",
+  "naval_risk_management",
+  "naval_nco_training",
+  "iron_working",
+  "the_stirrup"
+ ],
+ "techMeta": [
+  [
+   "army",
+   "Doctrine"
+  ],
+  [
+   "army",
+   "Doctrine"
+  ],
+  [
+   "army",
+   "Doctrine"
+  ],
+  [
+   "army",
+   "Doctrine"
+  ],
+  [
+   "army",
+   "Doctrine"
+  ],
+  [
+   "army",
+   "Small arms"
+  ],
+  [
+   "army",
+   "Small arms"
+  ],
+  [
+   "army",
+   "Small arms"
+  ],
+  [
+   "army",
+   "Small arms"
+  ],
+  [
+   "army",
+   "Small arms"
+  ],
+  [
+   "army",
+   "Artillery"
+  ],
+  [
+   "army",
+   "Artillery"
+  ],
+  [
+   "army",
+   "Artillery"
+  ],
+  [
+   "army",
+   "Artillery"
+  ],
+  [
+   "army",
+   "Artillery"
+  ],
+  [
+   "army",
+   "Military science"
+  ],
+  [
+   "army",
+   "Military science"
+  ],
+  [
+   "army",
+   "Military science"
+  ],
+  [
+   "army",
+   "Military science"
+  ],
+  [
+   "army",
+   "Military science"
+  ],
+  [
+   "army",
+   "Leadership"
+  ],
+  [
+   "army",
+   "Leadership"
+  ],
+  [
+   "army",
+   "Leadership"
+  ],
+  [
+   "army",
+   "Leadership"
+  ],
+  [
+   "army",
+   "Leadership"
+  ],
+  [
+   "navy",
+   "Naval doctrine"
+  ],
+  [
+   "navy",
+   "Naval doctrine"
+  ],
+  [
+   "navy",
+   "Naval doctrine"
+  ],
+  [
+   "navy",
+   "Naval doctrine"
+  ],
+  [
+   "navy",
+   "Naval doctrine"
+  ],
+  [
+   "navy",
+   "Hulls"
+  ],
+  [
+   "navy",
+   "Hulls"
+  ],
+  [
+   "navy",
+   "Hulls"
+  ],
+  [
+   "navy",
+   "Hulls"
+  ],
+  [
+   "navy",
+   "Hulls"
+  ],
+  [
+   "navy",
+   "Naval engineering"
+  ],
+  [
+   "navy",
+   "Naval engineering"
+  ],
+  [
+   "navy",
+   "Naval engineering"
+  ],
+  [
+   "navy",
+   "Naval engineering"
+  ],
+  [
+   "navy",
+   "Naval engineering"
+  ],
+  [
+   "navy",
+   "Naval science"
+  ],
+  [
+   "navy",
+   "Naval science"
+  ],
+  [
+   "navy",
+   "Naval science"
+  ],
+  [
+   "navy",
+   "Naval science"
+  ],
+  [
+   "navy",
+   "Naval science"
+  ],
+  [
+   "navy",
+   "Naval leadership"
+  ],
+  [
+   "navy",
+   "Naval leadership"
+  ],
+  [
+   "navy",
+   "Naval leadership"
+  ],
+  [
+   "navy",
+   "Naval leadership"
+  ],
+  [
+   "navy",
+   "Naval leadership"
+  ],
+  [
+   "other",
+   "Other"
+  ],
+  [
+   "other",
+   "Other"
+  ]
+ ],
+ "techsBy": {
+  "ENG": {
+   "1870.1.1": [
+    0,
+    5,
+    30,
+    50,
+    51
+   ],
+   "1871.1.1": [
+    0,
+    5,
+    30,
+    50,
+    51
+   ],
+   "1872.1.1": [
+    0,
+    5,
+    30,
+    50,
+    51
+   ]
+  },
+  "FRA": {
+   "1870.1.1": [
+    5
+   ],
+   "1871.1.1": [
+    5
+   ],
+   "1872.1.1": [
+    5
+   ]
+  }
+ },
+ "worldPop": {
+  "1870.1.1": 42200,
+  "1871.1.1": 42216,
+  "1872.1.1": 42208
+ },
+ "pops": {
+  "ENG": {
+   "1870.1.1": {
+    "craftsmen": 4000,
+    "farmers": 10699,
+    "labourers": 8001,
+    "serfs": 2002,
+    "soldiers": 13498
+   },
+   "1871.1.1": {
+    "craftsmen": 4002,
+    "farmers": 10703,
+    "labourers": 8001,
+    "serfs": 2002,
+    "soldiers": 13506
+   },
+   "1872.1.1": {
+    "craftsmen": 4001,
+    "farmers": 10701,
+    "labourers": 8001,
+    "serfs": 2002,
+    "soldiers": 13502
+   }
+  },
+  "FRA": {
+   "1870.1.1": {
+    "farmers": 3000,
+    "soldiers": 1000
+   },
+   "1871.1.1": {
+    "farmers": 3000,
+    "soldiers": 1002
+   },
+   "1872.1.1": {
+    "farmers": 3000,
+    "soldiers": 1001
+   }
+  }
+ },
+ "popTypes": [
+  "craftsmen",
+  "farmers",
+  "labourers",
+  "serfs",
+  "soldiers"
+ ],
+ "cultures": {
+  "ENG": {
+   "1870.1.1": [
+    [
+     "british",
+     37500,
+     1
+    ],
+    [
+     "irish",
+     700,
+     0
+    ]
+   ],
+   "1871.1.1": [
+    [
+     "british",
+     37512,
+     1
+    ],
+    [
+     "irish",
+     702,
+     0
+    ]
+   ],
+   "1872.1.1": [
+    [
+     "british",
+     37506,
+     1
+    ],
+    [
+     "irish",
+     701,
+     0
+    ]
+   ]
+  },
+  "FRA": {
+   "1870.1.1": [
+    [
+     "french",
+     4000,
+     1
+    ]
+   ],
+   "1871.1.1": [
+    [
+     "french",
+     4002,
+     1
+    ]
+   ],
+   "1872.1.1": [
+    [
+     "french",
+     4001,
+     1
+    ]
+   ]
+  }
+ },
+ "colours": [
+  "#E7C464",
+  "#D4553F",
+  "#8FB98C",
+  "#8FA8C8",
+  "#D48FA8",
+  "#B5A85C",
+  "#B48FC0",
+  "#EADFC2",
+  "#6FA8A0",
+  "#E09A4C",
+  "#9BAF6F",
+  "#A87FA0"
+ ],
+ "map": null,
+ "basePrices": {},
+ "greatPowers": {},
+ "flags": {},
+ "technology": {
+  "tree": {
+   "army": [
+    {
+     "area": "army_tech",
+     "techs": [
+      {
+       "key": "flintlock_rifles",
+       "year": 1836,
+       "cost": 100,
+       "effects": [
+        [
+         "Mobilisation size",
+         "0.500"
+        ]
+       ],
+       "inventions": [],
+       "name": "Flintlock rifles"
+      },
+      {
+       "key": "post_napoleonic_thought",
+       "year": 1836,
+       "cost": 100,
+       "effects": [],
+       "inventions": [],
+       "name": "Post napoleonic thought"
+      },
+      {
+       "key": "clipper_design",
+       "year": 1836,
+       "cost": 100,
+       "effects": [],
+       "inventions": [],
+       "name": "Clipper design"
+      },
+      {
+       "key": "the_stirrup",
+       "year": 1836,
+       "cost": 100,
+       "effects": [],
+       "inventions": [],
+       "name": "The stirrup"
+      },
+      {
+       "key": "iron_working",
+       "year": 1836,
+       "cost": 100,
+       "effects": [],
+       "inventions": [],
+       "name": "Iron working"
+      }
+     ],
+     "label": "Army tech"
+    }
+   ]
+  },
+  "categories": {
+   "army": "Army"
+  }
+ },
+ "wars": [
+  {
+   "name": "The Edge War",
+   "start": "",
+   "end": "",
+   "active": false,
+   "attackers": [
+    "ENG"
+   ],
+   "defenders": [
+    "FRA"
+   ],
+   "attacker_parties": [
+    {
+     "tag": "ENG",
+     "joined": "",
+     "original": true,
+     "leads": true
+    }
+   ],
+   "defender_parties": [
+    {
+     "tag": "FRA",
+     "joined": "",
+     "original": true,
+     "leads": true
+    }
+   ],
+   "goal": {
+    "casus_belli": "",
+    "actor": "",
+    "receiver": "",
+    "province": 0
+   },
+   "losses": [
+    0,
+    0
+   ],
+   "side_losses": [
+    0,
+    0,
+    0
+   ],
+   "outcome": "",
+   "goals": [],
+   "dated": 0,
+   "battles": [],
+   "transfers": []
+  }
+ ],
+ "succession": {},
+ "priceDates": [],
+ "priceYears": [],
+ "prices": {},
+ "goods": [],
+ "goodCategory": {},
+ "categoryLabels": {
+  "military": "Military",
+  "industrial": "Industrial",
+  "raw": "Raw materials",
+  "consumer": "Consumer",
+  "other": "Other"
+ },
+ "movement": {},
+ "snapshot": {},
+ "snapshotDates": [],
+ "naval": null,
+ "supply": {},
+ "growthSpan": 0.25,
+ "cross": null
+}

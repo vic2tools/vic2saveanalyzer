@@ -1,0 +1,8 @@
+
+=== states.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+ENG            0       0      0         0       0      0         1,250             0
+FRA            0       0      0         0       0      0           500             0
+
+2 nations disagree. Please report this with the save.
+

@@ -1,0 +1,25 @@
+
+=== awkward.v2 ===
+
+Top-level scalars:
+  date=1881.3.1
+  player=ENG
+  government=3
+  start_date=1836.1.1
+
+Top-level blocks (5 total, distinct):
+  flags, <province>, <country>
+
+First province block (1) keys:
+  name                     scalar
+  owner                    scalar
+  controller               scalar
+  core                     scalar
+  farmers                  block  <- pop, culture=british, religion=protestant
+
+First country block (ENG) keys:
+  primary_culture          scalar
+  government               scalar
+  prestige                 scalar
+  money                    scalar
+

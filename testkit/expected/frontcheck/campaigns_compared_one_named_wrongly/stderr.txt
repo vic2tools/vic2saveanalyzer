@@ -1,0 +1,1 @@
+--campaign-mod none: HOLDING has no common/ inside it, so it is not a mod folder.

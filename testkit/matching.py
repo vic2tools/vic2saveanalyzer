@@ -5,7 +5,7 @@ Two mods that are nearly the same, and the save that belongs to one of them.
 Reading a campaign under the wrong mod is the worst answer this program can
 give, because it is not a wrong label -- it is wrong numbers. Two mods built
 on a shared base rate the same cruiser differently, so the same save read
-under the other one reports guns it never had. `cross.match_mod` decides
+under the other one reports guns it never had. `--cross` decides
 this by elimination, and nothing tested it.
 
     python3 testkit/matching.py
@@ -25,7 +25,6 @@ import tempfile
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
-import cross                                               # noqa: E402
 import savefmt                                             # noqa: E402
 
 TAGS = ["ENG", "FRA", "PRU", "RUS", "AUS", "TUR", "SPA", "USA"]
@@ -151,30 +150,44 @@ def a_save(path, tags=None, techs=None, provinces=None, top_invention=1):
     return savefmt.write(path, *parts)
 
 
-def try_one(name, holding, mine, theirs, save_kwargs):
+def try_one(name, holding, make_mine, make_theirs, save_kwargs):
     """
-    [what went wrong] when a save belonging to `mine` is matched.
+    [what went wrong] when a campaign belonging to one of two mods is
+    surveyed by `--cross`.
 
-    Both directions, so a matcher that simply took the first candidate
-    would be caught. And the decoy is named `another` against the right
-    answer's `wanted`, because ties are broken alphabetically: if the
-    thing being tested stops working and both folders fit, the decoy wins
-    and the case fails, which is the whole point of having it.
+    Both ways round: the decoy is named to sort before the right answer's
+    `wanted`, and then after it. Ties are broken by name, so a matcher that
+    stopped telling them apart, or that always took the first or the last,
+    fails one of the two.
     """
-    wrong = []
-    for order in ("right first", "right second"):
-        pair = ([("wanted", mine), ("another", theirs)]
-                if order == "right first"
-                else [("another", theirs), ("wanted", mine)])
-        save = a_save(os.path.join(holding, "s.v2"), **save_kwargs)
-        cross._MOD_FACTS.clear()
-        cross._CAPACITY.clear()
-        label, _path, rows = cross.match_mod([save], pair, sample=1)
-        if label != "wanted":
-            why = "; ".join("%s: %s %s" % r for r in rows)
-            wrong.append("%s (%s): matched %r, not the one it came from -- %s"
-                         % (name, order, label, why[:150]))
-    return wrong
+    out = []
+    for decoy in ("another", "zz-another"):
+        out += one_way(name, os.path.join(holding, decoy), make_mine, make_theirs, decoy,
+                       save_kwargs)
+    return out
+
+
+def one_way(name, holding, make_mine, make_theirs, decoy, save_kwargs):
+    import subprocess
+    where = os.path.join(holding, name.replace(" ", "-"))
+    game = a_game(os.path.join(where, "game"))
+    make_mine(os.path.join(game, "mod", "wanted"))
+    make_theirs(os.path.join(game, "mod", decoy))
+    campaign = os.path.join(where, "campaigns", "camp")
+    os.makedirs(campaign)
+    a_save(os.path.join(campaign, "s.v2"), **save_kwargs)
+    env = dict(os.environ, TMPDIR=os.path.join(where, "tmp"))
+    os.makedirs(env["TMPDIR"])
+    done = subprocess.run([sys.executable, os.path.join(HERE, "vic2_analyzer.py"),
+                           os.path.join(where, "campaigns"), "--cross", "--game-root", game,
+                           "--out", os.path.join(where, "out"), "--no-html", "--no-cache"],
+                          capture_output=True, text=True, env=env)
+    said = done.stdout + done.stderr
+    line = next((l for l in said.splitlines() if l.strip().startswith("camp ")), "")
+    if done.returncode or not line.split("->")[-1].strip().startswith("wanted"):
+        return ["%s (decoy %s): the campaign was matched as %r, not to the mod it came from -- %s"
+                % (name, decoy, line.strip(), said[-400:])]
+    return []
 
 
 def main():
@@ -186,9 +199,8 @@ def main():
         # One province apart, which is the case the map test exists for:
         # two mods can agree on every country, technology and invention and
         # differ only here.
-        mine = a_mod(os.path.join(holding, "p-mine"))
-        theirs = a_mod(os.path.join(holding, "p-theirs"),
-                       provinces=range(1, 42))
+        mine = a_mod
+        theirs = lambda root: a_mod(root, provinces=range(1, 42))
         cases.append(("one province apart", mine, theirs, {}))
 
         # A technology only one folder defines, and the save has it. The
@@ -196,21 +208,20 @@ def main():
         # technology its mod defines, so a folder holding one the campaign
         # never researched is not thereby ruled out. What rules a folder
         # out is a name in the save it has never heard of.
-        mine = a_mod(os.path.join(holding, "t-mine"),
-                     techs=TECHS + ["a_tech_of_its_own"])
-        theirs = a_mod(os.path.join(holding, "t-theirs"))
+        mine = lambda root: a_mod(root, techs=TECHS + ["a_tech_of_its_own"])
+        theirs = a_mod
         cases.append(("a technology only one defines", mine, theirs,
                       {"techs": TECHS + ["a_tech_of_its_own"]}))
 
         # One country apart: the save names a tag only one folder defines.
-        mine = a_mod(os.path.join(holding, "c-mine"), tags=TAGS + ["BAV"])
-        theirs = a_mod(os.path.join(holding, "c-theirs"))
+        mine = lambda root: a_mod(root, tags=TAGS + ["BAV"])
+        theirs = a_mod
         cases.append(("one country apart", mine, theirs,
                       {"tags": TAGS + ["BAV"]}))
 
         # The save names an invention past the end of the other's array.
-        mine = a_mod(os.path.join(holding, "i-mine"), inventions=40)
-        theirs = a_mod(os.path.join(holding, "i-theirs"), inventions=3)
+        mine = lambda root: a_mod(root, inventions=40)
+        theirs = lambda root: a_mod(root, inventions=3)
         cases.append(("the save names a later invention", mine, theirs,
                       {"top_invention": 30}))
 

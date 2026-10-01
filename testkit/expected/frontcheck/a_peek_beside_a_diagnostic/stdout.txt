@@ -1,0 +1,29 @@
+
+=== 0.v2 ===
+
+Top-level scalars:
+  date=1880.1.1
+  player=ENG
+  government=3
+  start_date=1836.1.1
+
+Top-level blocks (10 total, distinct):
+  <province>, <country>
+
+First province block (1) keys:
+  name                     scalar
+  owner                    scalar
+  controller               scalar
+  core                     scalar
+  farmers                  block  <- pop, culture=british, religion=protestant
+
+First country block (ENG) keys:
+  primary_culture          scalar
+  government               scalar
+  civilized                scalar
+  capital                  scalar
+  prestige                 scalar
+  money                    scalar
+  technology               block
+  active_inventions        list
+

@@ -13,13 +13,15 @@ would take the whole campaign down. A save cut short is the exception that
 has to be refused: read, it is a whole save with most of it missing, and
 its numbers go into the report as though they were true.
 
-    python3 testkit/mangled.py [path/to/one/save.v2] [how many]
+    python3 testkit/mangled.py [path/to/one/save.v2] [how many] [--update]
 
-The mutations are seeded, so a failure is reproducible. Each is tried
-against both readers, because the Rust one and the Python one meet
-different halves of a broken file.
+The damage is seeded, so a failure is reproducible. Each damaged save is
+run through the analyzer. Without a save named, the furnished save the
+builders write is damaged, and each run must also give the answer recorded
+for it (`expected.py`) -- the Python reader's, taken while it was here.
 """
 
+import argparse
 import os
 import random
 import shutil
@@ -27,10 +29,14 @@ import sys
 import tempfile
 import threading
 import time
-import traceback
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "testkit"))
+
+import expected                                            # noqa: E402
+import matching                                            # noqa: E402
+import savefmt                                             # noqa: E402
 
 SEED = 20260921
 
@@ -69,24 +75,47 @@ HOW = ["cut in half", "bytes flipped", "a piece missing", "braces rubbed out",
        "nothing but nulls in the middle"]
 
 
-def while_being_written(raw, path):
+def ask(saves, holding, game, python=False):
+    """The analyzer's answer for the folder `saves`."""
+    out = os.path.join(holding, "out")
+    env = dict(os.environ, TMPDIR=os.path.join(holding, "tmp"))
+    for key in ("VIC2_NO_ENGINE", "VIC2_NO_FRONT", "VIC2_ENGINE_REQUIRED"):
+        env.pop(key, None)
+    if python:
+        env["VIC2_NO_ENGINE"] = "1"
+    os.makedirs(env["TMPDIR"], exist_ok=True)
+    got = expected.run([saves, "--out", out, "--game-root", game, "--no-cache", "-j", "1",
+                        "--no-html"], holding, env, out,
+                       [(env["TMPDIR"], "TMP"), (holding, "HOLDING")])
+    shutil.rmtree(out, ignore_errors=True)
+    return got
+
+
+def crashed(got):
+    """Whether an answer is a crash rather than a reading or a sentence."""
+    said = got["stdout.txt"] + got["stderr.txt"]
+    return (got["status.txt"].strip() not in ("0", "1") or "Traceback" in said
+            or "panicked" in said)
+
+
+def while_being_written(saves, holding, game):
     """
     [what went wrong] when the file changes all the way through the read.
 
-    A save is read in two passes -- the scanner reads it whole, and the
-    wars and the market are lifted out of it afterwards a span at a time
-    -- so one rewritten in between is read half from each version, and the
-    halves do not agree. Pointing the analyzer at the folder the game is
-    still writing to is a thing people do, and half of one month and half
-    of the next is worse than no answer at all.
-
-    Rewritten continuously rather than once, because once is a race: the
-    touch has to land inside the read. Continuously, it always does.
+    A save rewritten while it is read is read half from each version, and
+    the halves do not agree. Pointing the analyzer at the folder the game is
+    still writing to is a thing people do, and half of one month and half of
+    the next is worse than no answer at all. Rewritten continuously rather
+    than once, because once is a race: the touch has to land inside the read.
     """
-    import readsave
-
-    with open(path, "wb") as fh:
-        fh.write(raw)
+    path = os.path.join(saves, "broken.v2")
+    # Big enough that the read takes a while: a touch every couple of
+    # milliseconds has to land inside it.
+    parts = [savefmt.head("1880.1.1")]
+    parts += [savefmt.province(pid, "ENG", [savefmt.pop("farmers", pid, 1000 + pid)])
+              for pid in range(1, 40001)]
+    parts.append(savefmt.country("ENG"))
+    savefmt.write(path, *parts)
     stop = threading.Event()
 
     def keep_touching():
@@ -96,40 +125,34 @@ def while_being_written(raw, path):
                 os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10 ** 9))
             except OSError:
                 pass
-            time.sleep(0.02)
+            time.sleep(0.002)
 
     threading.Thread(target=keep_touching, daemon=True).start()
     try:
-        readsave.analyze_save(path, readsave.PLAIN, verbose=False)
-        return ["a save rewritten all through the read was read anyway"]
-    except ValueError as said:
-        if "changed while it was being read" not in str(said):
-            return ["refused, but for the wrong reason: %s" % str(said)[:70]]
-        print("  a save rewritten while it is read: refused")
-        return []
-    except BaseException as boom:                        # noqa: BLE001
-        return ["rewritten mid-read raised %s, not a refusal"
-                % type(boom).__name__]
+        got = ask(saves, holding, game)
     finally:
         stop.set()
-        time.sleep(0.08)
+        time.sleep(0.05)
+    if crashed(got):
+        return ["rewritten mid-read crashed: %s" % got["stderr.txt"][-300:]]
+    if "changed while it was being read" not in got["stderr.txt"]:
+        return ["a save rewritten all through the read was not refused as one: %s"
+                % (got["stdout.txt"] + got["stderr.txt"])[-300:]]
+    print("  a save rewritten while it is read: refused")
+    return []
 
 
-def cut_short(raw, path):
+def cut_short(raw, saves, holding, game):
     """
     [what went wrong] when the save stops part-way through.
 
-    The one damage above that is allowed to be *read* only because nothing
-    used to check for it. A save cut short parses without complaint, and
-    two thirds of one read as 34 of its 41 nations holding no army, no navy
-    and no technology, with every war gone -- numbers, not an error, so the
-    report showed every army in the world disbanding for a month. Both
-    readers have to refuse it, and say why: the Rust one reads the file
-    whole before Python ever opens it, and the two refuse in different
-    places.
+    A save cut short parses without complaint, and two thirds of one read as
+    34 of its 41 nations holding no army, no navy and no technology, with
+    every war gone -- numbers, not an error, so the report showed every army
+    in the world disbanding for a month. It has to be refused, and say why.
     """
-    import readsave
     wrong = []
+    path = os.path.join(saves, "broken.v2")
     for share in (0.3, 0.5, 0.67, 0.95):
         cut = raw[:int(len(raw) * share)]
         # A cut that happens to land just after a closing brace looks whole
@@ -139,75 +162,80 @@ def cut_short(raw, path):
             cut = cut[:-1]
         with open(path, "wb") as fh:
             fh.write(cut)
-        for use_scanner in (True, False):
-            who = "the scanner" if use_scanner else "Python"
-            try:
-                readsave.analyze_save(path, readsave.PLAIN, verbose=False,
-                                      use_scanner=use_scanner)
-                wrong.append("%d%% of a save was read as a whole one by %s"
-                             % (share * 100, who))
-            except ValueError as said:
-                if "cut short" not in str(said):
-                    wrong.append("%d%% of a save refused by %s, but for "
-                                 "another reason: %s"
-                                 % (share * 100, who, str(said)[:60]))
-            except BaseException as boom:                # noqa: BLE001
-                wrong.append("%d%% of a save raised %s in %s"
-                             % (share * 100, type(boom).__name__, who))
+        got = ask(saves, holding, game)
+        if crashed(got):
+            wrong.append("%d%% of a save crashed the run" % (share * 100))
+        elif "cut short" not in got["stderr.txt"]:
+            wrong.append("%d%% of a save was not refused as cut short: %s"
+                         % (share * 100, (got["stdout.txt"] + got["stderr.txt"])[-200:]))
     if not wrong:
-        print("  a save cut short, four places, both readers: refused")
+        print("  a save cut short, four places: refused")
     return wrong
 
 
 def main():
-    source = sys.argv[1] if len(sys.argv) > 1 else ""
-    rounds = int(sys.argv[2]) if len(sys.argv) > 2 else 5
-    if not source or not os.path.isfile(source):
-        print(__doc__.strip())
-        return 2
-
-    import readsave
-
-    raw = open(source, "rb").read()
-    rng = random.Random(SEED)
+    ap = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])
+    ap.add_argument("save", nargs="?", default="",
+                    help="a save to damage; by default the furnished one the builders write")
+    ap.add_argument("rounds", nargs="?", type=int, default=5)
+    ap.add_argument("--update", action="store_true",
+                    help="write what the program answers now as the expected answers")
+    ap.add_argument("--python", action="store_true",
+                    help="with --update: take the answers from the Python (VIC2_NO_ENGINE)")
+    args = ap.parse_args()
     holding = tempfile.mkdtemp(prefix="vic2mangled")
-    path = os.path.join(holding, "broken.v2")
-    crashes, misread, read, refused = [], [], 0, 0
+    saves = os.path.join(holding, "saves")
+    os.makedirs(saves)
+    path = os.path.join(saves, "broken.v2")
+    # Answers are recorded for the furnished save only: a real one is
+    # somebody's, and its damaged copies are held to not crashing.
+    book = None if args.save else expected.Book(expected.REPO, "mangled", args.update)
+    crashes, misread, differ, read, refused = [], [], [], 0, 0
     try:
+        game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
+        source = args.save or savefmt.furnished(os.path.join(holding, "furnished.v2"))
+        raw = open(source, "rb").read()
+        rng = random.Random(SEED)
         for how in HOW:
-            for _ in range(rounds):
+            for i in range(args.rounds):
                 with open(path, "wb") as fh:
                     fh.write(damage(raw, how, rng))
-                try:
-                    readsave.analyze_save(path, readsave.PLAIN, verbose=False)
+                got = ask(saves, holding, game, args.python)
+                if crashed(got):
+                    crashes.append((how, (got["stdout.txt"] + got["stderr.txt"]).strip()
+                                    .splitlines()[-1:]))
+                elif got["status.txt"].strip() == "0":
                     read += 1
-                except (ValueError, OSError):
-                    refused += 1            # a sentence, which is allowed
-                except BaseException:       # noqa: BLE001
-                    crashes.append(
-                        (how, traceback.format_exc().strip().splitlines()[-1]))
-        crashes += [("rewritten while read", w)
-                    for w in while_being_written(raw, path)]
-        misread = cut_short(raw, path)
+                else:
+                    refused += 1
+                if book is not None:
+                    found = book.hold("%s %d" % (how, i), got)
+                    if found:
+                        differ.append(("%s %d" % (how, i), found))
+        if book is not None:
+            book.finish()
+        if not args.python:
+            crashes += [("rewritten while read", w)
+                        for w in while_being_written(saves, holding, game)]
+            misread = cut_short(raw, saves, holding, game)
     finally:
         shutil.rmtree(holding, ignore_errors=True)
 
-    tried = len(HOW) * rounds
-    print("  %d damaged saves: %d read, %d refused, %d crashed"
-          % (tried, read, refused, len(crashes)))
-    if crashes or misread:
+    tried = len(HOW) * args.rounds
+    print("  %d damaged saves: %d read, %d refused, %d crashed%s"
+          % (tried, read, refused, len(crashes),
+             "" if book is None else ", %d differ from the recorded answers" % len(differ)))
+    if crashes or misread or differ:
         print("\nPROBLEMS:")
         for wrong in misread:
-            print("  %-28s %s" % ("cut short", wrong[:80]))
-        seen = set()
+            print("  %-28s %s" % ("cut short", wrong[:200]))
         for how, last in crashes:
-            if (how, last) in seen:
-                continue
-            seen.add((how, last))
-            print("  %-28s %s" % (how, last[:80]))
+            print("  %-28s %s" % (how, str(last)[:200]))
+        for case, found in differ[:5]:
+            expected.report(case, found)
         return 1
-    print("\nnothing crashed; every broken save was read or refused, and "
-          "one cut short was refused")
+    print("\nnothing crashed; every broken save was read or refused%s, and one cut "
+          "short was refused" % ("" if book is None else " as recorded"))
     return 0
 
 

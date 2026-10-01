@@ -1,0 +1,50 @@
+Campaigns found under HOLDING/xcampaigns:
+  a/run                    2 saves  ->  Alpha
+      note: 2 mods fit these saves; picked the one the campaign leaves least of unused. Name it with --mod-path, or in the window pick the mod itself instead of the folder, to settle it.
+  b/run                    1 saves  ->  Alpha
+      note: 2 mods fit these saves; picked the one the campaign leaves least of unused. Name it with --mod-path, or in the window pick the mod itself instead of the folder, to settle it.
+  both                     4 saves  ->  Alpha
+      note: 2 mods fit these saves; picked the one the campaign leaves least of unused. Name it with --mod-path, or in the window pick the mod itself instead of the folder, to settle it.
+  none                     2 saves  ->  Beta   (as told)
+  onlybeta                 3 saves  ->  Beta
+      note: s0.v2 disagrees with all 3 later saves by at least 8 event flags; it may be from another game
+Reading a/run (2 saves) under Alpha
+Reading b/run (1 saves) under Alpha
+Reading both (4 saves) under Alpha
+Reading none (2 saves) under Beta
+Reading onlybeta (3 saves) under Beta
+Cross-campaign: 5 campaigns, 3 nations in two or more of them.
+The rest of the report is both (the most saves; --primary picks another).
+Found 4 save(s).
+defines.lua: POP_SIZE_PER_REGIMENT=3000
+poptypes/: mobilizable = aristocrats craftsmen farmers labourers
+  [1/4] s0.v2 ... 1880.1.1
+  [2/4] s1.v2 ... 1880.7.1
+  [3/4] s2.v2 ... 1881.1.1
+  [4/4] s3.v2 ... 1881.7.1
+
+Invention indices decoded against 2 inventions (base 1): 0 of 8 nation-invention pairs are unreachable (0.0%).
+
+Mod scan: 5 techs (0 grant mobilisation_size), 0 inventions grant it (0 obtainable), 0 event modifiers, 0 triggered modifiers.
+
+8 nation-rows across 4 saves.
+
+Largest nations at 1881.7.1:
+  tag           pop  accept%    lit   brig  ships
+  FRA        23,000    100.0  40.0%      0      0
+  ENG        22,860    100.0  40.0%      0      0
+
+Computed mobilisation sizes at 1881.7.1 (check these against the in-game military panel):
+  FRA: 0.00%
+  ENG: 0.00%
+
+Wrote:
+  OUT/report.html
+  OUT/nations_timeseries.csv
+  OUT/prices.csv
+  OUT/market_snapshot.csv
+  OUT/ships_by_type.csv
+  OUT/brigades_by_type.csv
+  OUT/technologies.csv
+  OUT/pops_by_type.csv
+  OUT/pops_by_culture.csv

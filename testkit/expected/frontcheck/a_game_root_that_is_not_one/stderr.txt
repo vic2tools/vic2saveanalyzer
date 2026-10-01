@@ -1,0 +1,1 @@
+HOLDING/saves is not a Victoria II install: there is no map/default.map in it. Point --game-root at the folder the game is installed in, the one holding map/, gfx/ and mod/.

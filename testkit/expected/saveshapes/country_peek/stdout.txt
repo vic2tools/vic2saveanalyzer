@@ -1,0 +1,43 @@
+
+=== country.v2 ===
+
+Top-level scalars:
+  date=1881.3.1
+  player=ENG
+  government=3
+  start_date=1836.1.1
+
+Top-level blocks (2 total, distinct):
+  flags, <province>
+
+First province block (1) keys:
+  name                     scalar
+  owner                    scalar
+  controller               scalar
+  core                     scalar
+  soldiers                 block  <- pop, culture=british, religion=protestant
+
+First country block (ENG) keys:
+  primary_culture          scalar
+  culture                  list
+  government               scalar
+  civilized                scalar
+  capital                  scalar
+  prestige                 scalar
+  badboy                   scalar
+  money                    scalar
+  war_exhaustion           scalar
+  mobilize                 scalar
+  human                    scalar
+  voting_system            scalar
+  slavery                  scalar
+  flags                    block
+  modifier                 list
+  technology               block
+  active_inventions        list
+  saved_country_supply     block
+  state                    list
+  scheduled_mobilization   block
+  army                     block
+  navy                     block
+
