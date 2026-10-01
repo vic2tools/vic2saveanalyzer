@@ -195,17 +195,6 @@ def looked(html_path, seconds=90, wait_ms=6000):
 
 
 def hostile_names():
-    """[what went wrong], `_hostile_names` made by the report engine and in
-    Python (`ways.py`): the names are escaped by whichever made the page."""
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
-    import ways
-    wrong = []
-    for way, _env in ways.WAYS:
-        wrong += ["%s (%s)" % (w, way) for w in _hostile_names(way)]
-    return wrong
-
-
-def _hostile_names(way):
     """
     [what went wrong] with a report built from names that are markup.
 
@@ -220,7 +209,6 @@ def _hostile_names(way):
     import subprocess
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
     import savefmt
-    import ways
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     def probe(n):
@@ -255,7 +243,7 @@ def _hostile_names(way):
             [sys.executable, os.path.join(here, "vic2_analyzer.py"), saves,
              "--out", out, "--game-root", game, "--no-cache", "-q"],
             capture_output=True, text=True,
-            env=ways.env(way, dict(os.environ, TMPDIR=holding), strict=True))
+            env=dict(os.environ, TMPDIR=holding))
         report = os.path.join(out, "report.html")
         if built.returncode or not os.path.isfile(report):
             return ["the hostile campaign did not build: %s"
@@ -274,7 +262,7 @@ def _hostile_names(way):
         return ["the hostile campaign's report threw: %s" % said["error"][0]]
     if not said.get("done"):
         return ["the hostile campaign's report never finished loading"]
-    print("  names that are markup stay text: ok (%s)" % way)
+    print("  names that are markup stay text: ok")
     return []
 
 

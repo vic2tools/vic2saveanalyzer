@@ -138,7 +138,9 @@ def cross_campaigns():
                               "farmers", 100 + n, 20000 + 100 * n)]),
                           savefmt.country("ENG", techs=matching.TECHS))
 
-        for n in range(3):
+        # Alpha stays the larger by more than the save beta gains, so the
+        # campaign that changes is never the one the report is about.
+        for n in range(5):
             a_save(os.path.join(parent, "alpha"), n, 1840 + n)
         for n in range(2):
             a_save(os.path.join(parent, "beta"), n, 1850 + n)
@@ -233,8 +235,9 @@ def unfinished_runs():
             said = locked.stdout + locked.stderr
             if "Traceback" in said:
                 wrong.append("a locked table ended the run in a stack trace")
-            elif locked.returncode == 0 or "nations_timeseries.csv" not in said:
-                wrong.append("a locked table was not named: %s"
+            elif (locked.returncode == 0 or "nations_timeseries.csv" not in said
+                  or "open in another program" not in said):
+                wrong.append("a locked table was not named in a sentence: %s"
                              % said.strip()[-120:])
             again = run("--tags", "ENG")
             fine = "Nothing has changed" not in again.stdout
