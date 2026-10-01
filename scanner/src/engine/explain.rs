@@ -125,7 +125,14 @@ fn explain_mob(tag: &str, m: &Mod, live: &FxSet<String>, pres: &[Pre], files: &[
         total += value;
         crate::outln!("  {}{} {:+.2}%", left(kind, 19), left(name, 46), value * 100.0);
     }
-    crate::outln!("  {}{} {}%", left("", 19), left("TOTAL", 46), right(&format!("{:.2}", total * 100.0), 6));
+    if total < 0.0 {
+        // The report floors a negative sum at nought, as the game does, and
+        // this explains the report's number: the sum first, then that.
+        crate::outln!("  {}{} {}%", left("", 19), left("sum", 46), right(&format!("{:.2}", total * 100.0), 6));
+        crate::outln!("  {}{} {}%", left("", 19), left("TOTAL, floored at nought", 46), right("0.00", 6));
+    } else {
+        crate::outln!("  {}{} {}%", left("", 19), left("TOTAL", 46), right(&format!("{:.2}", total * 100.0), 6));
+    }
     crate::outln!("\n{} has {} techs and {} active inventions; {} sources grant it mobilisation size.",
                   tag, nat.tech_list.len(), nat.invention_ids.len(), parts.len());
     let skipped: Vec<&str> = m.triggered_mob.iter()

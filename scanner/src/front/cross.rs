@@ -585,6 +585,16 @@ fn right(text: &str, width: usize) -> String {
     if n >= width { text.to_string() } else { format!("{}{}", " ".repeat(width - n), text) }
 }
 
+/// The saves of a campaign that may be from another game, said under the
+/// campaign they are in. Python said them all after the survey, so the
+/// note read as if it were about whichever campaign was listed last.
+fn say_strays(e: &Surveyed) {
+    for (stray, worst, of) in history_breaks(&e.files).unwrap_or_else(|why| hand_back(&why)) {
+        crate::outln!("      note: {} disagrees with all {} later saves by at least {} event flags; \
+                       it may be from another game", stray, of, worst);
+    }
+}
+
 /// `survey_cross(parent, game_root, args)`.
 pub fn survey_cross(parent: &str, args: &Args, verbose: bool) -> R<Vec<Surveyed>> {
     let game_root = args.game_root.as_deref().filter(|g| !g.is_empty());
@@ -641,6 +651,7 @@ pub fn survey_cross(parent: &str, args: &Args, verbose: bool) -> R<Vec<Surveyed>
                 crate::outln!("  {} {} saves{}", left(&e.name, 22), right(&e.files.len().to_string(), 3),
                               if e.told { format!("  ->  {}   (as told)", e.mod_label.as_ref().unwrap()) }
                               else { String::new() });
+                say_strays(e);
             }
         }
     } else if game_root.is_none() && chosen.is_empty() {
@@ -683,6 +694,7 @@ pub fn survey_cross(parent: &str, args: &Args, verbose: bool) -> R<Vec<Surveyed>
                               e.mod_label.clone().unwrap_or_else(|| "no mod in that folder fits".into()),
                               if e.told { "   (as told)" } else { "" });
                 if e.told {
+                    say_strays(e);
                     continue;
                 }
                 let nearest: Vec<&(String, String, String)> = e.candidates.iter().filter(|r| r.1 == "nearest").collect();
@@ -699,14 +711,7 @@ pub fn survey_cross(parent: &str, args: &Args, verbose: bool) -> R<Vec<Surveyed>
                     crate::outln!("      note: nothing in {} explains these saves. If the mod is installed \
                                    elsewhere, point the mod box at it directly.", game_root.unwrap_or("None"));
                 }
-            }
-        }
-    }
-    if verbose {
-        for e in &found {
-            for (stray, worst, of) in history_breaks(&e.files).unwrap_or_else(|why| hand_back(&why)) {
-                crate::outln!("      note: {} disagrees with all {} later saves by at least {} event flags; \
-                               it may be from another game", stray, of, worst);
+                say_strays(e);
             }
         }
     }

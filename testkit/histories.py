@@ -19,6 +19,7 @@ Each used to carry its own copy of the rule, and neither copy had a check.
 """
 
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -27,7 +28,6 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "testkit"))
 
-import cross                                               # noqa: E402
 import fake_game                                           # noqa: E402
 import keeper                                              # noqa: E402
 
@@ -62,30 +62,40 @@ def two_games_one_nation(holding):
 
 def a_stray_save(holding):
     """
-    [what went wrong] when `history_breaks` is shown a campaign folder whose
-    first save is from another game, and one that is all one game.
+    [what went wrong] when `--cross` surveys a campaign folder whose first
+    save is from another game, beside one that is all one game.
     """
-    folder = os.path.join(holding, "campaign")
-    os.makedirs(folder)
-    paths = []
-    for n, (flags, month) in enumerate(((OTHER, 1), (fake_game.FLAGS, 2),
-                                        (fake_game.FLAGS, 3),
-                                        (fake_game.FLAGS, 4))):
-        path = os.path.join(folder, "save%d.v2" % n)
-        with open(path, "wb") as fh:
-            fh.write(fake_game.a_save(1840, month, "PRU", 20000, n=12,
-                                      flags=flags))
-        paths.append(path)
-    wrong = []
-    named = [name for name, _worst, _of in cross.history_breaks(paths)]
+    import matching
+    import subprocess
+    parent = os.path.join(holding, "campaigns")
+    for name, first in (("stray", OTHER), ("whole", fake_game.FLAGS)):
+        folder = os.path.join(parent, name)
+        os.makedirs(folder)
+        for n, (flags, month) in enumerate(((first, 1), (fake_game.FLAGS, 2),
+                                            (fake_game.FLAGS, 3), (fake_game.FLAGS, 4))):
+            with open(os.path.join(folder, "save%d.v2" % n), "wb") as fh:
+                fh.write(fake_game.a_save(1840, month, "PRU", 20000, n=12, flags=flags))
+    game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
+    env = dict(os.environ, TMPDIR=os.path.join(holding, "tmp"))
+    os.makedirs(env["TMPDIR"])
+    done = subprocess.run([sys.executable, os.path.join(HERE, "vic2_analyzer.py"), parent,
+                           "--cross", "--game-root", game, "--out", os.path.join(holding, "out"),
+                           "--no-html", "--no-cache"], capture_output=True, text=True, env=env)
+    said = done.stdout + done.stderr
+    if "Traceback" in said or "panicked" in said:
+        return ["--cross crashed:\n" + said[-1500:]]
+    survey = said.split("Reading ")[0]
+    named = re.findall(r"note: (\S+) disagrees with", survey)
     print("  a folder with another game's save first -> %s named"
           % (", ".join(named) or "nothing"))
+    wrong = []
     if named != ["save0.v2"]:
-        wrong.append("the save from another game was not named alone: %s"
-                     % (named or "nothing named"))
-    named = [name for name, _worst, _of in cross.history_breaks(paths[1:])]
-    if named:
-        wrong.append("saves from one game were named as strays: %s" % named)
+        wrong.append("the save from another game was not named alone: %s\n%s"
+                     % (named or "nothing named", survey))
+    # Under the campaign it belongs to, not wherever the survey ends.
+    block = re.search(r"(?ms)^  stray .*?(?=^  \S)", survey + "  .")
+    if not block or "save0.v2 disagrees" not in block[0]:
+        wrong.append("the note was not said under the campaign it is about:\n%s" % survey)
     return wrong
 
 

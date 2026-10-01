@@ -2,9 +2,9 @@ Campaigns found under HOLDING/xcampaigns, read under Beta:
   a/run                    2 saves
   b/run                    1 saves
   both                     4 saves
+      note: s0.v2 disagrees with all 3 later saves by at least 8 event flags; it may be from another game
   none                     2 saves
   onlybeta                 3 saves
-      note: s0.v2 disagrees with all 3 later saves by at least 8 event flags; it may be from another game
 Reading a/run (2 saves) under Beta
 Reading b/run (1 saves) under Beta
 Reading both (4 saves) under Beta
