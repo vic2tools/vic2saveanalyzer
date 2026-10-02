@@ -8,10 +8,9 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 //
-// `record.rs` builds a save's `(meta, nations)` as Python values, to be
-// pickled for the analyzer. This builds the same thing as Rust structs for
-// the engine that now does the analyzer's work itself, fold for fold: the
-// same fields, filled by the same rules, in the same order. Where Python's
+// A save's `(meta, nations)` as the analyzer's Python reader built them,
+// as Rust structs, fold for fold: the same fields, filled by the same rules,
+// in the same order. Where Python's
 // record holds an int in one save and a float in another -- a nation with no
 // naval base keeps the blank record's `0`, one with a base gets `47.0` --
 // the field is a `Num`, because the tables print the two differently.
@@ -19,7 +18,7 @@
 use crate::clause::{self, Tree, V};
 use crate::country::Country;
 use crate::omap::OMap;
-use crate::pickle::{FxMap, FxSet};
+use crate::fx::{FxMap, FxSet};
 use crate::province::Scan;
 use crate::pyfmt::Num;
 use crate::text::latin1;
@@ -92,9 +91,6 @@ pub struct Market {
     /// actual_sold_world, discovered -- in that order.
     pub snapshot: [OMap<String, f64>; 7],
 }
-
-pub const SNAPSHOT_FIELDS: [&str; 7] = ["world_pool", "supply", "demand", "real_demand",
-                                        "actual_sold", "actual_sold_world", "discovered"];
 
 /// What a save says that is not one nation's: the meta dict.
 #[derive(Clone, Debug, Default)]
@@ -678,7 +674,7 @@ pub fn read_worldmarket(block: &Tree) -> R<Market> {
 }
 
 /// The wars, the market and the great power list out of the save's
-/// top-level blocks, as `record::read_rest` reads them for the record.
+/// top-level blocks, each parsed as a generic tree (`clause`).
 pub fn read_rest(text: &[u8], blocks: &[(&[u8], usize, usize)]) -> R<Rest> {
     let mut wars = Vec::new();
     let mut market = None;
@@ -693,13 +689,7 @@ pub fn read_rest(text: &[u8], blocks: &[(&[u8], usize, usize)]) -> R<Rest> {
         }
         let tree = clause::parse_span(&text[*at..(*stop).min(text.len())]);
         if key == b"great_nations" {
-            great = match clause::great_nations(&tree)? {
-                crate::pickle::P::List(v) => v.iter().map(|p| match p {
-                    crate::pickle::P::Int(i) => *i,
-                    _ => -1,
-                }).collect(),
-                _ => Vec::new(),
-            };
+            great = clause::great_nations(&tree)?;
         } else if key == b"worldmarket" {
             seen_market = true;
             if let V::Dict(block) = &tree {

@@ -762,7 +762,7 @@ fn run(mut args: Args, protocol: bool) -> R<i32> {
             ]),
         });
     }
-    let done = crate::engine::run_spec(&spec, None).expect("a report run returns what it wrote");
+    let done = crate::engine::run_spec(&spec);
     if let Some(sentence) = done.run_error {
         return refuse(sentence);
     }

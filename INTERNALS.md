@@ -504,6 +504,44 @@ occupied; only that third one took anything.
 
 ## Speed
 
+### The scanner's dead modes are gone, 2026-10-01
+
+The first step of a pass at the scanner's speed, and not a speedup itself:
+what only the deleted Python fallback called is deleted from the scanner,
+about 1,330 lines, so that the data-model work after it has less to carry.
+
+- The save scan (`vic2scan SAVE`, `--serve`), its JSON answer and the
+  `--record` one: `scan_one`, `serve` and `answer_record` in `main.rs`, all of
+  `record.rs`, and the pickler in `pickle.rs`. What was left of `pickle.rs`
+  is the `Fx` hash and `FxMap`/`FxSet`, now `fx.rs`.
+- `clause.rs`'s war and market readers, which built pickle values for the
+  record. The engine reads both in `engine/model.rs`; `clause.rs` keeps the
+  tree and the conversions it and the mod reader use, and `great_nations`
+  answers the numbers rather than a pickle list of them.
+- `vic2scan report SPEC` (the engine as `engine.py` hosted it) and its
+  `--dump`, with the dump's writers in `engine/dump.rs`, the two `Kept`
+  fields (`total_pop`, `is_player`) and `SNAPSHOT_FIELDS` only it read.
+  `run_spec` returns its outcome, no longer an `Option` of it.
+- `mod_file`, the mod handed over as a JSON export.
+
+What stays: `analyze`, `mod-export`, `mod-signature`, `bench-engine` and
+the `selftest-*` modes. Nothing in Python, the testkit or `build.rs` named
+the removed ones; nothing in `country.rs` or `province.rs` became unused.
+All 57 mutations still apply as written: none was aimed at deleted code.
+
+The 265 saves of the 1880s campaign (`Modus Omnino Demens 1.6`), on an
+AMD Ryzen 7 6800H, median wall time of the whole run through
+`vic2_analyzer.py`, files in the page cache:
+
+| run | before (`374ac35`) | after |
+|---|---|---|
+| empty engine cache (3 runs) | 4.29 s | 4.16 s |
+| rebuild from a warm cache (5) | 1.42 s | 1.41 s |
+| nothing changed (3) | 63 ms | 60 ms |
+
+The same, within noise, as expected. Every table, `report.html`, stdout and
+stderr are byte-identical to the run before. 28/28 checks, 57/57 mutations.
+
 ### The Python fallback is gone, 2026-10-01
 
 Every run has been made by the scanner since 30 Sep, and the Python that
@@ -550,7 +588,7 @@ Left in the scanner, and worth deleting in a pass of its own: the modes only
 the Python called -- `vic2scan report SPEC` (the engine hosted by
 `engine.py`), the save scan's JSON and `--record` answers (`main.rs`,
 `record.rs`, `pickle.rs`, `clause.rs`) and the mod read from a JSON export
-(`mod_file`). Nothing reaches them now.
+(`mod_file`). Nothing reaches them now. (Deleted the same day; see above.)
 
 ### The checks hold the Rust to recorded answers, 2026-10-01
 

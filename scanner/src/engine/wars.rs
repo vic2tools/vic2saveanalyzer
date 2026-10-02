@@ -12,7 +12,7 @@
 use crate::engine::dates::year_fraction;
 use crate::engine::model::{Battle, FirstGoal, Goal, Side, War};
 use crate::omap::OMap;
-use crate::pickle::{FxMap, FxSet};
+use crate::fx::{FxMap, FxSet};
 use crate::pyfmt::{push_int, push_json_str};
 
 type Name = (String, String, String);

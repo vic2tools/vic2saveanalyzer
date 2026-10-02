@@ -28,7 +28,7 @@ use crate::engine::finish::{Pre, PreNation};
 use crate::engine::model::{Battle, FirstGoal, Goal, Market, Meta, Nation, Side, War};
 use crate::engine::rules::Held;
 use crate::omap::OMap;
-use crate::pickle::{FxMap, FxSet};
+use crate::fx::{FxMap, FxSet};
 use crate::pyfmt::Num;
 use std::io::Write;
 

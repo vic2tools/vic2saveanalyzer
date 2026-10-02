@@ -18,7 +18,7 @@
 // bare values mixed with keys are kept under `_items`.
 
 use crate::text::{find, unquote};
-use crate::pickle::FxMap;
+use crate::fx::FxMap;
 
 /// How many bytes of whitespace start at `i`: 0 for none. The text is the
 /// latin-1 block re-encoded as UTF-8, so a character is judged whole -- the

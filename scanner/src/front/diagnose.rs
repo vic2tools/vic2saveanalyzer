@@ -19,7 +19,7 @@ use crate::clause::{unquote, V};
 use crate::engine::modread::py_float;
 use crate::engine::walk::{looks_like_country_tag, parse_block, Tokens};
 use crate::engine::{basename, read_save, Reading, Refused};
-use crate::pickle::FxMap;
+use crate::fx::FxMap;
 use crate::pyre::space;
 
 const VANILLA_POP_TYPES: [&str; 12] = ["aristocrats", "artisans", "bureaucrats", "capitalists",

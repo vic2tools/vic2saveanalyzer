@@ -1,4 +1,5 @@
-// The wars, the world market and the great power list, read as Python reads them.
+// The generic tree Python's `v2parse.parse_span` builds, and the
+// conversions its readers made of it, read as Python read them.
 // Copyright (C) 2026 vic2tools
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -8,21 +9,16 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 //
-// These three were the last of a save the analyzer still read in Python, and
-// in `--record` mode they are read here. They go through the generic tree
-// Python's `v2parse.parse_span` builds and then `readwar.read_war` and
-// `readsave.read_worldmarket`, so this carries its own copy of both halves,
-// rule for rule, rather than the country reader's parser, which differs on
-// purpose in two places: it folds a repeated key into an earlier list of
-// bare values, where Python keeps the two apart, and its whitespace is
-// Rust's rather than Python's `\s`.
+// The wars, the world market and the great power list (`engine::model`),
+// the mod's files (`modread`) and the odd block elsewhere go through this
+// tree, rule for rule as Python built it, rather than the country reader's
+// parser, which differs on purpose in two places: it folds a repeated key
+// into an earlier list of bare values, where Python keeps the two apart, and
+// its whitespace is Rust's rather than Python's `\s`.
 //
 // Where Python would do something no save should make it do -- call `str()`
 // on a block where a name belongs and keep the repr, turn an infinite number
-// into an int and raise -- this refuses the save instead (`Err`), and the
-// analyzer reads it the other way, which does exactly what it always did.
-
-use crate::pickle::{text, Key, OMap, P};
+// into an int and raise -- this refuses the save instead (`Err`).
 
 pub type R<T> = Result<T, ()>;
 
@@ -246,43 +242,12 @@ pub(crate) fn as_list(v: Option<&V>) -> Vec<&V> {
     }
 }
 
-fn s(x: &[u8]) -> P {
-    P::Str(text(x))
-}
-
-fn k(x: &[u8]) -> Key {
-    Key::S(text(x))
-}
-
 // --------------------------------------------------------------------- wars
 
 const I32_WRAP: i64 = (1i64 << 32) / 1000;
 
 pub(crate) fn unwrap_overflow(n: i64) -> i64 {
     if n < 0 { n + I32_WRAP } else { n }
-}
-
-fn side(v: Option<&V>) -> R<P> {
-    let block = match v {
-        Some(V::Dict(d)) => d,
-        _ => return Ok(P::None),
-    };
-    let mut out = OMap::new();
-    out.set(k(b"country"), s(&name(block.get(b"country"))?));
-    out.set(k(b"leader"), s(&name(block.get(b"leader"))?));
-    out.set(k(b"losses"), P::Int(unwrap_overflow(to_int(block.get(b"losses"), 0)?)));
-    let mut units = OMap::new();
-    for (key, val) in &block.pairs {
-        if key == b"country" || key == b"leader" || key == b"losses" || key.first() == Some(&b'_') {
-            continue;
-        }
-        let n = unwrap_overflow(to_int(Some(val), 0)?);
-        if n != 0 {
-            units.set(k(key), P::Int(n));
-        }
-    }
-    out.set(k(b"units"), P::Dict(units));
-    Ok(P::Dict(out))
 }
 
 /// `^\d{3,4}\.\d{1,2}\.\d{1,2}$`. A key ending in a newline, which `$`
@@ -305,166 +270,6 @@ pub(crate) fn date_key(d: &[u8]) -> (i64, i64, i64) {
         p.iter().fold(0i64, |a, &c| a * 10 + (c - b'0') as i64)
     });
     (it.next().unwrap_or(0), it.next().unwrap_or(0), it.next().unwrap_or(0))
-}
-
-fn battle(raw: &V, when: Option<&[u8]>, out: &mut Vec<P>) -> R<()> {
-    let raw = match raw {
-        V::Dict(d) => d,
-        _ => return Ok(()),
-    };
-    let mut b = OMap::new();
-    b.set(k(b"name"), s(&name(raw.get(b"name"))?));
-    b.set(k(b"location"), P::Int(to_int(raw.get(b"location"), 0)?));
-    b.set(k(b"date"), match when { Some(w) => s(w), None => P::None });
-    b.set(k(b"attacker_won"), P::Bool(yes(raw.get(b"result"))?));
-    b.set(k(b"attacker"), side(raw.get(b"attacker"))?);
-    b.set(k(b"defender"), side(raw.get(b"defender"))?);
-    out.push(P::Dict(b));
-    Ok(())
-}
-
-fn goal_of(raw: &V) -> R<Option<OMap>> {
-    let raw = match raw {
-        V::Dict(d) => d,
-        _ => return Ok(None),
-    };
-    let mut g = OMap::new();
-    g.set(k(b"casus_belli"), s(&name(raw.get(b"casus_belli"))?));
-    g.set(k(b"actor"), s(&name(raw.get(b"actor"))?));
-    g.set(k(b"receiver"), s(&name(raw.get(b"receiver"))?));
-    g.set(k(b"province"), P::Int(to_int(raw.get(b"state_province_id"), 0)?));
-    g.set(k(b"added"), s(&name(raw.get(b"date"))?));
-    g.set(k(b"fulfilled"), P::Bool(yes(raw.get(b"is_fulfilled"))?));
-    Ok(Some(g))
-}
-
-fn sorted_names(mut v: Vec<Vec<u8>>) -> P {
-    // Python sorts str by code point, which for latin-1 is the byte.
-    v.sort();
-    v.dedup();
-    P::List(v.iter().map(|x| s(x)).collect())
-}
-
-/// `readwar.read_war(block, active)`, or None for a block that is not a dict.
-pub fn read_war(v: &V, active: bool) -> R<Option<P>> {
-    let block = match v {
-        V::Dict(d) => d,
-        _ => return Ok(None),
-    };
-    let empty = Tree::default();
-    let history = match block.get(b"history") {
-        Some(V::Dict(d)) => d,
-        _ => &empty,
-    };
-    let mut joined: Vec<(Vec<u8>, Vec<u8>, bool)> = Vec::new();
-    let mut left: Vec<(Vec<u8>, Vec<u8>, bool)> = Vec::new();
-    let mut battles: Vec<P> = Vec::new();
-    let mut battle_dates: Vec<Vec<u8>> = Vec::new();
-    for (key, value) in &history.pairs {
-        if key == b"battle" {
-            for raw in as_list(Some(value)) {
-                battle(raw, None, &mut battles)?;
-            }
-            continue;
-        }
-        if !dated(key)? {
-            continue;
-        }
-        for entry in as_list(Some(value)) {
-            let entry = match entry {
-                V::Dict(d) => d,
-                _ => continue,
-            };
-            for (what, who) in &entry.pairs {
-                if what == b"battle" {
-                    for raw in as_list(Some(who)) {
-                        let before = battles.len();
-                        battle(raw, Some(key), &mut battles)?;
-                        if battles.len() > before {
-                            battle_dates.push(key.clone());
-                        }
-                    }
-                } else if what == b"add_attacker" || what == b"add_defender" {
-                    joined.push((key.clone(), name(Some(who))?, what == b"add_attacker"));
-                } else if what == b"rem_attacker" || what == b"rem_defender" {
-                    left.push((key.clone(), name(Some(who))?, what == b"rem_attacker"));
-                }
-            }
-        }
-    }
-
-    let mut goals = Vec::new();
-    for raw in as_list(block.get(b"war_goal")) {
-        if let Some(g) = goal_of(raw)? {
-            let has = |f: &[u8]| matches!(g.get(&k(f)), Some(P::Str(x)) if !x.is_empty());
-            if has(b"actor") || has(b"receiver") {
-                goals.push(P::Dict(g));
-            }
-        }
-    }
-    let empty_goal = Tree::default();
-    let goal = match block.get(b"original_wargoal") {
-        Some(V::Dict(d)) => d,
-        _ => &empty_goal,
-    };
-
-    // `min`/`max` with `date_key`: the first of equals wins either way.
-    let dates: Vec<&Vec<u8>> = joined.iter().map(|j| &j.0)
-        .chain(left.iter().map(|l| &l.0))
-        .chain(battle_dates.iter())
-        .collect();
-    let pick = |want_max: bool| -> Vec<u8> {
-        let mut best: Option<&Vec<u8>> = None;
-        for d in &dates {
-            let better = match best {
-                None => true,
-                Some(b) if want_max => date_key(d) > date_key(b),
-                Some(b) => date_key(d) < date_key(b),
-            };
-            if better {
-                best = Some(d);
-            }
-        }
-        best.cloned().unwrap_or_default()
-    };
-    let start = if dates.is_empty() { Vec::new() } else { pick(false) };
-    let end = if !dates.is_empty() && !active { pick(true) } else { Vec::new() };
-
-    let mut fighting = Vec::new();
-    for side_key in [&b"attacker"[..], &b"defender"[..]] {
-        for tag in as_list(block.get(side_key)) {
-            fighting.push(name(Some(tag))?);
-        }
-    }
-    let event = |list: &Vec<(Vec<u8>, Vec<u8>, bool)>| {
-        P::List(list.iter().map(|(d, w, a)| P::List(vec![s(d), s(w), P::Bool(*a)])).collect())
-    };
-
-    let mut goal_out = OMap::new();
-    goal_out.set(k(b"casus_belli"), s(&name(goal.get(b"casus_belli"))?));
-    goal_out.set(k(b"actor"), s(&name(goal.get(b"actor"))?));
-    goal_out.set(k(b"receiver"), s(&name(goal.get(b"receiver"))?));
-    goal_out.set(k(b"province"), P::Int(to_int(goal.get(b"state_province_id"), 0)?));
-
-    let mut war = OMap::new();
-    war.set(k(b"name"), s(&name(block.get(b"name"))?));
-    war.set(k(b"active"), P::Bool(active));
-    war.set(k(b"start"), s(&start));
-    war.set(k(b"end"), s(&end));
-    war.set(k(b"original_attacker"), s(&name(block.get(b"original_attacker"))?));
-    war.set(k(b"original_defender"), s(&name(block.get(b"original_defender"))?));
-    let side = |attacking: bool| -> Vec<Vec<u8>> {
-        joined.iter().filter(|j| j.2 == attacking).map(|j| j.1.clone()).collect()
-    };
-    war.set(k(b"attackers"), sorted_names(side(true)));
-    war.set(k(b"defenders"), sorted_names(side(false)));
-    war.set(k(b"fighting"), sorted_names(fighting));
-    war.set(k(b"joins"), event(&joined));
-    war.set(k(b"leaves"), event(&left));
-    war.set(k(b"goals"), P::List(goals));
-    war.set(k(b"goal"), P::Dict(goal_out));
-    war.set(k(b"battles"), P::List(battles));
-    Ok(Some(P::Dict(war)))
 }
 
 // ------------------------------------------------------------------- market
@@ -492,78 +297,8 @@ pub(crate) fn shift_months(date: &[u8], back: i64) -> R<Vec<u8>> {
     Ok(format!("{}.{}.{}", total.div_euclid(12), total.rem_euclid(12) + 1, n[2]).into_bytes())
 }
 
-fn numeric(block: &Tree, key: &[u8]) -> R<P> {
-    let mut out = OMap::new();
-    if let Some(V::Dict(sub)) = block.get(key) {
-        for (k2, v) in &sub.pairs {
-            if k2.first() == Some(&b'_') {
-                continue;
-            }
-            if let V::Str(_) = v {
-                out.set(k(k2), P::Float(to_float(Some(v), 0.0)?));
-            }
-        }
-    }
-    Ok(P::Dict(out))
-}
-
-/// `readsave.read_worldmarket(block, save_date)`.
-pub fn read_worldmarket(block: &Tree, save_date: &[u8]) -> R<P> {
-    let current = numeric(block, b"price_pool")?;
-    let history_blocks: Vec<&Tree> = as_list(block.get(b"price_history"))
-        .into_iter()
-        .filter_map(|v| match v { V::Dict(d) => Some(d), _ => None })
-        .collect();
-    let last_update = match block.get(b"price_history_last_update") {
-        None => Vec::new(),
-        Some(V::Str(x)) => unquote(x).to_vec(),
-        Some(_) => Vec::new(),
-    };
-    let mut history = Vec::new();
-    let count = history_blocks.len() as i64;
-    for (idx, snap) in history_blocks.iter().enumerate() {
-        let stamp = if last_update.is_empty() {
-            Vec::new()
-        } else {
-            shift_months(&last_update, count - 1 - idx as i64)?
-        };
-        if stamp.is_empty() {
-            continue;
-        }
-        let stamp = text(&stamp);
-        for (good, price) in &snap.pairs {
-            if good.first() == Some(&b'_') {
-                continue;
-            }
-            if let V::Str(_) = price {
-                history.push(P::Tuple(vec![P::Str(stamp.clone()), s(good),
-                                           P::Float(to_float(Some(price), 0.0)?)]));
-            }
-        }
-    }
-    let mut snapshot = OMap::new();
-    for (name, key) in [
-        (&b"world_pool"[..], &b"worldmarket_pool"[..]),
-        (b"supply", b"supply_pool"),
-        (b"demand", b"demand"),
-        (b"real_demand", b"real_demand"),
-        (b"actual_sold", b"actual_sold"),
-        (b"actual_sold_world", b"actual_sold_world"),
-        (b"discovered", b"discovered_goods"),
-    ] {
-        snapshot.set(k(name), numeric(block, key)?);
-    }
-    let mut out = OMap::new();
-    out.set(k(b"current"), current);
-    out.set(k(b"history"), P::List(history));
-    out.set(k(b"last_update"), s(&last_update));
-    out.set(k(b"snapshot"), P::Dict(snapshot));
-    out.set(k(b"save_date"), s(save_date));
-    Ok(P::Dict(out))
-}
-
 /// The great power list: `[to_int(i, -1) for i in ids]`.
-pub fn great_nations(v: &V) -> R<P> {
+pub fn great_nations(v: &V) -> R<Vec<i64>> {
     let ids: Vec<&V> = match v {
         V::List(items) => items.iter().collect(),
         V::Dict(d) => match d.get(b"_items") {
@@ -577,7 +312,7 @@ pub fn great_nations(v: &V) -> R<P> {
     };
     let mut out = Vec::with_capacity(ids.len());
     for i in ids {
-        out.push(P::Int(to_int(Some(i), -1)?));
+        out.push(to_int(Some(i), -1)?);
     }
-    Ok(P::List(out))
+    Ok(out)
 }

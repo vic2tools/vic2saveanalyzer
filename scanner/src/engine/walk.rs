@@ -22,7 +22,7 @@
 use crate::clause::{unquote, V};
 use crate::country::{Country, Tables};
 use crate::engine::modread::{block_end, py_float, str_of};
-use crate::pickle::{FxMap, FxSet};
+use crate::fx::{FxMap, FxSet};
 use crate::province::{accumulate, pop_known, Parts, Pop, PopulationRules, Scan};
 use crate::pyre::space;
 

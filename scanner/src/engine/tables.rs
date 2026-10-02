@@ -15,7 +15,7 @@
 // forget. What is written here is only what a spec without them gets.
 
 use crate::jsonr::J;
-use crate::pickle::FxMap;
+use crate::fx::FxMap;
 
 pub struct Tables {
     /// (key, label, format)

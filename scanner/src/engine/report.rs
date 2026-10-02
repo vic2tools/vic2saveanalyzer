@@ -23,7 +23,7 @@ use crate::engine::mapflags;
 use crate::engine::market::{self, PriceRow, SnapRow};
 use crate::engine::model::Meta;
 use crate::omap::OMap;
-use crate::pickle::{FxMap, FxSet};
+use crate::fx::{FxMap, FxSet};
 use crate::pyfmt::{push_csv_field, push_int, push_json_float, push_json_str, round};
 use crate::engine::rules::{self, Mod};
 use crate::engine::wars::{self, Book, Mapping};

@@ -21,7 +21,7 @@
 use crate::deflate;
 use crate::engine::model::{Meta, Nation};
 use crate::omap::OMap;
-use crate::pickle::{FxMap, FxSet};
+use crate::fx::{FxMap, FxSet};
 use crate::pyfmt::{floordiv, push_csv_field, push_float, push_int, push_json_float,
                    push_json_str, round, trunc_int, Num};
 use crate::engine::rules::{impact_for, naval_profile, rate_for, save_world, Held, Mod, World, D};
@@ -483,8 +483,6 @@ pub struct Kept {
     pub primary_culture: String,
     pub accepted_cultures: Vec<String>,
     pub government: String,
-    pub total_pop: i64,
-    pub is_player: Option<bool>,
     pub capital: String,
 }
 
@@ -562,7 +560,7 @@ pub fn finish(pre: Pre, spec: &Spec, m: &Mod, live: Option<&FxSet<String>>) -> D
     for pre in nations {
         let PreNation { tag, nat, kept, is_player, buckets, pool, entries, cap_rule } = pre;
         if !kept {
-            kept_out.push(trim(&tag, &nat, None));
+            kept_out.push(trim(&tag, &nat));
             continue;
         }
         let rate = rate_for(&nat, m, live, Some(&world), is_player)?;
@@ -738,13 +736,13 @@ pub fn finish(pre: Pre, spec: &Spec, m: &Mod, live: Option<&FxSet<String>>) -> D
         }
         let vals: Vec<Val> = columns.iter().map(|c| row.get(c)).collect();
         csv_line(&mut text[0], &vals);
-        kept_out.push(trim(&tag, &row.nat, Some(is_player)));
+        kept_out.push(trim(&tag, &row.nat));
         rows.push(row);
     }
     Ok(Spent { meta, nations: kept_out, chunk, rows, tables, naval, supply, text })
 }
 
-fn trim(tag: &str, nat: &Nation, is_player: Option<bool>) -> Kept {
+fn trim(tag: &str, nat: &Nation) -> Kept {
     Kept {
         tag: tag.to_string(),
         units_at: nat.units_at.clone(),
@@ -752,8 +750,6 @@ fn trim(tag: &str, nat: &Nation, is_player: Option<bool>) -> Kept {
         primary_culture: nat.primary_culture.clone(),
         accepted_cultures: nat.accepted_cultures.clone(),
         government: nat.government.clone(),
-        total_pop: nat.total_pop,
-        is_player,
         capital: nat.capital.clone(),
     }
 }

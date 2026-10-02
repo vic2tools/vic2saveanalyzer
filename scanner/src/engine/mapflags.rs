@@ -18,7 +18,7 @@
 use crate::engine::dates::py_int;
 use crate::deflate;
 use crate::omap::OMap;
-use crate::pickle::{FxMap, FxSet};
+use crate::fx::{FxMap, FxSet};
 use crate::pyfmt::{floordiv, round};
 use std::io::{Read, Seek, SeekFrom};
 

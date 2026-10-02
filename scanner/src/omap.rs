@@ -15,7 +15,7 @@
 // already there keeps its place. Small maps are searched in order; a map
 // past `INDEXED` keys gets a hash index.
 
-use crate::pickle::FxMap;
+use crate::fx::FxMap;
 use std::borrow::Borrow;
 use std::hash::Hash;
 

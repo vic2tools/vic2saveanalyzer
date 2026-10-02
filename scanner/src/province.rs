@@ -15,7 +15,7 @@
 
 use crate::text::{find, find_pair, is_number_b, to_float_b, to_int_b, trim_b, trim_end_b,
                   unquote_b};
-use crate::pickle::{FxMap, FxSet};
+use crate::fx::{FxMap, FxSet};
 
 
 

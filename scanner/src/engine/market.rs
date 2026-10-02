@@ -12,7 +12,7 @@ use crate::engine::dates::date_key;
 use crate::engine::tables::Tables;
 use crate::engine::model::Meta;
 use crate::omap::OMap;
-use crate::pickle::FxSet;
+use crate::fx::FxSet;
 use crate::pyfmt::round;
 
 

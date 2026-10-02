@@ -1,5 +1,4 @@
-// The report engine: a whole run, from the saves to the report, once the
-// analyzer's Python has read the mod.
+// The report engine: a whole run, from the saves to the report.
 // Copyright (C) 2026 vic2tools
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -9,12 +8,10 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 //
-//     vic2scan report SPEC.json [--dump FOLDER]
-//
-// SPEC is what `engine.spec` writes: the saves in report order, how each is
-// read, how each nation is finished, and where the report goes. The mod
-// folder is named there too (`mod_path`), and read here (`modread`) on a
-// thread of its own while the saves are.
+// The spec is what the front end (`front`) makes of a run: the saves in
+// report order, how each is read, how each nation is finished, and where the
+// report goes. The mod folder is named there too (`mod_path`), and read here
+// (`modread`) on a thread of its own while the saves are.
 //
 // Every save is read on every core (`prepare`, pass one), the campaign's
 // inventions are settled, every save is finished (`finish`, pass two), and
@@ -43,7 +40,7 @@ use crate::country::{read_country, Country, Tables};
 use finish::{Pre, Spec, Spent};
 use crate::jsonr::{self, J};
 use model::Save;
-use crate::pickle::{FxMap, FxSet};
+use crate::fx::{FxMap, FxSet};
 use crate::province::{read_province, top_level_blocks, Interner, PopulationRules, Scan};
 use rules::{Decline, Mod, D};
 use crate::text::{latin1, tag_bytes, to_int_b, trim_b, unquote_b};
@@ -90,13 +87,11 @@ pub struct Run {
     pub quiet: bool,
     pub jobs: Option<i64>,
     pub cross: Option<String>,
-    /// The mod folder, read here (`modread`); or, for the checks that hand
-    /// the engine a mod Python read, `mod_file`, that mod as JSON.
+    /// The mod folder, read here (`modread`).
     pub mod_path: Option<String>,
     /// `mod_reader.mod_signature` of it, which keys the read kept for the
     /// next run; None when Python did not work it out.
     pub mod_signature: Option<String>,
-    pub mod_file: Option<String>,
     /// Whether a host reads `@progress` and the rest: Python, which starts
     /// the engine with a spec (`engine.spec`), does.
     pub protocol: bool,
@@ -213,7 +208,6 @@ fn parse_run(j: &J) -> Run {
         cross: j.at("cross").as_str().map(|s| s.to_string()),
         mod_path: j.at("mod_path").as_str().map(|s| s.to_string()),
         mod_signature: j.at("mod_signature").as_str().map(|s| s.to_string()),
-        mod_file: j.at("mod_file").as_str().map(|s| s.to_string()),
         protocol: j.at("protocol").truthy(),
         own_refusals: j.at("own_refusals").truthy(),
         ask: explain::Ask::from_json(j.at("diagnose")),
@@ -496,7 +490,7 @@ pub fn os_error_text(e: &std::io::Error, path: &str) -> String {
     format!("[Errno {}] {}: {}", errno, strerror, crate::engine::modread::py_repr(path))
 }
 
-/// One save read whole, the way `--record` reads it: read again once if it
+/// One save read whole: read again once if it
 /// changed while it was read, as Python does, and refused in Python's words
 /// if it changes again.
 pub fn read_save(path: &str, reading: &Reading, raw: &mut Vec<u8>) -> Result<Save, Refused> {
@@ -768,17 +762,12 @@ pub fn decline(why: &str) -> ! {
     std::process::exit(1);
 }
 
-/// The mod: read from its folder -- or from what the last run kept of the
-/// same files -- or from the JSON a check wrote of the one Python read.
-fn load_mod(mod_path: &Option<String>, signature: &Option<String>, mod_file: &Option<String>,
+/// The mod: read from its folder, or from what the last run kept of the
+/// same files.
+fn load_mod(mod_path: &Option<String>, signature: &Option<String>,
             store: &cache::Store) -> D<Mod> {
-    let j = match (mod_path, mod_file) {
-        (_, Some(file)) => {
-            let text = std::fs::read_to_string(file)
-                .unwrap_or_else(|e| decline(&format!("cannot read the mod export {}: {}", file, e)));
-            jsonr::parse(&text).unwrap_or_else(|e| decline(&format!("mod export: {}", e)))
-        }
-        (Some(path), None) => {
+    let j = match mod_path {
+        Some(path) => {
             let slot = cache::mod_slot(store, path, signature.as_deref());
             match slot.as_ref().and_then(cache::mod_load) {
                 Some(j) => j,
@@ -791,7 +780,7 @@ fn load_mod(mod_path: &Option<String>, signature: &Option<String>, mod_file: &Op
                 }
             }
         }
-        (None, None) => decline("no mod was named"),
+        None => decline("no mod was named"),
     };
     Mod::from_json(&j)
 }
@@ -882,26 +871,8 @@ pub fn bench(args: &[String]) {
               t[0] / k, t[1] / k, t[2] / k, t[3] / k, t[4] / k, t[5] / k);
 }
 
-pub fn main(args: &[String]) {
-    if args.len() < 3 {
-        eprintln!("usage: vic2scan report SPEC.json [--dump FOLDER]");
-        std::process::exit(2);
-    }
-    let text = std::fs::read_to_string(&args[2]).unwrap_or_else(|e| {
-        eprintln!("cannot read {}: {}", args[2], e);
-        std::process::exit(2);
-    });
-    let spec_j = jsonr::parse(&text).unwrap_or_else(|e| {
-        eprintln!("{}: {}", args[2], e);
-        std::process::exit(2);
-    });
-    let dump = args.iter().position(|a| a == "--dump").and_then(|i| args.get(i + 1)).cloned();
-    run_spec(&spec_j, dump);
-}
-
-/// A run as `engine.spec` declares it. None when `dump` was asked for
-/// instead of the report; a run handed back never returns.
-pub fn run_spec(spec_j: &J, dump: Option<String>) -> Option<report::Outcome> {
+/// A run as the front end declares it. A run handed back never returns.
+pub fn run_spec(spec_j: &J) -> report::Outcome {
     phase("start");
     let run = parse_run(spec_j);
     out::set_protocol(run.protocol);
@@ -931,11 +902,11 @@ pub fn run_spec(spec_j: &J, dump: Option<String>) -> Option<report::Outcome> {
     // while the saves are: the mod arrives while they are being read, and
     // the bitmap is twelve million pixels nothing else needs until the page.
     let mod_job = {
-        let (mod_path, mod_file) = (run.mod_path.clone(), run.mod_file.clone());
+        let mod_path = run.mod_path.clone();
         let (signature, store) = (run.mod_signature.clone(), run.store.clone());
         let (scale, want_map) = (run.map_scale, !run.no_html);
         std::thread::spawn(move || {
-            let mut m = load_mod(&mod_path, &signature, &mod_file, &store)?;
+            let mut m = load_mod(&mod_path, &signature, &store)?;
             if want_map {
                 m.raster = Some(crate::engine::mapflags::province_raster(&m.map_bmp, &m.map_csv, scale));
             }
@@ -1043,9 +1014,9 @@ pub fn run_spec(spec_j: &J, dump: Option<String>) -> Option<report::Outcome> {
         Err(d) => match modread::raised_sentence(&d) {
             Some(sentence) if run.own_refusals => {
                 out::release();
-                return Some(report::Outcome { html: None, refused: Vec::new(),
-                                              run_error: Some(sentence.to_string()),
-                                              cross_part: None });
+                return report::Outcome { html: None, refused: Vec::new(),
+                                         run_error: Some(sentence.to_string()),
+                                         cross_part: None };
             }
             _ => decline(&format!("the mod: {}", d.0.trim_start_matches('\u{1}'))),
         },
@@ -1065,20 +1036,20 @@ pub fn run_spec(spec_j: &J, dump: Option<String>) -> Option<report::Outcome> {
         }
     }
     if pres.is_empty() && run.cross_part {
-        return Some(report::Outcome { html: None, refused: Vec::new(), run_error: None,
-                                      cross_part: None });
+        return report::Outcome { html: None, refused: Vec::new(), run_error: None,
+                                 cross_part: None };
     }
     if pres.is_empty() {
         out::release();
-        return Some(report::Outcome { html: None, refused: Vec::new(),
-                                      run_error: Some("No saves could be read.".into()), cross_part: None });
+        return report::Outcome { html: None, refused: Vec::new(),
+                                 run_error: Some("No saves could be read.".into()), cross_part: None };
     }
     // A diagnostic is answered off the campaign as it stands, and ends the
     // run: no report, no tables.
     if let Some(ask) = &run.ask {
         let said = explain::answer(ask, &m, &live, &pres, &files, &run.reading);
-        return Some(report::Outcome { html: None, refused: Vec::new(), run_error: said.err(),
-                                      cross_part: None });
+        return report::Outcome { html: None, refused: Vec::new(), run_error: said.err(),
+                                 cross_part: None };
     }
 
     // What `--cross` names each nation by: every nation of every save, in
@@ -1108,17 +1079,13 @@ pub fn run_spec(spec_j: &J, dump: Option<String>) -> Option<report::Outcome> {
     }
     let spent: Vec<Spent> = spent.into_iter().map(|s| s.unwrap()).collect();
     phase("pass two: saves finished");
-    if let Some(folder) = dump {
-        crate::engine::dump::write(&folder, &spent, &m, &live);
-        return None;
-    }
     // Nothing from here on hands the run back.
     out::release();
     if run.cross_part {
-        return Some(report::Outcome { html: None, refused: Vec::new(), run_error: None,
-                                      cross_part: Some(cross_part(&run, &m, &held_names, &spent)) });
+        return report::Outcome { html: None, refused: Vec::new(), run_error: None,
+                                 cross_part: Some(cross_part(&run, &m, &held_names, &spent)) };
     }
-    Some(crate::engine::report::run(&run, &m, &live, spent))
+    crate::engine::report::run(&run, &m, &live, spent)
 }
 
 /// One campaign of a `--cross` run, as `campaign_rows` and `run_cross`

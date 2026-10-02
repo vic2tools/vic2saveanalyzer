@@ -19,7 +19,7 @@
 use crate::jsonr::J;
 use crate::engine::model::{Meta, Nation};
 use crate::omap::OMap;
-use crate::pickle::{FxMap, FxSet};
+use crate::fx::{FxMap, FxSet};
 use crate::pyfmt::{py_float, py_sum, trunc_int};
 
 /// Something Python would have raised over, which the engine does not copy:

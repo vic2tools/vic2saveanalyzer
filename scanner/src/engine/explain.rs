@@ -22,7 +22,7 @@ use crate::engine::model::Nation;
 use crate::engine::rules::{self, Mod};
 use crate::engine::{read_save, Reading, Refused};
 use crate::jsonr::J;
-use crate::pickle::FxSet;
+use crate::fx::FxSet;
 
 /// What was asked, and the settings the answers read.
 pub struct Ask {
@@ -285,7 +285,7 @@ fn explain_mob_pool(ask: &Ask, tag: &str, m: &Mod, live: &FxSet<String>, pres: &
 /// index held at least eight times.
 fn index_holdings(pres: &[Pre]) -> Vec<(i64, Vec<FxSet<&str>>)> {
     let mut out: Vec<(i64, Vec<FxSet<&str>>)> = Vec::new();
-    let mut at: crate::pickle::FxMap<i64, usize> = crate::pickle::FxMap::default();
+    let mut at: crate::fx::FxMap<i64, usize> = crate::fx::FxMap::default();
     for pre in pres {
         for h in &pre.held {
             if h.tech_list.is_empty() {
