@@ -648,7 +648,17 @@ fn read_flat(text: &[u8], blocks: &[(&[u8], usize, usize)], reading: &Reading, t
 
 // ------------------------------------------------------------ the pool
 
-/// `readfolder.worker_count`: cores bar one, the saves left, and memory.
+/// How many threads read the saves: cores bar one, the saves left, and
+/// memory.
+///
+/// Every logical core helps (the 1880s campaign's empty-cache run: 3.83 s
+/// on 8 threads, 3.50 s on 15, 3.47 s on 16, on 8 cores of two threads
+/// each); one is left for the window. A thread holds the save it reads --
+/// mapped, or in its buffer where saves are not mapped -- and ~0.15 of a
+/// save's size more while it reads it (measured: 43 MB a thread for 42 MB
+/// saves, read into buffers). Threads are allowed half of the memory the
+/// system could hand out, at a save and a quarter each; the rest is for
+/// the campaign the run holds, which is the same whatever the count.
 pub fn worker_count(jobs: usize, biggest: u64, asked: Option<i64>) -> usize {
     if let Some(a) = asked {
         return (a.max(1) as usize).min(jobs).max(1);
@@ -656,19 +666,21 @@ pub fn worker_count(jobs: usize, biggest: u64, asked: Option<i64>) -> usize {
     let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
         .saturating_sub(1).max(1);
     let mut room = jobs;
-    if let Some(spare) = spare_memory() {
-        room = ((spare as f64 * 0.6) as u64 / (biggest * 3).max(1)).max(1) as usize;
+    if let Some(avail) = available_memory() {
+        let per_thread = (biggest + biggest / 4).max(1);
+        room = (avail / 2 / per_thread).max(1) as usize;
     }
     cores.min(jobs).min(room).max(1)
 }
 
 #[cfg(target_os = "linux")]
-fn spare_memory() -> Option<u64> {
-    // `os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")`: free
-    // pages, which /proc/meminfo calls MemFree.
+fn available_memory() -> Option<u64> {
+    // MemAvailable: free pages and what the page cache would give back.
+    // MemFree alone, which the Python read, leaves the page cache out, and
+    // moved with it from run to run (8, 11 or 15 threads here).
     let text = std::fs::read_to_string("/proc/meminfo").ok()?;
     for line in text.lines() {
-        if let Some(rest) = line.strip_prefix("MemFree:") {
+        if let Some(rest) = line.strip_prefix("MemAvailable:") {
             let kb: u64 = rest.trim().trim_end_matches("kB").trim().parse().ok()?;
             return Some(kb * 1024);
         }
@@ -677,7 +689,7 @@ fn spare_memory() -> Option<u64> {
 }
 
 #[cfg(windows)]
-fn spare_memory() -> Option<u64> {
+fn available_memory() -> Option<u64> {
     #[repr(C)]
     struct Status {
         length: u32,
@@ -700,7 +712,7 @@ fn spare_memory() -> Option<u64> {
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
-fn spare_memory() -> Option<u64> {
+fn available_memory() -> Option<u64> {
     None
 }
 

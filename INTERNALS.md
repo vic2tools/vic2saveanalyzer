@@ -504,6 +504,69 @@ occupied; only that third one took anything.
 
 ## Speed
 
+### A run ends without freeing, and reads on a steady count of threads, 2026-10-02
+
+Two steps, a commit each.
+
+**Exiting without freeing** (`a2b8c02`). gdb samples of a warm rebuild
+found ~0.3 s after "tables written" spent in drop glue: the campaign's
+`OMap<String, OMap<String, f64>>` tables, the `Kept` saves, the mod, each
+string freed on its own before the process ended. `report::run` now
+`mem::forget`s the campaign, prices and snapshots once it has said
+everything, and `run_spec` the run and the mod after it; the system takes
+the memory back whole at exit. One campaign of a `--cross` run returns
+from `run_spec` before either, so it is freed as before and a comparison
+holds one campaign at a time. Checked through a pipe, into a reader that
+goes away after three lines, and hosted by the window (`--protocol`,
+relayed): status 0, every protocol line read, no `vic2scan` left behind.
+
+What is left after the last line is the kernel: ~1 ms from the summary to
+`exit()`, then ~60-80 ms before the parent sees the process gone, which is
+the 1.3 GB address space being torn down. Only a smaller data model
+(below, to come) shortens that.
+
+**The worker count** (the commit after it). `worker_count` was the Python's rule:
+cores bar one, capped by MemFree x 0.6 / (3 x the biggest save). MemFree
+leaves the page cache out, so with the saves cached it moved from run to
+run -- 8, 11 and 15 threads on the same campaign -- and 3 x a save was a
+Python worker process's cost. Measured on the Rust threads (the 1880s
+campaign, biggest save 42 MB, `opt/memj.py`):
+
+| `-j` | heap at the end of pass one, saves mapped | the same, saves read into buffers (as on Windows) | empty-cache wall |
+|---|---|---|---|
+| 1 | 762 MB | 802 MB | 18.3 s |
+| 4 | 781 MB | 937 MB | 5.8 s |
+| 8 | 804 MB | 1,112 MB | 3.83 s |
+| 16 | 854 MB | 1,447 MB | 3.47 s |
+
+So a thread costs ~6 MB of heap besides the save it holds (mapped, or 43 MB
+of buffer where saves are read), and most of the memory is the campaign
+being kept, the same at any count; the run's peak, ~1.25-1.3 GB, comes
+after pass one. The rule now reads MemAvailable on Linux (Windows already
+read `avail_phys`), gives a thread a save and a quarter, and lets threads
+have half of what is available. On this machine that allows ~160 threads,
+so the cores decide: 15, every run. The Windows branch is unchanged and
+type-checks for `x86_64-pc-windows-gnu`, but has not been run on Windows.
+
+Threads above the 8 physical cores help, every one (empty-cache wall,
+median of 3, interleaved): 8 threads 3.83 s, 12 3.62 s, 14 3.52 s, 15
+3.50 s, 16 3.47 s. Cores bar one stays, leaving a core for the window; the
+sixteenth thread is worth ~1%, inside the noise.
+
+The 265 saves of the 1880s campaign, median wall through
+`vic2_analyzer.py`, files in the page cache:
+
+| run | before (`79499d1`) | exit without freeing | and the worker count |
+|---|---|---|---|
+| empty engine cache (3 runs) | 4.16 s | 3.89 s | 3.49 s |
+| rebuild from a warm cache (5) | 1.41 s | 1.15 s | 1.15 s |
+| nothing changed (3) | 60 ms | 62 ms | 62 ms |
+
+The warm rebuild was expected at ~1.1 s; it is 1.15 s, the kernel's
+teardown above being the difference. Every table, `report.html`, stdout and
+stderr are byte-identical to the run before, bar "on N cores". 28/28
+checks after each commit; 57/57 mutations, run once after both.
+
 ### The scanner's dead modes are gone, 2026-10-01
 
 The first step of a pass at the scanner's speed, and not a speedup itself:
