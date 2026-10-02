@@ -971,6 +971,9 @@ pub fn run(run: &Run, m: &Mod, live: &FxSet<String>, spent: Vec<Spent>) -> Outco
     say(&format!("@done html={} refused={}", html_path.is_some() as i32,
                  refused.iter().map(|p| crate::engine::basename(p).to_string())
                      .collect::<Vec<_>>().join("\t")));
+    // The process ends with this run, and the system takes its memory back
+    // whole: freeing the campaign a string at a time first cost ~0.3 s.
+    std::mem::forget((c, prices, snaps));
     Outcome { html: html_path, refused, run_error: None, cross_part: None }
 }
 

@@ -1085,7 +1085,11 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
         return report::Outcome { html: None, refused: Vec::new(), run_error: None,
                                  cross_part: Some(cross_part(&run, &m, &held_names, &spent)) };
     }
-    crate::engine::report::run(&run, &m, &live, spent)
+    let done = crate::engine::report::run(&run, &m, &live, spent);
+    // As the campaign in `report::run`: the process ends with this run. A
+    // campaign of a `--cross` run, one of several, is freed as it returns.
+    std::mem::forget((run, m, live));
+    done
 }
 
 /// One campaign of a `--cross` run, as `campaign_rows` and `run_cross`
