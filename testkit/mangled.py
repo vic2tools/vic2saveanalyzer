@@ -75,14 +75,10 @@ HOW = ["cut in half", "bytes flipped", "a piece missing", "braces rubbed out",
        "nothing but nulls in the middle"]
 
 
-def ask(saves, holding, game, python=False):
+def ask(saves, holding, game):
     """The analyzer's answer for the folder `saves`."""
     out = os.path.join(holding, "out")
     env = dict(os.environ, TMPDIR=os.path.join(holding, "tmp"))
-    for key in ("VIC2_NO_ENGINE", "VIC2_NO_FRONT", "VIC2_ENGINE_REQUIRED"):
-        env.pop(key, None)
-    if python:
-        env["VIC2_NO_ENGINE"] = "1"
     os.makedirs(env["TMPDIR"], exist_ok=True)
     got = expected.run([saves, "--out", out, "--game-root", game, "--no-cache", "-j", "1",
                         "--no-html"], holding, env, out,
@@ -180,8 +176,6 @@ def main():
     ap.add_argument("rounds", nargs="?", type=int, default=5)
     ap.add_argument("--update", action="store_true",
                     help="write what the program answers now as the expected answers")
-    ap.add_argument("--python", action="store_true",
-                    help="with --update: take the answers from the Python (VIC2_NO_ENGINE)")
     args = ap.parse_args()
     holding = tempfile.mkdtemp(prefix="vic2mangled")
     saves = os.path.join(holding, "saves")
@@ -200,7 +194,7 @@ def main():
             for i in range(args.rounds):
                 with open(path, "wb") as fh:
                     fh.write(damage(raw, how, rng))
-                got = ask(saves, holding, game, args.python)
+                got = ask(saves, holding, game)
                 if crashed(got):
                     crashes.append((how, (got["stdout.txt"] + got["stderr.txt"]).strip()
                                     .splitlines()[-1:]))
@@ -214,10 +208,9 @@ def main():
                         differ.append(("%s %d" % (how, i), found))
         if book is not None:
             book.finish()
-        if not args.python:
-            crashes += [("rewritten while read", w)
-                        for w in while_being_written(saves, holding, game)]
-            misread = cut_short(raw, saves, holding, game)
+        crashes += [("rewritten while read", w)
+                    for w in while_being_written(saves, holding, game)]
+        misread = cut_short(raw, saves, holding, game)
     finally:
         shutil.rmtree(holding, ignore_errors=True)
 

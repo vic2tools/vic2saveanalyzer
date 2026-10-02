@@ -29,41 +29,44 @@ fn l1(b: &[u8]) -> String {
     crate::engine::modread::l1(b)
 }
 
-/// `_refuse_unless_whole`, asked of every file first: whether Python would
-/// read it at all.
-pub fn whole(path: &str) -> bool {
+/// Whether a file can be looked at whole, by `--peek` and `--verify`: Err
+/// with the sentence that says why not -- a file that cannot be opened, a
+/// zip, one with no `date=` in its head, one cut short. The report skips
+/// such a file; these two are asked about the file itself, so they refuse.
+pub fn whole(path: &str) -> Result<(), String> {
     use std::io::{Read, Seek, SeekFrom};
-    let mut f = match std::fs::File::open(path) {
-        Ok(f) => f,
-        Err(_) => return false,
-    };
+    let unreadable = |e: std::io::Error| format!("{} cannot be read: {}", path, e);
+    let mut f = std::fs::File::open(path).map_err(unreadable)?;
     let mut head = vec![0u8; 4096];
     let mut got = 0;
     while got < head.len() {
         match f.read(&mut head[got..]) {
             Ok(0) => break,
             Ok(k) => got += k,
-            Err(_) => return false,
+            Err(e) => return Err(unreadable(e)),
         }
     }
     let head = &head[..got];
     if head.starts_with(b"PK") {
-        return false;
+        return Err(format!("{} is a zip archive. Extract it, or re-save the game in debug mode \
+                            to get plaintext.", path));
     }
     let has = |needle: &[u8]| head.windows(needle.len()).any(|w| w == needle);
     if !(has(b"date=") || has(b"date =")) {
-        return false;
+        return Err(format!("{} does not look like a plaintext Vic2 save (no `date=` in the \
+                            header). If it is binary, launch Victoria 2 in debug mode and re-save.",
+                           path));
     }
-    let len = match f.seek(SeekFrom::End(0)) {
-        Ok(n) => n,
-        Err(_) => return false,
-    };
+    let len = f.seek(SeekFrom::End(0)).map_err(unreadable)?;
     let mut tail = Vec::new();
-    if f.seek(SeekFrom::Start(len.saturating_sub(256))).is_err() || f.read_to_end(&mut tail).is_err() {
-        return false;
-    }
+    f.seek(SeekFrom::Start(len.saturating_sub(256))).map_err(unreadable)?;
+    f.read_to_end(&mut tail).map_err(unreadable)?;
     let end = tail.iter().rposition(|c| !b" \t\n\r\x0b\x0c".contains(c));
-    end.map(|i| tail[i]) == Some(b'}')
+    if end.map(|i| tail[i]) != Some(b'}') {
+        return Err(format!("{} stops part-way through, so it was cut short: the game crashed \
+                            while writing it, or is writing it right now.", path));
+    }
+    Ok(())
 }
 
 /// `str.isdigit()` for latin-1 text.

@@ -1,6 +1,0 @@
-Checking 9 save(s) on N cores.
-
-=== 0.v2 ===
-tag     brigades    scan   diff     ships    scan   diff        people          scan
-All nations agree: 0 regiments, 0 ships, 9,450 people.
-

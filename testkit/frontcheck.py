@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
 """
-Hold the Rust front end of a run (`vic2scan analyze`) to the Python's.
+Hold the run's front end (`vic2scan analyze`) to the answers recorded for it.
 
-A run from the command line is now done by the scanner from the start --
-finding the saves, settling the game and the mod, the stamp, the dates --
-and what it does not do it hands back before saying anything. So every
-case here is run twice, the Rust way and all in Python (`VIC2_NO_ENGINE=1`),
-and the two must agree on everything a person sees: what was printed to
-stdout and to stderr, the exit status, and every file written but the
-stamp, which each way takes of itself. The page is compared by what it
-carries (`enginecheck.page`): its compressed parts are two compressors'
-output.
+A run from the command line is done by the scanner from the start --
+finding the saves, settling the game and the mod, the stamp, the dates, the
+diagnostics, `--cross` -- and every case here must print, exit and write
+what is recorded for it in `testkit/expected/frontcheck/` (`expected.py`):
+stdout and stderr, the exit status, and every file but the stamp, the page
+by what it carries. The answers were the pure Python's, taken while it was
+still here to ask, and are updated with `--update` after a deliberate
+change.
 
 The cases are the edges of the front end: every refusal it words, a single
 save, a folder with none, two saves of one date, `~` and `$VAR` in paths, a
 relative path, the settings that change the spec, a table open elsewhere,
-"nothing has changed" on the second run, and the runs it hands back.
+"nothing has changed" on the second run, saves laid out another way, the
+diagnostics, `--peek`, `--verify` and `--cross`, and files that cannot be
+read at all.
 
-    python3 testkit/frontcheck.py
+    python3 testkit/frontcheck.py [--update]
 """
 
 import os
-import re
 import shutil
 import stat
 import subprocess
@@ -124,13 +124,64 @@ def cross_world(holding):
     return game, top
 
 
+def mod_signature(mod_path):
+    """
+    What `vic2scan mod-signature` has to answer, as the Python it replaced
+    worked it out: an MD5 of the mod folder's path and every file below it
+    (its path under the folder, size and time, `os.walk` order with names
+    sorted, linked folders not followed), and of the game folders beneath
+    a mod that sits in an install's mod folder.
+    """
+    import hashlib
+    from mod_reader import _base_game_path
+    if not mod_path:
+        return "no-mod"
+    mod_path = os.path.abspath(os.path.expanduser(os.path.expandvars(mod_path)))
+    roots = [mod_path]
+    base = _base_game_path(mod_path)
+    if base:
+        roots.extend(os.path.join(base, folder) for folder in (
+            "common", "decisions", "gfx/flags", "inventions", "localisation",
+            "map", "poptypes", "technologies", "units"))
+    digest = hashlib.md5()
+    for source in roots:
+        digest.update(source.encode("utf-8", "replace"))
+        _sign_folder(digest, source, "")
+    return digest.hexdigest()
+
+
+def _sign_folder(digest, folder, under):
+    files, folders = [], []
+    try:
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                try:
+                    is_dir = entry.is_dir()
+                except OSError:
+                    is_dir = False
+                (folders if is_dir else files).append(entry)
+    except OSError:
+        return
+    files.sort(key=lambda entry: entry.name)
+    for entry in files:
+        try:
+            st = entry.stat()
+        except OSError:
+            continue
+        digest.update(("%s|%d|%d\n" % (os.path.join(under, entry.name), st.st_size,
+                                        st.st_mtime_ns)).encode("utf-8", "replace"))
+    folders.sort(key=lambda entry: entry.name)
+    for entry in folders:
+        path = os.path.join(folder, entry.name)
+        if not os.path.islink(path):
+            _sign_folder(digest, path, os.path.join(under, entry.name))
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])
     ap.add_argument("--update", action="store_true",
                     help="write what the program answers now as the expected answers")
-    ap.add_argument("--python", action="store_true",
-                    help="with --update: take the answers from the Python (VIC2_NO_ENGINE)")
     args = ap.parse_args()
     if not os.path.isfile(BIN):
         print("needs a built Rust scanner")
@@ -308,11 +359,11 @@ def main():
             ("a peek", [saves, "--peek"] + M, None),
             ("a peek at a save laid out another way", [walked, "--peek"] + M, None),
             ("a peek at the fullest save", [os.path.join(holding, "furnished.v2"), "--peek"], None),
-            ("a peek at a file Python refuses", [refused_only, "--peek"] + M, "handed back"),
+            ("a peek at a file it cannot read", [refused_only, "--peek"] + M, None),
             ("a peek beside a diagnostic", [saves, "--peek", "--explain-mob", "ENG"] + M, None),
             ("verified", [saves, "--verify"] + M, None),
             ("verified, laid out another way", [walked, "--verify", "-j", "1"], None),
-            ("verified among files Python refuses", [mixed, "--verify"] + M, "handed back"),
+            ("verified among files it cannot read", [mixed, "--verify"] + M, None),
         ]
         bad = 0
         temps = []
@@ -327,11 +378,10 @@ def main():
             bad += 1
         # The mod's signature, which keys the engine's copy of the mod and
         # goes into the stamp: Python's MD5 over the same walk.
-        import mod_reader
         for folder in (mod, game, away, empty_mod, os.path.join(holding, "nowhere")):
             mine = subprocess.run([BIN, "mod-signature", folder], capture_output=True,
                                   text=True).stdout.strip()
-            theirs = mod_reader.mod_signature(folder)
+            theirs = mod_signature(folder)
             if mine != theirs:
                 bad += 1
                 print("DIFFERS: the signature of %s: %s against %s" % (folder, mine, theirs))
@@ -341,19 +391,12 @@ def main():
             os.makedirs(place)
             out = os.path.join(place, "out")
             env = dict(os.environ)
-            for key in ("VIC2_NO_ENGINE", "VIC2_ENGINE_REQUIRED", "VIC2_NO_FRONT"):
-                env.pop(key, None)
             env["VIC2FRONT"] = holding
             env["HOME"] = holding
             # Short: a worker pool's socket may live in it, and a path past
             # 108 bytes is refused.
             env["TMPDIR"] = tempfile.mkdtemp(prefix="vf", dir="/tmp" if os.name != "nt" else None)
             temps.append(env["TMPDIR"])
-            log = os.path.join(place, "front.log")
-            if args.python:
-                env["VIC2_NO_ENGINE"] = "1"
-            else:
-                env["VIC2_FRONT_LOG"] = log
             full = list(argv) if how == "own-out" else list(argv) + ["--out", out]
             places = [(env["TMPDIR"], "TMP"), (holding, "HOLDING")]
             if how == "locked":
@@ -374,23 +417,7 @@ def main():
             got = expected.run(full, holding, env, out, places)
             if how == "locked":
                 os.chmod(locked, stat.S_IREAD | stat.S_IWRITE)
-            if how == "handed back":
-                # Python's own crash: its traceback carries line numbers
-                # inside the worker pool that depend on timing.
-                got["stderr.txt"] = re.sub(r"(?s)Traceback.*", "<a Python traceback>\n",
-                                           got["stderr.txt"])
             found = book.hold(name, got)
-            if not args.python:
-                # A case the Rust handed back would be the Python answering
-                # for it. A refusal is written for Python to raise (status
-                # 4), which the person sees as status 1.
-                with open(log) as fh:
-                    last = (fh.read().strip().splitlines() or [""])[-1]
-                logged = {"done: status 4": "done: status 1"}.get(last, last)
-                handed = logged != "done: status %s" % got["status.txt"].strip()
-                if handed != (how == "handed back"):
-                    found.append("the Rust %s this case: %r"
-                                 % ("handed back" if handed else "made", last))
             if found:
                 bad += 1
             expected.report(name, found, width)

@@ -20,9 +20,8 @@
 // inventions are settled, every save is finished (`finish`, pass two), and
 // the campaign is walked in date order into the tables and the page.
 //
-// Anything Python would have read another way -- a file the scanner turns
-// down, a mod rule the engine does not copy -- ends the run with status 3
-// before anything is written, and the analyzer reads the campaign itself.
+// Anything it cannot read at all -- a number past what an int holds, a block
+// where a list belongs -- stops the run with a sentence (`decline`).
 
 pub mod cache;
 pub mod dates;
@@ -52,7 +51,6 @@ use std::io::{Read, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 
-pub const DECLINED: i32 = 3;
 
 /// Phase times, when `VIC2_ENGINE_TIMES` is set: appended to the file it
 /// names, or on stderr when it names none (`1`).
@@ -583,8 +581,8 @@ fn read_bytes(path: &str, reading: &Reading, raw: &[u8],
             let (date, player, countries) = read_flat(text, &blocks, reading, &tables, &mut scan);
             (blocks, date, player, countries)
         }
-        // Not the game's layout: Python walks it a token at a time, and so
-        // does this.
+        // Not the game's layout: walked a token at a time, as the Python
+        // that this replaced walked it.
         None => {
             let w = walk::read(text, &reading.pop_types, &reading.mob_types, &tables, &mut scan,
                                &reading.population_groups)
@@ -593,7 +591,7 @@ fn read_bytes(path: &str, reading: &Reading, raw: &[u8],
         }
     };
     let rest = model::read_rest(text, &blocks)
-        .map_err(|_| Refused::Back(format!("{}: the wars or the market hold something only Python reads", path)))?;
+        .map_err(|_| Refused::Back(format!("{}: the wars or the market hold something it cannot make out", path)))?;
     let save = model::build(basename(path).to_string(), date, player, &scan, &countries, rest)
         .map_err(|_| Refused::Back(format!("{}: the record could not be built", path)))?;
     // Again after the scan, not only after the read: a mapped file is read
@@ -754,32 +752,20 @@ where
     });
 }
 
-/// A line in the file `VIC2_FRONT_LOG` names, for the checks that need to
-/// know whether a run was made here or handed back.
-pub fn front_log(line: &str) {
-    if let Some(path) = std::env::var_os("VIC2_FRONT_LOG") {
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-            let _ = writeln!(f, "{}", line);
-        }
-    }
-}
-
 /// A line for the host to read: progress, and the like.
 pub fn say(line: &str) {
     out::protocol(line);
 }
 
-/// Hand the run back. What it has said so far is dropped with it when it
-/// was being held (`out`); the checks that require the engine see why.
+/// Stop the run over something it cannot read: a number past what an int
+/// holds, a block where a list belongs -- input the Python this replaced
+/// would have crashed on too. Said as a sentence, and the run ends with
+/// status 1, the status of every other run that does not finish.
 pub fn decline(why: &str) -> ! {
-    front_log(&format!("handed back: {}", why));
-    if std::env::var_os("VIC2_ENGINE_REQUIRED").is_some() {
-        eprintln!("engine: {}", why);
-    } else if out::say_declines() {
-        // Python hosting the engine keeps its stderr for when it fails.
-        crate::errln!("engine: {}", why);
-    }
-    std::process::exit(DECLINED);
+    out::release();
+    crate::errln!("Stopped: {}. This is something the analyzer cannot read; if it came from a \
+                   save or a mod the game itself loads, please report it with that file.", why);
+    std::process::exit(1);
 }
 
 /// The mod: read from its folder -- or from what the last run kept of the

@@ -771,8 +771,8 @@ pub fn run_cross(parent: &str, found: &[Surveyed], args: &Args, verbose: bool, p
             pairs.push(("cross_part".into(), J::Bool(true)));
         }
         let done = crate::engine::run_spec(&spec, None).expect("a campaign read returns what it read");
-        if done.run_error.is_some() {
-            hand_back("a mod Python raises over, in a --cross campaign");
+        if let Some(why) = done.run_error {
+            return refuse(format!("{}: {}", e.name, why));
         }
         let part = match done.cross_part {
             Some(p) => p,

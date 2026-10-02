@@ -3,7 +3,7 @@
 The mobilisation rate rule, which two paths have to agree about.
 
 A nation's mobilisation size decides how many brigades the report says it
-could raise, and it comes out of `modrules.rate_for`: the sum of every
+could raise, and it comes out of `rate_for` (`scanner/src/engine/rules.rs`): the sum of every
 technology, invention, national value, reform and triggered modifier the
 mod grants it, floored at zero.
 

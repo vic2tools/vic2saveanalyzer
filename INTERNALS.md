@@ -504,6 +504,54 @@ occupied; only that third one took anything.
 
 ## Speed
 
+### The Python fallback is gone, 2026-10-01
+
+Every run has been made by the scanner since 30 Sep, and the Python that
+used to make them was kept only for runs the scanner handed back -- input
+that would have crashed the Python too -- and for the checks to compare
+against. Its answers are recorded now (below), so it is deleted: `cacheio`,
+`explain`, `finishing`, `market`, `modrules`, `nation`, `readsave`,
+`readwar`, `report`, `spending`, `stamp`, `state_history`, `tech_groups`,
+`v2parse`, `wars` and `engine`, about 11,000 lines. What is left of the
+Python is the window, the keeper and the command line, and the few things
+they ask before handing a run over:
+
+| module | what is left of it |
+|---|---|
+| `vic2_analyzer.py` | `main`, `analyze`: the run handed to `vic2scan analyze`, its output relayed |
+| `fastscan.py` | where the scanner is, and `CREATE_NO_WINDOW` |
+| `readfolder.py` | the Stop button and progress bar; the cache folder the window measures and empties |
+| `mod_reader.py` | `is_install`, `settle_game`, which the window asks before a run |
+| `cross.py` | `campaigns_in`, which tells the window one campaign from several |
+| `savehead.py`, `dates.py` | what the keeper reads off a save's head |
+
+A run the scanner used to hand back now stops with a sentence ("Stopped:
+... This is something the analyzer cannot read") and status 1. `--peek` and
+`--verify` of a file that cannot be read whole -- a zip, an empty file, one
+cut short -- were handed back so that the Python could crash on them; they
+are refused now, naming the file and what is wrong with it, as the report
+skips it. With no scanner built, a run is refused with the command that
+builds it. `VIC2_NO_FRONT`, `VIC2_NO_ENGINE`, `VIC2_ENGINE_REQUIRED` and
+`VIC2_FRONT_LOG` are gone with what they switched; `VIC2_ENGINE_TIMES`,
+`VIC2_ENGINE_READ` and `VIC2_ENGINE_PAYLOAD` are the scanner's own and stay.
+
+The 265 saves of the 1880s campaign, run before the deletion and after it:
+every table, `report.html`, stdout and stderr byte-identical; the stamp
+differs, as it should, since the build did. 28/28 checks, 57/57 mutations.
+Two of those 57 were blind at first, both made so by the deletion: the war
+infobox's bug is in `template.py`, which the scanner builds in, and
+`mutate.py` rebuilt only for a change under `scanner/`, while the Python
+path had read the template at run time; and the rewritten Stop check
+passed when the scanner was left reading, since it ended on its own after
+thirty seconds. `mutate.py` rebuilds for the template now, and Stop must
+end the scanner within ten seconds and by killing it.
+
+Left in the scanner, and worth deleting in a pass of its own: the modes only
+the Python called -- `vic2scan report SPEC` (the engine hosted by
+`engine.py`), the save scan's JSON and `--record` answers (`main.rs`,
+`record.rs`, `pickle.rs`, `clause.rs`) and the mod read from a JSON export
+(`mod_file`). Nothing reaches them now.
+
 ### The checks hold the Rust to recorded answers, 2026-10-01
 
 Until now the checks held the Rust to the Python by running each case both

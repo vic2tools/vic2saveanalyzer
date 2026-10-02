@@ -1,86 +1,89 @@
-"""Pipe failures, callback failures, and isolation of writable test worlds."""
+"""The scanner relayed to the window, a missing scanner, and isolation of
+writable test worlds."""
 import contextlib
 import io
-import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
-from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import engine
+import vic2_analyzer
 from matching import a_game
 from enginecheck import copies_of
 
 
-class EngineRuntime(unittest.TestCase):
-    def relay(self, body, progress=lambda *args: None):
-        proc = subprocess.Popen([sys.executable, "-c", body],
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        relay = engine._Relay(proc, True, progress, lambda path: None)
-        self.addCleanup(lambda: proc.poll() is None and proc.kill())
-        return proc, relay
+class Relay(unittest.TestCase):
+    """
+    `vic2_analyzer._relayed`: the scanner's output passed on to whoever is
+    listening -- the window's log, or a check running the analyzer in its
+    own process -- with the protocol lines turned into callbacks.
+    """
 
-    def test_large_pipes_are_drained_and_closed(self):
+    def relay(self, body, hosted=True):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            status = vic2_analyzer._relayed([sys.executable, "-c", body], 0, hosted)
+        return status, out.getvalue(), err.getvalue()
+
+    def test_large_pipes_are_drained_and_progress_told(self):
         seen = []
-        proc, relay = self.relay(
+        vic2_analyzer.set_progress(lambda *a: seen.append(a))
+        self.addCleanup(vic2_analyzer.set_progress, None)
+        status, out, err = self.relay(
             "import sys; sys.stderr.write('x' * 200000); "
-            "print('@progress 1 1'); print('@done html=1 refused=')",
-            lambda *args: seen.append(args))
-        self.assertEqual(relay.finish(), 0)
-        self.assertEqual(seen, [(1, 1)])
-        self.assertEqual(relay.done, {"html": "1", "refused": ""})
-        self.assertTrue(proc.stdout.closed and proc.stderr.closed)
-        self.assertEqual(proc.returncode, 0)
+            "print('said'); print('@progress 1 2'); print('@done'); sys.exit(5)")
+        self.assertEqual(status, 5)
+        self.assertEqual(seen, [(1, 2)])
+        self.assertEqual(out, "said\n")
+        self.assertEqual(len(err), 200000)
 
-    def test_callback_failure_is_raised_after_reaping(self):
-        def fail(*args):
-            raise RuntimeError("progress callback failed")
-        with contextlib.redirect_stdout(io.StringIO()):
-            proc, relay = self.relay(
-                "print('@progress 1 1'); print('x' * 200000)", fail)
-            with self.assertRaisesRegex(RuntimeError, "progress callback failed"):
-                relay.finish()
-        self.assertEqual(proc.returncode, 0)
-        self.assertTrue(proc.stdout.closed and proc.stderr.closed)
+    def test_report_ready_is_told_its_path(self):
+        ready = []
+        vic2_analyzer.set_report_ready(ready.append)
+        self.addCleanup(vic2_analyzer.set_report_ready, None)
+        self.relay("print('@ready /some/report.html')")
+        self.assertEqual(ready, ["/some/report.html"])
 
-    def test_malformed_protocol_is_not_silent_success(self):
-        proc, relay = self.relay("print('@progress bad'); print('@done html=1 refused=')")
-        with self.assertRaises(ValueError):
-            relay.finish()
-        self.assertEqual(proc.returncode, 0)
+    def test_unhosted_lines_are_passed_on_as_they_are(self):
+        _status, out, _err = self.relay("print('@progress 1 2')", hosted=False)
+        self.assertEqual(out, "@progress 1 2\n")
 
-    def test_cancel_reaps_child_and_removes_handoff_files(self):
-        class Stopped(Exception):
-            pass
-        def stop():
-            raise Stopped()
-        children = []
-        real_popen = subprocess.Popen
+    def test_stop_kills_the_child(self):
+        vic2_analyzer.set_cancel_check(lambda: True)
+        self.addCleanup(vic2_analyzer.set_cancel_check, None)
+        started = []
+        real = subprocess.Popen
+
         def launch(*args, **kwargs):
-            child = real_popen([sys.executable, "-c",
-                                "import time; time.sleep(30)"], **kwargs)
-            children.append(child)
+            child = real(*args, **kwargs)
+            started.append(child)
             return child
-        with tempfile.TemporaryDirectory() as tmp:
-            args = SimpleNamespace(quiet=True)
-            with patch("engine.spec", return_value={}), \
-                 patch("engine.tempfile.gettempdir", return_value=tmp), \
-                 patch("fastscan.available", return_value="fake-scanner"), \
-                 patch("engine.subprocess.Popen", side_effect=launch):
-                with self.assertRaises(Stopped):
-                    engine.run_report(args, [], SimpleNamespace(pop_types=[]),
-                                      None, None, "/no/mod", None, None, lambda *a: None,
-                                      lambda *a: None, stop)
-            self.assertEqual(len(children), 1)
-            self.assertIsNotNone(children[0].returncode)
-            self.assertTrue(children[0].stdout.closed)
-            self.assertTrue(children[0].stderr.closed)
-            self.assertEqual(os.listdir(tmp), [])
+        began = time.monotonic()
+        with patch.object(subprocess, "Popen", side_effect=launch):
+            with self.assertRaises(vic2_analyzer.Cancelled):
+                self.relay("import time; print('x', flush=True); time.sleep(30)")
+        # Stopped, not waited for: a scanner left reading would end on its
+        # own in thirty seconds, with status 0, and Stop would have done
+        # nothing but hide it.
+        self.assertLess(time.monotonic() - began, 10)
+        self.assertEqual(len(started), 1)
+        self.assertIsNotNone(started[0].returncode)
+        self.assertNotEqual(started[0].returncode, 0)
 
+    def test_a_missing_scanner_is_refused_with_how_to_build_it(self):
+        from run import Run
+        with patch.object(vic2_analyzer.fastscan, "available", return_value=None):
+            with self.assertRaises(vic2_analyzer.RunError) as said:
+                vic2_analyzer._front(Run(saves="."))
+        self.assertIn("cargo build --release --manifest-path scanner/Cargo.toml",
+                      str(said.exception))
+
+
+class Fixtures(unittest.TestCase):
     def test_fixture_builder_refuses_links(self):
         with tempfile.TemporaryDirectory() as tmp:
             real = Path(tmp, "real")

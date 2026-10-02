@@ -19,16 +19,15 @@ A bug put back in `scanner/` is built before its check runs (`cargo build
 --release` in the tree), and the scanner as committed is copied back after,
 so the next mutation starts from it.
 
-Copy the scanner in first. A fresh worktree has no `scanner/target/`, so
-every save is read in Python -- four times slower, and `parity.py` has
-nothing to compare against.
+Copy the scanner in first. A fresh worktree has no `scanner/target/`, and
+with no scanner every run is refused, so this refuses to start.
 
 Every check it uses is first run on the tree with no bug in it, and must
 pass there. A check that fails anyway is reported UNTESTED for each of its
 mutations rather than counted as catching them: it would have failed
 whatever was put back. It exits non-zero unless every mutation is caught.
 
-This is not one of the 24 checks and `all.py` does not run it. It is the
+This is not one of the checks and `all.py` does not run it. It is the
 thing you reach for when you have written a new check and want to know
 whether it would fail on the code it is supposed to reject.
 """
@@ -50,10 +49,12 @@ def revert():
 
 
 def scanner_touched():
-    """Whether the mutation put back is in the Rust, which must be rebuilt."""
+    """Whether the mutation put back is in the Rust, which must be rebuilt --
+    or in the page, which `scanner/build.rs` builds into it."""
     out = subprocess.run(["git", "diff", "--name-only"], cwd=TREE,
                          capture_output=True, text=True).stdout
-    return any(line.startswith("scanner/") for line in out.splitlines())
+    return any(line.startswith("scanner/") or line == "template.py"
+               for line in out.splitlines())
 
 
 def build_scanner():
@@ -200,13 +201,12 @@ def m36():
 
 
 @mutation("scanner-opens-console-window",
-          "on Windows the scanner is started without CREATE_NO_WINDOW, so the "
-          "windowed executable flashes a console window per save",
+          "on Windows the window starts the scanner without CREATE_NO_WINDOW, "
+          "so the windowed executable flashes a console window per run",
           "packing.py")
 def m38():
-    patch("fastscan.py",
-          "                            stderr=stderr, creationflags=_no_window())",
-          "                            stderr=stderr)")
+    patch("vic2_analyzer.py", "            status = _relayed(argv, fastscan._no_window(), hosted)",
+          "            status = _relayed(argv, 0, hosted)")
 
 
 # ---- a name out of a save ran as script in the report
@@ -268,11 +268,12 @@ def m44():
           "    min_pop: int = _setting(0, report=False)")
 
 
-@mutation("engine-callback-error-lost",
-          "the engine relay silently drops callback failures", "engine_runtime.py")
+@mutation("relay-progress-lost",
+          "the window's relay passes @progress on as text instead of moving the bar",
+          "engine_runtime.py")
 def m68():
-    patch("engine.py", "        if self.failure is not None:\n            raise self.failure",
-          "        if False:\n            raise self.failure")
+    patch("vic2_analyzer.py", '                    if word == "@progress":',
+          '                    if word == "@progresss":')
 
 
 @mutation("fixture-writes-through-link",
@@ -282,10 +283,11 @@ def m69():
           "        if False:")
 
 
-@mutation("engine-leaks-handoff-files",
-          "a stopped engine leaves its mod and settings files behind", "engine_runtime.py")
+@mutation("stop-leaves-scanner-running",
+          "Stop raises in the window but leaves the scanner reading",
+          "engine_runtime.py")
 def m70():
-    patch("engine.py", "                os.remove(path)", "                pass")
+    patch("vic2_analyzer.py", "        if proc.poll() is None:\n            proc.kill()\n", "")
 
 
 # ---- what the Python fallback was held to, put back into the Rust that
@@ -672,8 +674,8 @@ def main():
             "%s has uncommitted changes. This reverts with `git checkout` "
             "between mutations and would throw them away:\n%s" % (TREE, dirty))
     if not os.path.exists(os.path.join(TREE, "scanner/target/release/vic2scan")):
-        print("note: no scanner in %s, so parity.py compares Python with "
-              "Python. Copy scanner/target/release/vic2scan in first.\n" % TREE)
+        raise SystemExit("no scanner in %s, so every run would be refused. Copy "
+                         "scanner/target/release/vic2scan in first." % TREE)
     chosen = [m for m in MUTATIONS if not args.names or m[0] in args.names]
     # The scanner as committed, to put back after each bug put into it.
     binary = os.path.join(TREE, "scanner/target/release/vic2scan")

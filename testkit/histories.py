@@ -10,7 +10,7 @@ and two parts of the program lean on it:
 - the keeper, which files an autosave under the campaign it continues, and
   must put a second game played as the same nation from the same start in a
   folder of its own rather than into the first game's;
-- `--cross`, whose `history_breaks` names a save in a campaign folder that
+- `--cross`, whose `history_breaks` (`scanner/src/front/cross.rs`) names a save in a campaign folder that
   cannot share a history with the saves after it.
 
 Each used to carry its own copy of the rule, and neither copy had a check.

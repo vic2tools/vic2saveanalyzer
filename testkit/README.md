@@ -10,10 +10,11 @@ All of them, in the right order, with one command:
 ```
 python3 testkit/all.py "/path/to/saves" --mod "/path/to/mod"
 python3 testkit/all.py "/path/to/saves" --quick     # skip the slow ones
+python3 testkit/all.py --update-expected           # after a deliberate change
 ```
 
-The suite includes parser parity, cache invalidation, worker startup, GUI,
-browser and CLI checks. Allow a few minutes for a full campaign run. A check that cannot run here — no Firefox, no display, no
+The suite includes the recorded answers, cache invalidation, GUI, browser
+and CLI checks. Allow a few minutes for a full campaign run. A check that cannot run here — no Firefox, no display, no
 mod, no saves — says so, exits 77 (`outcome.SKIPPED`), and does not count
 against the total. One that
 fails prints its own output in full, because the point of a suite is the
@@ -23,13 +24,11 @@ Or one at a time:
 
 ```
 python3 testkit/tooearly.py                       # no saves needed
-python3 testkit/awkward.py                        # no saves needed
-python3 testkit/countries.py                      # no saves needed
+python3 testkit/saveshapes.py                     # no saves needed
 python3 testkit/edges.py                          # no saves needed
 python3 testkit/facts.py out/report.html          # the report is optional
 python3 testkit/invariants.py out/nations_timeseries.csv out/report.html
-python3 testkit/mangled.py "/path/to/one/save.v2"
-python3 testkit/parity.py ["/path/to/saves"] [8]   # builds one if none
+python3 testkit/mangled.py ["/path/to/one/save.v2"]
 python3 testkit/boots.py out/report.html
 python3 testkit/state_history_ui.py out/report.html # every decoded state value and order
 python3 testkit/map_rendering.py out/report.html # map pixels, seams, and cache reuse
@@ -40,36 +39,73 @@ python3 testkit/sharing.py                       # no saves needed
 python3 testkit/savefmt.py                       # no saves needed
 python3 testkit/packing.py                       # no saves needed
 python3 testkit/matching.py                      # no saves needed
-python3 testkit/modcache.py                      # no saves needed
 python3 testkit/raster.py                        # no saves needed
-python3 testkit/noworkers.py                     # no saves needed
 python3 testkit/staleness.py                     # no saves needed
 python3 testkit/mobrate.py                       # no saves needed
 python3 testkit/crossrows.py                     # no saves needed
-python3 testkit/record.py                        # no saves needed
 python3 testkit/caching.py                       # no saves needed
+python3 testkit/engine_runtime.py                # no saves needed
+python3 testkit/enginefmt.py scanner/target/release/vic2scan 20000
+python3 testkit/enginecompress.py scanner/target/release/vic2scan
 python3 testkit/modread.py [--mod "/path/to/mod"] # no saves needed
 python3 testkit/frontcheck.py                    # no saves needed
 python3 testkit/window.py "/path/to/saves"
-python3 testkit/spawned.py "/path/to/saves"
+python3 testkit/enginecheck.py "/path/to/saves" --mod "/path/to/mod"
 python3 testkit/smoke.py "/path/to/saves" --mod "/path/to/mod"
 ```
 
+**Recorded answers.** Until 1 Oct 2026 every run could be made two ways,
+by the Rust scanner and by the Python it replaced, and the checks held the
+one to the other by running each case both ways. The Python is gone now,
+and what it answered was written down first (`expected.py`): for every
+case, the exit status, stdout and stderr, every file the run left but the
+stamp, and the page as what it carries -- the payload as indented JSON with
+its flags and state snapshots decoded, and the page around it as its
+difference from the template. The synthetic cases are in `expected/` and
+in the repository. The real campaign's cases are somebody's data, so they
+live outside it, in `$VIC2_EXPECTED_REAL` (by default
+`~/.cache/vic2speed/expected-real`), and a check that finds none there
+says so and skips them.
+
+A check that disagrees with its record prints the difference, cut down to
+where it is. After a deliberate change, one command writes the program's
+present answers over the old ones, and `git diff testkit/expected` shows
+what changed:
+
+```
+python3 testkit/all.py "/path/to/saves" --mod "/path/to/mod" --update-expected
+```
+
+Six checks hold a run to its record: `frontcheck.py`, `saveshapes.py`,
+`mangled.py`, `crossrows.py`, `modread.py` and `enginecheck.py`. Each takes
+`--update` on its own as well.
+
 **`modread.py`** holds the report engine's mod reader
-(`scanner/src/engine/modread.rs`) to `mod_reader.py`: what the Rust makes
-of a folder must be, as JSON text, what `modexport.export_mod` makes of
-Python's `Mod`, and a folder Python raises over must be one the Rust
-declines. It runs the reader's regular expressions against Python's `re`,
+(`scanner/src/engine/modread.rs`) to its recorded answers: what
+`vic2scan mod-export` makes of a folder, as JSON text, and which folders it
+refuses. It runs the reader's regular expressions against Python's `re`,
 reads a world written to be awkward (a mod over a game, names differing
 only in case, Windows-1252 localisation with its gaps, a block where a
-name belongs, `1_000`), then that world damaged at random a few hundred
+name belongs, `1_000`), then that world damaged at random a thousand
 times, and the real mod when `--mod` names one.
 
-**`frontcheck.py`** holds the scanner's `analyze` mode -- a command-line
-run done in Rust from the start -- to the Python: thirty cases run both
-ways (the second all in Python, `VIC2_NO_ENGINE=1`) must print the same, exit the
-same and write the same files, and the Rust must have made every one of
-them itself but the two it hands back.
+**`frontcheck.py`** holds the scanner's `analyze` mode -- every run, from
+the command line and the window alike -- to its recorded answers: every
+refusal it words, one save, two saves of one date, `~` and `$VAR`, a
+relative path, the settings, a table open elsewhere, "nothing has changed",
+saves laid out another way, the diagnostics, `--peek`, `--verify`,
+`--cross`, and files that cannot be read at all.
+
+**`saveshapes.py`** reads the shapes a save can take and real campaigns
+do not -- a pop with a mod's own block nested inside it, a province with no
+owner, an army loaded onto a transport, a key that appears twice, two of a
+nation's states in one region, a save with its countries first or laid out
+with spaces -- each as a report, with `--peek` and with `--verify`, and
+holds every answer to its record.
+
+**`enginecheck.py`** runs the real program a dozen ways over a world of
+edge cases, and over a handful of real saves under the real mod with rules
+added that the campaign never meets, and holds every answer to its record.
 
 **`savefmt.py`** writes save-shaped text, and is the only place in here
 that knows the format. The tab depth *is* the format — both the reader and
@@ -88,29 +124,6 @@ one alone catches nothing:
 python3 testkit/savefmt.py
 ```
 
-**`parity.py`** holds the Rust scanner to the Python parser, save by save,
-field by field, exactly — no tolerance, because the floats are accumulated
-in the same order on both sides and a tolerance would hide the drift this
-exists to catch. It had stopped doing it: the scanner was switched off by
-replacing `fastscan.scan`, which `analyze_save` does not call — it calls
-`start`, `head` and `collect`, because it works between the scanner's two
-halves rather than waiting for both — so the "slow" read ran the scanner
-too and this compared it against itself, reporting "identical across 41
-nations" for free. It uses `analyze_save`'s own `use_scanner` argument now
-and then *checks the scanner stayed off*, because a comparison that has
-quietly stopped comparing is the failure this file is for. Given no save
-folder it builds one with `savefmt.furnished`, so it runs on a machine that
-has never seen a Victoria 2 campaign; real saves are still better where
-there are any, since they carry shapes nobody thought to write on purpose.
-
-**`awkward.py`** and **`countries.py`** write saves with the layouts that
-are legal but rare — a pop with a mod's own block nested inside it, an army
-loaded onto a transport, a province with no owner — and read them both ways.
-All three read a save both ways through `readboth.py`. The two smaller ones
-had kept the old `fastscan.scan` switch after `parity.py` lost it, so until
-they shared it they too compared the scanner with itself: either would
-pass with the Python reader raising on every call.
-
 **`edges.py`** builds the campaigns nobody has: an empty folder, one save, a
 first-month save with nothing researched, a save with no pops, a truncated
 one, a zip, files that are not saves. A case passes if it works or refuses
@@ -125,16 +138,18 @@ or refuse it in a sentence; a stack trace is never right, and it would take
 the whole campaign down with it. A save cut short is the one that must be
 refused, by both readers: read, it is a whole save with most of it missing,
 and two thirds of one used to go into the report as 34 of 41 nations with
-no army and no war. The mutations are seeded, so a failure is
-reproducible.
+no army and no war. The damage is seeded, so a failure is
+reproducible, and without a save named each damaged copy of the furnished
+save is held to its record.
 
 **`invariants.py`** checks the arithmetic the report's own numbers have to
 satisfy — 58 rules over every nation in every save, and, given the report
 as well, the shape of the data inside it: that every column is as long as
 the list of dates it is read against, that every technology index points at
 a technology, that a war ends after it starts and its battles happen while
-it is being fought, that a war's losses are its battles' losses. Parity proves the two
-readers agree; it does not prove either is right. These are the identities
+it is being fought, that a war's losses are its battles' losses. The
+recorded answers prove a run says what it said before; they do not prove
+it was right. These are the identities
 that hold whatever the save says: the strata are a partition of the
 population, a percentage is its own numerator over its own denominator,
 brigades are the standing ones plus the mobilized ones, a count is never
@@ -159,8 +174,8 @@ The report ships `series` whole and `facts` stripped of everything `series`
 already carries — the same numbers in two orientations, and a seventh of the
 file when both travelled — and the page transposes them back at boot. So the
 report shows numbers that are not in the file it came in, and the loop that
-reconstructs them is in the template while the pair it has to agree with is
-in `report.py`. This checks the pair; `boots.py` checks the template's copy,
+reconstructs them is in the template while its description is `rebuild_facts`
+in `facts.py`. This checks the pair; `boots.py` checks the template's copy,
 because if the two drift every table on the page is empty or wrong.
 
 **`tooearly.py`** looks for a local read on a line above every line that
@@ -185,34 +200,21 @@ the other reports guns it never had. Four discriminators, each tried in both
 orderings, and the decoy is named so that a tie goes to it: switch any one
 discriminator off and exactly its own case fails.
 
-**`modcache.py`** checks cached mod data against fresh reads, including
-changes to inherited base-game files, local overrides, parser dependencies,
-corrupt cache entries and failed atomic writes. It also checks quoted braces
-and the shared tokenizer's block skip.
-
 **`raster.py`** decodes a small bitmap of awkward runs -- a colour the map
 does not name, two colours for one province, runs carrying into the next
 row, row padding, rows a scale skips -- and compares it with a reading done
-a pixel at a time, at four scales. It also checks that `raster_ahead` leaves
-the cache entry behind, and starts nothing without a map or with one cached.
+a pixel at a time, at four scales.
 
-**`caching.py`** checks that invention summaries preserve order, skip invalid
-saves, survive corruption, and expire after same-size edits within one second.
-It compares cached and uncached runs after changing mobilizable pop types,
-and checks scanner cleanup on completion, abandonment and timeout.
+**`caching.py`** holds a run read out of the engine's cache to one made
+with `--no-cache` on the same saves, after something has changed under the
+cache: a save rewritten to the same size within the same second, every
+entry damaged and then cut in half, the mobilizable pop types changed, a
+save replaced by another of the same name, and one save read at a time
+against several at once.
 
-**`noworkers.py`** takes the workers away and checks the campaign is still
-read. A machine that cannot start worker processes is not exotic — a
-locked-down laptop, a container with a tight process limit, a sandbox that
-refuses `fork`, or a temp folder with a long path, which is the one that
-actually happened: Python 3.14 starts workers through a forkserver whose
-socket lives in `TMPDIR`, an `AF_UNIX` path cannot exceed 108 bytes, and a
-deep enough temp folder took every run down with a stack trace out of the
-depths of `multiprocessing`. None of it has to be fatal — every save can be
-read one at a time and the answer is the same answer. What made it fatal was
-where the guard sat: `ProcessPoolExecutor(...)` succeeds even when no worker
-can start, because it starts them on the first `submit`, and the guard was
-around the constructor.
+**`engine_runtime.py`** checks the scanner's output relayed to the window
+and a missing scanner refused with the command that builds it, and that no
+writable test world links back into a real install.
 
 **`mobrate.py`** asks what a nation's mobilisation size is, in the cases a
 real campaign does not happen to contain. The subtle part is what an empty
@@ -241,51 +243,6 @@ where the report keeps them. The check watches the one finishing function
 both paths now call, so it compares the settings each path asked for *and*
 the numbers each got back -- putting any one of the five divergences back
 fails it.
-
-**`record.py`** holds the nation record and its two readers to each other
-without needing either of them to run. A save is read in Python by
-`readsave` and, where it has been built, by the Rust scanner, whose answer
-`nation.fold_provinces` and `nation.fold_country` fold into the same
-seventy-two fields. Two implementations of one thing are safe only while
-something proves continuously that they agree, and the proof was
-`parity.py` alone -- which needs a folder of real saves *and* a compiled
-binary and says nothing without both. That is the wrong shape for the
-failure it guards: the dangerous drift is not a wrong number on a machine
-with a scanner, it is a field one side learns about and the other does not,
-which on a machine without one looks exactly like everything working. So
-this checks the shape instead, from the sources: every fold rule names a
-field the record declares, no field is claimed twice, the save-key names
-Python and `scanner/src/country.rs` each keep a copy of still match, every
-key the scanner emits is handled and every key handled is emitted, the fold
-fills the containers `blank_nation` made rather than replacing them, and a
-key nobody accounted for raises instead of being dropped in silence. Seven
-ways of drifting were each put in and each came out.
-
-**`caching.py`** checks that a cached answer is the answer the run would
-have computed, and that the key it is filed under says everything that
-changes it. Part of that is `readsave.Reading`, the one object that says how
-a run reads a save, handed to every read with the save: one save read under
-a mod, then plain, then under the mod again, with the scanner and without,
-has to come back with the mod's pops the first and third time and none of
-them the second, and a campaign read in workers has to come back under the
-run's reading. That is the shape of the worst bug this file has seen -- a
-pop-type set that only grew carried one mod's `bankers` into the next
-campaign, read one anyway, and cached it under a key that said it had not. Five ways of making the key and the state
-disagree were each put in and each came out.
-
-**`mobrate.py`** also holds the line a mod must not cross when nobody has
-decoded its invention indices. A save writes each nation's inventions as
-bare numbers into an array the engine builds at load time, and which number
-means which invention is only decidable against a save -- so a freshly
-loaded mod does not know. It used to say so with `index_base = None`, which
-is also what it says once the indices *have* been checked and do not decode.
-Those are not the same answer: decoded, a nation's mobilisation size counts
-the inventions the save says it rolled; undecodable, `breakdown` falls back
-to every invention whose requirements it meets, an upper bound that
-overstates nations with poor luck. A caller who forgot to decode got that
-upper bound silently, for every nation. The mod refuses the question now
-until it has been asked, and the check holds both halves -- refusing before,
-and still falling back after.
 
 **`staleness.py`** touches every source file the program has, in a copy of it,
 and checks each one moves the report stamp. The stamp is what lets a second run
@@ -347,15 +304,6 @@ to the buttons, and the other half in `work`. Anything driving `work`
 directly got a run with the early open and the progress bar missing, and
 nothing about the finished run looked different. A run owns its own wiring
 now.
-
-**`spawned.py`** reads a campaign the way Windows reads it. Linux forks its
-workers, so each one begins with the parent's memory already in it; Windows
-spawns a fresh interpreter that re-imports everything, which means anything
-passed to a worker has to survive pickling by name and anything set up
-after import has to be handed over rather than inherited. This is developed
-on Linux and shipped as a Windows executable, and nothing had ever run it
-the way it actually runs there. It builds the same campaign both ways and
-compares every file byte for byte.
 
 **`boots.py`** opens a built report in headless Firefox, with a handler on
 `window.onerror` and on unhandled rejections, and asks the page what it

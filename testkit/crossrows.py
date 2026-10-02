@@ -149,8 +149,6 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])
     ap.add_argument("--update", action="store_true",
                     help="write what the program answers now as the expected answers")
-    ap.add_argument("--python", action="store_true",
-                    help="with --update: take the answers from the Python (VIC2_NO_ENGINE)")
     args = ap.parse_args()
     holding = tempfile.mkdtemp(prefix="vic2cross")
     book = expected.Book(expected.REPO, "crossrows", args.update)
@@ -161,10 +159,6 @@ def main():
         for name, extra in CASES:
             out = os.path.join(holding, "out")
             env = dict(os.environ)
-            for key in ("VIC2_NO_ENGINE", "VIC2_NO_FRONT", "VIC2_ENGINE_REQUIRED"):
-                env.pop(key, None)
-            if args.python:
-                env["VIC2_NO_ENGINE"] = "1"
             env["TMPDIR"] = os.path.join(holding, "tmp")
             os.makedirs(env["TMPDIR"], exist_ok=True)
             got = expected.run(

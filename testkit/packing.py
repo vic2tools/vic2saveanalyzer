@@ -61,17 +61,20 @@ def reached(start="app"):
 
 def the_scanner_opens_no_window():
     """
-    [what went wrong] in how the scanner is started, as Windows would see it.
+    [what went wrong] in how the window starts the scanner, as Windows would
+    see it.
 
     The executable is built windowed and the scanner is a console program,
-    and on Windows that combination opens a console window for every save
-    read unless `Popen` is told `CREATE_NO_WINDOW`. Nothing here runs
-    Windows, so this asks what `fastscan.start` would hand `Popen` there --
-    and here, where the same flag is refused outright.
+    and on Windows that combination opens a console window for every run
+    unless `Popen` is told `CREATE_NO_WINDOW`. Nothing here runs Windows, so
+    this asks what the window's run (`vic2_analyzer._front`, hosted) would
+    hand `Popen` there -- and here, where the same flag is refused outright.
     """
     sys.path.insert(0, HERE)
     import subprocess
-    import fastscan
+    from unittest.mock import patch
+    import vic2_analyzer
+    from run import Run
 
     asked = []
 
@@ -80,29 +83,29 @@ def the_scanner_opens_no_window():
             asked.append(kwargs)
             raise OSError("not really started")
 
-    real_popen, real_platform = subprocess.Popen, sys.platform
-    real_found = fastscan._FOUND
+    real_platform = sys.platform
     wrong = []
     try:
-        subprocess.Popen = Popen
-        fastscan._FOUND = __file__            # anything that is a file
-        for platform in ("win32", real_platform):
-            del asked[:]
-            sys.platform = platform
-            fastscan.start("a.v2", (), ())
-            flags = asked[0].get("creationflags", 0) if asked else None
-            if flags is None:
-                wrong.append("fastscan.start never called Popen")
-            elif platform == "win32" and not flags & 0x08000000:
-                wrong.append("on Windows the scanner is started without "
-                             "CREATE_NO_WINDOW, so every save read opens a "
-                             "console window")
-            elif platform != "win32" and flags:
-                wrong.append("here the scanner is started with Windows-only "
-                             "creation flags, which Popen refuses")
+        with patch.object(subprocess, "Popen", Popen), \
+                patch.object(vic2_analyzer.fastscan, "available", return_value=__file__):
+            for platform in ("win32", real_platform):
+                del asked[:]
+                sys.platform = platform
+                try:
+                    vic2_analyzer._front(Run(saves="."), hosted=True)
+                except OSError:
+                    pass
+                flags = asked[0].get("creationflags", 0) if asked else None
+                if flags is None:
+                    wrong.append("the window's run never called Popen")
+                elif platform == "win32" and not flags & 0x08000000:
+                    wrong.append("on Windows the scanner is started without "
+                                 "CREATE_NO_WINDOW, so every run opens a console window")
+                elif platform != "win32" and flags:
+                    wrong.append("here the scanner is started with Windows-only "
+                                 "creation flags, which Popen refuses")
     finally:
-        subprocess.Popen, sys.platform = real_popen, real_platform
-        fastscan._FOUND = real_found
+        sys.platform = real_platform
     return wrong
 
 
@@ -111,7 +114,7 @@ def main():
     import build_exe
     from unittest.mock import patch
     # Refuse before writing icons or invoking PyInstaller, not after making
-    # a slow release. The source application's fallback remains available.
+    # a slow release.
     with patch.object(build_exe, 'scanner_binary', return_value=None), \
          patch.object(build_exe, 'write_icon') as icon, \
          patch.object(build_exe.subprocess, 'call') as bundle:

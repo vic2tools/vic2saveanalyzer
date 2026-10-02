@@ -12,18 +12,14 @@
 The front of a save: what its first few hundred kilobytes say, without
 reading the rest.
 
-Three parts of the program look at saves this way. The keeper decides which
-campaign an autosave continues; `--cross` checks that a folder's saves share
-one history; and the analyzer puts a campaign's saves in date order before
-it reads any of them. Each had its own copy of the patterns, and the keeper
-and `--cross` each their own copy of the measured rule about event flags.
+The keeper reads a save this way to decide which campaign an autosave
+continues. `--cross`, in the scanner, holds a campaign folder's saves to the
+same measured rule about event flags (`FLAG_GAP`, `FLAG_FLOOR`) to name one
+that may be from another game; `scanner/src/front/cross.rs` copies the
+numbers, and `testkit/histories.py` holds both to them.
 """
 
-import os
 import re
-import sys
-
-from dates import ymd
 
 # Everything the game writes above the first province block, with room to
 # spare: the date, the player, the start date and the event flags.
@@ -32,7 +28,6 @@ HEADER_BYTES = 400_000
 _FIELD = re.compile(rb'(date|player|start_date)\s*=\s*"([^"]*)"')
 _FLAGS = re.compile(rb'^flags=\s*\{(.*?)^\}', re.M | re.S)
 _FLAG_NAME = re.compile(rb'^\s*([A-Za-z_]\w*)\s*=', re.M)
-_DATE = re.compile(rb'date\s*=\s*"([\d.]+)"')
 
 # Global event flags accumulate, so an earlier save's flags should all be in
 # a later save of the same game. Flags do get cleared on purpose --
@@ -107,83 +102,3 @@ def flags_lost(earlier, later):
     if len(earlier) < FLAG_FLOOR or len(later) < FLAG_FLOOR:
         return None
     return len(earlier - later)
-
-
-def date_of(path):
-    """A save's in-game date, off its first line, without parsing it."""
-    try:
-        with open(path, "rb") as fh:
-            found = _DATE.search(fh.read(4096))
-    except OSError:
-        return ""
-    return found.group(1).decode("ascii") if found else ""
-
-
-def dates_of(files):
-    """
-    {path: `date_of(path)`} for every save, the files opened side by side.
-
-    One after another this was the first half second of a first run over 265
-    saves: the files were not in memory yet, so each 4 KB was a trip to the
-    disk, and on Windows a file opened is also a file the virus scanner
-    looks at. Threads, because each one spends its time waiting for the
-    disk, which it does without holding the interpreter.
-    """
-    files = list(files)
-    if len(files) < 8:
-        return {p: date_of(p) for p in files}
-    from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=min(16, len(files))) as pool:
-        return dict(zip(files, pool.map(date_of, files)))
-
-
-def sort_key(date):
-    """(0, year, month, day), or (1, 0, 0, 0) -- after every date -- for none."""
-    got = ymd(date)
-    return (0,) + got if got else (1, 0, 0, 0)
-
-
-def in_date_order(files, dates=None):
-    """
-    The saves sorted by the date inside them, read from their first line.
-
-    Worth the 4 KB a save: the campaign has to be walked oldest first -- war
-    histories fold that way -- and knowing the order up front is what lets
-    saves be handed over one at a time instead of collected and sorted.
-    Saves with no date come last, by name. `dates` is `dates_of(files)`,
-    when the caller has it.
-    """
-    if dates is None:
-        dates = dates_of(files)
-    return sorted(files, key=lambda p: (sort_key(dates[p]), p))
-
-
-def one_per_date(files, dates=None):
-    """
-    `files`, in date order, with one save per in-game date.
-
-    Two saves carrying the same date used to be read twice over: every
-    table held both, so a copy of one save doubled its rows, while the
-    report -- which keeps one reading a date -- showed the later of the two.
-    It happens for real. Every game's first save is 1836.1.1, so a folder
-    holding two games holds two of those, and a save made by hand can fall
-    on an autosave's day. The later-named file is kept, which is the one
-    the report already showed, and the rest are named on the way past.
-    """
-    known = dates if dates is not None else {}
-    kept, keys, clash = [], [], {}
-    for path in files:
-        date = known[path] if path in known else date_of(path)
-        key = sort_key(date)
-        if kept and key[0] == 0 and key == keys[-1]:
-            clash.setdefault(date, [kept[-1]]).append(path)
-            kept[-1] = path
-            continue
-        kept.append(path)
-        keys.append(key)
-    for date, same in clash.items():
-        print("note: %s are all dated %s, so only %s is read. Saves from two "
-              "games in one folder? Keep each game in a folder of its own."
-              % (", ".join(os.path.basename(p) for p in same), date,
-                 os.path.basename(same[-1])), file=sys.stderr)
-    return kept

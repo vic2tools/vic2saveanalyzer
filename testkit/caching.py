@@ -58,8 +58,6 @@ class World:
         """The tables and the page of one run (what it printed aside)."""
         out = os.path.join(self.holding, "out")
         env = dict(os.environ, TMPDIR=self.tmp, TEMP=self.tmp, TMP=self.tmp)
-        for key in ("VIC2_NO_ENGINE", "VIC2_NO_FRONT"):
-            env.pop(key, None)
         got = expected.run([self.saves, "--out", out, "--game-root", self.game, "--rebuild",
                             "-q"] + list(extra) + ([] if cached else ["--no-cache"]),
                            self.holding, env, out, [(self.tmp, "TMP"), (self.holding, "HOLDING")])

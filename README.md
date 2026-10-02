@@ -630,7 +630,8 @@ still the right answer for a campaign of a few dozen saves.
 ## Running it from a terminal
 
 The executable works as a command-line tool when given arguments, and
-`vic2_analyzer.py` does the same with Python 3.8 or newer. No dependencies.
+`vic2_analyzer.py` does the same with Python 3.8 or newer and the scanner
+built ([below](#the-rust-scanner)). No other dependencies.
 
 ```bash
 vic2saveanalyzer.exe "C:\path\to\saves" --mod-path "C:\path\to\mod"
@@ -765,43 +766,31 @@ models failed, what is still not modelled — it is in
 
 ---
 
-## The Rust scanner (optional)
+## The Rust scanner
 
-Reading a save is almost entirely scanning text and converting numbers, and
-the province blocks -- most of the file, and every pop in the game -- are
-about fifty-five percent of it. `scanner/` is that one loop written in Rust.
-It is optional in the strict sense: without it every save is read in Python
-exactly as before, a little slower, and nothing else changes.
+Every run is made by `scanner/`, in Rust: finding the saves, settling the
+game and the mod, reading every save on every core, the report, the tables,
+the diagnostics and `--cross`. The Python is the window, the keeper and the
+command line, which hand the run to the scanner and pass on what it says.
+From source, build it once:
 
 ```
 cargo build --release --manifest-path scanner/Cargo.toml
 ```
 
 No dependencies, so that works on a machine that has never talked to
-crates.io. `build_exe.py` requires the binary and carries it inside the
-executable. Source runs can still use the Python fallback.
+crates.io. Without it a run is refused with that command. `build_exe.py`
+requires the binary and carries it inside the executable.
 
-On 103 real saves, 3.5 GB:
-
-| | Python only | with the scanner |
-|---|---|---|
-| one 31 MB save | 0.598 s | **0.428 s** |
-| whole campaign, first run | 10.7 s | **8.0 s** |
-
-Two implementations of anything is a liability, so there is a check that they
-agree:
+The checks in `testkit/` hold it to answers recorded for every case they
+run -- what was printed, the exit status, every table and what the page
+carries -- most of them taken from the Python the scanner replaced, which
+checked out the same, while it was still here to ask:
 
 ```
-python3 testkit/parity.py "/path/to/saves" 10
+python3 testkit/all.py "/path/to/saves" --mod "/path/to/mod"
+python3 testkit/all.py --update-expected     # after a deliberate change
 ```
-
-It reads each save both ways and compares every field of every nation
-exactly -- not approximately, since both sides accumulate in the same order
-and a tolerance would hide the drift it exists to find. It has already earned
-its keep twice: once on cultures of equal size, where the scanner's
-alphabetical output reordered a table that a stable sort had been leaving in
-file order, and once on a nation with no naval base, where Python leaves an
-integer `0` and the scanner was handing back `0.0`.
 
 ---
 
@@ -820,22 +809,19 @@ runs it.
 
 | | |
 |---|---|
+| `app.py` | The executable: the window, or the command line when given arguments |
 | `gui.py` | The window: the folder pickers and the log box |
-| `vic2_analyzer.py` | Command line, aggregation, CSV output |
-| `readfolder.py` | A folder of saves: read on every core, cached, stoppable |
-| `finishing.py` | What a nation comes to: players, mobilisation, brigade cap, shares |
-| `readsave.py` | One save into numbers: provinces, pops, countries, wars, the market |
-| `nation.py` | What a nation record is, and what may be dropped from one when |
-| `explain.py` | The four flags that print something about one nation and stop |
-| `v2parse.py` | The tokenizer underneath it |
-| `scanner/` | The same province and country scan in Rust, used when it has been built |
-| `mod_reader.py` | Reads the mod: names, colours, map, tech, pop types, modifiers |
-| `modrules.py` | What those rules are worth to one nation, triggers and all |
-| `cross.py` | Finds campaigns, works out which mod each was played on |
-| `report.py` | Prepares everything the report needs |
-| `state_history.py` | Compacts and compresses state snapshots in workers; restores them for offline comparisons |
-| `template.py` | The report's HTML, CSS and JavaScript |
-| `tech_groups.py` | Which technologies count as army or navy |
+| `keeper.py`, `keeper_gui.py` | Keeping every autosave, and its tab |
+| `publish.py`, `settings.py` | Sharing a report, and what the window remembers |
+| `vic2_analyzer.py` | The command line: hands the run to the scanner and relays what it says |
+| `run.py` | Every setting of a run, declared once, and the command line that fills them |
+| `fastscan.py` | Where the scanner is, and how to start it with no window |
+| `readfolder.py` | The Stop button and progress bar, and the scanner's cache folder |
+| `mod_reader.py` | Which folder is a game install, and where a mod may be read from |
+| `cross.py` | Which folders under a folder hold campaigns |
+| `savehead.py`, `dates.py` | What the head of a save says, for the keeper |
+| `scanner/` | The Rust that makes every run: reading, the report, the tables |
+| `template.py` | The report's HTML, CSS and JavaScript, built into the scanner |
 | `build_exe.py` | Draws the icon and packs the executable |
 
 ---

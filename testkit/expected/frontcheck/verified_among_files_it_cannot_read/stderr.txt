@@ -1,0 +1,1 @@
+HOLDING/mixed/0a_zip.v2 is a zip archive. Extract it, or re-save the game in debug mode to get plaintext.

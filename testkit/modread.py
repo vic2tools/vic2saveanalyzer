@@ -1,14 +1,14 @@
 """
-Hold the engine's mod reader (`scanner/src/engine/modread.rs`) to Python's.
+Hold the engine's mod reader (`scanner/src/engine/modread.rs`) to its
+recorded answers.
 
-The engine reads a mod folder itself, and what it makes of one has to be
-what `mod_reader.load_mod` makes of it, field for field: the JSON
-`modexport.export_mod` writes of Python's `Mod` and the JSON
-`vic2scan mod-export` writes must be the same text. Where Python raises
-over a folder, the Rust must decline it (status 3), so the analyzer reads
-it in Python and raises as it always did.
+What `vic2scan mod-export` makes of a folder, as JSON text, must be what is
+recorded for it (`testkit/expected/modread/exports.jsonl`), and a folder
+recorded as refused (status 3) must still be refused. The answers were
+those of `mod_reader.load_mod`, the Python reader, taken on 1 Oct 2026
+while it was still here; before then this ran every case both ways.
 
-Four parts:
+Five parts:
 
 - the regular expressions the reader runs, against Python's `re`, on
   random text built from the pieces mod files are made of;
@@ -16,12 +16,12 @@ Four parts:
   differ only in case, localisation in Windows-1252 with its gaps, a block
   where a name belongs, numbers Python spells its own way -- read as the
   mod and as the game;
-- that world, damaged at random a few hundred times, each read both ways;
+- that world, damaged at random a thousand times;
 - the real mod, when `--mod` names one;
 - and the copy the engine keeps of a mod it has read: a report run twice
   with the mod edited in between must show the edit.
 
-    python3 testkit/modread.py [--mod MOD] [--rounds N]
+    python3 testkit/modread.py [--mod MOD] [--rounds N] [--update]
 """
 
 import argparse
@@ -122,18 +122,6 @@ def patterns(rnd, rounds):
 
 # ------------------------------------------------------------ the answers
 
-def python_side(path):
-    """Python's export as text, or None and what it raised. Only while
-    recording from the Python (`--update --python`)."""
-    import mod_reader as mr
-    from modexport import export_mod
-    try:
-        return json.dumps(export_mod(mr._load_mod(mr._mod_root(path))),
-                          separators=(",", ":")), None
-    except Exception as exc:                                  # noqa: BLE001
-        return None, "%s: %s" % (type(exc).__name__, exc)
-
-
 def mod_root(path):
     """The folder a run reads as the mod: `path` itself, or the game it names."""
     return os.path.abspath(os.path.expanduser(os.path.expandvars(path)))
@@ -144,13 +132,10 @@ def rust_side(path):
     return run.returncode, run.stdout.decode("utf-8").rstrip("\n"), run.stderr.decode("utf-8", "replace")
 
 
-def answer_of(path, python=False, holding=None):
+def answer_of(path, holding=None):
     """{"status": 0 and "export": the JSON text, or "status": 3 for a folder
     that is refused}. Where the world was built (`holding`) is HOLDING."""
     place = (lambda t: t.replace(json.dumps(holding)[1:-1], "HOLDING")) if holding else str
-    if python:
-        text, raised = python_side(path)
-        return {"status": 3} if raised is not None else {"status": 0, "export": place(text)}
     code, out, err = rust_side(path)
     if code == 0:
         return {"status": 0, "export": place(out)}
@@ -392,8 +377,6 @@ def kept_copy(holding):
     matching.a_save(os.path.join(saves, "a.v2"))
     out = os.path.join(holding, "out")
     env = dict(os.environ)
-    env.pop("VIC2_NO_ENGINE", None)
-    env["VIC2_ENGINE_REQUIRED"] = "1"
 
     def years():
         run = subprocess.run([sys.executable, os.path.join(HERE, "vic2_analyzer.py"), saves,
@@ -426,8 +409,6 @@ def main():
     ap.add_argument("--rounds", type=int, default=1000)
     ap.add_argument("--update", action="store_true",
                     help="write what the reader answers now as the expected answers")
-    ap.add_argument("--python", action="store_true",
-                    help="with --update: take the answers from the Python (mod_reader)")
     args = ap.parse_args()
     if not os.path.isfile(BIN):
         print("needs a built Rust scanner")
@@ -449,7 +430,7 @@ def main():
     wrong = []
 
     def ask(name, path):
-        got = answer_of(path, args.python, holding)
+        got = answer_of(path, holding)
         answers.append(dict(world=name, **got))
         if not args.update:
             wrong.extend(held(name, want.get(name), got))
@@ -499,7 +480,7 @@ def main():
             elif args.update:
                 os.makedirs(os.path.dirname(real), exist_ok=True)
                 with open(real, "w", encoding="utf-8") as fh:
-                    json.dump(answer_of(args.mod, args.python), fh)
+                    json.dump(answer_of(args.mod), fh)
                 print("recorded the real mod's answer in %s" % real)
             elif not os.path.isfile(real):
                 print("no answer is recorded for the real mod in %s" % real)

@@ -42,7 +42,7 @@ fn refuse<T>(why: impl Into<String>) -> R<T> {
     Err(RunError(why.into()))
 }
 
-/// Hand the run back to Python, having said nothing.
+/// Stop the run over input it cannot read at all (`engine::decline`).
 fn hand_back(why: &str) -> ! {
     crate::engine::decline(why)
 }
@@ -581,7 +581,6 @@ fn strs(v: &[String]) -> J {
 
 /// `vic2scan analyze --run RUN.json`.
 pub fn main(argv: &[String]) -> ! {
-    out::quiet_declines();
     // `--protocol`: a host (the window) reads `@progress`, `@ready` and
     // `@done` off stdout among the lines it shows.
     let protocol = argv.iter().any(|a| a == "--protocol");
@@ -615,7 +614,6 @@ pub fn main(argv: &[String]) -> ! {
             }
         },
     };
-    crate::engine::front_log(&format!("done: status {}", code));
     out::release();
     std::process::exit(code);
 }
@@ -623,11 +621,13 @@ pub fn main(argv: &[String]) -> ! {
 fn run(mut args: Args, protocol: bool) -> R<i32> {
     let verbose = !args.quiet;
     let (saves_path, mut files) = saves_in(&args)?;
-    // `--peek` comes before anything else is settled, as in `_main`. A file
-    // Python would refuse raises out of it, which is Python's to say.
+    // `--peek` comes before anything else is settled, and looks at the
+    // first save whole, or refuses to in a sentence.
     if args.peek {
-        if files.is_empty() || !diagnose::whole(&files[0]) {
-            hand_back("--peek of a file Python refuses");
+        match files.first().map(|f| diagnose::whole(f)) {
+            None => return refuse(format!("No .v2 files in {}", saves_path)),
+            Some(Err(why)) => return refuse(why),
+            Some(Ok(())) => {}
         }
         diagnose::peek(&files[0]);
         return Ok(0);
@@ -657,10 +657,11 @@ fn run(mut args: Args, protocol: bool) -> R<i32> {
 
     if args.verify {
         if args.cross {
-            hand_back("--verify of a --cross campaign");
+            return refuse("--verify checks the saves of one campaign; run it on one of the \
+                           folders --cross found rather than on all of them.");
         }
-        if !files.iter().all(|f| diagnose::whole(f)) {
-            hand_back("--verify of a file Python refuses");
+        if let Some(why) = files.iter().find_map(|f| diagnose::whole(f).err()) {
+            return refuse(why);
         }
         return match diagnose::verify_all(&files, args.jobs) {
             Ok(()) => Ok(0),

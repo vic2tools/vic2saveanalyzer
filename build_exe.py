@@ -92,10 +92,9 @@ def write_icon(path=ICON):
 
 def scanner_binary():
     """
-    The Rust province scanner, if this machine has built one.
+    The Rust scanner, which makes every run, if this machine has built one.
 
-    Source runs can fall back to Python. Releases require this binary so a
-    missing build dependency cannot silently make every user's first run slow.
+    A release without it would refuse every run, so `build` requires it.
     """
     name = "vic2scan.exe" if sys.platform == "win32" else "vic2scan"
     built = os.path.join(HERE, "scanner", "target", "release", name)
@@ -112,24 +111,14 @@ def build():
     write_icon()
     # These are imported inside functions rather than at the top of the file, so
     # they are named here in case the bundler's scan ever stops following them.
-    carried = ["vic2_analyzer", "run", "stamp", "readsave", "readwar",
-               "readfolder", "savehead", "dates", "finishing", "spending",
-               "wars", "market", "explain", "cacheio", "v2parse",
-               "mod_reader", "modrules", "nation", "report", "template",
-               "tech_groups", "fastscan",
+    carried = ["vic2_analyzer", "run", "fastscan", "readfolder",
                # the window's two halves, what they remember, and the one
                # thing that leaves the machine, all reached from app.py
                "gui", "keeper", "keeper_gui", "settings", "publish",
-               # reached only from inside functions, in both the window and the
-               # analyzer, so the scan has nothing at module level to follow
-               "cross", "state_history",
-               # the report engine's side of the analyzer: what hands a run
-               # to the scanner's `report` mode and the mod to it
-               "engine",
-               # saves are read on several cores, and the machinery for that is
-               # reached through function-level imports
-               "multiprocessing", "multiprocessing.spawn",
-               "concurrent.futures.process"]
+               # what the keeper reads off a save's head, and what the window
+               # asks before a run: which folder is a game, which holds
+               # campaigns -- reached only from inside functions
+               "savehead", "dates", "mod_reader", "cross"]
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
            "--onefile", "--windowed", "--name", NAME, "--icon", ICON,
            "--distpath", os.path.join(HERE, "dist"),
@@ -137,7 +126,8 @@ def build():
            "--specpath", os.path.join(HERE, "build")]
     for module in carried:
         cmd += ["--hidden-import", module]
-    # `.` puts it beside the unpacked modules, where fastscan looks first.
+    # `.` puts it beside the unpacked modules, where fastscan looks first:
+    # the scanner makes every run, so a release without it makes none.
     cmd += ["--add-binary", "%s%s." % (scanner, os.pathsep)]
     print("carrying the Rust scanner: %s" % scanner)
     for junk in ("numpy", "pandas", "matplotlib", "PIL", "scipy", "setuptools",

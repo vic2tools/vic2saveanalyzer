@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-The report engine against the analyzer's own Python, run for run.
+The report engine against the answers recorded for it, run for run.
 
-A run the engine takes is read, finished and written in Rust, and a run it
-hands back is done in Python, so the program has two implementations of
-everything from the saves to the report. This runs the real program both
-ways -- the engine, and `VIC2_NO_ENGINE=1` -- over a handful of real saves
-and a dozen ways of asking, and requires the same nine outputs and the same
-printed words from both.
+This runs the real program over a world of edge cases and over a handful of
+real saves, a dozen ways of asking, and requires the nine outputs and the
+printed words recorded for each (`expected.py`). The answers were the pure
+Python's, taken on 1 Oct 2026 while it was still here; before then this ran
+every case both ways. The real saves' answers are somebody's campaign and
+are kept outside the repository (`$VIC2_EXPECTED_REAL`), with the saves they
+came from named in `inputs.json`.
 
-    python3 testkit/enginecheck.py SAVES --mod MOD [--every N]
+    python3 testkit/enginecheck.py SAVES --mod MOD [--every N] [--update]
 
 The mod they are read under is the real one, with rules added that the
 campaigns here never meet: triggered modifiers asking every question the
@@ -323,16 +324,10 @@ def a_modifier_someone_holds(saves):
 
 # ------------------------------------------------------------- running
 
-def run(folder, mod, args, out, holding, python=False):
+def run(folder, mod, args, out, holding):
     """One run's answer. `CACHED` fills a cache of its own first, so the run
     answered is read entirely out of it."""
     env = dict(os.environ)
-    for key in ("VIC2_NO_ENGINE", "VIC2_NO_FRONT", "VIC2_ENGINE_REQUIRED"):
-        env.pop(key, None)
-    if python:
-        env["VIC2_NO_ENGINE"] = "1"
-    else:
-        env["VIC2_ENGINE_REQUIRED"] = "1"
     quiet = [] if "VERBOSE" in args else ["-q"]
     if "VERBOSE" in args and "-j" not in args:
         # How many saves are read at once follows the memory free at the
@@ -373,8 +368,6 @@ def main():
     ap.add_argument("--every", type=int, default=17)
     ap.add_argument("--update", action="store_true",
                     help="write what the program answers now as the expected answers")
-    ap.add_argument("--python", action="store_true",
-                    help="with --update: take the answers from the Python (VIC2_NO_ENGINE)")
     args = ap.parse_args()
     binary = os.path.join(HERE, "scanner", "target", "release",
                           "vic2scan" + (".exe" if os.name == "nt" else ""))
@@ -394,8 +387,7 @@ def main():
         edge_mod, edge_folder = an_edge_world(os.path.join(holding, "edges"))
         book = expected.Book(expected.REPO, "enginecheck", args.update)
         for name, flags in SYNTHETIC_RUNS:
-            got = run(edge_folder, edge_mod, flags, os.path.join(holding, "out"), holding,
-                      args.python)
+            got = run(edge_folder, edge_mod, flags, os.path.join(holding, "out"), holding)
             found = book.hold(name, got)
             expected.report(name, found, width)
             wrong += ["%s: %s" % (name, f) for f in found]
@@ -429,8 +421,7 @@ def main():
                                              inputs["modifier"])
                 book = expected.Book(expected.REAL, "enginecheck", args.update)
                 for name, flags in RUNS:
-                    got = run(folder, mod, flags, os.path.join(holding, "out"), holding,
-                              args.python)
+                    got = run(folder, mod, flags, os.path.join(holding, "out"), holding)
                     found = book.hold(name, got)
                     expected.report(name, found, width)
                     wrong += ["%s: %s" % (name, f) for f in found]

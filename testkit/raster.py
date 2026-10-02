@@ -152,8 +152,6 @@ def shipped(saves, mod, scale, holding):
     """The map a run's page carries at `scale`."""
     out = holding / ("out%d" % scale)
     env = dict(os.environ, TMPDIR=str(holding / "tmp"))
-    for key in ("VIC2_NO_ENGINE", "VIC2_NO_FRONT"):
-        env.pop(key, None)
     (holding / "tmp").mkdir(exist_ok=True)
     done = subprocess.run([sys.executable, str(HERE / "vic2_analyzer.py"), saves, "--mod-path",
                            mod, "--out", str(out), "--map-scale", str(scale), "-q", "--no-cache"],

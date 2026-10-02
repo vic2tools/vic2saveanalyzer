@@ -2,8 +2,8 @@
 """
 Check the arithmetic the report's own numbers have to satisfy.
 
-Parity proves the two readers agree; it does not prove either of them is
-right. These are the identities that hold whatever the save says -- the
+The recorded answers prove a run says what it said before; they do not
+prove it was right. These are the identities that hold whatever the save says -- the
 strata are a partition of the population, a percentage is its own numerator
 over its own denominator, brigades are the standing ones plus the mobilized
 ones -- so a break is a bug in the counting and not a quirk of a campaign.
@@ -26,7 +26,6 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
 from outcome import SKIPPED                                 # noqa: E402
-from dates import year_fraction                             # noqa: E402
 
 # Floating point: literacy and money are accumulated in a different order
 # from the totals they are checked against, so an identity can miss by a few
@@ -34,6 +33,16 @@ from dates import year_fraction                             # noqa: E402
 # larger than the numbers involved, not larger than zero.
 RELATIVE = 1e-9
 ABSOLUTE = 1e-6
+
+
+def year_fraction(date):
+    """A date as a position on a year axis, as the report places it; 0.0
+    for anything else."""
+    try:
+        y, m, d = (int(p) for p in date.split("."))
+    except (ValueError, AttributeError):
+        return 0.0
+    return y + (m - 1) / 12.0 + (d - 1) / 365.0
 
 
 def near(a, b):

@@ -156,7 +156,7 @@ pub(crate) struct Pop<'a> {
 /// top-level block opens with `{` alone at column zero and its key is the
 /// line above. Returns None if any brace has something other than a bare
 /// `key=` above it -- a save reflowed by a text editor -- and then the caller
-/// falls back to Python, which has a slower reader that copes.
+/// reads it a token at a time instead (`engine/walk.rs`), slower but coping.
 pub(crate) fn top_level_blocks(bytes: &[u8]) -> Option<Vec<(&[u8], usize, usize)>> {
     let mut found: Vec<(&[u8], usize, usize)> = Vec::new();
     let mut pos = 0usize;
