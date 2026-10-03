@@ -140,8 +140,12 @@ def cross_cases(saves, mod, out, holding, analyzer):
     for i, name in enumerate(files):
         side = "alpha" if i % 2 else "beta"
         os.makedirs(os.path.join(holding, side), exist_ok=True)
-        os.symlink(os.path.join(saves, name),
-                   os.path.join(holding, side, name))
+        try:
+            os.symlink(os.path.join(saves, name),
+                       os.path.join(holding, side, name))
+        except OSError:                 # Windows, without the right to link
+            shutil.copyfile(os.path.join(saves, name),
+                            os.path.join(holding, side, name))
     base = [sys.executable, analyzer, holding, "--out", out, "--cross",
             "--mod-path", mod]
     return [("cross, quiet", base + ["--rebuild", "-q"], []),
@@ -154,7 +158,8 @@ def run(name, argv, wants, width):
     """One case. True if it lived and said what it was supposed to."""
     refuses = "refuses" in wants
     began = time.monotonic()
-    done = subprocess.run(argv, capture_output=True, text=True)
+    done = subprocess.run(argv, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
     took = time.monotonic() - began
     out = done.stdout + done.stderr
     why = []
@@ -183,6 +188,8 @@ def run(name, argv, wants, width):
 
 
 def main():
+    # The marks it draws are not in a Windows code page, and a pipe has one.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("saves", help="a folder of .v2 saves")
     ap.add_argument("--mod", default="", help="a mod folder, if there is one")
