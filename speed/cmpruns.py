@@ -51,11 +51,14 @@ for n in names:
     if x != y:
         bad.append("%s differs" % n)
 def norm(p, out):
-    t = read(p).decode("utf-8", "replace").replace(out, "<OUT>")
+    # A run made on Windows may carry a byte-order mark (PowerShell's
+    # redirect) and ends its lines with CR LF; the reference has neither.
+    t = read(p).decode("utf-8-sig", "replace").replace("\r\n", "\n").replace(out, "<OUT>")
     # A run kept under another name than it was made under (31a2931 was
     # made as task01-pre) says that folder.
     t = re.sub(r"/[^\s]*/opt/runs/[^/\s]+/out", "<OUT>", t)
-    # What a run wrote, named in any folder on any machine: <OUT>/name.
+    # What a run wrote, named in any folder on any machine, with / or \
+    # between the folders: <OUT>/name.
     t = re.sub(r"(?m)^(\s+)\S[^\n]*?[\\/]([^\\/\n]+\.(?:html|csv))$", r"\1<OUT>/\2", t)
     # The game it found, which is wherever this machine installed it.
     t = re.sub(r"(?m)^Victoria II at .*?, (with |unmodded)", r"Victoria II at <GAME>, \1", t)
