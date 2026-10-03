@@ -51,3 +51,7 @@ scanner/target/
 
 # Except the tables the checks are held to (testkit/expected.py).
 !testkit/expected/**/*.csv
+
+# The speed job's settings for this machine: its campaign, its mod and what
+# must stay private (speed/prepush.sh).
+speed/local.env
