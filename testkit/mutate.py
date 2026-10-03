@@ -455,7 +455,7 @@ def r27():
 
 @mutation("chunk-stream-cut",
           "a save's state-history chunk loses the first byte of its gzip "
-          "stream, so the page's chunk does not decompress", "enginecheck.py", "saves")
+          "stream, so the page's chunk does not decompress", "frontcheck.py")
 def m58():
     patch("scanner/src/engine/finish.rs",
           "deflate::gzip_level(raw.as_bytes(), &deflate::LEVEL5))",
