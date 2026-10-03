@@ -16,48 +16,61 @@
 // parser for the format, matching the Python one's conventions exactly --
 // repeated keys collapse into a list, a block of bare values is a list, and
 // bare values mixed with keys are kept under `_items`.
+//
+// It reads the save's own bytes, which are latin-1: a byte is a character.
+// What it parses borrows from them, and only what a country keeps -- a
+// culture, a flag, a technology's name -- is decoded into a `String`. It used
+// to decode every country block whole before reading a word of it.
 
-use crate::text::{find, unquote};
+use crate::text::{find, latin1, unquote_b};
 use crate::fx::FxMap;
 
-/// How many bytes of whitespace start at `i`: 0 for none. The text is the
-/// latin-1 block re-encoded as UTF-8, so a character is judged whole -- the
-/// ASCII spaces, or U+0085 and U+00A0 (`C2 85`, `C2 A0`) -- and never by a
-/// byte of one: `0x85` and `0xA0` are also the second bytes of `Å` and `à`,
-/// and taking them for spaces cut a word inside a character.
-pub(crate) fn space_len(b: &[u8], i: usize) -> usize {
-    match b[i] {
-        0x09..=0x0d | 0x20 => 1,
-        0xc2 if matches!(b.get(i + 1), Some(0x85) | Some(0xa0)) => 2,
-        _ => 0,
+/// Whether a byte of the save is whitespace, as Python's `\s` judged the
+/// latin-1 text it decoded -- the ASCII spaces, NEL and the no-break space --
+/// and as `str::trim` does too. A latin-1 byte is a whole character, so
+/// there is no second byte of anything to mistake for one.
+pub(crate) fn is_space(c: u8) -> bool {
+    matches!(c, 0x09..=0x0d | 0x20 | 0x85 | 0xa0)
+}
+
+/// `str::trim` on the decoded text, done on the bytes.
+fn trim(s: &[u8]) -> &[u8] {
+    let mut a = 0;
+    let mut b = s.len();
+    while a < b && is_space(s[a]) { a += 1; }
+    while b > a && is_space(s[b - 1]) { b -= 1; }
+    &s[a..b]
+}
+
+/// Whether latin-1 bytes are the same text as a decoded name.
+fn eq_latin1(b: &[u8], s: &str) -> bool {
+    if b.is_ascii() {
+        return b == s.as_bytes();
     }
+    let mut chars = s.chars();
+    b.iter().all(|&c| chars.next() == Some(c as char)) && chars.next().is_none()
 }
 
 /// A token cursor over the save's own grammar: `"quoted"`, `{`, `}`, `=`, or
 /// a run of anything else. The same rule as the Python `TOKEN_RE`.
 pub struct Tokens<'a> {
-    text: &'a str,
     bytes: &'a [u8],
     pos: usize,
-    pushed: Option<&'a str>,
+    pushed: Option<&'a [u8]>,
 }
 
 impl<'a> Tokens<'a> {
-    pub fn new(text: &'a str, at: usize) -> Tokens<'a> {
-        Tokens { text, bytes: text.as_bytes(), pos: at, pushed: None }
+    pub fn new(bytes: &'a [u8], at: usize) -> Tokens<'a> {
+        Tokens { bytes, pos: at, pushed: None }
     }
 
-    pub fn next(&mut self) -> Option<&'a str> {
+    pub fn next(&mut self) -> Option<&'a [u8]> {
         if let Some(t) = self.pushed.take() {
             return Some(t);
         }
         let b = self.bytes;
-        while self.pos < b.len() {
-            let n = space_len(b, self.pos);
-            if n == 0 {
-                break;
-            }
-            self.pos += n;
+        while self.pos < b.len() && is_space(b[self.pos]) {
+            self.pos += 1;
         }
         if self.pos >= b.len() {
             return None;
@@ -70,28 +83,28 @@ impl<'a> Tokens<'a> {
                     i += 1;
                 }
                 self.pos = (i + 1).min(b.len());
-                Some(&self.text[start..self.pos])
+                Some(&b[start..self.pos])
             }
             b'{' | b'}' | b'=' => {
                 self.pos = start + 1;
-                Some(&self.text[start..self.pos])
+                Some(&b[start..self.pos])
             }
             _ => {
                 let mut i = start;
                 while i < b.len() {
                     let c = b[i];
-                    if space_len(b, i) > 0 || c == b'{' || c == b'}' || c == b'=' {
+                    if is_space(c) || c == b'{' || c == b'}' || c == b'=' {
                         break;
                     }
                     i += 1;
                 }
                 self.pos = i;
-                Some(&self.text[start..i])
+                Some(&b[start..i])
             }
         }
     }
 
-    pub fn push(&mut self, t: &'a str) {
+    pub fn push(&mut self, t: &'a [u8]) {
         self.pushed = Some(t);
     }
 
@@ -113,7 +126,12 @@ impl<'a> Tokens<'a> {
                     b'{' => { depth += 1; bare = false; }
                     b'}' => { depth -= 1; bare = false; }
                     b'=' => bare = false,
-                    _ if space_len(self.bytes, self.pos) > 0 => bare = false,
+                    // NEL and the no-break space leave a word open, as
+                    // they did when this ran over the block re-encoded as
+                    // UTF-8 and took their second byte for a letter: a
+                    // quote straight after one does not open a name here,
+                    // though `next()` would open one. Kept as it was.
+                    _ if is_space(c) && c < 0x80 => bare = false,
                     _ => bare = true,
                 }
             }
@@ -122,30 +140,31 @@ impl<'a> Tokens<'a> {
     }
 }
 
+/// What a block holds, borrowed from the save's bytes.
 #[derive(Debug)]
-pub enum Value {
-    Text(String),
+pub enum Value<'a> {
+    Text(&'a [u8]),
     /// A block of bare values, or the several values of a repeated key.
-    List(Vec<Value>),
-    Dict(Dict),
+    List(Vec<Value<'a>>),
+    Dict(Dict<'a>),
 }
 
 #[derive(Debug, Default)]
-pub struct Dict {
-    pub pairs: Vec<(String, Value)>,
-    pub items: Vec<Value>,
+pub struct Dict<'a> {
+    pub pairs: Vec<(&'a [u8], Value<'a>)>,
+    pub items: Vec<Value<'a>>,
 }
 
-impl Dict {
-    pub fn get(&self, key: &str) -> Option<&Value> {
-        self.pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+impl<'a> Dict<'a> {
+    pub fn get(&self, key: &[u8]) -> Option<&Value<'a>> {
+        self.pairs.iter().find(|(k, _)| *k == key).map(|(_, v)| v)
     }
 
-    pub fn has(&self, key: &str) -> bool {
-        self.pairs.iter().any(|(k, _)| k == key)
+    pub fn has(&self, key: &[u8]) -> bool {
+        self.pairs.iter().any(|(k, _)| *k == key)
     }
 
-    pub fn text(&self, key: &str) -> Option<&str> {
+    pub fn text(&self, key: &[u8]) -> Option<&'a [u8]> {
         match self.get(key) {
             Some(Value::Text(s)) => Some(s),
             _ => None,
@@ -154,7 +173,7 @@ impl Dict {
 }
 
 /// Every dict directly under a value, whether it appeared once or many times.
-pub fn sub_blocks(v: &Value) -> Vec<&Dict> {
+pub fn sub_blocks<'v, 'a>(v: &'v Value<'a>) -> Vec<&'v Dict<'a>> {
     match v {
         Value::Dict(d) => vec![d],
         Value::List(items) => items
@@ -174,7 +193,7 @@ pub fn sub_blocks(v: &Value) -> Vec<&Dict> {
 /// bare values becomes a list; bare values alongside keys are kept as
 /// `items`. That is what the Python does, and several readers downstream
 /// depend on which of the three they get.
-pub fn parse_block(tok: &mut Tokens, skip: &[&str]) -> Value {
+pub fn parse_block<'a>(tok: &mut Tokens<'a>, skip: &[&[u8]]) -> Value<'a> {
     parse_fields(tok, skip, Shape::All)
 }
 
@@ -185,59 +204,59 @@ pub fn parse_block(tok: &mut Tokens, skip: &[&str]) -> Value {
 enum Shape { All, State, Factory, Units, Regiment, Pop, Ship }
 
 impl Shape {
-    fn field(self, key: &str) -> Option<Shape> {
+    fn field(self, key: &[u8]) -> Option<Shape> {
         use Shape::*;
         match (self, key) {
             (All, _) => Some(All),
-            (State, "provinces" | "is_colonial") => Some(All),
-            (State, "state_buildings") => Some(Factory),
-            (Factory, "level") => Some(All),
-            (Units, "location") => Some(All),
-            (Units, "army" | "navy") => Some(Units),
-            (Units, "regiment") => Some(Regiment),
-            (Units, "ship") => Some(Ship),
-            (Regiment, "type" | "strength") => Some(All),
-            (Regiment, "pop") => Some(Pop),
-            (Pop, "id") => Some(All),
-            (Ship, "type" | "strength" | "experience") => Some(All),
+            (State, b"provinces" | b"is_colonial") => Some(All),
+            (State, b"state_buildings") => Some(Factory),
+            (Factory, b"level") => Some(All),
+            (Units, b"location") => Some(All),
+            (Units, b"army" | b"navy") => Some(Units),
+            (Units, b"regiment") => Some(Regiment),
+            (Units, b"ship") => Some(Ship),
+            (Regiment, b"type" | b"strength") => Some(All),
+            (Regiment, b"pop") => Some(Pop),
+            (Pop, b"id") => Some(All),
+            (Ship, b"type" | b"strength" | b"experience") => Some(All),
             _ => None,
         }
     }
 }
 
-fn parse_fields(tok: &mut Tokens, skip: &[&str], shape: Shape) -> Value {
-    let mut pairs: Vec<(String, Value)> = Vec::new();
-    let mut items: Vec<Value> = Vec::new();
+fn parse_fields<'a>(tok: &mut Tokens<'a>, skip: &[&[u8]], shape: Shape) -> Value<'a> {
+    let mut pairs: Vec<(&'a [u8], Value<'a>)> = Vec::new();
+    let mut items: Vec<Value<'a>> = Vec::new();
     let mut discarded_pair = false;
     loop {
         let t = match tok.next() {
             None => break,
-            Some("}") => break,
+            Some(b"}") => break,
             Some(t) => t,
         };
-        if t == "{" {
+        if t == b"{" {
             items.push(parse_fields(tok, skip, shape));
             continue;
         }
-        if t == "=" {
+        if t == b"=" {
             continue;
         }
         let nxt = tok.next();
         match nxt {
-            Some("=") => {
-                let key = unquote(t);
+            Some(b"=") => {
+                let key = unquote_b(t);
                 let val_tok = tok.next();
                 let child = match shape.field(key) {
                     Some(child) => child,
                     None => {
                         discarded_pair |= val_tok.is_some()
-                            && !(val_tok == Some("{") && skip.contains(&key));
-                        if val_tok == Some("{") { tok.skip_to_close(); }
+                            && !(val_tok == Some(b"{") && skip.contains(&key));
+                        if val_tok == Some(b"{") { tok.skip_to_close(); }
                         continue;
                     }
                 };
                 let val = match val_tok {
-                    Some("{") => {
+                    Some(b"{") => {
                         if skip.contains(&key) {
                             tok.skip_to_close();
                             continue;
@@ -245,9 +264,9 @@ fn parse_fields(tok: &mut Tokens, skip: &[&str], shape: Shape) -> Value {
                         parse_fields(tok, skip, child)
                     }
                     None => break,
-                    Some(v) => Value::Text(unquote(v).to_string()),
+                    Some(v) => Value::Text(unquote_b(v)),
                 };
-                match pairs.iter_mut().find(|(k, _)| k == key) {
+                match pairs.iter_mut().find(|(k, _)| *k == key) {
                     Some(slot) => {
                         // A repeat: the pair becomes the list of both.
                         let held = std::mem::replace(&mut slot.1,
@@ -260,11 +279,11 @@ fn parse_fields(tok: &mut Tokens, skip: &[&str], shape: Shape) -> Value {
                             one => slot.1 = Value::List(vec![one, val]),
                         }
                     }
-                    None => pairs.push((key.to_string(), val)),
+                    None => pairs.push((key, val)),
                 }
             }
             other => {
-                items.push(Value::Text(unquote(t).to_string()));
+                items.push(Value::Text(unquote_b(t)));
                 if let Some(o) = other {
                     tok.push(o);
                 }
@@ -277,31 +296,34 @@ fn parse_fields(tok: &mut Tokens, skip: &[&str], shape: Shape) -> Value {
     Value::Dict(Dict { pairs, items })
 }
 
-fn to_float(s: &str) -> f64 {
-    s.trim().parse::<f64>().unwrap_or(0.0)
+/// `float(s)` as `str::parse` reads the decoded text, trimmed: None where it
+/// fails. A number is ASCII, so bytes that are not cannot parse either way.
+fn parse_float(s: &[u8]) -> Option<f64> {
+    std::str::from_utf8(trim(s)).ok()?.parse::<f64>().ok()
 }
 
-fn to_float_or(s: Option<&str>, fallback: f64) -> f64 {
+fn to_float(s: &[u8]) -> f64 {
+    parse_float(s).unwrap_or(0.0)
+}
+
+fn to_float_or(s: Option<&[u8]>, fallback: f64) -> f64 {
     match s {
-        Some(v) => v.trim().parse::<f64>().unwrap_or(fallback),
+        Some(v) => parse_float(v).unwrap_or(fallback),
         None => fallback,
     }
 }
 
-fn to_int(s: &str) -> i64 {
-    let v = s.trim().parse::<f64>().unwrap_or(0.0);
+fn to_int(s: &[u8]) -> i64 {
+    let v = parse_float(s).unwrap_or(0.0);
     if v.is_finite() { v.trunc() as i64 } else { 0 }
 }
 
-fn to_int_or(s: Option<&str>, fallback: i64) -> i64 {
+fn to_int_or(s: Option<&[u8]>, fallback: i64) -> i64 {
     match s {
-        Some(v) => {
-            let f = v.trim().parse::<f64>();
-            match f {
-                Ok(x) if x.is_finite() => x.trunc() as i64,
-                _ => fallback,
-            }
-        }
+        Some(v) => match parse_float(v) {
+            Some(x) if x.is_finite() => x.trunc() as i64,
+            _ => fallback,
+        },
         None => fallback,
     }
 }
@@ -345,48 +367,49 @@ pub struct Country {
 }
 
 /// An ordered counter, so what comes back is in the order the file gave it.
+/// It counts the save's own bytes and decodes each name once, at the end.
 #[derive(Default)]
-struct Tally {
-    order: Vec<String>,
-    index: FxMap<String, usize>,
+struct Tally<'a> {
+    order: Vec<&'a [u8]>,
+    index: FxMap<&'a [u8], usize>,
     total: Vec<f64>,
 }
 
-impl Tally {
-    fn add(&mut self, name: &str, by: f64) {
+impl<'a> Tally<'a> {
+    fn add(&mut self, name: &'a [u8], by: f64) {
         match self.index.get(name) {
             Some(&i) => self.total[i] += by,
             None => {
-                self.index.insert(name.to_string(), self.order.len());
-                self.order.push(name.to_string());
+                self.index.insert(name, self.order.len());
+                self.order.push(name);
                 self.total.push(by);
             }
         }
     }
     fn ints(&self) -> Vec<(String, i64)> {
-        self.order.iter().cloned()
+        self.order.iter().map(|n| latin1(n))
             .zip(self.total.iter().map(|v| *v as i64)).collect()
     }
     fn floats(&self) -> Vec<(String, f64)> {
-        self.order.iter().cloned().zip(self.total.iter().copied()).collect()
+        self.order.iter().map(|n| latin1(n)).zip(self.total.iter().copied()).collect()
     }
 }
 
 #[derive(Default)]
-struct Units {
+struct Units<'a> {
     brigades: i64,
     armies: i64,
     navies: i64,
     ships: i64,
     regiment_pops: Vec<i64>,
-    by_type: Tally,
-    ships_by_type: Tally,
-    ship_crew: Tally,
-    at: Vec<(i64, Tally)>,
-    men: Vec<(i64, Tally)>,
+    by_type: Tally<'a>,
+    ships_by_type: Tally<'a>,
+    ship_crew: Tally<'a>,
+    at: Vec<(i64, Tally<'a>)>,
+    men: Vec<(i64, Tally<'a>)>,
 }
 
-impl Units {
+impl<'a> Units<'a> {
     fn at_mut(&mut self, where_: i64) -> usize {
         match self.at.iter().position(|(p, _)| *p == where_) {
             Some(i) => i,
@@ -404,48 +427,49 @@ impl Units {
 /// Recursive on purpose: an army loaded onto transports is stored as an
 /// `army` block inside the `navy` carrying it, so reading army->regiment at
 /// one fixed depth silently drops every embarked brigade.
-fn count_units(node: &Dict, out: &mut Units, where_: Option<i64>) {
+fn count_units<'a>(node: &Dict<'a>, out: &mut Units<'a>, where_: Option<i64>) {
     for (key, value) in &node.pairs {
-        if key.starts_with('_') {
+        let key = *key;
+        if key.first() == Some(&b'_') {
             continue;
         }
-        if key == "regiment" {
+        if key == b"regiment" {
             for reg in sub_blocks(value) {
                 out.brigades += 1;
-                let pop_id = match reg.get("pop") {
-                    Some(Value::Dict(d)) => to_int_or(d.text("id"), -1),
+                let pop_id = match reg.get(b"pop") {
+                    Some(Value::Dict(d)) => to_int_or(d.text(b"id"), -1),
                     _ => -1,
                 };
                 out.regiment_pops.push(pop_id);
                 // A unit type is an unquoted name; a bare id reference
                 // carries a number instead, and a number is not a name.
-                let raw = reg.text("type").unwrap_or("");
-                let rtype = if raw.trim().parse::<f64>().is_ok() { "" } else { raw };
-                let rtype = if rtype.is_empty() { "unknown" } else { rtype };
+                let raw = reg.text(b"type").unwrap_or(b"");
+                let rtype: &[u8] = if parse_float(raw).is_some() { b"" } else { raw };
+                let rtype: &[u8] = if rtype.is_empty() { b"unknown" } else { rtype };
                 out.by_type.add(rtype, 1.0);
                 if let Some(w) = where_ {
                     let i = out.at_mut(w);
                     out.at[i].1.add(rtype, 1.0);
-                    let strength = to_float(reg.text("strength").unwrap_or(""));
+                    let strength = to_float(reg.text(b"strength").unwrap_or(b""));
                     out.men[i].1.add(rtype, (strength * 1000.0).round_ties_even());
                 }
             }
-        } else if key == "ship" {
+        } else if key == b"ship" {
             for ship in sub_blocks(value) {
                 out.ships += 1;
-                let kind = ship.text("type").unwrap_or("unknown");
+                let kind = ship.text(b"type").unwrap_or(b"unknown");
                 out.ships_by_type.add(kind, 1.0);
                 // Both are percentages. Strength scales the damage a hull
                 // deals; experience is subtracted from the damage it takes,
                 // which leaves it as a divisor on its owner's side.
-                let strength = to_float_or(ship.text("strength"), 100.0) / 100.0;
-                let experience = to_float_or(ship.text("experience"), 0.0) / 100.0;
+                let strength = to_float_or(ship.text(b"strength"), 100.0) / 100.0;
+                let experience = to_float_or(ship.text(b"experience"), 0.0) / 100.0;
                 let experience = experience.clamp(0.0, 0.95);
                 out.ship_crew.add(kind, strength.max(0.0) / (1.0 - experience));
             }
-        } else if key == "army" || key == "navy" {
+        } else if key == b"army" || key == b"navy" {
             let blocks = sub_blocks(value);
-            if key == "army" {
+            if key == b"army" {
                 out.armies += blocks.len() as i64;
             } else {
                 out.navies += blocks.len() as i64;
@@ -453,7 +477,7 @@ fn count_units(node: &Dict, out: &mut Units, where_: Option<i64>) {
             for block in blocks {
                 // An embarked army has no location of its own, so it
                 // inherits the navy's.
-                let here = to_int_or(block.text("location"), -1);
+                let here = to_int_or(block.text(b"location"), -1);
                 count_units(block, out, if here > 0 { Some(here) } else { where_ });
             }
         }
@@ -466,35 +490,44 @@ pub struct Tables<'a> {
     pub reform_keys: &'a [String],
 }
 
-const STATE_SKIP: &[&str] = &["employment", "stockpile", "id"];
-const UNIT_SKIP: &[&str] = &["id", "leader"];
+const STATE_SKIP: &[&[u8]] = &[b"employment", b"stockpile", b"id"];
+const UNIT_SKIP: &[&[u8]] = &[b"id", b"leader"];
 
-const SCALARS: &[(&str, &str)] = &[
-    ("nationalvalue", "nationalvalue"),
-    ("primary_culture", "primary_culture"),
-    ("civilized", "civilized"),
-    ("government", "government"),
-    ("capital", "capital"),
+const SCALARS: &[(&[u8], &str)] = &[
+    (b"nationalvalue", "nationalvalue"),
+    (b"primary_culture", "primary_culture"),
+    (b"civilized", "civilized"),
+    (b"government", "government"),
+    (b"capital", "capital"),
 ];
-const NUMERICS: &[(&str, &str)] = &[
-    ("prestige", "prestige"),
-    ("badboy", "infamy"),
-    ("money", "treasury"),
-    ("tax_base", "tax_base"),
-    ("war_exhaustion", "war_exhaustion"),
-    ("revanchism", "revanchism"),
-    ("plurality", "plurality"),
-    ("research_points", "research_points"),
-    ("ruling_party", "ruling_party"),
+const NUMERICS: &[(&[u8], &str)] = &[
+    (b"prestige", "prestige"),
+    (b"badboy", "infamy"),
+    (b"money", "treasury"),
+    (b"tax_base", "tax_base"),
+    (b"war_exhaustion", "war_exhaustion"),
+    (b"revanchism", "revanchism"),
+    (b"plurality", "plurality"),
+    (b"research_points", "research_points"),
+    (b"ruling_party", "ruling_party"),
 ];
 
-/// One country block.
-pub fn read_country(text: &str, at: usize, stop: usize, tag: &str,
+/// The bare values of a block, whether it came back a list or kept them
+/// beside keys.
+fn bare_values<'v, 'a>(block: &'v Value<'a>) -> &'v [Value<'a>] {
+    match block {
+        Value::List(items) => items,
+        Value::Dict(d) => &d.items,
+        _ => &[],
+    }
+}
+
+/// One country block: the save's bytes from `at` to `stop`.
+pub fn read_country(bytes: &[u8], at: usize, stop: usize, tag: &str,
                     tables: &Tables) -> Country {
     let mut out = Country::default();
     out.tag = tag.to_string();
     let mut units = Units::default();
-    let bytes = text.as_bytes();
 
     // The same one-tab entries the Python scans: `\n\t<key>=<value>`, where
     // a value starting with `{` means the block that follows.
@@ -508,7 +541,7 @@ pub fn read_country(text: &str, at: usize, stop: usize, tag: &str,
         let mut p = key_start;
         while p < stop && bytes[p] != b'=' {
             let c = bytes[p];
-            if space_len(bytes, p) > 0 || c == b'{' || c == b'}' || c == b'"' {
+            if is_space(c) || c == b'{' || c == b'}' || c == b'"' {
                 break;
             }
             p += 1;
@@ -517,27 +550,27 @@ pub fn read_country(text: &str, at: usize, stop: usize, tag: &str,
             i = nl + 2;
             continue;
         }
-        let key = &text[key_start..p];
+        let key = &bytes[key_start..p];
         let line_end = match bytes[p..stop].iter().position(|&c| c == b'\n') {
             Some(k) => p + k,
             None => stop,
         };
-        let value = text[p + 1..line_end].trim();
+        let value = trim(&bytes[p + 1..line_end]);
         i = line_end;
 
-        if !value.is_empty() && !value.starts_with('{') {
-            let clean = unquote(value);
-            if key == "mobilize" {
-                out.is_mobilized = if clean.eq_ignore_ascii_case("yes") { 1 } else { 0 };
-            } else if key == "human" {
-                out.human = clean.eq_ignore_ascii_case("yes");
-            } else if tables.reform_keys.iter().any(|r| r == key) {
-                out.reforms.push((key.to_string(), clean.to_string()));
+        if !value.is_empty() && value[0] != b'{' {
+            let clean = unquote_b(value);
+            if key == b"mobilize" {
+                out.is_mobilized = if clean.eq_ignore_ascii_case(b"yes") { 1 } else { 0 };
+            } else if key == b"human" {
+                out.human = clean.eq_ignore_ascii_case(b"yes");
+            } else if tables.reform_keys.iter().any(|r| eq_latin1(key, r)) {
+                out.reforms.push((latin1(key), latin1(clean)));
             } else if let Some((_, name)) = SCALARS.iter().find(|(k, _)| *k == key) {
                 // Unquoted: the Python's entry scanner strips the quotes
                 // before the value ever reaches this decision, so a primary
                 // culture is `dutch` and not `"dutch"`.
-                out.scalars.push((name.to_string(), clean.to_string()));
+                out.scalars.push((name.to_string(), latin1(clean)));
             } else if let Some((_, name)) = NUMERICS.iter().find(|(k, _)| *k == key) {
                 out.numerics.push((name.to_string(), to_float(clean)));
             }
@@ -549,106 +582,84 @@ pub fn read_country(text: &str, at: usize, stop: usize, tag: &str,
             None => continue,
             Some(b) => b,
         };
+        // A block runs to the end of the country at most, as it did when
+        // the country was a copy of its own.
+        let mut tok = Tokens::new(&bytes[..stop], brace + 1);
         match key {
-            "army" | "navy" => {
-                let mut tok = Tokens::new(text, brace + 1);
+            b"army" | b"navy" => {
                 let block = parse_fields(&mut tok, UNIT_SKIP, Shape::Units);
                 i = tok.pos;
                 let mut wrapper = Dict::default();
-                wrapper.pairs.push((key.to_string(), block));
+                wrapper.pairs.push((key, block));
                 count_units(&wrapper, &mut units, None);
             }
-            "culture" => {
-                let mut tok = Tokens::new(text, brace + 1);
-                match parse_block(&mut tok, &[]) {
-                    Value::List(items) => {
-                        for v in items {
-                            if let Value::Text(s) = v {
-                                out.accepted_cultures.push(s);
-                            }
-                        }
+            b"culture" => {
+                for v in bare_values(&parse_block(&mut tok, &[])) {
+                    if let Value::Text(s) = v {
+                        out.accepted_cultures.push(latin1(s));
                     }
-                    Value::Dict(d) => {
-                        for v in d.items {
-                            if let Value::Text(s) = v {
-                                out.accepted_cultures.push(s);
-                            }
-                        }
-                    }
-                    _ => {}
                 }
             }
-            "flags" => {
-                let mut tok = Tokens::new(text, brace + 1);
+            b"flags" => {
                 if let Value::Dict(d) = parse_block(&mut tok, &[]) {
                     for (k, v) in &d.pairs {
-                        if k.starts_with('_') {
+                        if k.first() == Some(&b'_') {
                             continue;
                         }
                         if let Value::Text(s) = v {
-                            if s.eq_ignore_ascii_case("yes") {
-                                out.country_flags.push(k.clone());
+                            if s.eq_ignore_ascii_case(b"yes") {
+                                out.country_flags.push(latin1(k));
                             }
                         }
                     }
                 }
             }
-            "modifier" => {
-                let mut tok = Tokens::new(text, brace + 1);
+            b"modifier" => {
                 if let Value::Dict(d) = parse_block(&mut tok, &[]) {
-                    if let Some(Value::Text(s)) = d.get("modifier") {
-                        out.modifiers.push(s.clone());
+                    if let Some(Value::Text(s)) = d.get(b"modifier") {
+                        out.modifiers.push(latin1(s));
                     }
                 }
             }
-            "saved_country_supply" => {
-                let mut tok = Tokens::new(text, brace + 1);
+            b"saved_country_supply" => {
                 if let Value::Dict(d) = parse_block(&mut tok, &[]) {
                     for (g, v) in &d.pairs {
-                        if g.starts_with('_') {
+                        if g.first() == Some(&b'_') {
                             continue;
                         }
                         if let Value::Text(s) = v {
                             let n = to_float(s);
                             if n > 0.0 {
-                                out.goods_supply.push((g.clone(), n));
+                                out.goods_supply.push((latin1(g), n));
                             }
                         }
                     }
                 }
             }
-            "active_inventions" => {
-                let mut tok = Tokens::new(text, brace + 1);
+            b"active_inventions" => {
                 let block = parse_block(&mut tok, &[]);
-                let ids: Vec<&Value> = match &block {
-                    Value::List(items) => items.iter().collect(),
-                    Value::Dict(d) => d.items.iter().collect(),
-                    _ => Vec::new(),
-                };
-                out.invention_ids = ids.iter().map(|v| match v {
+                out.invention_ids = bare_values(&block).iter().map(|v| match v {
                     Value::Text(s) => to_int_or(Some(s), -1),
                     _ => -1,
                 }).collect();
             }
-            "scheduled_mobilization" => {
-                let mut tok = Tokens::new(text, brace + 1);
+            b"scheduled_mobilization" => {
                 if let Value::Dict(d) = parse_block(&mut tok, &[]) {
-                    let spawned = d.text("spawned").unwrap_or("no");
-                    if !spawned.eq_ignore_ascii_case("yes") {
+                    let spawned = d.text(b"spawned").unwrap_or(b"no");
+                    if !spawned.eq_ignore_ascii_case(b"yes") {
                         out.mobilizing += 1;
                     }
                 } else {
                     out.mobilizing += 1;
                 }
             }
-            "state" => {
-                let mut tok = Tokens::new(text, brace + 1);
+            b"state" => {
                 let block = parse_fields(&mut tok, STATE_SKIP, Shape::State);
                 i = tok.pos;
                 if let Value::Dict(d) = block {
                     out.states += 1;
                     let ordinal = out.states;
-                    let ids: Vec<i64> = match d.get("provinces") {
+                    let ids: Vec<i64> = match d.get(b"provinces") {
                         Some(Value::List(items)) => items.iter().map(|v| match v {
                             Value::Text(s) => to_int_or(Some(s), -1),
                             _ => -1,
@@ -662,9 +673,9 @@ pub fn read_country(text: &str, at: usize, stop: usize, tag: &str,
                     // `is_colonial=1` is a protectorate and `=2` a colony;
                     // both sit outside the stated states, and the level
                     // matters to the brigade cap.
-                    let colonial = d.has("is_colonial");
+                    let colonial = d.has(b"is_colonial");
                     let level = if colonial {
-                        to_int_or(d.text("is_colonial"), 0)
+                        to_int_or(d.text(b"is_colonial"), 0)
                     } else { 0 };
                     for pid in ids {
                         out.province_state.push((pid, ordinal));
@@ -673,38 +684,37 @@ pub fn read_country(text: &str, at: usize, stop: usize, tag: &str,
                             out.colonial_level.push((pid, level));
                         }
                     }
-                    if let Some(v) = d.get("state_buildings") {
+                    if let Some(v) = d.get(b"state_buildings") {
                         for bld in sub_blocks(v) {
                             out.factory_count += 1;
-                            out.factory_levels += to_int_or(bld.text("level"), 1);
+                            out.factory_levels += to_int_or(bld.text(b"level"), 1);
                         }
                     }
                 }
             }
-            "technology" => {
-                let mut tok = Tokens::new(text, brace + 1);
+            b"technology" => {
                 if let Value::Dict(d) = parse_block(&mut tok, &[]) {
                     for (tech, tval) in &d.pairs {
-                        if tech.starts_with('_') {
+                        if tech.first() == Some(&b'_') {
                             continue;
                         }
-                        let first = match tval {
+                        let first: &[u8] = match tval {
                             Value::List(items) => match items.first() {
-                                Some(Value::Text(s)) => s.as_str(),
-                                _ => "",
+                                Some(Value::Text(s)) => s,
+                                _ => b"",
                             },
                             Value::Dict(inner) => match inner.items.first() {
-                                Some(Value::Text(s)) => s.as_str(),
-                                _ => "",
+                                Some(Value::Text(s)) => s,
+                                _ => b"",
                             },
-                            Value::Text(s) => s.as_str(),
+                            Value::Text(s) => s,
                         };
                         if to_int(first) == 1 {
                             out.techs += 1;
-                            out.tech_list.push(tech.clone());
-                            if tables.army_techs.iter().any(|t| t == tech) {
+                            out.tech_list.push(latin1(tech));
+                            if tables.army_techs.iter().any(|t| eq_latin1(tech, t)) {
                                 out.army_techs += 1;
-                            } else if tables.navy_techs.iter().any(|t| t == tech) {
+                            } else if tables.navy_techs.iter().any(|t| eq_latin1(tech, t)) {
                                 out.navy_techs += 1;
                             }
                         }
@@ -732,13 +742,39 @@ pub fn read_country(text: &str, at: usize, stop: usize, tag: &str,
 mod tests {
     use super::*;
 
-    /// `Å` and `à` are `C3 85` and `C3 A0` once decoded: neither byte is a
-    /// space, and a bare word holding one is read whole, as Python reads it.
+    /// `Å` and `à` are the bytes `C5` and `E0`, and `A0` is a no-break
+    /// space: a bare word holding one of the first two is read whole, and
+    /// the third ends a word, as Python reads the decoded text.
     #[test]
     fn a_bare_word_past_ascii_is_one_token() {
-        let text = crate::text::latin1(b"\xc5land_flag=yes \xe0x\xa0y }");
-        let mut tok = Tokens::new(&text, 0);
-        let got: Vec<&str> = std::iter::from_fn(|| tok.next()).collect();
-        assert_eq!(got, ["\u{c5}land_flag", "=", "yes", "\u{e0}x", "y", "}"]);
+        let text = b"\xc5land_flag=yes \xe0x\xa0y }";
+        let mut tok = Tokens::new(text, 0);
+        let got: Vec<&[u8]> = std::iter::from_fn(|| tok.next()).collect();
+        let want: [&[u8]; 6] = [b"\xc5land_flag", b"=", b"yes", b"\xe0x", b"y", b"}"];
+        assert_eq!(got, want);
+    }
+
+    /// A name is matched against the decoded tables by its characters, not
+    /// its bytes: `C3 A9` is `Ã©` in a save, never `é`.
+    #[test]
+    fn latin1_names_match_by_character() {
+        assert!(eq_latin1(b"army_tech", "army_tech"));
+        assert!(eq_latin1(b"\xe9cole", "\u{e9}cole"));
+        assert!(!eq_latin1(b"\xc3\xa9cole", "\u{e9}cole"));
+        assert!(!eq_latin1(b"\xe9cole", "\u{e9}col"));
+        assert!(!eq_latin1(b"army", "army_tech"));
+    }
+
+    /// A skipped block reads a quote straight after a no-break space as it
+    /// did on the UTF-8 copy -- not as opening a name, so the brace after it
+    /// closes the block -- and after an ASCII space as opening one.
+    #[test]
+    fn a_skipped_block_reads_a_no_break_space_as_it_did() {
+        let mut tok = Tokens::new(b"a=\xa0\"}\" } after", 0);
+        tok.skip_to_close();
+        assert_eq!(tok.next(), Some(&b"\" } after"[..]));
+        let mut tok = Tokens::new(b"a= \"}\" } after", 0);
+        tok.skip_to_close();
+        assert_eq!(tok.next(), Some(&b"after"[..]));
     }
 }

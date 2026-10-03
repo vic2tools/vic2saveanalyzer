@@ -504,6 +504,82 @@ occupied; only that third one took anything.
 
 ## Speed
 
+### Countries are read from the save's bytes, 2026-10-02
+
+`read_flat` decoded every country block into a latin-1 `String` before
+`read_country` read a word of it, and the parser then made a `String` of
+every key and value it kept in its tree. The profile put a third of the
+country time in that copy (`text::latin1`). Now `read_country`, `Tokens`
+and `parse_fields` (`country.rs`) work on the save's own bytes, the tree
+(`Value`, `Dict`) borrows its keys and values from them, the unit tallies
+count borrowed names, and only what a `Country` keeps -- a culture, a flag,
+a modifier, a good, a technology, a unit type -- is decoded, once.
+
+What makes this the same reading and not a near one:
+
+- **Whitespace.** The old tokenizer judged the UTF-8 copy, where NEL and the
+  no-break space were two bytes (`C2 85`, `C2 A0`). On latin-1 bytes they
+  are `85` and `A0`, single characters, and `is_space` takes exactly those
+  and the ASCII spaces -- the set `str::trim` trimmed on the copy, and the
+  one Python's `\s` has in latin-1 bar `\x1c`-`\x1f`, which neither the old
+  code nor this one counts.
+- **Numbers.** `parse_float` trims that set and parses what is left as
+  `str::parse` did; bytes that are not ASCII never parsed as a number on the
+  copy either.
+- **Names against the mod's tables.** A reform, army or navy technology is
+  matched by character (`eq_latin1`), not by byte: the bytes `C3 A9` are
+  `Ã©` in a save, never `é`.
+- **One quirk kept on purpose.** Skipping an unused block, the old code met
+  the second byte of a no-break space or NEL, took it for a letter, and so
+  did not let a `"` straight after one open a quoted name -- where `next()`
+  would. `skip_to_close` keeps that (`c < 0x80` on the space that closes a
+  word) so that no output can move; a unit test holds both cases, and was
+  run against the old code too. Whether to make it agree with `next()` is
+  a fix that could change a number, so it is left for the maintainer.
+- A block's tokens stop at the end of the country, as they did when the
+  country was a copy of its own (`Tokens::new(&bytes[..stop], ...)`).
+
+The walked path (`engine/walk.rs`, saves not laid out the game's way) has
+its own reader and is untouched; `frontcheck.py` and `saveshapes.py` read it.
+
+**Done on Windows, not on the laptop.** This step was the first made on the
+Windows PC (Ryzen 9 7950X, 16 cores / 32 threads, 31 GB), with Rust's
+`x86_64-pc-windows-gnu` toolchain (rustup stable 1.99.0; it needs no Visual
+Studio). The 1880s campaign, its mod and `expected-real` are not there, and
+neither is gdb, so:
+
+- The checks: `testkit/all.py --quick`, no saves. On Windows 13 of 20 hold
+  *before* this change; the 7 others fail on `main` too, the recorded
+  answers having been written on Linux (`HOLDING/saves/...` where Windows
+  says `HOLDING\saves\...`, and so on). The whole log of the suite after
+  the change is identical to the one before, line for line, timings and the
+  worktree path aside: the same checks hold, and the failing ones print the
+  same differences.
+- Real saves: the three saves of a small 1836 campaign on that PC, under a
+  stand-in vanilla game (`testkit/matching.a_vanilla`), run by both trees
+  ten ways (a report, `--tags`, `--split`, one save, `--peek`, `--verify`,
+  and the four diagnostics, which refuse on both for want of a mod):
+  exit status, stdout, stderr and every file byte-identical.
+- Mutations: none patches `country.rs`, and all 57 still find the text
+  they patch (a dry run). The full run was not made: on Windows the seven
+  checks above fail before any mutation, so theirs would be UNTESTED.
+- Speed: `vic2scan bench-engine` on those three saves, both builds in
+  alternation, 15 rounds, median per save. The spec it needs was taken
+  from a run with a temporary probe, not committed.
+
+| per save | before (`d23d16b`) | after |
+|---|---|---|
+| countries | 6.5 ms | 4.9 ms |
+| read + scan + build | 35.3 ms | 33.7 ms |
+| provinces, blocks, file, wars + market, record | unchanged | unchanged |
+
+Through `vic2_analyzer.py` from an empty cache (files in the page cache),
+`-j 1`, 15 rounds: pass one 158 -> 153 ms, wall 245 -> 240 ms; on the
+default thread count, three saves on three threads, 61 -> 60 ms. These are
+1836-41 saves, whose countries are small; on the 1880s campaign the profile
+put countries at ~23% of a worker's time, a third of it the copy, so pass
+one there should drop by more. That and the gdb split are for the laptop.
+
 ### A run ends without freeing, and reads on a steady count of threads, 2026-10-02
 
 Two steps, a commit each.

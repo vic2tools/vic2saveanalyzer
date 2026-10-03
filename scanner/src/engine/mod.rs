@@ -620,9 +620,9 @@ fn read_flat(text: &[u8], blocks: &[(&[u8], usize, usize)], reading: &Reading, t
     let mut referenced_pops = FxSet::default();
     for (key, at, stop) in blocks {
         if tag_bytes(key) {
-            let chunk = latin1(&text[*at..(*stop).min(text.len())]);
+            let chunk = &text[*at..(*stop).min(text.len())];
             let tag = latin1(key);
-            let country = read_country(&chunk, 0, chunk.len(), &tag, tables);
+            let country = read_country(chunk, 0, chunk.len(), &tag, tables);
             let rule = rules.entry(key.to_vec()).or_default();
             let bytes = |s: &str| s.chars().map(|c| c as u8).collect::<Vec<_>>();
             rule.accepted.extend(country.accepted_cultures.iter().map(|s| bytes(s)));
@@ -849,8 +849,8 @@ pub fn bench(args: &[String]) {
         let mut referenced = FxSet::default();
         for (key, at, stop) in &blocks {
             if tag_bytes(key) {
-                let chunk = latin1(&raw[*at..(*stop).min(raw.len())]);
-                let country = read_country(&chunk, 0, chunk.len(), &latin1(key), &tables);
+                let chunk = &raw[*at..(*stop).min(raw.len())];
+                let country = read_country(chunk, 0, chunk.len(), &latin1(key), &tables);
                 let rule = rules.entry(key.to_vec()).or_default();
                 rule.accepted.extend(country.accepted_cultures.iter().map(|s| s.as_bytes().to_vec()));
                 rule.colonial.extend(&country.colonial_provinces);

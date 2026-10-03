@@ -11,10 +11,10 @@
 // Reading bytes as the analyzer's Python reads text: the numbers, the quotes,
 // the country tags, the latin-1 decode, and finding a needle. `find` and the
 // quotes are used by both readers and written once here. The country reader
-// keeps its own number parsing, on text it has already decoded: it trims
-// whitespace the way Python's `float()` does, which is wider than the ASCII
-// these byte versions trim, and the two agree only because the game writes
-// ASCII numbers.
+// keeps its own number parsing: it trims latin-1's whitespace -- NEL and the
+// no-break space besides the ASCII -- which is wider than the ASCII these
+// byte versions trim, and the two agree only because the game writes ASCII
+// numbers.
 
 // Byte versions of the three conversions. A save's numbers are ASCII, so
 // nothing here needs the file decoded first -- which is the whole point:
