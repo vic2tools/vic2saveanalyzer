@@ -467,3 +467,63 @@ Notes for task 03:
   named for the last commit. `~/vic2speed/rw/mut03b` is a worktree here.
 - Next: task 04 (`04-state-chunk.md`). The two browser checks it relies on
   now run on this PC.
+
+## 2026-10-03, task 04 done on the Windows PC (the state chunk)
+
+- **Made on the Windows PC** (Ryzen 9 7950X), the campaign and mod there.
+  Commits (not pushed): `87f8a4d` "Compress each save's state chunk at
+  level 5", then three small ones for `mutate.py` (below). INTERNALS.md:
+  "The state chunk is compressed at level 5, 2026-10-03".
+- **What the chunk costs** (265 saves, one thread, quiet machine, a probe
+  dumping every chunk's JSON, `vic2scan selftest-deflate levels DIR`): per
+  save JSON 0.57 ms, gzip at level 6 5.1 ms, base64 0.08 ms; 91 KB raw, 37 KB
+  gzipped. It is its compression, so nothing was tried on the JSON. The
+  chunks are 13 MB of the 18.6 MB page, so a faster level shows in the page.
+- **What was kept:** `deflate.rs` takes a `Level` (zlib's good/lazy/nice/
+  chain row); `deflate_raw` is level 6 as before, byte for byte (the real
+  campaign's page with the chunks at 6 is identical to `speed/runs/11e1f21`);
+  `Snapshot::pack` uses `LEVEL5`. `selftest-deflate` has `gz4`, `gz5` and
+  `levels DIR`. **Dropped:** zlib's levels 1-3 (`deflate_fast`) were written
+  and removed: no faster end to end than 5, and up to +6.8% page.
+
+| chunk level | chunk bytes | ms a chunk | pass one | wall | report.html |
+|---|---|---|---|---|---|
+| 6 | 9.88 MB | 5.1 | 1.521 s | 2.468 s | 18,603,225 |
+| 5 (kept) | +0.8% | 2.8 | 1.477 s | 2.419 s | +0.55% |
+| 4 | +3.3% | 1.3 | 1.477 s | 2.423 s | +2.3% |
+| 3 | +5.0% | 1.5 | 1.473 s | 2.443 s | +3.5% |
+| 1 | +9.6% | 0.6 | 1.476 s | 2.450 s | +6.8% |
+
+  (Seven interleaved rounds each, empty scratch cache, medians.) Final A/B,
+  the previous commit's build against `87f8a4d`, ten interleaved rounds:
+  empty cache wall 2.534 -> 2.446 s, pass one 1.535 -> 1.497 s. Warm rebuild
+  (six rounds) 1.098 -> 1.070 s, which reads chunks from the cache and
+  compresses none: noise. Nothing-changed not measured (no code on its path).
+- **Verified:** `testkit/all.py` with the campaign and mod: 28 of 28 hold
+  (`logs/all-04b.out`). The real campaign (`runs/04`) against
+  `speed/runs/11e1f21`: every CSV byte-identical; `report.html` differs in
+  bytes (the chunks) and `cmpruns.py --payload` says IDENTICAL, 12 files,
+  chunks decoded. The rebuilt `dist/vic2saveanalyzer.exe` run on the campaign
+  gives files byte-identical to the source's run. `enginecompress.py`
+  round-trips levels 4 and 5 through `gzip.decompress`.
+- **Mutations** (`logs/mut-04.out`, clean worktree `~/vic2speed/rw/mut04`
+  at `87f8a4d`): 59 now, with two new: `level-five-stream-cut`
+  (`enginecompress.py`) and `chunk-stream-cut` (`enginecheck.py` with the
+  campaign and mod). First run: 57 caught, 1 BLIND (`keeper-folder-windows-
+  only`, as before, Linux only), 1 untested: `chunk-stream-cut`, because
+  `enginecheck.py` skips its real-campaign half without the mod, which
+  `mutate.py` could not hand it. Fixed in `mutate.py` (`--mod`, and the
+  `"saves-and-mod"` argument; two commits got there, the first aimed it at
+  `frontcheck.py`, which does not decode chunks and was BLIND). Run alone
+  on the fixed harness: caught. So 58 of 59 caught, the BLIND one being
+  Linux's to answer. The 57 others were run before the harness fix, which
+  touched only the new mutation's catcher.
+- **My mistake:** my first full-suite run set `PYTHONIOENCODING=utf-8` and one
+  front-end case ("a region naming a superscript") failed with `Â²` for `²`.
+  Without the variable it passes, and 28/28 hold; not looked into further.
+- **For the laptop:** pull; build; `all.py` (28/28), the mutation run (59,
+  `--mod` now); measure pass one on the 1880s campaign, where the gain may
+  differ (the profile put the chunk at ~14% of a worker there). Nothing
+  here is Windows-only in the program.
+- Next: task 05 (`05-model-survey.md`). Bundle `~/vic2saveanalyzer-backup-
+  <hash>.bundle` on this PC, named for the last commit.

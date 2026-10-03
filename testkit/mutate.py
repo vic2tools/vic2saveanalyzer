@@ -128,11 +128,11 @@ def check(script, args=()):
 
 def argv_for(extra):
     """
-    What a mutation's check is handed: "saves" means the save folder, and
+    What a mutation's check is handed: "saves" means the save folder,
     "saves-and-mod" the folder and the mod (the real campaign, for the checks
-    that run it only when given both), and "one-save" the first save in it, for the checks that damage a copy of
-    one -- handed with a round count of one, because each round is a save
-    read twice over.
+    that run it only when given both), and "one-save" the first save in it,
+    for the checks that damage a copy of one -- handed with a round count of
+    one, because each round is a save read twice over.
     """
     if extra == "saves":
         return (SAVES,)
