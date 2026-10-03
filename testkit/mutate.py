@@ -93,14 +93,16 @@ def put_back(pristine, binary):
 def patch(path, old, new, count=1):
     """Replace `old` with `new` in TREE/path. Fails loudly if it does not match."""
     full = os.path.join(TREE, path)
-    src = open(full).read()
+    with open(full, encoding="utf-8") as fh:
+        src = fh.read()
     n = src.count(old)
     if n < 1:
         raise SystemExit("MUTATION DID NOT APPLY: %r not found in %s" % (old[:70], path))
     if count and n != count:
         raise SystemExit("MUTATION AMBIGUOUS: %r appears %d times in %s"
                          % (old[:70], n, path))
-    open(full, "w").write(src.replace(old, new))
+    with open(full, "w", encoding="utf-8") as fh:
+        fh.write(src.replace(old, new))
 
 
 class Said(str):
