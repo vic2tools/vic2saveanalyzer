@@ -385,4 +385,5 @@ Notes for task 03:
   find why the browser checks skip.
 - Not pushed. Bundle `~/vic2saveanalyzer-backup-<hash>.bundle` on the
   Windows PC, named for this commit.
-- Next: task 04 (`04-state-chunk.md`).
+- Next: task 03b (`03b-checks-on-windows.md`), then task 04
+  (`04-state-chunk.md`).
