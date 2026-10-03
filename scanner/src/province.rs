@@ -16,6 +16,7 @@
 use crate::text::{find, find_pair, is_number_b, to_float_b, to_int_b, trim_b, trim_end_b,
                   unquote_b};
 use crate::fx::{FxMap, FxSet};
+use crate::names::{self, Sym};
 
 
 
@@ -218,7 +219,7 @@ pub(crate) fn building_level(bytes: &[u8], open: usize, stop: usize) -> f64 {
 
 pub(crate) struct Scan {
     pub(crate) world_pop: i64,
-    pub(crate) owners: Vec<(i64, Vec<u8>, Vec<u8>)>,
+    pub(crate) owners: Vec<(i64, Sym, Sym)>,
     pub(crate) nations: FxMap<Vec<u8>, Nation>,
     // The order nations were first seen, which is the order the file names
     // them. Python builds its dict that way and rows are written by walking
@@ -422,7 +423,9 @@ pub(crate) fn accumulate(
         _ => return,
     };
     let held = controller.filter(|c| !c.is_empty()).unwrap_or(owner);
-    scan.owners.push((pid, owner.to_vec(), held.to_vec()));
+    let owner_name = names::intern(owner);
+    let held_name = if held == owner { owner_name } else { names::intern(held) };
+    scan.owners.push((pid, owner_name, held_name));
 
     if !scan.nations.contains_key(owner) {
         scan.seen.push(owner.to_vec());

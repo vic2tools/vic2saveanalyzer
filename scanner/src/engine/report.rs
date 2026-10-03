@@ -22,6 +22,7 @@ use crate::jsonr::J;
 use crate::engine::mapflags;
 use crate::engine::market::{self, PriceRow, SnapRow};
 use crate::engine::model::Meta;
+use crate::names::{self, Sym};
 use crate::omap::OMap;
 use crate::fx::{FxMap, FxSet};
 use crate::pyfmt::{push_csv_field, push_int, push_json_float, push_json_str, round};
@@ -177,15 +178,16 @@ fn build_map(m: &Mod, parsed: &[Kept1], scale: i64) -> Option<MapOut> {
     let derived = unanchored.iter().filter(|p| spots.contains_key(*p)).count();
 
     crate::engine::phase("map: raster decoded, spots placed");
-    let mut tagset: Vec<String> = {
-        let seen: FxSet<&str> = parsed.iter()
+    let mut tagset: Vec<Sym> = {
+        let seen: FxSet<Sym> = parsed.iter()
             .flat_map(|k| k.meta.province_owner.iter())
-            .flat_map(|(_, o, c)| [o.as_str(), c.as_str()])
+            .flat_map(|(_, o, c)| [*o, *c])
             .collect();
-        seen.into_iter().map(|t| t.to_string()).collect()
+        seen.into_iter().collect()
     };
-    tagset.sort();
-    let index: FxMap<&str, usize> = tagset.iter().enumerate().map(|(i, t)| (t.as_str(), i)).collect();
+    tagset.sort_by(|a, b| names::cmp(*a, *b));
+    let by_sym: FxMap<Sym, usize> = tagset.iter().enumerate().map(|(i, t)| (*t, i)).collect();
+    let index: FxMap<&str, usize> = tagset.iter().enumerate().map(|(i, t)| (names::text(*t), i)).collect();
 
     let mut j = String::with_capacity(4 << 20);
     j.push_str("{\"w\":");
@@ -204,10 +206,13 @@ fn build_map(m: &Mod, parsed: &[Kept1], scale: i64) -> Option<MapOut> {
         if i > 0 {
             j.push(',');
         }
-        push_json_str(&mut j, t);
+        push_json_str(&mut j, names::text(*t));
     }
     j.push_str("],\"colours\":");
-    obj(&mut j, tagset.iter().filter_map(|t| m.colours.get(t).map(|c| (t.as_str(), c))),
+    obj(&mut j, tagset.iter().filter_map(|t| {
+            let t = names::text(*t);
+            m.colours.get(t).map(|c| (t, c))
+        }),
         |o, c| push_json_str(o, c));
     j.push_str(",\"sea\":[");
     for (i, s) in m.sea.iter().enumerate() {
@@ -247,8 +252,8 @@ fn build_map(m: &Mod, parsed: &[Kept1], scale: i64) -> Option<MapOut> {
             if *p < 0 {
                 continue;
             }
-            held[*p as usize] = index[o.as_str()] as i32;
-            occ[*p as usize] = if c != o { index[c.as_str()] as i32 } else { -1 };
+            held[*p as usize] = by_sym[o] as i32;
+            occ[*p as usize] = if c != o { by_sym[c] as i32 } else { -1 };
             any = true;
         }
         if si > 0 {
@@ -402,12 +407,12 @@ fn build_map(m: &Mod, parsed: &[Kept1], scale: i64) -> Option<MapOut> {
 fn succession(parsed: &[Kept1], m: &Mod) -> String {
     struct Ledger<'a> {
         date: &'a str,
-        book: &'a [(i64, String, String)],
-        owners: FxSet<&'a str>,
+        book: &'a [(i64, Sym, Sym)],
+        owners: FxSet<Sym>,
         home: FxMap<&'a str, (&'a str, FxSet<&'a str>)>,
     }
     let ledgers: Vec<Ledger> = parsed.iter().map(|k| {
-        let owners = k.meta.province_owner.iter().map(|(_, o, _)| o.as_str())
+        let owners = k.meta.province_owner.iter().map(|(_, o, _)| *o)
             .filter(|o| !o.is_empty()).collect();
         let home = k.nations.iter().map(|n| {
             let mut acc: FxSet<&str> = n.accepted_cultures.iter().map(|s| s.as_str()).collect();
@@ -416,10 +421,10 @@ fn succession(parsed: &[Kept1], m: &Mod) -> String {
         }).collect();
         Ledger { date: &k.meta.date, book: &k.meta.province_owner, owners, home }
     }).collect();
-    let holdings = |book: &[(i64, String, String)], tags: &[&str]| -> FxMap<String, FxSet<i64>> {
-        let mut held: FxMap<String, FxSet<i64>> = tags.iter().map(|t| (t.to_string(), FxSet::default())).collect();
+    let holdings = |book: &[(i64, Sym, Sym)], tags: &[Sym]| -> FxMap<Sym, FxSet<i64>> {
+        let mut held: FxMap<Sym, FxSet<i64>> = tags.iter().map(|t| (*t, FxSet::default())).collect();
         for (pid, o, _) in book {
-            if let Some(s) = held.get_mut(o.as_str()) {
+            if let Some(s) = held.get_mut(o) {
                 s.insert(*pid);
             }
         }
@@ -429,38 +434,40 @@ fn succession(parsed: &[Kept1], m: &Mod) -> String {
     let mut first = true;
     for pair in ledgers.windows(2) {
         let (was, now_l) = (&pair[0], &pair[1]);
-        let mut appeared: Vec<&str> = now_l.owners.iter().filter(|o| !was.owners.contains(*o)).copied().collect();
+        let mut appeared: Vec<Sym> = now_l.owners.iter().filter(|o| !was.owners.contains(*o)).copied().collect();
         if appeared.is_empty() {
             continue;
         }
-        appeared.sort();
-        let mut vanished: Vec<&str> = was.owners.iter().filter(|o| !now_l.owners.contains(*o)).copied().collect();
-        vanished.sort();
+        appeared.sort_by(|a, b| names::cmp(*a, *b));
+        let mut vanished: Vec<Sym> = was.owners.iter().filter(|o| !now_l.owners.contains(*o)).copied().collect();
+        vanished.sort_by(|a, b| names::cmp(*a, *b));
         let now = holdings(now_l.book, &appeared);
         let before = holdings(was.book, &vanished);
         for tag in &appeared {
-            let land = &now[*tag];
+            let land = &now[tag];
+            let tag_text = names::text(*tag);
             if land.is_empty() {
                 continue;
             }
             let empty = FxSet::default();
-            let accepts = now_l.home.get(tag).map(|h| &h.1).unwrap_or(&empty);
-            let declared = m.formations.get(*tag);
+            let accepts = now_l.home.get(tag_text).map(|h| &h.1).unwrap_or(&empty);
+            let declared = m.formations.get(tag_text);
             let mut came: Vec<(String, f64, i64)> = Vec::new();
             for old in &vanished {
-                let shared = before[*old].intersection(land).count();
+                let shared = before[old].intersection(land).count();
                 if shared == 0 {
                     continue;
                 }
-                if (shared as f64) / (before[*old].len() as f64) < 0.5 {
+                if (shared as f64) / (before[old].len() as f64) < 0.5 {
                     continue;
                 }
-                let by_decision = declared.is_some_and(|d| d.contains(*old));
-                let mine = was.home.get(old).map(|h| h.0).unwrap_or("");
+                let old_text = names::text(*old);
+                let by_decision = declared.is_some_and(|d| d.contains(old_text));
+                let mine = was.home.get(old_text).map(|h| h.0).unwrap_or("");
                 if !by_decision && (mine.is_empty() || !accepts.contains(mine)) {
                     continue;
                 }
-                came.push((old.to_string(), round(shared as f64 / land.len() as f64, 4),
+                came.push((old_text.to_string(), round(shared as f64 / land.len() as f64, 4),
                            by_decision as i64));
             }
             if !came.is_empty() {
@@ -469,7 +476,7 @@ fn succession(parsed: &[Kept1], m: &Mod) -> String {
                     out.push(',');
                 }
                 first = false;
-                push_json_str(&mut out, tag);
+                push_json_str(&mut out, tag_text);
                 out.push_str(":{\"date\":");
                 push_json_str(&mut out, now_l.date);
                 out.push_str(",\"from\":[");
@@ -1008,9 +1015,9 @@ fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]
                 let mapping = Mapping { province_names: &m.province_names,
                                         province_regions: &m.province_regions,
                                         state_names: &m.state_names, unit_kinds: &m.unit_kinds };
-                let owners: Vec<(String, Vec<(i64, String)>)> = c.parsed.iter()
+                let owners: Vec<(String, Vec<(i64, Sym)>)> = c.parsed.iter()
                     .map(|k| (k.meta.date.clone(),
-                              k.meta.province_owner.iter().map(|(p, o, _)| (*p, o.clone())).collect()))
+                              k.meta.province_owner.iter().map(|(p, o, _)| (*p, *o)).collect()))
                     .collect();
                 wars::build(&c.book, &owners, &mapping)
             });

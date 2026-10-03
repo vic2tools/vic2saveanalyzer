@@ -17,6 +17,7 @@
 
 use crate::clause::{self, Tree, V};
 use crate::country::Country;
+use crate::names::Sym;
 use crate::omap::OMap;
 use crate::fx::{FxMap, FxSet};
 use crate::province::Scan;
@@ -100,7 +101,7 @@ pub struct Meta {
     pub player: String,
     pub world_pop: i64,
     /// (province, owner, controller), in the order the file lists them.
-    pub province_owner: Vec<(i64, String, String)>,
+    pub province_owner: Vec<(i64, Sym, Sym)>,
     pub great_nations: Vec<i64>,
     pub wars: Vec<War>,
     pub market: Option<Market>,
@@ -432,8 +433,7 @@ pub fn build(file: String, date: String, player: String, scan: &Scan, countries:
         date,
         player,
         world_pop: scan.world_pop,
-        province_owner: scan.owners.iter()
-            .map(|(pid, o, h)| (*pid, latin1(o), latin1(h))).collect(),
+        province_owner: scan.owners.clone(),
         great_nations: rest.great,
         wars: rest.wars,
         market: rest.market,

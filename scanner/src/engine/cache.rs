@@ -27,6 +27,7 @@
 use crate::engine::finish::{Pre, PreNation};
 use crate::engine::model::{Battle, FirstGoal, Goal, Market, Meta, Nation, Side, War};
 use crate::engine::rules::Held;
+use crate::names::{self, Sym};
 use crate::omap::OMap;
 use crate::fx::{FxMap, FxSet};
 use crate::pyfmt::Num;
@@ -134,6 +135,21 @@ impl<'a> R<'a> {
         Ok(s)
     }
 
+    /// `s`, as the run's name for it: no copy of the text when the entry's
+    /// table has it already.
+    fn sym(&mut self) -> X<Sym> {
+        let n = self.u()?;
+        if n > 0 {
+            return self.strings.get(n as usize - 1).map(|s| names::intern_str(s)).ok_or(());
+        }
+        let len = self.u()? as usize;
+        let raw = self.b.get(self.i..self.i + len).ok_or(())?;
+        self.i += len;
+        let s = std::str::from_utf8(raw).map_err(|_| ())?;
+        self.strings.push(s.to_string());
+        Ok(names::intern_str(s))
+    }
+
     fn len(&mut self) -> X<usize> {
         let n = self.u()? as usize;
         // A length no entry could hold is a damaged entry, not an allocation.
@@ -169,6 +185,13 @@ impl Keep for bool {
 impl Keep for String {
     fn put(&self, w: &mut W) { w.s(self) }
     fn get(r: &mut R) -> X<Self> { r.s() }
+}
+
+/// A name is written by its text, through the entry's own table, exactly
+/// as a `String` is: no run's id ever reaches an entry.
+impl Keep for Sym {
+    fn put(&self, w: &mut W) { w.s(names::text(*self)) }
+    fn get(r: &mut R) -> X<Self> { r.sym() }
 }
 
 impl Keep for Num {

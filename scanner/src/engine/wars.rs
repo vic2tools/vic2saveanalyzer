@@ -11,6 +11,7 @@
 
 use crate::engine::dates::year_fraction;
 use crate::engine::model::{Battle, FirstGoal, Goal, Side, War};
+use crate::names::{self, Sym};
 use crate::omap::OMap;
 use crate::fx::{FxMap, FxSet};
 use crate::pyfmt::{push_int, push_json_str};
@@ -267,8 +268,8 @@ fn at_sea(b: &Battle, kinds: &FxMap<String, String>) -> bool {
 }
 
 /// `_ledger_at`: province ownership at the save just before (or after) a date.
-fn ledger_at<'a>(books: &'a [(String, FxMap<i64, String>)], when_each: &[f64], date: &str,
-                 before: bool) -> Option<&'a FxMap<i64, String>> {
+fn ledger_at<'a>(books: &'a [(String, FxMap<i64, Sym>)], when_each: &[f64], date: &str,
+                 before: bool) -> Option<&'a FxMap<i64, Sym>> {
     if books.is_empty() {
         return None;
     }
@@ -393,19 +394,19 @@ pub struct Built {
 
 /// `build_wars`: every war in the campaign, as the Wars tab's JSON objects,
 /// sorted by start. `saves` is (date, province owners) in walk order.
-pub fn build(book: &Book, saves: &[(String, Vec<(i64, String)>)], m: &Mapping) -> Vec<Built> {
+pub fn build(book: &Book, saves: &[(String, Vec<(i64, Sym)>)], m: &Mapping) -> Vec<Built> {
     // Date order, stable: a save's year fraction.
-    let mut ordered: Vec<&(String, Vec<(i64, String)>)> = saves.iter().collect();
+    let mut ordered: Vec<&(String, Vec<(i64, Sym)>)> = saves.iter().collect();
     ordered.sort_by(|a, b| year_fraction(&a.0).partial_cmp(&year_fraction(&b.0))
         .unwrap_or(std::cmp::Ordering::Equal));
-    let books: Vec<(String, FxMap<i64, String>)> = ordered.iter()
-        .map(|(d, owners)| (d.clone(), owners.iter().cloned().collect())).collect();
+    let books: Vec<(String, FxMap<i64, Sym>)> = ordered.iter()
+        .map(|(d, owners)| (d.clone(), owners.iter().copied().collect())).collect();
     let mut state_provinces: FxMap<&str, Vec<i64>> = FxMap::default();
     for (pid, state) in m.province_regions.iter() {
         state_provinces.entry(state.as_str()).or_default().push(*pid);
     }
     let ledger_dates: Vec<f64> = books.iter().map(|(d, _)| year_fraction(d)).collect();
-    let empty: FxMap<i64, String> = FxMap::default();
+    let empty: FxMap<i64, Sym> = FxMap::default();
 
     let mut out = Vec::new();
     for key in &book.order {
@@ -454,13 +455,13 @@ pub fn build(book: &Book, saves: &[(String, Vec<(i64, String)>)], m: &Mapping) -
                                   added: "", fulfilled: None });
         }
         let has_start = !war.start.is_empty();
-        let mut before: &FxMap<i64, String> = if has_start {
+        let mut before: &FxMap<i64, Sym> = if has_start {
             ledger_at(&books, &ledger_dates, &war.start, true).unwrap_or(&empty)
         } else { &empty };
         if !end.is_empty() && !ledger_dates.is_empty() && ledger_dates[0] >= year_fraction(&end) {
             before = &empty;
         }
-        let after: &FxMap<i64, String> = if has_start {
+        let after: &FxMap<i64, Sym> = if has_start {
             let when = if !end.is_empty() { end.as_str() } else { war.start.as_str() };
             ledger_at(&books, &ledger_dates, when, false).unwrap_or(&empty)
         } else { &empty };
@@ -475,10 +476,10 @@ pub fn build(book: &Book, saves: &[(String, Vec<(i64, String)>)], m: &Mapping) -
                 _ => if g.province != 0 { vec![g.province] } else { vec![] },
             };
             let took: Vec<i64> = wanted.iter().copied().filter(|p| {
-                before.get(p).map(|o| o.as_str()) == Some(g.receiver)
-                    && after.get(p).map(|o| o.as_str()) == Some(g.actor)
+                before.get(p).map(|o| names::text(*o)) == Some(g.receiver)
+                    && after.get(p).map(|o| names::text(*o)) == Some(g.actor)
             }).collect();
-            let had = wanted.iter().filter(|p| before.get(p).map(|o| o.as_str()) == Some(g.receiver)).count();
+            let had = wanted.iter().filter(|p| before.get(p).map(|o| names::text(*o)) == Some(g.receiver)).count();
             let met = had > 0 && took.len() == had;
             let part = !took.is_empty() && took.len() < had;
             if had > 0 {
