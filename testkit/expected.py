@@ -119,6 +119,45 @@ def shell_diff(shell):
 
 # ------------------------------------------------------------- an answer
 
+def stand_in_for(path, stand_in, text):
+    """
+    `text` with the folder `path` written as `stand_in`. On Windows the
+    program prints what lies below that folder with a backslash -- two, where
+    it quotes a path as Python would -- and the record has `/`, so the
+    separators of the names that follow the stand-in are turned into `/`:
+    those, and no other backslash in the text.
+    """
+    if os.sep == "/":
+        return text.replace(path, stand_in)
+    name = r"""[^\\/\s,:;"'*?<>|]+"""
+    for sep in ("\\", "\\\\"):                  # as written, and as quoted
+        text = re.sub(re.escape(path.replace("\\", sep))
+                      + "((?:" + re.escape(sep) + name + ")*)",
+                      lambda m: stand_in + m.group(1).replace(sep, "/"), text)
+    return text
+
+
+def os_wording(text):
+    """
+    What Windows says where the record has Linux's words, said Linux's way.
+    Only the operating system's own text: opening a folder as a file is
+    "Permission denied" on Windows (and only for a path that is a folder
+    here, so a file refused for real stays "Permission denied"), and a
+    folder made below a file is "Cannot create a file when that file already
+    exists" where Linux says "Not a directory".
+    """
+    if os.name != "nt":
+        return text
+
+    def opened(m):
+        path = m.group(1).replace("\\\\", "\\")
+        if os.path.isdir(path):
+            return "[Errno 21] Is a directory: '%s'" % m.group(1)
+        return m.group(0)
+    text = re.sub(r"\[Errno 13\] Permission denied: '((?:[^'\\]|\\\\)+)'", opened, text)
+    return text.replace("Cannot create a file when that file already exists.", "Not a directory")
+
+
 def answer(status, stdout, stderr, out, places=()):
     """
     What a run came to, as text: {name: str or bytes}. `places` are
@@ -128,8 +167,9 @@ def answer(status, stdout, stderr, out, places=()):
     places = sorted(((p, s) for p, s in places if p), key=lambda ps: -len(ps[0]))
 
     def clean(text):
+        text = os_wording(text)
         for path, stand_in in places:
-            text = text.replace(path, stand_in)
+            text = stand_in_for(path, stand_in, text)
         return CORES.sub(r"\1N\2", text)
 
     got = {"status.txt": "%d\n" % status, "stdout.txt": clean(stdout),

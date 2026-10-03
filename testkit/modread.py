@@ -132,10 +132,23 @@ def rust_side(path):
     return run.returncode, run.stdout.decode("utf-8").rstrip("\n"), run.stderr.decode("utf-8", "replace")
 
 
+def below_holding(text, holding):
+    """
+    `text` (JSON) with the folder a world was built in (`holding`, as JSON
+    escapes it) written HOLDING. Where the separators are backslashes, those
+    in the names below it become `/`, as the record has them -- and no other
+    escaped backslash does.
+    """
+    if os.sep == "/":
+        return text.replace(holding, "HOLDING")
+    return re.sub(re.escape(holding) + r'((?:\\\\[^\\/\s",:*?<>|]+)*)',
+                  lambda m: "HOLDING" + m.group(1).replace("\\\\", "/"), text)
+
+
 def answer_of(path, holding=None):
     """{"status": 0 and "export": the JSON text, or "status": 3 for a folder
     that is refused}. Where the world was built (`holding`) is HOLDING."""
-    place = (lambda t: t.replace(json.dumps(holding)[1:-1], "HOLDING")) if holding else str
+    place = (lambda t: below_holding(t, json.dumps(holding)[1:-1])) if holding else str
     code, out, err = rust_side(path)
     if code == 0:
         return {"status": 0, "export": place(out)}

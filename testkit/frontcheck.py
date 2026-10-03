@@ -43,6 +43,30 @@ BIN = os.path.join(HERE, "scanner", "target", "release",
 TAGS = ("ENG", "FRA", "PRU")
 
 
+def shut(path):
+    """
+    Make `path` a file that cannot be opened for reading; the way back, as a
+    function. A mode of 0 does it where permissions are modes. Windows has no
+    such mode, so the file is held open by a handle that shares it with no
+    one, which refuses every other open the same way until it is let go.
+    """
+    if os.name != "nt":
+        os.chmod(path, 0)
+        return lambda: os.chmod(path, stat.S_IREAD | stat.S_IWRITE)
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                   wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD,
+                                   wintypes.HANDLE]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    held = kernel.CreateFileW(path, 0x80000000, 0, None, 3, 0x80, None)   # read, no sharing
+    if held in (None, wintypes.HANDLE(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return lambda: kernel.CloseHandle(held)
+
+
 def world(holding):
     """A game with a mod in it, and a campaign of four saves played on it."""
     mod = matching.a_mod_in_a_game(holding, "Mod", tags=list(TAGS), mob_size=0.05,
@@ -217,7 +241,7 @@ def main():
         os.makedirs(os.path.join(mixed, "2b_folder.v2"))
         locked_save = os.path.join(mixed, "2c_locked.v2")
         shutil.copyfile(os.path.join(saves, "0.v2"), locked_save)
-        os.chmod(locked_save, 0)
+        release_save = shut(locked_save)
         refused_only = os.path.join(holding, "refused")
         os.makedirs(refused_only)
         for name in ("0a_zip.v2", "0b_empty.v2", "1b_cut.v2"):
@@ -393,6 +417,8 @@ def main():
             env = dict(os.environ)
             env["VIC2FRONT"] = holding
             env["HOME"] = holding
+            if os.name == "nt":
+                env["USERPROFILE"] = holding        # where Windows looks for `~`
             # Short: a worker pool's socket may live in it, and a path past
             # 108 bytes is refused.
             env["TMPDIR"] = tempfile.mkdtemp(prefix="vf", dir="/tmp" if os.name != "nt" else None)
@@ -430,7 +456,7 @@ def main():
         for t in locals().get("temps", ()):
             shutil.rmtree(t, ignore_errors=True)
         try:
-            os.chmod(locked_save, stat.S_IREAD | stat.S_IWRITE)
+            release_save()
         except (OSError, NameError):
             pass
         shutil.rmtree(holding, ignore_errors=True)
