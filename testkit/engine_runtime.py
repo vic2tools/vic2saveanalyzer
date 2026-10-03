@@ -23,6 +23,11 @@ class Relay(unittest.TestCase):
     own process -- with the protocol lines turned into callbacks.
     """
 
+    # The scanner ends its lines with a bare newline. A Python stand-in in a
+    # pipe ends them as its system does, with a carriage return too on
+    # Windows, so the stand-ins here are told which to use; the relay passes
+    # on whatever it is given.
+
     def relay(self, body, hosted=True):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -34,7 +39,8 @@ class Relay(unittest.TestCase):
         vic2_analyzer.set_progress(lambda *a: seen.append(a))
         self.addCleanup(vic2_analyzer.set_progress, None)
         status, out, err = self.relay(
-            "import sys; sys.stderr.write('x' * 200000); "
+            "import sys; sys.stdout.reconfigure(newline='\\n'); "
+            "sys.stderr.write('x' * 200000); "
             "print('said'); print('@progress 1 2'); print('@done'); sys.exit(5)")
         self.assertEqual(status, 5)
         self.assertEqual(seen, [(1, 2)])
@@ -49,7 +55,8 @@ class Relay(unittest.TestCase):
         self.assertEqual(ready, ["/some/report.html"])
 
     def test_unhosted_lines_are_passed_on_as_they_are(self):
-        _status, out, _err = self.relay("print('@progress 1 2')", hosted=False)
+        _status, out, _err = self.relay("import sys; sys.stdout.reconfigure(newline='\\n'); "
+                                        "print('@progress 1 2')", hosted=False)
         self.assertEqual(out, "@progress 1 2\n")
 
     def test_stop_kills_the_child(self):

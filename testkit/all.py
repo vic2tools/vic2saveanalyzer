@@ -39,7 +39,8 @@ def run(name, argv, why=""):
     began = time.monotonic()
     try:
         done = subprocess.run([sys.executable] + argv, capture_output=True,
-                              text=True, cwd=HERE, timeout=900)
+                              text=True, encoding="utf-8", errors="replace",
+                              cwd=HERE, timeout=900)
     except subprocess.TimeoutExpired as exc:
         output = exc.stdout or b""
         if isinstance(output, bytes):

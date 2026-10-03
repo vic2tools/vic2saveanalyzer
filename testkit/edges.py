@@ -367,6 +367,8 @@ def _(folder, out):
 
 
 def main():
+    # The marks it draws are not in a Windows code page, and a pipe has one.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     bad = _cases()
     print()
     if bad:
