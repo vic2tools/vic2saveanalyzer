@@ -1,0 +1,70 @@
+Found 17 save(s).
+Victoria II at HOLDING/game, with Modus Omnino Demens 1.6.
+defines.lua: POP_SIZE_PER_REGIMENT=3000
+poptypes/: mobilizable = craftsmen farmers labourers
+Reading 17 save(s) on N cores.
+  reading NET1872_09_01.v2 ... 1872.9.1, 41 nations, 36 months of prices
+  reading NET1874_02_01.v2 ... 1874.2.1, 42 nations, 36 months of prices
+  reading NET1875_07_01.v2 ... 1875.7.1, 42 nations, 36 months of prices
+  reading NET1876_12_01.v2 ... 1876.12.1, 42 nations, 36 months of prices
+  reading NET1878_05_01.v2 ... 1878.5.1, 41 nations, 37 months of prices
+  reading NET1879_10_01.v2 ... 1879.10.1, 41 nations, 36 months of prices
+  reading NET1881_03_01.v2 ... 1881.3.1, 41 nations, 36 months of prices
+  reading NET1882_08_01.v2 ... 1882.8.1, 40 nations, 36 months of prices
+  reading NET1884_01_01.v2 ... 1884.1.1, 40 nations, 37 months of prices
+  reading NET1885_06_01.v2 ... 1885.6.1, 42 nations, 36 months of prices
+  reading NET1886_11_01.v2 ... 1886.11.1, 43 nations, 36 months of prices
+  reading NET1888_04_01.v2 ... 1888.4.1, 41 nations, 36 months of prices
+  reading NET1889_09_01.v2 ... 1889.9.1, 37 nations, 36 months of prices
+  reading NET1891_02_01.v2 ... 1891.2.1, 37 nations, 36 months of prices
+  reading NET1892_07_01.v2 ... 1892.7.1, 37 nations, 36 months of prices
+  reading NET1893_12_01.v2 ... 1893.12.1, 33 nations, 36 months of prices
+  reading NET1894_09_01.v2 ... 1894.9.1, 33 nations, 36 months of prices
+
+Invention indices decoded against 387 inventions (base 1): 123 of 56688 nation-invention pairs are unreachable (0.2%).
+
+Mod scan: 150 techs (1 grant mobilisation_size), 4 inventions grant it (4 obtainable), 2 event modifiers, 14 triggered modifiers.
+  triggered modifiers left out, because their trigger asks something this cannot answer: enginecheck_unknown
+  tech       military_logistics                           +0.020
+  invention  mobilization_time_tables                     +0.010
+  invention  personnel_category_tables                    +0.010
+  invention  railroad_transport_groups                    +0.010
+  invention  staff_command_support                        +0.010
+map/positions.txt anchors no army counter for 5 of the provinces holding troops; those markers sit at the middle of the province instead.
+
+673 nation-rows across 17 saves.
+625 dated price points, 1869.9.29 to 1894.9.1, 48 goods.
+
+Largest nations at 1894.9.1:
+  tag           pop  accept%    lit   brig  ships
+  CHI   108,567,410     46.9   5.8%    281      8
+  ENG    83,217,954     14.4  44.2%    618    281
+  RUS    29,561,919     60.8  43.5%    549    119
+  GER    17,076,006     86.3  87.0%    489     99
+  USA    15,289,697     77.8  59.6%    255    140
+  SCA    15,206,502     21.3  55.0%     72     70
+  KUK    15,090,152     43.0  69.1%    230     20
+  FRA    13,186,875     88.2  85.5%    390    145
+
+Computed mobilisation sizes at 1894.9.1 (check these against the in-game military panel):
+  CHI: 5.80%
+  ENG: 18.70%
+  RUS: 19.90%
+  GER: 20.10%
+  USA: 14.65%
+  SCA: 17.40%
+  KUK: 18.90%
+  FRA: 19.85%
+  TUR: 15.60%
+  AST: 17.55%
+
+Wrote:
+  OUT/report.html
+  OUT/nations_timeseries.csv
+  OUT/prices.csv
+  OUT/market_snapshot.csv
+  OUT/ships_by_type.csv
+  OUT/brigades_by_type.csv
+  OUT/technologies.csv
+  OUT/pops_by_type.csv
+  OUT/pops_by_culture.csv

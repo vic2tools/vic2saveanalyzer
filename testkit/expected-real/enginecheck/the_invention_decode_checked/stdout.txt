@@ -1,0 +1,50 @@
+Found 17 save(s).
+Victoria II at HOLDING/game, with Modus Omnino Demens 1.6.
+defines.lua: POP_SIZE_PER_REGIMENT=3000
+poptypes/: mobilizable = craftsmen farmers labourers
+Reading 17 save(s) on N cores.
+  [1/17] NET1872_09_01.v2 ... 1872.9.1
+  [2/17] NET1874_02_01.v2 ... 1874.2.1
+  [3/17] NET1875_07_01.v2 ... 1875.7.1
+  [4/17] NET1876_12_01.v2 ... 1876.12.1
+  [5/17] NET1878_05_01.v2 ... 1878.5.1
+  [6/17] NET1879_10_01.v2 ... 1879.10.1
+  [7/17] NET1881_03_01.v2 ... 1881.3.1
+  [8/17] NET1882_08_01.v2 ... 1882.8.1
+  [9/17] NET1884_01_01.v2 ... 1884.1.1
+  [10/17] NET1885_06_01.v2 ... 1885.6.1
+  [11/17] NET1886_11_01.v2 ... 1886.11.1
+  [12/17] NET1888_04_01.v2 ... 1888.4.1
+  [13/17] NET1889_09_01.v2 ... 1889.9.1
+  [14/17] NET1891_02_01.v2 ... 1891.2.1
+  [15/17] NET1892_07_01.v2 ... 1892.7.1
+  [16/17] NET1893_12_01.v2 ... 1893.12.1
+  [17/17] NET1894_09_01.v2 ... 1894.9.1
+
+Invention indices decoded against 387 inventions (base 1): 123 of 56688 nation-invention pairs are unreachable (0.2%).
+
+Mod scan: 150 techs (1 grant mobilisation_size), 4 inventions grant it (4 obtainable), 2 event modifiers, 14 triggered modifiers.
+  triggered modifiers left out, because their trigger asks something this cannot answer: enginecheck_unknown
+  tech       military_logistics                           +0.020
+  invention  mobilization_time_tables                     +0.010
+  invention  personnel_category_tables                    +0.010
+  invention  railroad_transport_groups                    +0.010
+  invention  staff_command_support                        +0.010
+
+Checking 387 inventions against 17 saves.
+  257 indices held often enough to judge
+
+  offset      confirmed   granted   suspect  unjudged
+  -2                118        68        71         0
+  -1                180        39        38         0
+  as used           254         3         0         0   <-- the decode in use
+  +1                227         6        23         1
+  +2                204         5        46         2
+
+  Every index the saves can judge sits where the array says it does. 3 of them are held by a few nations that could not have researched them, which is the engine granting inventions outside the tech tree.
+  The decode is right: who holds which invention is exact.
+
+   index  invention                                       holders  needs
+     140  anti_trust_laws                            40 with    6 without  market_regulations
+     141  financial_regulations                      41 with    6 without  market_regulations
+     142  banking_regulations                        33 with    6 without  market_regulations

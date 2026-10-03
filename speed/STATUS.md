@@ -224,3 +224,39 @@ Notes for task 03:
   ~/vic2saveanalyzer, then do the next task file in speed/ that STATUS.md
   says is not done." The old prompt still works through the pointers.
 - Next: task 03 (`03-countries-from-bytes.md`).
+
+## 2026-10-03, the real campaign's answers and the reference run in the repo (no task work)
+
+- The maintainer wants to run the checks and the speed comparisons on the
+  Windows PC, so both went to GitHub:
+  - `testkit/expected-real/` (48 MB, 278 files): the real campaign's and
+    the real mod's recorded answers, copied from
+    `~/.cache/vic2speed/expected-real` (identical; that folder is no longer
+    read). `testkit/expected.py` now defaults to the repo copy;
+    `VIC2_EXPECTED_REAL` still overrides. The campaign cases were already
+    machine-independent (keyed by save file names and sizes, run on copies
+    in a scratch folder).
+  - The real mod's answer held absolute paths. `modread.portable()` now
+    writes the folders it was read from as MOD and GAME and their
+    separators as `/`, on the record and on each fresh answer; the record
+    was converted with it. Tested: a Linux answer, the same answer with
+    Windows backslashes and with a non-ASCII user folder come out
+    identical; other backslashes are untouched; idempotent.
+  - `speed/runs/11e1f21/` (65 MB): one reference run (02a, 02b and
+    31a2931 are identical to it, so they stay local), `report.stamp` left
+    out, stdout with `<GAME>` and `<OUT>/name` where the folders were.
+    `cmpruns.py` finds a name in `opt/runs/` or else in `speed/runs/`, and
+    normalises both sides the same way. Tested: repo copy vs the laptop's
+    original and vs a fresh run of main: identical; the same run printed
+    with Windows paths: identical; one byte added to a CSV, or "Found 264":
+    caught.
+- `.gitattributes`: both folders `-text`, so git keeps the tables' CRLF
+  byte for byte (as `testkit/expected/**` already was). `.gitignore`
+  let in their CSVs and the reference `report.html`.
+- `local.env`'s `VIC2_PRIVATE` now matches the name as a whole word: the
+  game data has "Prince Aleksandar" and the province "Balekungomi", which
+  the old pattern would have flagged forever. (Set it the same way in a
+  Windows `local.env`.)
+- On Windows: the campaign checks need the same 265 saves (same names and
+  sizes) and the same mod folder name. Untested there; the first Windows
+  run of `testkit/all.py` is the test.

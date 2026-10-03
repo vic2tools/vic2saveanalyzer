@@ -61,11 +61,13 @@ and what it answered was written down first (`expected.py`): for every
 case, the exit status, stdout and stderr, every file the run left but the
 stamp, and the page as what it carries -- the payload as indented JSON with
 its flags and state snapshots decoded, and the page around it as its
-difference from the template. The synthetic cases are in `expected/` and
-in the repository. The real campaign's cases are somebody's data, so they
-live outside it, in `$VIC2_EXPECTED_REAL` (by default
-`~/.cache/vic2speed/expected-real`), and a check that finds none there
-says so and skips them.
+difference from the template. The synthetic cases are in `expected/`.
+The real campaign's cases are in `expected-real/` (or wherever
+`$VIC2_EXPECTED_REAL` points), keyed by the saves' file names and sizes and
+the mod's folder name, so they run on any machine with the same saves and
+mod; a check that finds none says so and skips them. The real mod's
+answer names the folders it was read from MOD and GAME, so it holds
+wherever the game is installed.
 
 A check that disagrees with its record prints the difference, cut down to
 where it is. After a deliberate change, one command writes the program's

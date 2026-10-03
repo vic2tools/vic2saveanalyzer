@@ -14,9 +14,10 @@ compressor's bytes and only what they hold is the answer.
     <root>/<check>/<case>/status.txt, stdout.txt, stderr.txt, written.txt
     <root>/<check>/<case>/<file>         (a file of more than a megabyte: <file>.gz)
 
-The synthetic cases are kept in the repository (`testkit/expected/`). Cases
-run on real saves are somebody's campaign and stay out of it: they live in
-`$VIC2_EXPECTED_REAL`, by default `~/.cache/vic2speed/expected-real`, and a
+The synthetic cases are kept in `testkit/expected/`. Cases run on the real
+campaign and mod are in `testkit/expected-real/`, with the saves they came
+from named by file name and size, so that a clone on another machine with
+the same saves can run them; `$VIC2_EXPECTED_REAL` points elsewhere. A
 check that finds none there says so and skips them.
 
 After a deliberate change to what the program answers, one command writes
@@ -38,8 +39,7 @@ import zlib
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO = os.path.join(HERE, "testkit", "expected")
-REAL = (os.environ.get("VIC2_EXPECTED_REAL")
-        or os.path.join(os.path.expanduser("~"), ".cache", "vic2speed", "expected-real"))
+REAL = os.environ.get("VIC2_EXPECTED_REAL") or os.path.join(HERE, "testkit", "expected-real")
 BIG = 1 << 20
 
 # How many cores a read takes follows the memory free at that moment, so

@@ -119,8 +119,8 @@ def main():
             print("  %-16s %s" % (script, "recorded" if ok else "FAILED"))
             if not ok:
                 print((done.stdout + done.stderr)[-3000:])
-        print("\nsee `git diff testkit/expected`; the real campaign's answers are in %s"
-              % os.environ.get("VIC2_EXPECTED_REAL", "~/.cache/vic2speed/expected-real"))
+        print("\nsee `git diff testkit/expected testkit/expected-real`; the real campaign's "
+              "answers are in %s" % os.environ.get("VIC2_EXPECTED_REAL", "testkit/expected-real"))
         shutil.rmtree(holding, ignore_errors=True)
         return 1 if bad else 0
 

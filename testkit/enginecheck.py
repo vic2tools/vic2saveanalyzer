@@ -6,9 +6,9 @@ This runs the real program over a world of edge cases and over a handful of
 real saves, a dozen ways of asking, and requires the nine outputs and the
 printed words recorded for each (`expected.py`). The answers were the pure
 Python's, taken on 1 Oct 2026 while it was still here; before then this ran
-every case both ways. The real saves' answers are somebody's campaign and
-are kept outside the repository (`$VIC2_EXPECTED_REAL`), with the saves they
-came from named in `inputs.json`.
+every case both ways. The real saves' answers are in `testkit/expected-real/`
+(or `$VIC2_EXPECTED_REAL`), with the saves they came from named in
+`inputs.json`.
 
     python3 testkit/enginecheck.py SAVES --mod MOD [--every N] [--update]
 

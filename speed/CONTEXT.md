@@ -8,10 +8,13 @@ order, one per session.
 
 These notes, the task files and the tools (`bench.sh`, `refrun.sh`,
 `cmpruns.py`, `memj.py`, `pipecheck.sh`, `prepush.sh`) are in `speed/` in
-the repo, which is public on GitHub. What a run produces stays outside it,
-in `~/.cache/vic2speed/opt/` (`opt/` below): `runs/` (reference outputs),
-`logs/` and `benchtmp/`. So do the gdb tools and worktrees under
-`~/.cache/vic2speed/`.
+the repo, which is public on GitHub, and so are the answers the checks
+hold the real campaign to (`testkit/expected-real/`) and one reference run
+of it (`speed/runs/11e1f21/`, made by `11e1f21`, now `374ac35`, and
+identical through `a47e98f`), so that a clone on Windows can run both.
+What else a run produces stays outside the repo, in `~/.cache/vic2speed/opt/`
+(`opt/` below): `runs/` (more runs), `logs/` and `benchtmp/`. So do the gdb
+tools and worktrees under `~/.cache/vic2speed/`.
 
 The machine's own settings are in `speed/local.env`, which is not
 committed (`.gitignore`): `VIC2_SAVES` (the campaign), `VIC2_MOD` (its
@@ -55,7 +58,7 @@ The maintainer wants it "cutting edge, blazing fast parsing". He has agreed to t
 data-model rewrite (tasks 05-09), after the cheaper fixes.
 
 The checks hold every run to **recorded answers** (`testkit/expected/`, and
-for the real campaign `~/.cache/vic2speed/expected-real`): exit status,
+for the real campaign `testkit/expected-real/`): exit status,
 stdout, stderr, all nine CSV tables, and the page as what it carries (the
 payload decoded, not its compressed bytes). That is the safety net for this
 whole job. Any change to output, including a reordered column, fails a check
@@ -156,9 +159,11 @@ culture names, tech names, and so on.
   `TMPDIR`. Every CSV must be byte-identical. `report.html` must be
   byte-identical, except after step 5, where only its decoded payload must be
   identical; compare it with the testkit's decoding (`testkit/expected.py`).
-  stdout and stderr must be identical apart from the out path and "on N
-  cores". Keep the before outputs under `opt/runs/<commit>/` (`speed/refrun.sh`,
-  compared with `speed/cmpruns.py`).
+  stdout and stderr must be identical apart from the machine's folders and
+  "on N cores". Keep the before outputs under `opt/runs/<commit>/`
+  (`speed/refrun.sh`, compared with `speed/cmpruns.py`); a name not found
+  there is looked up in `speed/runs/`, so `cmpruns.py 11e1f21 NEW` works
+  on any machine.
 - The full mutation run takes about an hour. Start it in the background
   as soon as a commit is ready, and work on the write-up meanwhile.
 - If a step deliberately changes output (it should not), stop and ask the maintainer

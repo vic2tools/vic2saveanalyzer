@@ -13,3 +13,7 @@ LICENSE -text
 # The answers the checks are held to are kept byte for byte as the program
 # wrote them: the tables end their lines in CRLF, and that is part of the answer.
 testkit/expected/** -text
+testkit/expected-real/** -text
+
+# The speed job's reference run, held to the same bytes (speed/cmpruns.py).
+speed/runs/** -text

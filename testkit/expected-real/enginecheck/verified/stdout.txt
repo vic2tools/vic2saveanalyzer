@@ -1,0 +1,86 @@
+Checking 17 save(s) on N cores.
+
+=== NET1872_09_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 2,596 regiments, 967 ships, 306,576,957 people.
+
+
+=== NET1874_02_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 2,792 regiments, 1,271 ships, 309,721,227 people.
+
+
+=== NET1875_07_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 2,593 regiments, 1,321 ships, 313,095,409 people.
+
+
+=== NET1876_12_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 2,861 regiments, 1,429 ships, 316,974,143 people.
+
+
+=== NET1878_05_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 3,694 regiments, 1,536 ships, 320,903,439 people.
+
+
+=== NET1879_10_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 3,803 regiments, 1,556 ships, 324,230,056 people.
+
+
+=== NET1881_03_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 3,969 regiments, 1,431 ships, 329,134,766 people.
+
+
+=== NET1882_08_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 3,803 regiments, 1,441 ships, 333,458,132 people.
+
+
+=== NET1884_01_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 3,061 regiments, 1,454 ships, 338,225,731 people.
+
+
+=== NET1885_06_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 3,331 regiments, 1,512 ships, 344,537,806 people.
+
+
+=== NET1886_11_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 3,552 regiments, 1,607 ships, 347,546,760 people.
+
+
+=== NET1888_04_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 3,691 regiments, 1,587 ships, 351,537,031 people.
+
+
+=== NET1889_09_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 3,658 regiments, 1,606 ships, 356,370,449 people.
+
+
+=== NET1891_02_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 4,305 regiments, 1,558 ships, 360,779,122 people.
+
+
+=== NET1892_07_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 4,370 regiments, 1,505 ships, 365,836,924 people.
+
+
+=== NET1893_12_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 4,284 regiments, 1,455 ships, 368,945,651 people.
+
+
+=== NET1894_09_01.v2 ===
+tag     brigades    scan   diff     ships    scan   diff        people          scan
+All nations agree: 4,925 regiments, 1,477 ships, 369,495,605 people.
+

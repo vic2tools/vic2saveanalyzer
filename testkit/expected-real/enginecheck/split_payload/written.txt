@@ -1,0 +1,10 @@
+brigades_by_type.csv
+market_snapshot.csv
+nations_timeseries.csv
+pops_by_culture.csv
+pops_by_type.csv
+prices.csv
+report.data.gz
+report.html
+ships_by_type.csv
+technologies.csv

@@ -1,0 +1,89 @@
+
+=== NET1872_09_01.v2 ===
+
+Top-level scalars:
+  date=1872.9.1
+  player=NET
+  government=6
+  automate_trade=no
+  automate_sliders=0
+  rebel=7812
+  unit=7065
+  state=1538
+  start_date=1836.1.1
+  start_pop_index=945810
+  great_wars_enabled=no
+  world_wars_enabled=no
+  player_monthly_pop_growth_tag=NET
+  player_monthly_pop_growth_date=1872.9.1
+
+Top-level blocks (3865 total, distinct):
+  flags, gameplaysettings, worldmarket, overseas_penalty, unit_cost, budget_balance, player_monthly_pop_growth, fascist, socialist, communist, anarcho_liberal, canals, id, fired_events, <province>, <country>, rebel_faction, diplomacy, combat, active_war, previous_war, invention, great_nations, outliner, news_collector, crisis_manager, region
+
+First province block (1) keys:
+  name                     scalar
+  owner                    scalar
+  controller               scalar
+  core                     list
+  garrison                 scalar
+  railroad                 list
+  nationalism              scalar
+  colonial                 scalar
+  aristocrats              list  <- pop, culture=native_american_minor, religion=animist
+  artisans                 block  <- pop, culture=dixie, religion=protestant
+  bureaucrats              block  <- pop, culture=yankee, religion=protestant
+  clergymen                block  <- pop, culture=yankee, religion=protestant
+  labourers                list  <- pop, culture=native_american_minor, religion=animist
+  officers                 block  <- pop, culture=yankee, religion=protestant
+  soldiers                 block  <- pop, culture=dixie, religion=protestant
+  military_construction    block
+  rgo                      block
+  life_rating              scalar
+  infrastructure           scalar
+  last_imigration          scalar
+  last_controller_change   scalar
+  unit_names               block
+  party_loyalty            list
+
+First country block (REB) keys:
+  tax_base                 scalar
+  flags                    block
+  variables                block
+  capital                  scalar
+  technology               block
+  last_election            scalar
+  wage_reform              scalar
+  work_hours               scalar
+  safety_regulations       scalar
+  unemployment_subsidies   scalar
+  pensions                 scalar
+  health_care              scalar
+  school_reforms           scalar
+  slavery                  scalar
+  vote_franschise          scalar
+  upper_house_composition  scalar
+  voting_system            scalar
+  public_meetings          scalar
+  press_rights             scalar
+  trade_unions             scalar
+  political_parties        scalar
+  land_reform              scalar
+  admin_reform             scalar
+  finance_reform           scalar
+  education_reform         scalar
+  transport_improv         scalar
+  pre_indust               scalar
+  industrial_construction  scalar
+  foreign_training         scalar
+  foreign_weapons          scalar
+  military_constructions   scalar
+  foreign_officers         scalar
+  army_schools             scalar
+  foreign_naval_officers   scalar
+  naval_schools            scalar
+  foreign_navies           scalar
+  upper_house              block
+  diplomatic_points        scalar
+  religion                 scalar
+  plurality                scalar
+

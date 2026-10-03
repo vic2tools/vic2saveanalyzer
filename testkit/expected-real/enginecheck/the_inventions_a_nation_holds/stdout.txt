@@ -1,0 +1,245 @@
+Found 17 save(s).
+Victoria II at HOLDING/game, with Modus Omnino Demens 1.6.
+defines.lua: POP_SIZE_PER_REGIMENT=3000
+poptypes/: mobilizable = craftsmen farmers labourers
+Reading 17 save(s) on N cores.
+  [1/17] NET1872_09_01.v2 ... 1872.9.1
+  [2/17] NET1874_02_01.v2 ... 1874.2.1
+  [3/17] NET1875_07_01.v2 ... 1875.7.1
+  [4/17] NET1876_12_01.v2 ... 1876.12.1
+  [5/17] NET1878_05_01.v2 ... 1878.5.1
+  [6/17] NET1879_10_01.v2 ... 1879.10.1
+  [7/17] NET1881_03_01.v2 ... 1881.3.1
+  [8/17] NET1882_08_01.v2 ... 1882.8.1
+  [9/17] NET1884_01_01.v2 ... 1884.1.1
+  [10/17] NET1885_06_01.v2 ... 1885.6.1
+  [11/17] NET1886_11_01.v2 ... 1886.11.1
+  [12/17] NET1888_04_01.v2 ... 1888.4.1
+  [13/17] NET1889_09_01.v2 ... 1889.9.1
+  [14/17] NET1891_02_01.v2 ... 1891.2.1
+  [15/17] NET1892_07_01.v2 ... 1892.7.1
+  [16/17] NET1893_12_01.v2 ... 1893.12.1
+  [17/17] NET1894_09_01.v2 ... 1894.9.1
+
+Invention indices decoded against 387 inventions (base 1): 123 of 56688 nation-invention pairs are unreachable (0.2%).
+
+Mod scan: 150 techs (1 grant mobilisation_size), 4 inventions grant it (4 obtainable), 2 event modifiers, 14 triggered modifiers.
+  triggered modifiers left out, because their trigger asks something this cannot answer: enginecheck_unknown
+  tech       military_logistics                           +0.020
+  invention  mobilization_time_tables                     +0.010
+  invention  personnel_category_tables                    +0.010
+  invention  railroad_transport_groups                    +0.010
+  invention  staff_command_support                        +0.010
+
+FRA at 1894.9.1 in NET1894_09_01.v2
+the mod rebuilds 387 inventions; this save names 201 of them, indices 1..362
+decoded with base 1
+
+  -- army_inventions.txt
+     1  post_napoleonic_army_doctrine              post_napoleonic_thought
+     2  field_fortifications                       strategic_mobility
+     3  railroad_transport_groups                  strategic_mobility
+     4  signal_detachments                         point_defense_system
+     5  flexible_firepower                         point_defense_system
+     6  synchronized_heavy_support                 point_defense_system
+     7  staff_command_support                      point_defense_system
+     8  trench_systems                             deep_defense_system
+    11  elastic_defense_system                     deep_defense_system
+    12  flexible_counterattacks                    deep_defense_system
+    20  flintlock_rifle_armament                   flintlock_rifles
+    21  muzzle_loaded_rifle_armament               muzzle_loaded_rifles
+    22  breech_loaded_rifle_armament               breech_loaded_rifles
+    23  machine_gun_armament                       machine_guns
+    24  colonial_negotiations                      breech_loaded_rifles
+    37  cuirassier_activation                      military_staff_system
+    38  dragoon_activation                         military_staff_system
+    39  hussar_activation                          military_staff_system
+    40  telegraph_coordination                     military_plans
+    41  mobilization_time_tables                   military_plans
+    42  personnel_category_tables                  military_plans
+    43  ammunition_area_effect_calculations        military_statistics
+    44  empirical_combat_efficiency_matrix         military_statistics
+    45  combat_loss_evaluation_schemata            military_statistics
+    46  pre_planned_depot_systems                  military_logistics
+    47  logistical_calculations                    military_logistics
+    48  replenishment_transport_organisation       military_logistics
+    63  army_academic_training                     army_professionalism
+    64  field_training                             army_professionalism
+    65  army_societal_status                       army_professionalism
+    66  army_independent_command                   army_decision_making
+    67  army_continuous_issuing_of_orders          army_decision_making
+    68  army_delegated_power                       army_decision_making
+    69  army_wargames                              army_risk_management
+    70  army_alternative_plans                     army_risk_management
+    71  saddle_orders                              army_risk_management
+  -- commerce_inventions.txt
+    75  multitude_of_financial_instruments         stock_exchange
+    76  insurance_companies                        stock_exchange
+    77  regulated_buying_and_selling_of_stocks     stock_exchange
+    78  liquidation_of_assets                      business_banks
+    79  capital_for_investors                      business_banks
+    80  distribution_channels                      business_banks
+    81  industrial_rnd_investments                 investment_banks
+    83  industrial_distribution_investments        investment_banks
+    87  silver_standard                            ad_hoc_money_bill_printing
+    88  decimal_monetary_system                    ad_hoc_money_bill_printing
+    96  john_ramsay_mcculloch                      early_classical_theory_and_critique
+    97  nassau_william_sr                          early_classical_theory_and_critique
+    98  james_mill                                 early_classical_theory_and_critique
+    99  john_elliot_cairnes                        late_classical_theory
+   100  robert_torrens                             late_classical_theory
+   101  john_stuart_mill                           late_classical_theory
+   133  polypoly_structure                         market_structure
+   136  limited_partnership_company                business_regulations
+   137  joint_stock_company                        business_regulations
+   138  patent                                     business_regulations
+   139  trademark                                  business_regulations
+   140  anti_trust_laws                            market_regulations
+   141  financial_regulations                      market_regulations
+   151  work_classification                        organized_factories
+   152  work_specialization                        organized_factories
+   153  work_control_and_hierarchy                 organized_factories
+   154  sequence_planning                          scientific_management
+   155  inventory_planning                         scientific_management
+   157  time_studies                               time_saving_measures
+   158  time_clock                                 time_saving_measures
+   159  lighting                                   time_saving_measures
+   160  old_style_family_business                  management_strategy
+   161  anynomous_investor_business                management_strategy
+  -- culture_inventions.txt
+   165  romanticist_literature                     romanticism
+   166  romanticist_art                            romanticism
+   167  romanticist_music                          romanticism
+   184  neokantian_idealism                        idealism
+   185  hegelian_idealism                          idealism
+   186  proto_existentialism                       idealism
+   187  pragmatism                                 empiricism
+   188  i_empiricism                               empiricism
+   189  i_analytic_philosophy                      analytic_philosophy
+   190  modern_logics                              analytic_philosophy
+   191  logical_positivism                         analytic_philosophy
+   192  philosophy_of_language                     analytic_philosophy
+   193  phenomenology                              phenomenology_n_hermeneutic
+   207  paternalism                                enlightenment_thought
+   208  constitutionalism                          enlightenment_thought
+   209  atheism                                    enlightenment_thought
+   210  egalitarianism                             enlightenment_thought
+   211  rationalism                                enlightenment_thought
+   212  authoritarianism                           ideological_thought
+   213  hierarchical_order                         ideological_thought
+   214  traditionalism                             ideological_thought
+   215  political_religion                         ideological_thought
+   216  individualism                              ideological_thought
+   217  secularization                             ideological_thought
+   218  social_conscience                          ideological_thought
+   219  collectivism                               ideological_thought
+   220  determinism                                ideological_thought
+   221  social_justice                             ideological_thought
+   222  populism_vs._establishment                 state_n_government
+   223  clericalism_vs._anticlericalism            state_n_government
+   224  bureaucracy_vs._nepotism                   state_n_government
+   225  meritocracy_vs._aristocracy                state_n_government
+   226  national_fraternity                        nationalism_n_imperialism
+   227  biased_multiculturalism                    nationalism_n_imperialism
+   228  manifest_destiny                           nationalism_n_imperialism
+   229  expansionism                               nationalism_n_imperialism
+   230  mission_to_civilize                        state_n_government
+   231  separatism                                 nationalism_n_imperialism
+   232  dogma_of_violence                          revolution_n_counterrevolution
+   233  dogma_of_mass_action                       revolution_n_counterrevolution
+   234  terrorism                                  revolution_n_counterrevolution
+   236  womens_suffrage_movement                   revolution_n_counterrevolution
+   237  rhetoric_of_hate                           revolution_n_counterrevolution
+   238  nostalgic_romanticism                      revolution_n_counterrevolution
+   239  anti_egalitarianism                        revolution_n_counterrevolution
+   240  vangaurd_party                             revolution_n_counterrevolution
+  -- industry_inventions.txt
+   247  daimlers_automobile                        combustion_engine
+   248  wright_n_langleys_aeroplanes               combustion_engine
+   253  sharp_n_roberts_power_loom                 mechanical_production
+   254  jacquard_power_loom                        mechanical_production
+   255  northrop_power_loom                        mechanical_production
+   256  mechanical_saw                             mechanical_production
+   257  mechanical_precision_saw                   mechanical_production
+   258  hussey_n_mccormicks_reaping_machine        mechanical_production
+   259  pitts_threshing_machine                    mechanical_production
+   260  mechanized_slaughtering_block              mechanical_production
+   261  precision_work                             mechanical_production
+   262  machine_tools                              interchangeable_parts
+   263  whitney_n_colts_standardized_small_arms    interchangeable_parts
+   264  food_packing_system                        interchangeable_parts
+   265  integral_distillery_process                interchangeable_parts
+   266  jiggs                                      interchangeable_parts
+   267  electric_machinery                         semi_automatization
+   268  oil_pumping_machinery                      semi_automatization
+   269  drying_techniques                          semi_automatization
+   270  fordism                                    assembly_line
+   271  industrialized_armament_industry           assembly_line
+   272  refrigerator_technology                    assembly_line
+   273  ammunition_production                      mechanized_mining
+   274  small_arms_production                      mechanized_mining
+   275  explosives_production                      mechanized_mining
+   276  artillery_production                       mechanized_mining
+   277  pit_coal                                   clean_coal
+   278  coke                                       clean_coal
+   279  advanced_ore_roasting_processes            cheap_iron
+   280  advanced_ore_grinding_processes            cheap_iron
+   281  advanced_ore_smelting_processes            cheap_iron
+   282  bessemer_steel                             cheap_iron
+   283  martin_steel                               cheap_steel
+   284  thomas_steel                               cheap_steel
+   285  electric_rolling_techniques                advanced_metallurgy
+   286  steel_alloys                               advanced_metallurgy
+   288  combat_medicine                            medicine
+   289  aerial_bacteria_and_antiseptic_principle   medicine
+   290  vaccination                                medicine
+   291  chemotherapy                               medicine
+   292  genetics:_heredity                         medicine
+   293  clinical_thermometers_and_binaural_stethoscopes medicine
+   294  prophylaxis_against_malaria                medicine
+   295  pressure_chambers_for_thorax_surgery       medicine
+   296  artificial_fertilizers                     inorganic_chemistry
+   297  nitroglycerin                              inorganic_chemistry
+   298  chemical_wood_pulp_process                 inorganic_chemistry
+   299  rubber_vulcanization                       inorganic_chemistry
+   300  catalytic_fermentative_process             inorganic_chemistry
+   301  synthetic_dye                              organic_chemistry
+   302  gaslights                                  organic_chemistry
+   303  carbon_soil_enrichment                     organic_chemistry
+   304  cracking                                   organic_chemistry
+   305  x_rays                                     electricity
+   306  edison_light_bulb                          electricity
+   307  bell_n_greys_telephones                    electricity
+   308  electrical_lighting                        electricity
+   312  tulls_seed_drill                           water_wheel_power
+   313  rotherham_plough                           practical_steam_engine
+   314  telephone_switchboard                      electricity
+  -- navy_inventions.txt
+   316  long_range_fire_tactic                     battleship_column_doctrine
+   317  speedy_maneuvering_tactic                  battleship_column_doctrine
+   318  sealane_hunters                            raider_group_doctrine
+   319  fast_ship_killer                           raider_group_doctrine
+   320  big_ship_competitor                        raider_group_doctrine
+   321  standard_raider_group_doctrine             raider_group_doctrine
+   322  blue_water_school                          blue_and_brown_water_schools
+   323  brown_water_school                         blue_and_brown_water_schools
+   328  building_station_shipyards                 clipper_design
+   329  mechanized_fishing_vessels                 steamers
+   330  steamer_automatic_construction_plants      steamers
+   331  steamer_transports                         steamers
+   332  commerce_raiders                           steamers
+   333  ironclads                                  iron_steamers
+   334  monitors                                   iron_steamers
+   335  torpedo_boats                              iron_steamers
+   336  protected_cruisers                         steel_steamers
+   337  pre_dreadnought                            steel_steamers
+   343  optical_rangefinders                       fire_control_systems
+   344  gyrostabilized_fire_control                fire_control_systems
+   347  armoured_turrets                           weapon_platforms
+   349  rifled_guns                                main_armament
+   350  quick_firing_guns                          main_armament
+   351  armoured_citadels                          main_armament
+   352  heavy_caliber_guns                         main_armament
+   362  target_hit_profile_analysis                naval_plans
+
+201 decoded. Compare against the technology screen: every invention shown as discovered there should appear here, and nothing else should.

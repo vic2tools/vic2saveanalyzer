@@ -144,6 +144,32 @@ def answer_of(path, holding=None):
     return {"status": code, "said": err.strip()[-300:]}
 
 
+def portable(answer):
+    """
+    The real mod's answer with the folders it was read from written as MOD
+    and GAME, and the separators below them as `/`, so that one record holds
+    wherever the game is installed -- on Windows as on Linux. Holding this
+    answer to the record compares everything else as text, as before.
+    """
+    if answer.get("status") != 0:
+        return answer
+    text = answer["export"]
+    export = json.loads(text)
+    roots = [("MOD", export.get("path") or "")]
+    bmp = export.get("map_bmp") or ""
+    game = re.sub(r"[\\/]map[\\/]provinces\.bmp$", "", bmp)
+    if game != bmp:
+        roots.append(("GAME", game))
+    # The mod lies inside the game, so it is named first.
+    for name, root in roots:
+        if root and root not in ("MOD", "GAME"):
+            for ascii_only in (False, True):
+                text = text.replace(json.dumps(root, ensure_ascii=ascii_only)[1:-1], name)
+    text = re.sub(r'"(MOD|GAME)((?:\\\\|/)[^"]*)"',
+                  lambda m: '"%s%s"' % (m.group(1), m.group(2).replace("\\\\", "/")), text)
+    return dict(answer, export=text)
+
+
 def base_of(name):
     """The undamaged world a damaged one was made from."""
     i = int(name.rsplit(" ", 1)[1])
@@ -470,8 +496,8 @@ def main():
             print("recorded %d answers in %s" % (len(answers), record))
         ok &= kept_copy(os.path.join(holding, "kept"))
         if args.mod:
-            # The real mod is somebody's install: its answer is kept out of
-            # the tree, and keyed by the mod's folder name.
+            # The real mod's answer is keyed by the mod's folder name, with
+            # the folders it was read from written as MOD and GAME.
             real = os.path.join(expected.REAL, "modread",
                                 expected.slug(os.path.basename(os.path.abspath(args.mod))) + ".json")
             if not os.path.isdir(args.mod):
@@ -480,13 +506,13 @@ def main():
             elif args.update:
                 os.makedirs(os.path.dirname(real), exist_ok=True)
                 with open(real, "w", encoding="utf-8") as fh:
-                    json.dump(answer_of(args.mod), fh)
+                    json.dump(portable(answer_of(args.mod)), fh)
                 print("recorded the real mod's answer in %s" % real)
             elif not os.path.isfile(real):
                 print("no answer is recorded for the real mod in %s" % real)
             else:
                 with open(real, encoding="utf-8") as fh:
-                    found = held(args.mod, json.load(fh), answer_of(args.mod))
+                    found = held(args.mod, portable(json.load(fh)), portable(answer_of(args.mod)))
                 print("the real mod: %s" % (found[0] if found else "as recorded"))
                 ok &= not found
     finally:
