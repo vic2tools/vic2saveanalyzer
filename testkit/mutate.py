@@ -673,12 +673,13 @@ def main():
         raise SystemExit(
             "%s has uncommitted changes. This reverts with `git checkout` "
             "between mutations and would throw them away:\n%s" % (TREE, dirty))
-    if not os.path.exists(os.path.join(TREE, "scanner/target/release/vic2scan")):
+    scanner = "scanner/target/release/vic2scan" + (".exe" if sys.platform == "win32" else "")
+    if not os.path.exists(os.path.join(TREE, scanner)):
         raise SystemExit("no scanner in %s, so every run would be refused. Copy "
-                         "scanner/target/release/vic2scan in first." % TREE)
+                         "%s in first." % (TREE, scanner))
     chosen = [m for m in MUTATIONS if not args.names or m[0] in args.names]
     # The scanner as committed, to put back after each bug put into it.
-    binary = os.path.join(TREE, "scanner/target/release/vic2scan")
+    binary = os.path.join(TREE, scanner)
     pristine = binary + ".pristine"
     if os.path.exists(binary):
         shutil.copyfile(binary, pristine)

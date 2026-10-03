@@ -545,8 +545,8 @@ its own reader and is untouched; `frontcheck.py` and `saveshapes.py` read it.
 **Done on Windows, not on the laptop.** This step was the first made on the
 Windows PC (Ryzen 9 7950X, 16 cores / 32 threads, 31 GB), with Rust's
 `x86_64-pc-windows-gnu` toolchain (rustup stable 1.99.0; it needs no Visual
-Studio). The 1880s campaign, its mod and `expected-real` are not there, and
-neither is gdb, so:
+Studio), and gdb from MSYS2. The 1880s campaign, its mod and
+`expected-real` are not there, so:
 
 - The checks: `testkit/all.py --quick`, no saves. On Windows 13 of 20 hold
   *before* this change; the 7 others fail on `main` too, the recorded
@@ -560,9 +560,12 @@ neither is gdb, so:
   ten ways (a report, `--tags`, `--split`, one save, `--peek`, `--verify`,
   and the four diagnostics, which refuse on both for want of a mod):
   exit status, stdout, stderr and every file byte-identical.
-- Mutations: none patches `country.rs`, and all 57 still find the text
-  they patch (a dry run). The full run was not made: on Windows the seven
-  checks above fail before any mutation, so theirs would be UNTESTED.
+- Mutations: none patches `country.rs`. The full run: 27 caught, 29
+  UNTESTED -- every one whose check already fails on Windows (the seven
+  above, and `boots.py`, which wants a browser) -- and 1 BLIND,
+  `keeper-folder-windows-only`, which puts back a call that only fails off
+  Windows. None got past a check that works there; the laptop's run is
+  the one that answers for all 57.
 - Speed: `vic2scan bench-engine` on those three saves, both builds in
   alternation, 15 rounds, median per save. The spec it needs was taken
   from a run with a temporary probe, not committed.
@@ -578,7 +581,26 @@ Through `vic2_analyzer.py` from an empty cache (files in the page cache),
 default thread count, three saves on three threads, 61 -> 60 ms. These are
 1836-41 saves, whose countries are small; on the 1880s campaign the profile
 put countries at ~23% of a worker's time, a third of it the copy, so pass
-one there should drop by more. That and the gdb split are for the laptop.
+one there should drop by more; that is for the laptop to measure.
+
+gdb samples (`speed/gdbsample.py`: `bench-engine` over the three saves
+listed 400 times, 100 samples a build) agree. Before, `text::latin1` was
+sampled straight under `read_flat`, the country copy; after, it appears
+only under `model::build` and `read_war`, decoding what they keep. Share
+of samples, before -> after, each +-3-4 points at 100 samples:
+
+| part | before | after |
+|---|---|---|
+| countries | 14% | 11% |
+| provinces | 33% | 36% |
+| prepare (its gzip) | 28% (24%) | 26% (23%) |
+| top-level blocks | 6% | 7% |
+| malloc / free | 24% | 21% |
+| reading the file | 4% | 6% |
+
+`deflate::deflate_raw`, compressing each save's state-history chunk, is
+the hottest single function on Windows at ~23% of samples, against ~14%
+on the laptop: task 04.
 
 ### A run ends without freeing, and reads on a steady count of threads, 2026-10-02
 

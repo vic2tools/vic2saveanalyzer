@@ -229,8 +229,9 @@ Notes for task 03:
 
 - **Made on the Windows PC, not the laptop.** It had no Rust: rustup with
   the `x86_64-pc-windows-gnu` toolchain was installed (stable 1.99.0, in
-  `~/.cargo/bin`, not on PATH; no Visual Studio needed). No gdb, no
-  Victoria 2, no 1880s campaign, no `expected-real` there. Its own
+  `~/.cargo/bin`, not on PATH; no Visual Studio needed). gdb came later,
+  from MSYS2 (`C:\msys64\mingw64\bin\gdb.exe`, `mingw-w64-x86_64-gdb`,
+  18.1). No Victoria 2, no 1880s campaign, no `expected-real` there. Its own
   `speed/local.env` was written (ignored); its `VIC2_PRIVATE` is a guess at
   that machine's words, so run `prepush.sh` on the laptop before any push.
 - `e9da15c` "Read the countries from the save's bytes, not a decoded copy
@@ -260,14 +261,32 @@ Notes for task 03:
     (`testkit/matching.a_vanilla`), both trees, ten ways (report, `--tags`,
     `--split`, one save, `--peek`, `--verify`, four diagnostics): status,
     stdout, stderr, every file byte-identical.
-  - Mutations: a dry run shows all 57 still apply; none patches
-    `country.rs`. **The full mutation run was not made** (on Windows the 7
-    failing checks would make theirs UNTESTED).
+  - Mutations, the full run on `7325f60` (`--saves` the three saves):
+    57 applied; **27 caught, 29 UNTESTED, 1 BLIND, 0 did not apply.** The
+    29 are every mutation whose check already fails on Windows before any
+    bug goes in (the 7 above, and `boots.py`, which wants a browser), so
+    they say nothing either way. The BLIND one is
+    `keeper-folder-windows-only`, which puts back a call to
+    `os.startfile` -- harmless on Windows by its nature, so it can only be
+    caught on Linux. None patches `country.rs`. `testkit/mutate.py` looked
+    for `vic2scan` without `.exe` and refused to start on Windows; fixed
+    (the commit after this entry's first version).
 - Numbers, `vic2scan bench-engine` on the three saves, alternated, 15
   rounds, median per save (Ryzen 9 7950X): countries 6.5 -> 4.9 ms,
   read+scan+build 35.3 -> 33.7 ms, every other part unchanged. Empty-cache
   runs through `vic2_analyzer.py`, `-j 1`, 15 rounds: pass one 158 -> 153
-  ms, wall 245 -> 240 ms. No gdb split.
+  ms, wall 245 -> 240 ms.
+- gdb samples, new `speed/gdbsample.py` (the Windows counterpart of
+  `sample_run.sh` + `gdbreport.py`): `bench-engine` over the three saves
+  listed 400 times, 100 samples per build, `d23d16b` vs `e9da15c`. Before,
+  `text::latin1` was sampled straight under `read_flat` -- the country
+  copy; after, every `latin1` sample is under `model::build` or
+  `read_war`, decoding names they keep, and none under `read_flat` or
+  `country::`. Share of samples (100 each, so +-3-4 points): countries
+  14% -> 11%, provinces 33 -> 36%, prepare 28 -> 26% (its gzip 24 -> 23%),
+  top-level blocks 6 -> 7%, malloc/free 24 -> 21%, reading the file 4 ->
+  6%. On Windows the per-save gzip is a bigger share than the laptop's
+  ~14%, and `deflate_raw` is the one hottest function: task 04's target.
 - `dist/vic2saveanalyzer.exe` rebuilt on Windows from `e9da15c`, **with the
   Rust scanner bundled** (the 2 Sep build had none and predates the
   rewrite). Checked: its report from the three saves is byte-identical to
@@ -275,10 +294,11 @@ Notes for task 03:
   line's wrapping (the program's name). Committed with this entry.
 - **For the laptop, before task 04:** pull; rebuild the scanner; run the
   real-campaign comparison against `opt/runs/31a2931` (`refrun.sh` +
-  `cmpruns.py`), `all.py` with the campaign (28/28), the full mutation run
-  on `e9da15c` in `rw/retire-mut`, the bench (empty-cache pass one should
-  drop), and gdb samples to confirm `text::latin1` is gone from pass one.
-  Record them here. If any fails, task 03 is not done.
+  `cmpruns.py`), `all.py` with the campaign (28/28), the mutation run in
+  `rw/retire-mut` (the 29 UNTESTED here and the BLIND one get their real
+  answer only there: 57/57 expected), and the bench on the 1880s campaign
+  (empty-cache pass one should drop). Record them here. If any fails,
+  task 03 is not done.
 - Not pushed. No bundle in the laptop's `~` (made one on the Windows PC:
   `~/vic2saveanalyzer-backup-<hash>.bundle`, named for this commit).
 - Next: the laptop checks above, then task 04 (`04-state-chunk.md`).
