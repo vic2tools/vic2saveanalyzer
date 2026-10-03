@@ -966,8 +966,8 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
                     } else if workers > 1 {
                         crate::outln!("  [{}/{}] {} ... {}", done, n, basename(&run.files[i]), pre.meta.date);
                     } else {
-                        let months: FxSet<&str> = pre.meta.market.as_ref()
-                            .map(|m| m.history.iter().map(|h| h.0.as_str()).collect())
+                        let months: FxSet<crate::names::Sym> = pre.meta.market.as_ref()
+                            .map(|m| m.history.iter().map(|h| h.0).collect())
                             .unwrap_or_default();
                         let extra = if months.is_empty() { String::new() }
                                     else { format!(", {} months of prices", months.len()) };

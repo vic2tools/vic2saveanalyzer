@@ -17,7 +17,7 @@
 
 use crate::clause::{self, Tree, V};
 use crate::country::Country;
-use crate::names::Sym;
+use crate::names::{self, Sym};
 use crate::omap::OMap;
 use crate::fx::{FxMap, FxSet};
 use crate::province::Scan;
@@ -86,11 +86,12 @@ pub struct War {
 /// `readsave.read_worldmarket`'s dict, the parts anything reads.
 #[derive(Clone, Debug, Default)]
 pub struct Market {
-    pub current: OMap<String, f64>,
-    pub history: Vec<(String, String, f64)>,
+    pub current: OMap<Sym, f64>,
+    /// (month stamp, good, price)
+    pub history: Vec<(Sym, Sym, f64)>,
     /// world_pool, supply, demand, real_demand, actual_sold,
     /// actual_sold_world, discovered -- in that order.
-    pub snapshot: [OMap<String, f64>; 7],
+    pub snapshot: [OMap<Sym, f64>; 7],
 }
 
 /// What a save says that is not one nation's: the meta dict.
@@ -617,7 +618,7 @@ pub fn read_war(v: &V, active: bool) -> R<Option<War>> {
     }))
 }
 
-fn numeric(block: &Tree, key: &[u8]) -> R<OMap<String, f64>> {
+fn numeric(block: &Tree, key: &[u8]) -> R<OMap<Sym, f64>> {
     let mut out = OMap::new();
     if let Some(V::Dict(sub)) = block.get(key) {
         for (k2, v) in &sub.pairs {
@@ -625,7 +626,7 @@ fn numeric(block: &Tree, key: &[u8]) -> R<OMap<String, f64>> {
                 continue;
             }
             if let V::Str(_) = v {
-                out.set(s(k2), clause::to_float(Some(v), 0.0)?);
+                out.set(names::intern(k2), clause::to_float(Some(v), 0.0)?);
             }
         }
     }
@@ -654,19 +655,19 @@ pub fn read_worldmarket(block: &Tree) -> R<Market> {
         if stamp.is_empty() {
             continue;
         }
-        let stamp = s(&stamp);
+        let stamp = names::intern(&stamp);
         for (good, price) in &snap.pairs {
             if good.first() == Some(&b'_') {
                 continue;
             }
             if let V::Str(_) = price {
-                history.push((stamp.clone(), s(good), clause::to_float(Some(price), 0.0)?));
+                history.push((stamp, names::intern(good), clause::to_float(Some(price), 0.0)?));
             }
         }
     }
     let keys: [&[u8]; 7] = [b"worldmarket_pool", b"supply_pool", b"demand", b"real_demand",
                             b"actual_sold", b"actual_sold_world", b"discovered_goods"];
-    let mut snapshot: [OMap<String, f64>; 7] = Default::default();
+    let mut snapshot: [OMap<Sym, f64>; 7] = Default::default();
     for (i, key) in keys.iter().enumerate() {
         snapshot[i] = numeric(block, key)?;
     }

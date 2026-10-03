@@ -338,7 +338,7 @@ impl Keep for Market {
     fn get(r: &mut R) -> X<Self> {
         let current = Keep::get(r)?;
         let history = Keep::get(r)?;
-        let mut snapshot: [OMap<String, f64>; 7] = Default::default();
+        let mut snapshot: [OMap<Sym, f64>; 7] = Default::default();
         for s in snapshot.iter_mut() {
             *s = Keep::get(r)?;
         }
