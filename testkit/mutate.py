@@ -683,6 +683,30 @@ def m85():
     patch("scanner/src/front/cross.rs", "        if worst >= 6 {", "        if worst >= 600 {")
 
 
+@mutation("market-snapshot-goods-by-id",
+          "the market snapshot's goods come out in the order the run met their "
+          "names, not by name",
+          "enginecheck.py", "saves-and-mod")
+def m86():
+    patch("scanner/src/names.rs", "/// Order by what the names say",
+          "pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say")
+    patch("scanner/src/engine/market.rs",
+          "        goods.sort_by(|a, b| names::cmp(*a, *b));\n        let get",
+          "        goods.sort_by_key(|g| names::id(*g));\n        let get")
+
+
+@mutation("market-prices-goods-by-id",
+          "a day's prices come out in the order the run met the goods' names, "
+          "not by name",
+          "enginecheck.py", "saves-and-mod")
+def m87():
+    patch("scanner/src/names.rs", "/// Order by what the names say",
+          "pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say")
+    patch("scanner/src/engine/market.rs",
+          "        goods.sort_by(|a, b| names::cmp(*a, *b));\n        for good in goods {",
+          "        goods.sort_by_key(|g| names::id(*g));\n        for good in goods {")
+
+
 def main():
     global TREE, SAVES, MOD
     ap = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])
