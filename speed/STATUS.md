@@ -387,3 +387,83 @@ Notes for task 03:
   Windows PC, named for this commit.
 - Next: task 03b (`03b-checks-on-windows.md`), then task 04
   (`04-state-chunk.md`).
+
+## 2026-10-03, task 03b done on the Windows PC (the checks hold on Windows)
+
+- **`testkit/all.py` with the campaign and the mod: 28 of 28 hold on
+  Windows, none skipped** (`2697c57`; the baseline at `a80ec11` was 19 of
+  28, with two browser checks skipping). The program and the recorded
+  answers are untouched: no `--update-expected`, no change to anything the
+  program prints or writes. INTERNALS.md: "The checks hold on Windows,
+  2026-10-03"; `testkit/README.md` has an "On Windows" section.
+- Commits (new hashes, not pushed):
+  - `15a79c8` paths and wording: `expected.stand_in_for` (separators below
+    a stand-in become `/`, as written or doubled; no other backslash),
+    `modread.below_holding` (the same for JSON), `expected.os_wording`
+    (Windows' "Permission denied" for a folder opened as a file, and
+    "Cannot create a file when that file already exists", said as the
+    record has them), USERPROFILE beside HOME in `frontcheck.py`, and
+    `frontcheck.shut` (a save held open with no sharing, since a mode of 0
+    does nothing). Fixes saveshapes, mangled, frontcheck, crossrows,
+    enginecheck (all 27 cases, the real campaign included) and modread.
+  - `4325f38` `engine_runtime.py`: the stand-in scanners wrote CR LF (a
+    Python in a pipe, on Windows); the relay passes bytes as they are and
+    the Rust scanner writes a bare newline, so **not a program bug**. Also
+    `edges.py` (printed a mark no Windows code page has) and `all.py`
+    (read the checks' output in that code page): UTF-8.
+  - `cc909a9` `smoke.py` copies the eight saves where it may not link.
+  - `17f76b7` `browser.py` finds Firefox in Program Files; boots.py,
+    state_history_ui.py and looks.py use it. Both browser checks now run
+    and pass on Windows.
+  - `62d292b` `speed/cmpruns.py` sets aside a byte-order mark, CR LF and
+    backslashes in the folders a run wrote.
+  - `cf16767` the fixture builder's refusal of links did not see a
+    junction (`os.path.islink` is false for one). `matching._linked` does;
+    `engine_runtime.py` makes a junction where it cannot make a symlink
+    (the second half, a link to a file, is not run on Windows);
+    `mutate.py`'s `fixture-writes-through-link` is aimed at the new line.
+  - `2697c57` `mutate.py` read the files it patches in the code page and
+    died at `template.py` on Windows; UTF-8 now.
+- **Not masks:** with a changed number and a changed path put into records
+  by hand, `frontcheck.py` still fails and names the cases; with the
+  junction guard removed the link test fails; `cmpruns.py` still reports
+  a changed CSV or `Found 264`.
+- **Mutations** (`logs/mut-03b.out`, a clean worktree
+  `~/vic2speed/rw/mut03b` at `2697c57` with its scanner copied in, the
+  campaign as `--saves`): **57 mutations, 56 caught, 1 BLIND, 0 did not
+  apply, 0 untested.** The BLIND one is `keeper-folder-windows-only`, which
+  puts back `os.startfile` and can only be caught off Windows, as the task
+  said. (The 29 untested on Windows after task 03 are all judged now.)
+- **The reference run:** `refrun.sh` + `cmpruns.py` against
+  `speed/runs/11e1f21`: IDENTICAL, 12 files (`runs/03b`), and the older
+  PowerShell-made `runs/03win` is now identical too. The exe in
+  `dist/` run on the campaign gave the same, in 3.6 s.
+- **The exe:** `dist/vic2saveanalyzer.exe` is modified in the working tree
+  and not committed. It was already modified (10:05 today) when this
+  session began, by nothing in this session; the committed one is `e1e5d0a`.
+  It carries the Rust scanner (`build_exe.py` refuses to build without it;
+  it unpacks `vic2scan.exe` and starts it as a child, which does the run)
+  and produces the reference report byte for byte. Not rebuilt: no program
+  code changed. Rebuild before committing it, as for any change.
+- **Seen, not fixed:** `testkit/window.py` exits 0 when the "analysis did
+  not finish" dialog it traps raises inside a Tk callback (the refused-run
+  case), which Tk swallows; the traceback is printed. Is that so on Linux?
+- **For the laptop, before the next push** (nothing here could be run on
+  Linux, so every change was kept to `os.name == "nt"`, `os.sep` or
+  something that is a plain no-op there): pull; `all.py` with the campaign
+  (28/28); the mutation run (57/57, with `keeper-folder-windows-only` now
+  caught). The checks touched: saveshapes, mangled, frontcheck, crossrows,
+  enginecheck, modread (through `expected.py` / `modread.py`),
+  engine_runtime (the relay stand-ins' newline; the link test, which on
+  Linux still makes a symlink; `matching._linked`), edges, smoke (an
+  `except OSError` around its link), boots, state_history_ui, looks (the
+  Firefox lookup, `browser.py` -- on Linux still `shutil.which`), all.py
+  (UTF-8 for the output it reads), `mutate.py` (UTF-8 for what it patches
+  and the re-aimed mutation). Linux-specific things to look at: the
+  new `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` in
+  edges.py and smoke.py, and `matching._linked` using `os.path.isjunction`
+  where Python has it.
+- Not pushed. Bundle `~/vic2saveanalyzer-backup-<hash>.bundle` on this PC,
+  named for the last commit. `~/vic2speed/rw/mut03b` is a worktree here.
+- Next: task 04 (`04-state-chunk.md`). The two browser checks it relies on
+  now run on this PC.

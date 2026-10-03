@@ -504,6 +504,51 @@ occupied; only that third one took anything.
 
 ## Speed
 
+### The checks hold on Windows, 2026-10-03
+
+On Windows nine of `all.py`'s 28 checks failed and two skipped, every one
+for a reason in the check and none in the program. Now all 28 hold, with
+the real campaign and its mod, against the same recorded answers. Nothing
+the program prints or writes changed, and no record did.
+
+- **Folders printed with backslashes**: `expected.stand_in_for` writes the
+  check's folder as its stand-in and turns the separators of the names
+  below it into `/` (a doubled backslash too, where the program quotes a path as
+  Python does) -- those, and no other backslash. `modread.below_holding`
+  does the same for the mod reader's JSON. On Linux both are the plain
+  replace they were.
+- **The operating system's own words**: `expected.os_wording` says a
+  folder opened as a file (Windows: "Permission denied", only for a path
+  that is a folder) and a folder made below a file ("Cannot create a file
+  when that file already exists") as the record has them.
+- **`~`**: Windows looks in USERPROFILE; `frontcheck.py` sets it with HOME.
+- **A save that cannot be read**: a mode of 0 does nothing on Windows;
+  `frontcheck.shut` holds the file open with no sharing instead.
+- **Line ends**: the relay test's stand-in scanners were Python in a pipe,
+  which writes CR LF on Windows. The relay passes bytes on as they are; the
+  scanner writes a bare newline. The stand-ins now do too. Not a program bug.
+- **Links**: `smoke.py` copies where it may not link. The fixture builder's
+  refusal of links did not see a junction (`islink` is false for one);
+  `matching._linked` does, `engine_runtime.py` makes a junction where it
+  cannot make a symlink, and the mutation that takes the guard out is
+  aimed at the new line. Windows runs everything but the second half (a
+  link to a file).
+- **Firefox**: `browser.py` looks in Program Files and the user's folder.
+  Both browser checks run on Windows; `dump()` reaches the pipe as it does
+  on Linux.
+- **Code pages**: `edges.py` and `smoke.py` print UTF-8, `all.py` and
+  `smoke.py` read the checks' output as UTF-8, `state_history_ui.py` reads
+  the page as UTF-8, and `mutate.py` reads what it patches as UTF-8.
+- **Shown not to be masks**: a changed number and a changed path in a
+  record both still fail `frontcheck.py` and name the case; with the
+  junction guard taken out the link test fails; `cmpruns.py` still
+  reports a changed CSV or a changed line of stdout.
+
+What the window check does not do: it exits 0 although the "analysis did
+not finish" dialog it traps for raises in a Tk callback (which Tk
+swallows) when it runs a refused run. The traceback is printed and the
+check passes. Seen on Windows; not looked into.
+
 ### Countries are read from the save's bytes, 2026-10-02
 
 `read_flat` decoded every country block into a latin-1 `String` before
