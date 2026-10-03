@@ -82,6 +82,11 @@ fn walk(mut spent: Vec<Spent>) -> Campaign {
             for w in &wars {
                 book.fold_save(w);
             }
+            // Nothing needs the records once they are folded, and freeing
+            // them (millions of small allocations) is slower than the rest
+            // of the walk: a thread nothing joins does it, and the process
+            // may end first, which only skips the work.
+            std::thread::spawn(move || drop(wars));
             book
         });
         let mut c = walk_tables(spent);

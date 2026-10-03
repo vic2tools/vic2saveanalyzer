@@ -42,4 +42,14 @@ print("any @ line leaked:", any(l.startswith("@") for l in buf_out.getvalue().sp
 PY
 )
 sleep 0.3
-echo "-- leftovers:"; pgrep -x vic2scan && ps -o pid,stat,etime,args -C vic2scan || echo "none"
+echo "-- leftovers:"
+# pgrep where there is one; tasklist on Windows (Git Bash has no pgrep). With neither, fail:
+# "none" must never be printed for a check that could not look.
+if command -v pgrep >/dev/null 2>&1; then
+    pgrep -x vic2scan && ps -o pid,stat,etime,args -C vic2scan || echo "none"
+elif command -v tasklist >/dev/null 2>&1; then
+    left=$(tasklist //FI "IMAGENAME eq vic2scan.exe" //NH 2>/dev/null | grep -i vic2scan)
+    if [ -n "$left" ]; then echo "$left"; else echo "none"; fi
+else
+    echo "pipecheck.sh: neither pgrep nor tasklist: cannot look for leftovers" >&2; exit 2
+fi
