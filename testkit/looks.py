@@ -28,6 +28,8 @@ import tempfile
 import threading
 import time
 
+import browser
+
 # One transparent pixel, served late.
 PIXEL = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAj"
@@ -55,7 +57,7 @@ def slow_pixel(delay):
 
 def shoot(report, out, tab=None, delay=7, size="1500,1400"):
     """Screenshot `report` once it has had time to draw itself."""
-    firefox = shutil.which("firefox")
+    firefox = browser.firefox()
     if firefox is None:
         return False
     port, stop = slow_pixel(delay)

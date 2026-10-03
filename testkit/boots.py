@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 
+import browser
 from outcome import SKIPPED
 
 # Dumped by the page, read back off Firefox's stdout. `dump()` rather than
@@ -146,7 +147,7 @@ WATCHER = """<script>
 
 def looked(html_path, seconds=90, wait_ms=6000):
     """{what the page said}, or None if the browser never reported."""
-    firefox = shutil.which("firefox")
+    firefox = browser.firefox()
     if firefox is None:
         return None
     holding = tempfile.mkdtemp(prefix="vic2boot")
@@ -252,7 +253,7 @@ def hostile_names():
     finally:
         shutil.rmtree(holding, ignore_errors=True)
     if said is None:
-        return ([] if shutil.which("firefox") is None else
+        return ([] if browser.firefox() is None else
                 ["the browser never reported back on the hostile campaign"])
     ran = said.get("injected")
     if ran:
@@ -268,7 +269,7 @@ def hostile_names():
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--hostile":
-        if shutil.which("firefox") is None:
+        if browser.firefox() is None:
             print("no firefox here, so nothing was opened")
             return SKIPPED
         wrong = hostile_names()
@@ -285,7 +286,7 @@ def main():
     size = os.path.getsize(path) / 1048576.0
     said = looked(path)
     if said is None:
-        if shutil.which("firefox") is None:
+        if browser.firefox() is None:
             print("no firefox here, so nothing was opened")
             return SKIPPED
         print("the browser never reported back -- it may have failed to "

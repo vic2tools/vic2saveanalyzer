@@ -15,11 +15,11 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import shutil
 import sys
 import tempfile
 
 import boots
+import browser
 from outcome import SKIPPED
 
 
@@ -54,10 +54,10 @@ def expand_map(data):
 
 
 def check(path):
-    if shutil.which('firefox') is None:
+    if browser.firefox() is None:
         print('No Firefox available to check the state decoder')
         raise SystemExit(SKIPPED)
-    html = Path(path).read_text()
+    html = Path(path).read_text(encoding='utf-8')
     packed = re.search(r'const PACKED = "([^"]+)"', html)[1]
     data = json.loads(gzip.decompress(base64.b64decode(packed)))
     # The snapshots travel beside the payload, not inside it , and the page puts them back as this does.
@@ -98,7 +98,7 @@ document.documentElement.dataset.stateHistoryChecked = String(checkedStates.leng
     try:
         with tempfile.TemporaryDirectory(prefix='vic2states-') as tmp:
             watched = Path(tmp) / 'report.html'
-            watched.write_text(html)
+            watched.write_text(html, encoding='utf-8')
             result = boots.looked(str(watched))
     finally:
         boots.WATCHER = original
