@@ -2,6 +2,7 @@
 writable test worlds."""
 import contextlib
 import io
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -99,17 +100,30 @@ class Fixtures(unittest.TestCase):
             original.write_text("sea_starts = { 4 5 }\n")
             fake = Path(tmp, "fixture")
             fake.mkdir()
+            # A link to the folder: a symlink, or on Windows, where making
+            # one takes administrator rights, a junction, which does not.
             try:
                 (fake / "map").symlink_to(real / "map", target_is_directory=True)
             except OSError:
-                self.skipTest("symlink creation unavailable")
+                if os.name != "nt":
+                    self.skipTest("symlink creation unavailable")
+                made = subprocess.run(["cmd", "/c", "mklink", "/J", str(fake / "map"),
+                                       str(real / "map")], capture_output=True)
+                if made.returncode:
+                    self.skipTest("neither a symlink nor a junction can be made")
             with self.assertRaisesRegex(ValueError, "symlink"):
                 a_game(str(fake))
             self.assertEqual(original.read_text(), "sea_starts = { 4 5 }\n")
             # Also guard a direct link to the file, not just its directory.
-            (fake / "map").unlink()
+            try:
+                (fake / "map").unlink()
+            except OSError:
+                os.rmdir(fake / "map")      # a junction is taken away as a folder
             (fake / "map").mkdir()
-            (fake / "map/default.map").symlink_to(original)
+            try:
+                (fake / "map/default.map").symlink_to(original)
+            except OSError:
+                return          # no right to make a link to a file here
             with self.assertRaisesRegex(ValueError, "symlink"):
                 a_game(str(fake))
             self.assertEqual(original.read_text(), "sea_starts = { 4 5 }\n")

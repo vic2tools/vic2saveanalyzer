@@ -95,6 +95,11 @@ def a_mod(root, tags=None, techs=None, provinces=None, inventions=2,
     return root
 
 
+def _linked(path):
+    """A symlink, or on Windows a junction, which `islink` does not see."""
+    return os.path.islink(path) or getattr(os.path, "isjunction", lambda p: False)(path)
+
+
 def a_game(root):
     """
     The least a folder needs to be read as a Victoria II install: its map's
@@ -107,7 +112,7 @@ def a_game(root):
     target = os.path.abspath(os.path.join(root, "map", "default.map"))
     check = target
     while True:
-        if os.path.islink(check):
+        if _linked(check):
             raise ValueError("refusing to write a fixture through a symlink: " + check)
         parent = os.path.dirname(check)
         if parent == check:

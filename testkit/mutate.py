@@ -279,7 +279,7 @@ def m68():
 @mutation("fixture-writes-through-link",
           "a test fixture truncates a real file through a symlink", "engine_runtime.py")
 def m69():
-    patch("testkit/matching.py", "        if os.path.islink(check):",
+    patch("testkit/matching.py", "        if _linked(check):",
           "        if False:")
 
 

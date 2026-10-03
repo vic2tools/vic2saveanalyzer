@@ -20,6 +20,22 @@ against the total. One that
 fails prints its own output in full, because the point of a suite is the
 one that broke.
 
+### On Windows
+
+All 28 hold there, as on Linux, against the same recorded answers. What a
+run prints with backslashes is held to the record's slashes by
+`expected.stand_in_for` (the names below a check's own folder only), and
+`expected.os_wording` says Windows' words for a folder opened as a file and
+for a folder made below a file as Linux says them. Firefox is found in
+Program Files by `browser.py`, since its installer does not put it on PATH.
+`frontcheck.py` locks a save by holding it open with no sharing, where a
+mode of 0 does nothing; `smoke.py` copies the saves it would link where
+Windows will not let it link. Windows cannot make a symbolic link without
+Developer Mode or administrator rights, so `engine_runtime.py` makes a
+junction instead for the fixture builder's refusal of linked folders
+(`matching._linked` sees both); only its second half, a link to a file,
+is not run there.
+
 Or one at a time:
 
 ```
