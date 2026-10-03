@@ -7,8 +7,8 @@ order, one per session.
 ## Where this lives, and what stays private
 
 These notes, the task files and the tools (`bench.sh`, `refrun.sh`,
-`cmpruns.py`, `memj.py`, `pipecheck.sh`, `prepush.sh`) are in `speed/` in
-the repo, which is public on GitHub, and so are the answers the checks
+`cmpruns.py`, `memj.py`, `pipecheck.sh`, `prepush.sh`, `permute.sh`, `minibench.py`,
+`permexample.py`, `model-probe.diff`) are in `speed/` in the repo, which is public on GitHub, and so are the answers the checks
 hold the real campaign to (`testkit/expected-real/`) and one reference run
 of it (`speed/runs/11e1f21/`, made by `11e1f21`, now `374ac35`, and
 identical through `a47e98f`), so that a clone on Windows can run both.
@@ -55,7 +55,8 @@ launcher that hands the run to the scanner. No crate dependencies: the maintaine
 wants everything hand-written, so no mimalloc, no flate2, no rayon.
 
 The maintainer wants it "cutting edge, blazing fast parsing". He has agreed to the
-data-model rewrite (tasks 05-09), after the cheaper fixes.
+data-model rewrite (tasks 05-09, and 08b), after the cheaper fixes. Its
+design is `speed/MODEL.md`.
 
 The checks hold every run to **recorded answers** (`testkit/expected/`, and
 for the real campaign `testkit/expected-real/`): exit status,

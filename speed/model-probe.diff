@@ -1,0 +1,634 @@
+diff --git a/scanner/src/engine/finish.rs b/scanner/src/engine/finish.rs
+index b2e5bf2..338d009 100644
+--- a/scanner/src/engine/finish.rs
++++ b/scanner/src/engine/finish.rs
+@@ -264,7 +264,9 @@ pub fn escape_angles(s: &str) -> String {
+ // ------------------------------------------------------------- pass one
+ 
+ /// Everything about one save that does not wait for the inventions.
+-pub fn prepare(meta: Meta, nations: Vec<Nation>, keys: Vec<String>, spec: &Spec) -> Pre {
++pub fn prepare(mut meta: Meta, mut nations: Vec<Nation>, mut keys: Vec<String>, spec: &Spec) -> Pre {
++    probe_census(&meta, &keys, &nations, spec);
++    probe_permute(&mut meta, &mut nations, &mut keys);
+     let pairs: Vec<(String, Nation)> = keys.into_iter().zip(nations).collect();
+     let playing = players(&meta, &pairs, &spec.player_nations);
+     let mut snapshot = Snapshot::default();
+@@ -309,7 +311,9 @@ pub fn prepare(meta: Meta, nations: Vec<Nation>, keys: Vec<String>, spec: &Spec)
+         pre.nat = nat;
+         out.push(pre);
+     }
+-    Pre { meta, nations: out, chunk: snapshot.pack(), held }
++    let chunk = snapshot.pack();
++    probe_held(&meta, &out, &held, &chunk);
++    Pre { meta, nations: out, chunk, held }
+ }
+ 
+ // ------------------------------------------------------------- pass two
+@@ -360,6 +364,7 @@ impl Val<'_> {
+ 
+ 
+ /// A finished nation's row of the main table: `spending.save_rows`'s dict.
++#[derive(Clone)]
+ pub struct Row {
+     /// The key the save's dict holds the nation under.
+     pub key: String,
+@@ -478,6 +483,7 @@ pub struct PerNation {
+ }
+ 
+ /// What survives of a nation for the rest of the run (`KEEP_NATION`).
++#[derive(Clone)]
+ pub struct Kept {
+     pub tag: String,
+     pub units_at: OMap<i64, OMap<String, i64>>,
+@@ -756,3 +762,202 @@ fn trim(tag: &str, nat: &Nation) -> Kept {
+     }
+ }
+ 
++
++// ------------------------------------------------------------------ PROBE
++
++fn probe_census(meta: &Meta, keys: &[String], nations: &[Nation], spec: &Spec) {
++    use crate::probe::{note, word};
++    if std::env::var_os("VIC2_STATS").is_none() {
++        return;
++    }
++    let f = false;
++    note("meta.nations", nations.len(), f);
++    note("meta.province_owner", meta.province_owner.len(), f);
++    note("meta.great_nations", meta.great_nations.len(), f);
++    note("meta.wars", meta.wars.len(), f);
++    note("meta.battles", meta.wars.iter().map(|w| w.battles.len()).sum(), f);
++    note("meta.joins+leaves", meta.wars.iter().map(|w| w.joins.len() + w.leaves.len()).sum(), f);
++    note("meta.goals", meta.wars.iter().map(|w| w.goals.len()).sum(), f);
++    note("meta.war side tags", meta.wars.iter().map(|w| w.attackers.len() + w.defenders.len() + w.fighting.len()).sum(), f);
++    note("meta.battle units", meta.wars.iter().flat_map(|w| w.battles.iter())
++        .map(|b| b.attacker.iter().chain(b.defender.iter()).map(|s| s.units.len()).sum::<usize>()).sum(), f);
++    if let Some(m) = &meta.market {
++        note("meta.market.current", m.current.len(), f);
++        note("meta.market.history", m.history.len(), f);
++        for (i, s) in m.snapshot.iter().enumerate() {
++            note(&format!("meta.market.snapshot[{}]", i), s.len(), f);
++        }
++        for g in m.current.keys() { word("good", g); }
++        for (_, g, _) in &m.history { word("good", g); }
++    }
++    for (_, o, c) in &meta.province_owner { word("tag(owner/controller)", o); word("tag(owner/controller)", c); }
++    for w in &meta.wars {
++        word("war: name", &w.name); word("war: tag (original sides, side lists, fighting)", &w.original_attacker);
++        word("war: tag (original sides, side lists, fighting)", &w.original_defender);
++        for t in w.attackers.iter().chain(&w.defenders).chain(&w.fighting) { word("war: tag (original sides, side lists, fighting)", t); }
++        word("war: date", &w.start); word("war: date", &w.end);
++        for (d, t, _) in w.joins.iter().chain(&w.leaves) { word("war: date", d); word("war: tag (original sides, side lists, fighting)", t); }
++        for g in &w.goals { word("war: casus belli", &g.casus_belli); word("war: date", &g.added); }
++        for b in &w.battles {
++            word("war: battle name", &b.name);
++            if let Some(d) = &b.date { word("war: date", d); }
++            for sd in b.attacker.iter().chain(b.defender.iter()) {
++                word("war: leader", &sd.leader); word("war: tag (original sides, side lists, fighting)", &sd.country);
++                for (k, _) in sd.units.iter() { word("war: battle unit kind", k); }
++            }
++        }
++    }
++    if let Some(m) = &meta.market { for (st, _, _) in &m.history { word("market: stamp", st); } }
++    for (key, n) in keys.iter().zip(nations) {
++        let kept = spec.keeps(key, n);
++        let nn = |f: &str, v: usize| note(f, v, kept);
++        nn("nation.accepted_cultures", n.accepted_cultures.len());
++        nn("nation.ships_by_type", n.ships_by_type.len());
++        nn("nation.ship_crew", n.ship_crew.len());
++        nn("nation.regiments_by_type", n.regiments_by_type.len());
++        nn("nation.units_at (provinces)", n.units_at.len());
++        nn("nation.units_at (inner entries)", n.units_at.values().map(|m| m.len()).sum());
++        nn("nation.men_at (provinces)", n.men_at.len());
++        nn("nation.men_at (inner entries)", n.men_at.values().map(|m| m.len()).sum());
++        nn("nation.tech_list", n.tech_list.len());
++        nn("nation.invention_ids", n.invention_ids.len());
++        nn("nation.modifiers", n.modifiers.len());
++        nn("nation.country_flags", n.country_flags.len());
++        nn("nation.reforms", n.reforms.len());
++        nn("nation.pop_by_type", n.pop_by_type.len());
++        nn("nation.pop_by_culture", n.pop_by_culture.len());
++        nn("nation.goods_supply", n.goods_supply.len());
++        nn("nation.soldier_pops_at (provinces)", n.soldier_pops_at.len());
++        nn("nation.soldier_pops_at (sizes)", n.soldier_pops_at.iter().map(|(_, v)| v.len()).sum());
++        nn("nation.core_provinces", n.core_provinces.len());
++        nn("nation.colonial_level", n.colonial_level.len());
++        nn("nation.province_colonial", n.province_colonial.len());
++        nn("nation.colonial_provinces", n.colonial_provinces.len());
++        nn("nation.province_state", n.province_state.len());
++        nn("nation.occupied_provinces", n.occupied_provinces.len());
++        nn("nation.population_by_state (groups)", n.population_by_state.len());
++        nn("nation.population_by_state (type entries)", n.population_by_state.iter().map(|g| g.types.len()).sum());
++        nn("nation.population_by_state (culture entries)", n.population_by_state.iter().map(|g| g.cultures.len()).sum());
++        nn("nation.mobilizable_pops", n.mobilizable_pops.len());
++        for c in &n.accepted_cultures { word("culture", c); }
++        word("culture", &n.primary_culture);
++        for (k, _) in n.pop_by_culture.iter() { word("culture", k); }
++        for g in &n.population_by_state {
++            for (c, _) in &g.cultures { word("culture", c); }
++            for (t, _) in &g.types { word("poptype", t); }
++        }
++        for (t, _) in n.pop_by_type.iter() { word("poptype", t); }
++        for (k, c, _, _) in &n.mobilizable_pops { word("poptype", k); word("culture", c); }
++        for (t, _) in n.ships_by_type.iter() { word("shiptype", t); }
++        for (t, _) in n.ship_crew.iter() { word("shiptype", t); }
++        for (t, _) in n.regiments_by_type.iter() { word("regtype", t); }
++        for m in n.units_at.values().chain(n.men_at.values()) {
++            for (t, _) in m.iter() { word("unit kind (units_at/men_at)", t); }
++        }
++        for t in &n.tech_list { word("tech", t); }
++        for t in &n.modifiers { word("modifier", t); }
++        for t in n.country_flags.iter() { word("flag", t); }
++        for (k, v) in n.reforms.iter() { word("reform key", k); word("reform value", v); }
++        for (g, _) in n.goods_supply.iter() { word("good", g); }
++        word("tag", key); word("tag", &n.tag);
++        word("government", &n.government);
++        word("nationalvalue", &n.nationalvalue);
++        word("civilized", &n.civilized);
++        word("capital", &n.capital);
++    }
++}
++
++fn rev<T>(v: &mut Vec<T>) {
++    v.reverse();
++}
++
++fn probe_permute(meta: &mut Meta, nations: &mut Vec<Nation>, keys: &mut Vec<String>) {
++    use crate::probe::on;
++    if on("nations") { rev(nations); rev(keys); }
++    if on("province_owner") { rev(&mut meta.province_owner); }
++    if on("great_nations") { rev(&mut meta.great_nations); }
++    if on("wars") { rev(&mut meta.wars); }
++    for w in meta.wars.iter_mut() {
++        if on("war.battles") { rev(&mut w.battles); }
++        if on("war.joins") { rev(&mut w.joins); rev(&mut w.leaves); }
++        if on("war.goals") { rev(&mut w.goals); }
++        if on("war.units") {
++            for b in w.battles.iter_mut() {
++                if let Some(s) = b.attacker.as_mut() { s.units.reverse(); }
++                if let Some(s) = b.defender.as_mut() { s.units.reverse(); }
++            }
++        }
++    }
++    if let Some(m) = meta.market.as_mut() {
++        if on("market.current") { m.current.reverse(); }
++        if on("market.history") { rev(&mut m.history); }
++        if on("market.snapshot") { for s in m.snapshot.iter_mut() { s.reverse(); } }
++    }
++    for n in nations.iter_mut() {
++        if on("accepted_cultures") { rev(&mut n.accepted_cultures); }
++        if on("ships_by_type") { n.ships_by_type.reverse(); }
++        if on("ship_crew") { n.ship_crew.reverse(); }
++        if on("regiments_by_type") { n.regiments_by_type.reverse(); }
++        if on("units_at") { n.units_at.reverse(); }
++        if on("units_at.inner") { for m in n.units_at.values_mut() { m.reverse(); } }
++        if on("men_at") { n.men_at.reverse(); }
++        if on("men_at.inner") { for m in n.men_at.values_mut() { m.reverse(); } }
++        if on("tech_list") { rev(&mut n.tech_list); }
++        if on("invention_ids") { rev(&mut n.invention_ids); }
++        if on("modifiers") { rev(&mut n.modifiers); }
++        if on("reforms") { n.reforms.reverse(); }
++        if on("pop_by_type") { n.pop_by_type.reverse(); }
++        if on("pop_by_culture") { n.pop_by_culture.reverse(); }
++        if on("goods_supply") { n.goods_supply.reverse(); }
++        if on("mobilizable_pops") { rev(&mut n.mobilizable_pops); }
++        if on("soldier_pops_at") { rev(&mut n.soldier_pops_at); }
++        if on("soldier_pops_at.inner") { for (_, v) in n.soldier_pops_at.iter_mut() { rev(v); } }
++        if on("population_by_state") { rev(&mut n.population_by_state); }
++        if on("group.types") { for g in n.population_by_state.iter_mut() { rev(&mut g.types); } }
++        if on("group.cultures") { for g in n.population_by_state.iter_mut() { rev(&mut g.cultures); } }
++    }
++}
++
++fn probe_held(meta: &Meta, out: &[PreNation], held: &[Held], chunk: &String) {
++    use crate::probe::held as h;
++    if std::env::var_os("VIC2_STATS").is_none() {
++        return;
++    }
++    h("Pre.chunk (String)", chunk, |v| Box::new(v.clone()));
++    h("Pre.meta (whole)", meta, |v| Box::new(v.clone()));
++    h("Meta.province_owner", &meta.province_owner, |v| Box::new(v.clone()));
++    h("Meta.wars", &meta.wars, |v| Box::new(v.clone()));
++    h("Meta.market", &meta.market, |v| Box::new(v.clone()));
++    if let Some(m) = &meta.market {
++        h("Market.current", &m.current, |v| Box::new(v.clone()));
++        h("Market.history", &m.history, |v| Box::new(v.clone()));
++        h("Market.snapshot[7]", &m.snapshot, |v| Box::new(v.clone()));
++    }
++    for n in out {
++        let nat = &n.nat;
++        h("PreNation (whole nat)", nat, |v| Box::new(v.clone()));
++        h("PreNation.tag (String)", &n.tag, |v| Box::new(v.clone()));
++        h("PreNation.buckets (Vec<i64>)", &n.buckets, |v| Box::new(v.clone()));
++        h("nat: key,tag,primary_culture,civilized,government,capital,nationalvalue", &(nat.key.clone(), nat.tag.clone(),
++          nat.primary_culture.clone(), nat.civilized.clone(), nat.government.clone(),
++          nat.capital.clone(), nat.nationalvalue.clone()), |v| Box::new(v.clone()));
++        h("nat.accepted_cultures", &nat.accepted_cultures, |v| Box::new(v.clone()));
++        h("nat.ships_by_type", &nat.ships_by_type, |v| Box::new(v.clone()));
++        h("nat.ship_crew", &nat.ship_crew, |v| Box::new(v.clone()));
++        h("nat.regiments_by_type", &nat.regiments_by_type, |v| Box::new(v.clone()));
++        h("nat.units_at", &nat.units_at, |v| Box::new(v.clone()));
++        h("nat.men_at", &nat.men_at, |v| Box::new(v.clone()));
++        h("nat.tech_list", &nat.tech_list, |v| Box::new(v.clone()));
++        h("nat.invention_ids", &nat.invention_ids, |v| Box::new(v.clone()));
++        h("nat.modifiers", &nat.modifiers, |v| Box::new(v.clone()));
++        h("nat.country_flags", &nat.country_flags, |v| Box::new(v.clone()));
++        h("nat.reforms", &nat.reforms, |v| Box::new(v.clone()));
++        h("nat.pop_by_type", &nat.pop_by_type, |v| Box::new(v.clone()));
++        h("nat.pop_by_culture", &nat.pop_by_culture, |v| Box::new(v.clone()));
++        h("nat.goods_supply", &nat.goods_supply, |v| Box::new(v.clone()));
++    }
++    for x in held {
++        h("Held (tag, record_tag, tech_list, invention_ids, government)", x, |v| Box::new((v.tag.clone(),
++          v.record_tag.clone(), v.tech_list.clone(), v.invention_ids.clone(), v.government.clone())));
++    }
++}
+diff --git a/scanner/src/engine/mod.rs b/scanner/src/engine/mod.rs
+index 105844b..5768bc6 100644
+--- a/scanner/src/engine/mod.rs
++++ b/scanner/src/engine/mod.rs
+@@ -36,6 +36,7 @@ pub mod rules;
+ pub mod tables;
+ pub mod wars;
+ 
++use crate::probe;
+ use crate::country::{read_country, Country, Tables};
+ use finish::{Pre, Spec, Spent};
+ use crate::jsonr::{self, J};
+@@ -56,6 +57,9 @@ pub fn phase(what: &str) {
+     static START: OnceLock<std::time::Instant> = OnceLock::new();
+     static TO: OnceLock<Option<String>> = OnceLock::new();
+     let start = START.get_or_init(std::time::Instant::now);
++    if std::env::var_os("VIC2_ALLOC").is_some() {
++        eprintln!("[alloc] {:<40} {}", what, crate::probe::global_line());
++    }
+     if let Some(to) = TO.get_or_init(|| std::env::var("VIC2_ENGINE_TIMES").ok()) {
+         let line = format!("[{:8.3}] {}\n", start.elapsed().as_secs_f64(), what);
+         if to == "1" {
+@@ -584,9 +588,9 @@ fn read_bytes(path: &str, reading: &Reading, raw: &[u8],
+             (w.blocks, w.date, w.player, w.countries)
+         }
+     };
+-    let rest = model::read_rest(text, &blocks)
++    let rest = crate::probe::staged("3 wars+market (read_rest)", || model::read_rest(text, &blocks))
+         .map_err(|_| Refused::Back(format!("{}: the wars or the market hold something it cannot make out", path)))?;
+-    let save = model::build(basename(path).to_string(), date, player, &scan, &countries, rest)
++    let save = crate::probe::staged("4 build (model::build)", || model::build(basename(path).to_string(), date, player, &scan, &countries, rest))
+         .map_err(|_| Refused::Back(format!("{}: the record could not be built", path)))?;
+     // Again after the scan, not only after the read: a mapped file is read
+     // as it is scanned, and one the game rewrote meanwhile would be half of
+@@ -618,6 +622,7 @@ fn read_flat(text: &[u8], blocks: &[(&[u8], usize, usize)], reading: &Reading, t
+     let mut countries: Vec<Country> = Vec::new();
+     let mut rules: FxMap<Vec<u8>, PopulationRules> = FxMap::default();
+     let mut referenced_pops = FxSet::default();
++    let a0 = crate::probe::snap();
+     for (key, at, stop) in blocks {
+         if tag_bytes(key) {
+             let chunk = &text[*at..(*stop).min(text.len())];
+@@ -636,6 +641,7 @@ fn read_flat(text: &[u8], blocks: &[(&[u8], usize, usize)], reading: &Reading, t
+             countries.push(country);
+         }
+     }
++    let a1 = crate::probe::snap();
+     for (key, at, stop) in blocks {
+         if !key.is_empty() && key.iter().all(|c| c.is_ascii_digit()) {
+             read_province(text, *at, *stop, to_int_b(key), &reading.pop_types,
+@@ -643,6 +649,9 @@ fn read_flat(text: &[u8], blocks: &[(&[u8], usize, usize)], reading: &Reading, t
+                           &reading.population_groups);
+         }
+     }
++    let a2 = crate::probe::snap();
++    crate::probe::add_stage("1 countries", a0, a1);
++    crate::probe::add_stage("2 provinces", a1, a2);
+     (date, player, countries)
+ }
+ 
+@@ -932,13 +941,13 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
+     thread_local!(static RAW: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) });
+     in_order(n, workers, |i| {
+         if let Some(slot) = &slots[i] {
+-            if let Some(pre) = run.store.load(slot) {
++            if let Some(pre) = crate::probe::staged("7 cache load", || run.store.load(slot)) {
+                 return Ok((pre, true));
+             }
+         }
+         RAW.with(|raw| {
+             let mut raw = raw.borrow_mut();
+-            let got = read_save(&run.files[i], &run.reading, &mut raw);
++            let got = crate::probe::staged("0 read_save total", || read_save(&run.files[i], &run.reading, &mut raw));
+             // A worker holds a save's worth of buffer between saves, not a
+             // campaign's: let an outsized one go.
+             if raw.capacity() > 96 << 20 {
+@@ -949,9 +958,9 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
+                 Refused::Skip(why) | Refused::Back(why) => Refused::Back(why),
+             }).map(|save| {
+                 let tags = keys_of(&save);
+-                let pre = finish::prepare(save.meta, save.nations, tags, &run.spec);
++                let pre = crate::probe::staged("5 prepare", || finish::prepare(save.meta, save.nations, tags, &run.spec));
+                 if let Some(slot) = &slots[i] {
+-                    run.store.store(slot, &pre);
++                    crate::probe::staged("6 cache store", || run.store.store(slot, &pre));
+                 }
+                 (pre, false)
+             })
+@@ -1091,6 +1100,9 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
+     }
+     let spent: Vec<Spent> = spent.into_iter().map(|s| s.unwrap()).collect();
+     phase("pass two: saves finished");
++    if let Ok(path) = std::env::var("VIC2_STATS").or_else(|_| std::env::var("VIC2_STAGES")) {
++        probe::dump_to(&path);
++    }
+     // Nothing from here on hands the run back.
+     out::release();
+     if run.cross_part {
+diff --git a/scanner/src/engine/report.rs b/scanner/src/engine/report.rs
+index 17c985a..46e4726 100644
+--- a/scanner/src/engine/report.rs
++++ b/scanner/src/engine/report.rs
+@@ -39,6 +39,7 @@ use std::io::Write;
+ 
+ 
+ /// A save as the rest of the run keeps it: `(meta, nations)` trimmed.
++#[derive(Clone)]
+ pub struct Kept1 {
+     pub meta: Meta,
+     pub nations: Vec<Kept>,
+@@ -928,6 +929,28 @@ pub struct CrossPart {
+ pub fn run(run: &Run, m: &Mod, live: &FxSet<String>, spent: Vec<Spent>) -> Outcome {
+     let c = walk(spent);
+     crate::engine::phase("walked");
++    if std::env::var_os("VIC2_STATS").is_some() {
++        use crate::probe::held as h;
++        h("walk: Campaign.rows (Vec<Row>)", &c.rows, |v| Box::new(v.clone()));
++        h("walk: rows[].nat only", &c.rows.iter().map(|r| r.nat.clone()).collect::<Vec<_>>(), |v| Box::new(v.clone()));
++        h("walk: ships+crews+brigades+techs+pops+cultures (ByTag)", &(&c.ships, &c.crews, &c.brigades, &c.techs, &c.pops, &c.cultures), |v| Box::new((v.0.clone(), v.1.clone(), v.2.clone(), v.3.clone(), v.4.clone(), v.5.clone())));
++        h("walk:   ships", &c.ships, |v| Box::new(v.clone()));
++        h("walk:   techs", &c.techs, |v| Box::new(v.clone()));
++        h("walk:   pops", &c.pops, |v| Box::new(v.clone()));
++        h("walk:   cultures", &c.cultures, |v| Box::new(v.clone()));
++        h("walk: text[6] (per-save CSV text)", &c.text, |v| Box::new(v.clone()));
++        h("walk: naval_profiles+naval_of", &(&c.naval_profiles, &c.naval_of), |v| Box::new((v.0.clone(), v.1.clone())));
++        h("walk: supply", &c.supply, |v| Box::new(v.clone()));
++        h("walk: parsed (Vec<Kept1>)", &c.parsed, |v| Box::new(v.clone()));
++        h("walk:   parsed[].meta", &c.parsed.iter().map(|k| k.meta.clone()).collect::<Vec<_>>(), |v| Box::new(v.clone()));
++        h("walk:   parsed[].meta.province_owner", &c.parsed.iter().map(|k| k.meta.province_owner.clone()).collect::<Vec<_>>(), |v| Box::new(v.clone()));
++        h("walk:   parsed[].meta.market", &c.parsed.iter().map(|k| k.meta.market.clone()).collect::<Vec<_>>(), |v| Box::new(v.clone()));
++        h("walk:   parsed[].nations (Kept)", &c.parsed.iter().map(|k| k.nations.clone()).collect::<Vec<_>>(), |v| Box::new(v.clone()));
++        h("walk: book (Book: wars, index, last_folded)", &c.book, |v| Box::new(v.clone()));
++        h("walk:   book.wars", &c.book.wars, |v| Box::new(v.clone()));
++        h("walk:   book.order", &c.book.order, |v| Box::new(v.clone()));
++        crate::probe::dump_to(&std::env::var("VIC2_STATS").unwrap());
++    }
+     let metas: Vec<&Meta> = c.parsed.iter().map(|k| &k.meta).collect();
+     let prices = market::merge_prices(&metas, &run.tables);
+     let snaps = market::snapshot_rows(&metas, &run.tables);
+diff --git a/scanner/src/engine/wars.rs b/scanner/src/engine/wars.rs
+index 202248b..a2db5d6 100644
+--- a/scanner/src/engine/wars.rs
++++ b/scanner/src/engine/wars.rs
+@@ -20,6 +20,7 @@ pub type Key = (String, String, String, usize);
+ type BattleKey = (String, i64, i64, i64, usize);
+ 
+ /// One war as the book holds it.
++#[derive(Clone)]
+ pub struct Held {
+     pub name: String,
+     pub original_attacker: String,
+@@ -36,7 +37,7 @@ pub struct Held {
+     pub battles: OMap<BattleKey, Battle>,
+ }
+ 
+-#[derive(Default)]
++#[derive(Default, Clone)]
+ pub struct Book {
+     pub wars: FxMap<Key, Held>,
+     pub order: Vec<Key>,
+diff --git a/scanner/src/main.rs b/scanner/src/main.rs
+index fce5f54..fcf2ccf 100644
+--- a/scanner/src/main.rs
++++ b/scanner/src/main.rs
+@@ -31,6 +31,9 @@ mod fx;
+ mod jsonr;
+ mod md5;
+ mod omap;
++mod probe;
++#[global_allocator]
++static COUNTING: probe::Counting = probe::Counting;
+ mod province;
+ mod pyfmt;
+ mod pyre;
+diff --git a/scanner/src/omap.rs b/scanner/src/omap.rs
+index 39aac87..25bba3f 100644
+--- a/scanner/src/omap.rs
++++ b/scanner/src/omap.rs
+@@ -132,6 +132,22 @@ impl<K: Eq + Hash + Clone, V> OMap<K, V> {
+         self.keys.iter().zip(self.vals.iter())
+     }
+ 
++    pub fn reverse(&mut self) {
++        self.keys.reverse();
++        self.vals.reverse();
++        if self.index.is_some() {
++            let mut index: FxMap<K, usize> = FxMap::default();
++            for (i, k) in self.keys.iter().enumerate() {
++                index.insert(k.clone(), i);
++            }
++            self.index = Some(index);
++        }
++    }
++
++    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
++        self.vals.iter_mut()
++    }
++
+     pub fn keys(&self) -> impl Iterator<Item = &K> {
+         self.keys.iter()
+     }
+diff --git a/scanner/src/probe.rs b/scanner/src/probe.rs
+new file mode 100644
+index 0000000..8f228fb
+--- /dev/null
++++ b/scanner/src/probe.rs
+@@ -0,0 +1,182 @@
++// PROBE ONLY (task 05): never committed. A counting allocator, a census of
++// what a nation holds, and switches that reverse one field's order.
++
++use std::alloc::{GlobalAlloc, Layout, System};
++use std::cell::Cell;
++use std::collections::BTreeMap;
++use std::sync::atomic::{AtomicI64, AtomicU64, Ordering::Relaxed};
++use std::sync::Mutex;
++
++// ------------------------------------------------------------- allocator
++
++pub struct Counting;
++
++pub static LIVE_N: AtomicI64 = AtomicI64::new(0);
++pub static LIVE_B: AtomicI64 = AtomicI64::new(0);
++pub static PEAK_B: AtomicI64 = AtomicI64::new(0);
++pub static TOTAL_N: AtomicU64 = AtomicU64::new(0);
++
++thread_local! {
++    static T_ALLOCS: Cell<u64> = const { Cell::new(0) };
++    static T_REALLOCS: Cell<u64> = const { Cell::new(0) };
++    static T_FREES: Cell<u64> = const { Cell::new(0) };
++    static T_BYTES: Cell<u64> = const { Cell::new(0) };
++}
++
++fn up(size: usize) {
++    LIVE_N.fetch_add(1, Relaxed);
++    TOTAL_N.fetch_add(1, Relaxed);
++    let b = LIVE_B.fetch_add(size as i64, Relaxed) + size as i64;
++    if b > PEAK_B.load(Relaxed) {
++        PEAK_B.store(b, Relaxed);
++    }
++    let _ = T_ALLOCS.try_with(|c| c.set(c.get() + 1));
++    let _ = T_BYTES.try_with(|c| c.set(c.get() + size as u64));
++}
++
++unsafe impl GlobalAlloc for Counting {
++    unsafe fn alloc(&self, l: Layout) -> *mut u8 {
++        up(l.size());
++        System.alloc(l)
++    }
++    unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
++        up(l.size());
++        System.alloc_zeroed(l)
++    }
++    unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
++        LIVE_N.fetch_sub(1, Relaxed);
++        LIVE_B.fetch_sub(l.size() as i64, Relaxed);
++        let _ = T_FREES.try_with(|c| c.set(c.get() + 1));
++        System.dealloc(p, l)
++    }
++    unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
++        LIVE_B.fetch_add(new as i64 - l.size() as i64, Relaxed);
++        let _ = T_REALLOCS.try_with(|c| c.set(c.get() + 1));
++        let _ = T_BYTES.try_with(|c| c.set(c.get() + new as u64));
++        System.realloc(p, l, new)
++    }
++}
++
++/// This thread's (allocs, reallocs, frees, bytes) so far.
++pub fn snap() -> [u64; 4] {
++    [T_ALLOCS.with(|c| c.get()), T_REALLOCS.with(|c| c.get()), T_FREES.with(|c| c.get()),
++     T_BYTES.with(|c| c.get())]
++}
++
++pub fn global_line() -> String {
++    format!("live {} allocs {:.1} MB (peak {:.1} MB); {} allocs so far", LIVE_N.load(Relaxed),
++            LIVE_B.load(Relaxed) as f64 / 1e6, PEAK_B.load(Relaxed) as f64 / 1e6, TOTAL_N.load(Relaxed))
++}
++
++static STAGES: Mutex<BTreeMap<&'static str, [u64; 5]>> = Mutex::new(BTreeMap::new());
++
++/// Run `f` and add what this thread allocated in it to `name`:
++/// [calls, allocs, reallocs, frees, bytes].
++pub fn staged<T>(name: &'static str, f: impl FnOnce() -> T) -> T {
++    let a = snap();
++    let t = f();
++    let b = snap();
++    let mut s = STAGES.lock().unwrap();
++    let e = s.entry(name).or_insert([0; 5]);
++    e[0] += 1;
++    for i in 0..4 {
++        e[i + 1] += b[i] - a[i];
++    }
++    t
++}
++
++/// What a clone of a value allocates is what the value holds.
++pub fn held<T>(name: &'static str, v: &T, clone: impl Fn(&T) -> Box<dyn std::any::Any>) {
++    let a = snap();
++    let c = clone(v);
++    let b = snap();
++    drop(c);
++    let mut s = HELD.lock().unwrap();
++    let e = s.entry(name).or_insert([0; 3]);
++    e[0] += 1;
++    e[1] += b[0] - a[0];
++    e[2] += b[3] - a[3];
++}
++static HELD: Mutex<BTreeMap<&'static str, [u64; 3]>> = Mutex::new(BTreeMap::new());
++
++// ---------------------------------------------------------------- census
++
++#[derive(Default)]
++struct Census {
++    lens: BTreeMap<String, Vec<u32>>,
++    words: BTreeMap<&'static str, BTreeMap<String, u64>>,
++}
++static CENSUS: Mutex<Option<Census>> = Mutex::new(None);
++
++pub fn note(field: &str, n: usize, kept: bool) {
++    let mut g = CENSUS.lock().unwrap();
++    let c = g.get_or_insert_with(Census::default);
++    c.lens.entry(format!("all  {}", field)).or_default().push(n as u32);
++    if kept {
++        c.lens.entry(format!("kept {}", field)).or_default().push(n as u32);
++    }
++}
++
++pub fn word(class: &'static str, s: &str) {
++    let mut g = CENSUS.lock().unwrap();
++    let c = g.get_or_insert_with(Census::default);
++    *c.words.entry(class).or_default().entry(s.to_string()).or_insert(0) += 1;
++}
++
++pub fn dump_to(path: &str) {
++    let mut out = String::new();
++    {
++        let s = STAGES.lock().unwrap();
++        out.push_str("== allocation by stage (this thread; per call: allocs reallocs frees bytes)\n");
++        for (k, v) in s.iter() {
++            out.push_str(&format!("{:<28} calls {:>6}  allocs {:>12}  reallocs {:>11}  frees {:>12}  bytes {:>14}\n",
++                                  k, v[0], v[1], v[2], v[3], v[4]));
++        }
++    }
++    {
++        let s = HELD.lock().unwrap();
++        out.push_str("\n== what is held (allocations a clone makes, summed over every save)\n");
++        for (k, v) in s.iter() {
++            out.push_str(&format!("{:<34} values {:>8}  allocs {:>11}  bytes {:>13}\n", k, v[0], v[1], v[2]));
++        }
++    }
++    let g = CENSUS.lock().unwrap();
++    if let Some(c) = g.as_ref() {
++        out.push_str("\n== entries per nation (or per save for meta.*): n  total  mean  median  p90  max  nonempty\n");
++        for (k, v) in &c.lens {
++            let mut v = v.clone();
++            v.sort();
++            let n = v.len();
++            let total: u64 = v.iter().map(|&x| x as u64).sum();
++            let nonempty = v.iter().filter(|&&x| x > 0).count();
++            out.push_str(&format!("{:<44} n {:>6}  total {:>9}  mean {:>8.2}  med {:>5}  p90 {:>5}  max {:>6}  nonempty {:>6}\n",
++                                  k, n, total, total as f64 / n.max(1) as f64, v[n / 2], v[n * 9 / 10], v[n - 1], nonempty));
++        }
++        out.push_str("\n== names by class: occurrences, distinct, mean length\n");
++        for (k, m) in &c.words {
++            let occ: u64 = m.values().sum();
++            let bytes: usize = m.keys().map(|s| s.len()).sum();
++            out.push_str(&format!("{:<24} occurrences {:>10}  distinct {:>6}  mean length {:>5.1}\n", k, occ,
++                                  m.len(), bytes as f64 / m.len().max(1) as f64));
++        }
++    }
++    let _ = std::fs::write(path, out);
++}
++
++// ----------------------------------------------------------- permutation
++
++pub fn on(name: &str) -> bool {
++    use std::sync::OnceLock;
++    static LIST: OnceLock<Vec<String>> = OnceLock::new();
++    LIST.get_or_init(|| std::env::var("VIC2_PERMUTE").unwrap_or_default().split(',')
++        .map(|s| s.to_string()).collect()).iter().any(|s| s == name)
++}
++
++pub fn add_stage(name: &'static str, a: [u64; 4], b: [u64; 4]) {
++    let mut s = STAGES.lock().unwrap();
++    let e = s.entry(name).or_insert([0; 5]);
++    e[0] += 1;
++    for i in 0..4 {
++        e[i + 1] += b[i] - a[i];
++    }
++}

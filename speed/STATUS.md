@@ -527,3 +527,75 @@ Notes for task 03:
   here is Windows-only in the program.
 - Next: task 05 (`05-model-survey.md`). Bundle `~/vic2saveanalyzer-backup-
   <hash>.bundle` on this PC, named for the last commit.
+
+## 2026-10-03, task 05 done on the Windows PC (the survey and the design)
+
+- **Made on the Windows PC** (Ryzen 9 7950X), the 1880s campaign and mod
+  there. **No engine code changed**, and none of the checks was run for it:
+  the commit is `speed/` only (notes, a diff, three small scripts). The
+  design is `speed/MODEL.md`; its raw numbers are
+  `speed/model-census-2026-10-03.txt`.
+- What it found, which changes the plan:
+  - **`Meta` is 70% of what a campaign holds after pass one, not the
+    nation fields.** 9.49 M live allocations (36,000 a save): `Meta` 6.61 M
+    (`wars` 4.14 M, `province_owner` 1.35 M, `market` 1.12 M), `Nation` 2.34 M
+    (25%), `Held` 0.52 M. Tasks 06-08 as drawn cover the 25%, so MODEL.md
+    adds **stage 08b (`08b-model-meta.md`)** for `Meta`, in two halves: the
+    types, then reading wars and market straight from the bytes (today they
+    go through `clause::Tree`, 85,000 of a save's 221,000 pass-one
+    allocations).
+  - **Pass one is 221,000 allocations a save** on an empty cache:
+    `read_rest` 85,200, provinces 45,600, countries 38,100, `build` 35,200,
+    `prepare` 14,500, cache store 2,400; 185,000 are freed again. The warm
+    cache load is 38,200 a save. 2.2 M + 2.3 M of `build`'s Strings (`Group`,
+    `mobilizable_pops`) exist only to be dropped in `prepare`.
+  - **`Row` carries a whole `Nation`** (2.34 M allocations) through the walk
+    and the page; `Row::get` reads a few scalars and `pop_by_type`. `Held`
+    copies what the nation already holds. Both are dropped, not converted.
+  - **The names are few:** about 600 in the nation fields, at most about
+    7,400 in a whole run. Design: one run-wide table, `Sym(u32)`, a
+    per-thread cache in front, strings leaked once; containers keep their
+    shape, order and insertion order and change only their keys; no `Ord` on
+    `Sym`; the cache stores a per-entry name table. A `VIC2_ENGINE_NAMES_SHIFT`
+    knob (stage 06 adds it) moves every id, to show no output depends on one.
+  - **Order** (each field reversed in turn, the campaign run, compared with
+    `speed/runs/11e1f21`): it reaches the output for the nations in a save,
+    `units_at` (both levels), `pop_by_culture` (stable-sort ties), `goods_supply`,
+    `population_by_state`, `Group.types` / `cultures`, `great_nations`, `wars`,
+    battles, goals and a side's units; it did not for the other 19
+    (reasons per field in MODEL.md 3.2). Two are only vacuous here:
+    `reforms` is empty in this campaign, and `mobilizable_pops`'s order is
+    observable in principle (`pooled` carries over). The design keeps those.
+- Numbers on this PC, `398de81`, no probe (the stand-in
+  `speed/minibench.py`: `bench.sh` needs `bc`, `uptime` and `pgrep`, which
+  this shell lacks): empty cache 2.465 s wall (pass one ends 1.469 s),
+  warm 1.206 s (pass one 0.213 s; walk 0.20 s); a second run 2.459 s and
+  1.138 s.
+- Tools added in `speed/`: `model-probe.diff` (applies to `398de81`: a
+  counting global allocator, a census, reverse-this-field switches; env
+  `VIC2_ALLOC`, `VIC2_STAGES`, `VIC2_STATS`, `VIC2_PERMUTE`), `permute.sh
+  TREE FIELD...`, `permexample.py TREE FIELD`, `minibench.py TREE`,
+  `cmpruns_env.py` (their settings).
+  The probe tree is `~/vic2speed/rw/model05` (`398de81` + the diff,
+  uncommitted; its release build is there). A stage's session applies the
+  diff to its own tree and puts the same three numbers beside MODEL.md's.
+- **My mistakes, and what was not clean:** the first stage table I made was
+  polluted by the census's own allocations (it showed `prepare` at 32 M);
+  the numbers in the file come from a run without the census. My first
+  background batch of reversals looked empty because its launcher exited
+  while the loop ran on; I read it later. The 'what is held' tables count a
+  `Box` per call, which MODEL.md subtracts. IDENTICAL after a reversal means
+  only that this campaign's output did not move; MODEL.md says why per field
+  and keeps the order wherever that is free.
+- Not verified: Linux and the mmap path (the counts do not depend on them;
+  the times do); a campaign with many more nations a save, where the weights
+  move toward the nation fields; the cost of the `Group`s of nations that are
+  not kept (every nation is kept here).
+- **For the maintainer:** by live allocations the order of payoff is 08b, 08,
+  06, 07, and 06 is first only because it brings the shared plumbing. If
+  sessions are short, 08b's first half and 08 are worth more than 07. And
+  08b's second half (a typed reader for wars and market) is as big as task 03.
+- Not pushed. Bundle `~/vic2saveanalyzer-backup-<hash>.bundle` on this PC,
+  named for this commit.
+- Next: task 06 (`06-model-units-and-ships.md`): `names.rs` first (MODEL.md
+  5.2), then units and ships.

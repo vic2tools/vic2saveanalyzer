@@ -1,0 +1,238 @@
+MODEL.md's raw numbers: speed/MODEL.md says what they mean and how they were taken.
+1880s campaign (265 saves, 9.1 GB) and its mod, 3 Oct 2026, on 398de81 with speed/model-probe.diff
+applied (a counting global allocator and a census; the release build, -j 1).
+
+Every count is an allocator call: alloc + alloc_zeroed ("allocs"), realloc ("reallocs"), dealloc
+("frees"); "live" is allocs minus frees in the whole process, the mod and the page included.
+
+== 1. allocation by stage of pass one, an empty cache (VIC2_STAGES run; this thread only)
+0 read_save total            calls    265  allocs     54060415  reallocs     4494797  frees     39584949  bytes     8352834033
+1 countries                  calls    265  allocs     10089200  reallocs     1423964  frees      6136421  bytes     2415322748
+2 provinces                  calls    265  allocs     12073963  reallocs     2053000  frees      4119623  bytes     3419884881
+3 wars+market (read_rest)    calls    265  allocs     22580043  reallocs      824237  frees     17244410  bytes     1577234841
+4 build (model::build)       calls    265  allocs      9315088  reallocs      190945  frees       175786  bytes      738446050
+5 prepare                    calls    265  allocs      3853423  reallocs      134424  frees      8770495  bytes      551954325
+6 cache store                calls    265  allocs       625537  reallocs         265  frees       625537  bytes      370844416
+7 cache load                 calls    265  allocs          265  reallocs           0  frees          265  bytes          53530
+
+== 2. the same, a warm run: only the cache load happens
+7 cache load                 calls    265  allocs     10126055  reallocs      225092  frees       635455  bytes      658688067
+
+== 3. live allocations at each phase, empty cache, then warm (whole process)
+[alloc] start                                    live 11628 allocs 0.9 MB (peak 1.7 MB); 101724 allocs so far
+[alloc] pass one: saves read and prepared        live 9614015 allocs 687.6 MB (peak 692.3 MB); 59175751 allocs so far
+[alloc] mod loaded                               live 9614015 allocs 687.6 MB (peak 692.3 MB); 59175755 allocs so far
+[alloc] inventions settled                       live 9614020 allocs 687.6 MB (peak 692.6 MB); 59178347 allocs so far
+[alloc] pass two: saves finished                 live 11340981 allocs 837.3 MB (peak 837.5 MB); 64152735 allocs so far
+[alloc] walked                                   live 7182822 allocs 557.5 MB (peak 841.9 MB); 64950115 allocs so far
+[alloc] map: raster decoded, spots placed        live 7930842 allocs 614.6 MB (peak 841.9 MB); 66767759 allocs so far
+[alloc] map: owners                              live 8409780 allocs 650.3 MB (peak 841.9 MB); 67357285 allocs so far
+[alloc] map: capitals                            live 8608897 allocs 677.6 MB (peak 841.9 MB); 67584219 allocs so far
+[alloc] payload sections made                    live 7879273 allocs 657.2 MB (peak 841.9 MB); 70594748 allocs so far
+[alloc] payload assembled                        live 7879679 allocs 724.5 MB (peak 841.9 MB); 70629790 allocs so far
+[alloc] payload gzipped                          live 7879680 allocs 728.4 MB (peak 841.9 MB); 70634298 allocs so far
+[alloc] page filled                              live 7879682 allocs 755.6 MB (peak 841.9 MB); 70634314 allocs so far
+[alloc] tables written                           live 7875476 allocs 589.8 MB (peak 841.9 MB); 70634320 allocs so far
+-- warm --
+[alloc] start                                    live 11628 allocs 0.9 MB (peak 1.7 MB); 101723 allocs so far
+[alloc] pass one: saves read and prepared        live 9535387 allocs 484.3 MB (peak 484.5 MB); 10309509 allocs so far
+[alloc] mod loaded                               live 9535387 allocs 484.3 MB (peak 484.5 MB); 10309513 allocs so far
+[alloc] inventions settled                       live 9535392 allocs 484.3 MB (peak 489.3 MB); 10312105 allocs so far
+[alloc] pass two: saves finished                 live 11262353 allocs 636.9 MB (peak 637.0 MB); 15286493 allocs so far
+[alloc] walked                                   live 7182819 allocs 451.5 MB (peak 640.2 MB); 16083866 allocs so far
+[alloc] map: raster decoded, spots placed        live 7918577 allocs 507.8 MB (peak 640.2 MB); 17889217 allocs so far
+[alloc] map: owners                              live 8277749 allocs 532.3 MB (peak 640.2 MB); 18329818 allocs so far
+[alloc] map: capitals                            live 8418080 allocs 564.5 MB (peak 640.2 MB); 18490946 allocs so far
+[alloc] payload sections made                    live 7879271 allocs 551.1 MB (peak 662.8 MB); 21728500 allocs so far
+[alloc] payload assembled                        live 7879677 allocs 618.5 MB (peak 662.8 MB); 21763542 allocs so far
+[alloc] payload gzipped                          live 7879678 allocs 622.3 MB (peak 662.8 MB); 21768050 allocs so far
+[alloc] page filled                              live 7879680 allocs 649.5 MB (peak 667.7 MB); 21768066 allocs so far
+[alloc] tables written                           live 7875474 allocs 483.8 MB (peak 667.7 MB); 21768072 allocs so far
+
+== 4. what is held: allocations a clone of each part makes (the probe's own Box per call is
+== included: subtract one per call, as MODEL.md does)
+== what is held (allocations a clone makes, summed over every save)
+Held (tag, record_tag, tech_list, invention_ids, government) values    10569  allocs      528115  bytes      28524195
+Market.current                     values      265  allocs       26500  bytes       1189850
+Market.history                     values      265  allocs      917234  bytes      33374841
+Market.snapshot[7]                 values      265  allocs      175288  bytes       8121010
+Meta.market                        values      265  allocs     1118492  bytes      42685701
+Meta.province_owner                values      265  allocs     1355150  bytes      41999580
+Meta.wars                          values      265  allocs     4138781  bytes     163998633
+Pre.chunk (String)                 values      265  allocs         530  bytes      13286464
+Pre.meta (whole)                   values      265  allocs     6612953  bytes     248735655
+PreNation (whole nat)              values    10569  allocs     2349607  bytes     123710387
+PreNation.buckets (Vec<i64>)       values    10569  allocs       20533  bytes       7710920
+PreNation.tag (String)             values    10569  allocs       21138  bytes        285363
+nat.accepted_cultures              values    10569  allocs       25621  bytes        558109
+nat.country_flags                  values    10569  allocs       37614  bytes       1778194
+nat.goods_supply                   values    10569  allocs      401625  bytes      20262497
+nat.invention_ids                  values    10569  allocs       20608  bytes       7247032
+nat.men_at                         values    10569  allocs      404610  bytes      18547992
+nat.modifiers                      values    10569  allocs       25295  bytes        633961
+nat.pop_by_culture                 values    10569  allocs      343712  bytes      16593916
+nat.pop_by_type                    values    10569  allocs      127324  bytes       4769411
+nat.reforms                        values    10569  allocs       10569  bytes        845520
+nat.regiments_by_type              values    10569  allocs       56324  bytes       1908978
+nat.ship_crew                      values    10569  allocs       34370  bytes       1402169
+nat.ships_by_type                  values    10569  allocs       34370  bytes       1402169
+nat.tech_list                      values    10569  allocs      486369  bytes      20264009
+nat.units_at                       values    10569  allocs      404610  bytes      18547992
+nat: key,tag,primary_culture,civilized,government,capital,nationalvalue values    10569  allocs       84552  bytes       2268830
+walk:   book.order                 values        1  allocs         515  bytes         20712
+walk:   book.wars                  values        1  allocs       22791  bytes       1065185
+walk:   cultures                   values        1  allocs      202310  bytes       9432727
+walk:   parsed[].meta              values        1  allocs     2474174  bytes      84743406
+walk:   parsed[].meta.market       values        1  allocs     1118229  bytes      42685725
+walk:   parsed[].meta.province_owner values        1  allocs     1354887  bytes      41999604
+walk:   parsed[].nations (Kept)    values        1  allocs      845677  bytes      39018299
+walk:   pops                       values        1  allocs      127282  bytes       5235268
+walk:   ships                      values        1  allocs       29581  bytes       1280653
+walk:   techs                      values        1  allocs      496096  bytes      21287616
+walk: Campaign.rows (Vec<Row>)     values        1  allocs     2386863  bytes     127188794
+walk: book (Book: wars, index, last_folded) values        1  allocs       44099  bytes       1964039
+walk: naval_profiles+naval_of      values        1  allocs       12036  bytes        679244
+walk: parsed (Vec<Kept1>)          values        1  allocs     3320114  bytes     137048145
+walk: rows[].nat only              values        1  allocs     2339040  bytes     123710411
+walk: ships+crews+brigades+techs+pops+cultures (ByTag) values        1  allocs      939638  bytes      40762227
+walk: supply                       values        1  allocs      412548  bytes      18953449
+walk: text[6] (per-save CSV text)  values        1  allocs        1597  bytes      39601957
+
+
+== 5. entries per nation (per save for meta.*), "all" and "kept" are the same here: every nation is kept
+== entries per nation (or per save for meta.*): n  total  mean  median  p90  max  nonempty
+all  meta.battle units                       n    265  total    955959  mean  3607.39  med  3595  p90  4180  max   4739  nonempty    265
+all  meta.battles                            n    265  total    207296  mean   782.25  med   767  p90   915  max   1014  nonempty    265
+all  meta.goals                              n    265  total       561  mean     2.12  med     1  p90     7  max      8  nonempty    158
+all  meta.great_nations                      n    265  total      2120  mean     8.00  med     8  p90     8  max      8  nonempty    265
+all  meta.joins+leaves                       n    265  total    338000  mean  1275.47  med  1289  p90  1335  max   1352  nonempty    265
+all  meta.market.current                     n    265  total     12720  mean    48.00  med    48  p90    48  max     48  nonempty    265
+all  meta.market.history                     n    265  total    458352  mean  1729.63  med  1728  p90  1728  max   1776  nonempty    265
+all  meta.market.snapshot[0]                 n    265  total     11245  mean    42.43  med    43  p90    46  max     46  nonempty    265
+all  meta.market.snapshot[1]                 n    265  total     12720  mean    48.00  med    48  p90    48  max     48  nonempty    265
+all  meta.market.snapshot[2]                 n    265  total     12720  mean    48.00  med    48  p90    48  max     48  nonempty    265
+all  meta.market.snapshot[3]                 n    265  total     12720  mean    48.00  med    48  p90    48  max     48  nonempty    265
+all  meta.market.snapshot[4]                 n    265  total     10981  mean    41.44  med    43  p90    45  max     45  nonempty    265
+all  meta.market.snapshot[5]                 n    265  total     12720  mean    48.00  med    48  p90    48  max     48  nonempty    265
+all  meta.market.snapshot[6]                 n    265  total     11623  mean    43.86  med    45  p90    46  max     46  nonempty    265
+all  meta.nations                            n    265  total     10569  mean    39.88  med    41  p90    42  max     43  nonempty    265
+all  meta.province_owner                     n    265  total    677310  mean  2555.89  med  2613  p90  2678  max   2703  nonempty    265
+all  meta.war side tags                      n    265  total    171164  mean   645.90  med   653  p90   669  max    698  nonempty    265
+all  meta.wars                               n    265  total     42854  mean   161.71  med   161  p90   169  max    171  nonempty    265
+all  nation.accepted_cultures                n  10569  total      9505  mean     0.90  med     1  p90     2  max      6  nonempty   5547
+all  nation.colonial_level                   n  10569  total    195195  mean    18.47  med     0  p90    66  max    216  nonempty   4695
+all  nation.colonial_provinces               n  10569  total    195195  mean    18.47  med     0  p90    66  max    216  nonempty   4695
+all  nation.core_provinces                   n  10569  total    439218  mean    41.56  med    13  p90   101  max    286  nonempty  10304
+all  nation.country_flags                    n  10569  total     21228  mean     2.01  med     1  p90     6  max     14  nonempty   5817
+all  nation.goods_supply                     n  10569  total    193096  mean    18.27  med    16  p90    35  max     43  nonempty  10304
+all  nation.invention_ids                    n  10569  total    874172  mean    82.71  med    85  p90   170  max    230  nonempty  10039
+all  nation.men_at (inner entries)           n  10569  total    184945  mean    17.50  med     9  p90    48  max    142  nonempty   9508
+all  nation.men_at (provinces)               n  10569  total     93711  mean     8.87  med     4  p90    24  max     93  nonempty   9508
+all  nation.mobilizable_pops                 n  10569  total   1128927  mean   106.81  med    27  p90   292  max    617  nonempty  10039
+all  nation.modifiers                        n  10569  total      9278  mean     0.88  med     1  p90     3  max      5  nonempty   5448
+all  nation.occupied_provinces               n  10569  total     22108  mean     2.09  med     0  p90     6  max    117  nonempty   2248
+all  nation.pop_by_culture                   n  10569  total    171175  mean    16.20  med     9  p90    41  max     78  nonempty  10304
+all  nation.pop_by_type                      n  10569  total     96147  mean     9.10  med     9  p90    11  max     12  nonempty  10304
+all  nation.population_by_state (culture entries) n  10569  total    807818  mean    76.43  med    17  p90   234  max    685  nonempty  10304
+all  nation.population_by_state (groups)     n  10569  total    152959  mean    14.47  med     4  p90    47  max     75  nonempty  10304
+all  nation.population_by_state (type entries) n  10569  total   1350665  mean   127.79  med    33  p90   372  max    631  nonempty  10304
+all  nation.province_colonial                n  10569  total    195195  mean    18.47  med     0  p90    66  max    216  nonempty   4695
+all  nation.province_state                   n  10569  total    677310  mean    64.08  med    19  p90   183  max    346  nonempty  10569
+all  nation.reforms                          n  10569  total         0  mean     0.00  med     0  p90     0  max      0  nonempty      0
+all  nation.regiments_by_type                n  10569  total     26739  mean     2.53  med     3  p90     4  max      6  nonempty   9508
+all  nation.ship_crew                        n  10569  total     12479  mean     1.18  med     1  p90     3  max      7  nonempty   5661
+all  nation.ships_by_type                    n  10569  total     12479  mean     1.18  med     1  p90     3  max      7  nonempty   5661
+all  nation.soldier_pops_at (provinces)      n  10569  total    654741  mean    61.95  med    19  p90   174  max    344  nonempty  10304
+all  nation.soldier_pops_at (sizes)          n  10569  total    899142  mean    85.07  med    27  p90   246  max    623  nonempty  10304
+all  nation.tech_list                        n  10569  total    465761  mean    44.07  med    50  p90    81  max    104  nonempty  10039
+all  nation.units_at (inner entries)         n  10569  total    184945  mean    17.50  med     9  p90    48  max    142  nonempty   9508
+all  nation.units_at (provinces)             n  10569  total     93711  mean     8.87  med     4  p90    24  max     93  nonempty   9508
+kept nation.accepted_cultures                n  10569  total      9505  mean     0.90  med     1  p90     2  max      6  nonempty   5547
+kept nation.colonial_level                   n  10569  total    195195  mean    18.47  med     0  p90    66  max    216  nonempty   4695
+kept nation.colonial_provinces               n  10569  total    195195  mean    18.47  med     0  p90    66  max    216  nonempty   4695
+kept nation.core_provinces                   n  10569  total    439218  mean    41.56  med    13  p90   101  max    286  nonempty  10304
+kept nation.country_flags                    n  10569  total     21228  mean     2.01  med     1  p90     6  max     14  nonempty   5817
+kept nation.goods_supply                     n  10569  total    193096  mean    18.27  med    16  p90    35  max     43  nonempty  10304
+kept nation.invention_ids                    n  10569  total    874172  mean    82.71  med    85  p90   170  max    230  nonempty  10039
+kept nation.men_at (inner entries)           n  10569  total    184945  mean    17.50  med     9  p90    48  max    142  nonempty   9508
+kept nation.men_at (provinces)               n  10569  total     93711  mean     8.87  med     4  p90    24  max     93  nonempty   9508
+kept nation.mobilizable_pops                 n  10569  total   1128927  mean   106.81  med    27  p90   292  max    617  nonempty  10039
+kept nation.modifiers                        n  10569  total      9278  mean     0.88  med     1  p90     3  max      5  nonempty   5448
+kept nation.occupied_provinces               n  10569  total     22108  mean     2.09  med     0  p90     6  max    117  nonempty   2248
+kept nation.pop_by_culture                   n  10569  total    171175  mean    16.20  med     9  p90    41  max     78  nonempty  10304
+kept nation.pop_by_type                      n  10569  total     96147  mean     9.10  med     9  p90    11  max     12  nonempty  10304
+kept nation.population_by_state (culture entries) n  10569  total    807818  mean    76.43  med    17  p90   234  max    685  nonempty  10304
+kept nation.population_by_state (groups)     n  10569  total    152959  mean    14.47  med     4  p90    47  max     75  nonempty  10304
+kept nation.population_by_state (type entries) n  10569  total   1350665  mean   127.79  med    33  p90   372  max    631  nonempty  10304
+kept nation.province_colonial                n  10569  total    195195  mean    18.47  med     0  p90    66  max    216  nonempty   4695
+kept nation.province_state                   n  10569  total    677310  mean    64.08  med    19  p90   183  max    346  nonempty  10569
+kept nation.reforms                          n  10569  total         0  mean     0.00  med     0  p90     0  max      0  nonempty      0
+kept nation.regiments_by_type                n  10569  total     26739  mean     2.53  med     3  p90     4  max      6  nonempty   9508
+kept nation.ship_crew                        n  10569  total     12479  mean     1.18  med     1  p90     3  max      7  nonempty   5661
+kept nation.ships_by_type                    n  10569  total     12479  mean     1.18  med     1  p90     3  max      7  nonempty   5661
+kept nation.soldier_pops_at (provinces)      n  10569  total    654741  mean    61.95  med    19  p90   174  max    344  nonempty  10304
+kept nation.soldier_pops_at (sizes)          n  10569  total    899142  mean    85.07  med    27  p90   246  max    623  nonempty  10304
+kept nation.tech_list                        n  10569  total    465761  mean    44.07  med    50  p90    81  max    104  nonempty  10039
+kept nation.units_at (inner entries)         n  10569  total    184945  mean    17.50  med     9  p90    48  max    142  nonempty   9508
+kept nation.units_at (provinces)             n  10569  total     93711  mean     8.87  med     4  p90    24  max     93  nonempty   9508
+
+
+== 6. names by class, run-wide
+== names by class: occurrences, distinct, mean length
+capital                  occurrences      10569  distinct     47  mean length   3.6
+civilized                occurrences      10569  distinct      2  mean length   2.5
+culture                  occurrences    2127994  distinct    221  mean length   6.9
+flag                     occurrences      21228  distinct     61  mean length  18.7
+good                     occurrences     664168  distinct     48  mean length   7.8
+government               occurrences      10569  distinct      6  mean length  18.7
+market: stamp            occurrences     458352  distinct   4403  mean length   9.0
+modifier                 occurrences       9278  distinct     27  mean length  17.4
+nationalvalue            occurrences      10569  distinct      3  mean length   9.7
+poptype                  occurrences    2575739  distinct     12  mean length   8.6
+regtype                  occurrences      26739  distinct      9  mean length   7.7
+shiptype                 occurrences      24958  distinct      9  mean length  10.3
+tag                      occurrences      21138  distinct     47  mean length   3.0
+tag(owner/controller)    occurrences    1354620  distinct     48  mean length   3.0
+tech                     occurrences     465761  distinct    112  mean length  18.5
+unit kind (units_at/men_at) occurrences     369890  distinct      9  mean length   7.7
+war: battle name         occurrences     207296  distinct    576  mean length   8.3
+war: battle unit kind    occurrences     955959  distinct     18  mean length   9.0
+war: casus belli         occurrences        561  distinct     23  mean length  20.4
+war: date                occurrences     435329  distinct    798  mean length   9.0
+war: leader              occurrences     414592  distinct    667  mean length  15.4
+war: name                occurrences      42854  distinct    171  mean length  35.0
+war: tag (original sides, side lists, fighting) occurrences    1009464  distinct    130  mean length   3.0
+
+== 7. one field reversed at a time (speed/permute.sh), against speed/runs/11e1f21, CSVs and decoded page
+nations                  DIFFERENT: brigades_by_type.csv differs; nations_timeseries.csv differs; pops_by_culture.csv differs; pops_by_type.csv differs; report.html differs; ships_by_type.csv differs; technologies.csv differs
+accepted_cultures        IDENTICAL
+ships_by_type            IDENTICAL
+ship_crew                IDENTICAL
+regiments_by_type        IDENTICAL
+units_at                 DIFFERENT: report.html differs
+units_at.inner           DIFFERENT: report.html differs
+men_at                   IDENTICAL
+men_at.inner             IDENTICAL
+tech_list                IDENTICAL
+invention_ids            IDENTICAL
+modifiers                IDENTICAL
+reforms                  IDENTICAL
+pop_by_type              IDENTICAL
+pop_by_culture           DIFFERENT: pops_by_culture.csv differs; report.html differs
+goods_supply             DIFFERENT: report.html differs
+mobilizable_pops         IDENTICAL
+soldier_pops_at          IDENTICAL
+soldier_pops_at.inner    IDENTICAL
+population_by_state      DIFFERENT: report.html differs
+group.types              DIFFERENT: report.html differs
+group.cultures           DIFFERENT: report.html differs
+province_owner           IDENTICAL
+great_nations            DIFFERENT: report.html differs
+wars                     DIFFERENT: report.html differs
+war.battles              DIFFERENT: report.html differs
+war.joins                IDENTICAL
+war.goals                DIFFERENT: report.html differs
+war.units                DIFFERENT: report.html differs
+market.current           IDENTICAL
+market.history           IDENTICAL
+market.snapshot          IDENTICAL
