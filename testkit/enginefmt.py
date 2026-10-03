@@ -102,8 +102,11 @@ for t in texts:
     except ValueError:
         want.append("E")
 
+# UTF-8 both ways, as the scanner reads and writes: left to the locale,
+# Windows encodes in its code page, which has no \x85, and the run hung
+# with the input half sent.
 p = subprocess.run([binary, "selftest-fmt"], input="\n".join(lines) + "\n",
-                   capture_output=True, text=True)
+                   capture_output=True, text=True, encoding="utf-8")
 if p.returncode:
     raise RuntimeError(p.stderr)
 got = p.stdout.splitlines()

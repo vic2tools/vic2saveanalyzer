@@ -234,7 +234,7 @@ Notes for task 03:
   18.1). No Victoria 2, no 1880s campaign, no `expected-real` there. Its own
   `speed/local.env` was written (ignored); its `VIC2_PRIVATE` is a guess at
   that machine's words, so run `prepush.sh` on the laptop before any push.
-- `e9da15c` "Read the countries from the save's bytes, not a decoded copy
+- `cd7e575` "Read the countries from the save's bytes, not a decoded copy
   of them": `read_country(bytes, at, stop, tag, tables)` takes the save's
   bytes; `Tokens`, `parse_fields`, `Value<'a>`, `Dict<'a>` and the unit
   `Tally<'a>` borrow from them; only what a `Country` keeps is decoded
@@ -261,7 +261,7 @@ Notes for task 03:
     (`testkit/matching.a_vanilla`), both trees, ten ways (report, `--tags`,
     `--split`, one save, `--peek`, `--verify`, four diagnostics): status,
     stdout, stderr, every file byte-identical.
-  - Mutations, the full run on `7325f60` (`--saves` the three saves):
+  - Mutations, the full run on `e1e5d0a` (`--saves` the three saves):
     57 applied; **27 caught, 29 UNTESTED, 1 BLIND, 0 did not apply.** The
     29 are every mutation whose check already fails on Windows before any
     bug goes in (the 7 above, and `boots.py`, which wants a browser), so
@@ -278,7 +278,7 @@ Notes for task 03:
   ms, wall 245 -> 240 ms.
 - gdb samples, new `speed/gdbsample.py` (the Windows counterpart of
   `sample_run.sh` + `gdbreport.py`): `bench-engine` over the three saves
-  listed 400 times, 100 samples per build, `d23d16b` vs `e9da15c`. Before,
+  listed 400 times, 100 samples per build, `d23d16b` vs `cd7e575`. Before,
   `text::latin1` was sampled straight under `read_flat` -- the country
   copy; after, every `latin1` sample is under `model::build` or
   `read_war`, decoding names they keep, and none under `read_flat` or
@@ -287,7 +287,7 @@ Notes for task 03:
   top-level blocks 6 -> 7%, malloc/free 24 -> 21%, reading the file 4 ->
   6%. On Windows the per-save gzip is a bigger share than the laptop's
   ~14%, and `deflate_raw` is the one hottest function: task 04's target.
-- `dist/vic2saveanalyzer.exe` rebuilt on Windows from `e9da15c`, **with the
+- `dist/vic2saveanalyzer.exe` rebuilt on Windows from `cd7e575`, **with the
   Rust scanner bundled** (the 2 Sep build had none and predates the
   rewrite). Checked: its report from the three saves is byte-identical to
   the source's, every file; its `--help` matches the source's bar the usage
@@ -338,3 +338,51 @@ Notes for task 03:
 - On Windows: the campaign checks need the same 265 saves (same names and
   sizes) and the same mod folder name. Untested there; the first Windows
   run of `testkit/all.py` is the test.
+
+## 2026-10-03, task 03 checked on the real campaign, on Windows
+
+- The Windows PC now has the game (Steam), the mod in its `mod/` folder
+  and the 265 saves (9.1 GB, same names and sizes), and the answers and the
+  reference run came with `a9aed25`. Its `local.env` points at them;
+  `VIC2_PRIVATE` there is now whole-word, as above.
+- History: the three Windows commits were rebased onto `a9aed25` (they had
+  been made on `d23d16b`, not pushed). New hashes: `e9da15c` ->
+  `cd7e575`, `7325f60` -> `e1e5d0a`, `86cad27` -> `2ce03a2`. The entries
+  above name the new ones; the exe commit's message still says it was
+  built "from e9da15c", which is `cd7e575`. The exe is that build, and
+  the source it bundles is unchanged by the rebase.
+- **`testkit/all.py` with the campaign and the mod: 19 of 28 hold.** The
+  9 that fail are all Windows-only, none from task 03:
+  - the 7 that fail on Windows without saves too (recorded answers with
+    `/` where Windows prints `\`, and the like);
+  - `enginecheck.py`, the real campaign against `expected-real`: **17 of
+    27 cases identical; the other 9 differ only in `stdout.txt`, and all 54
+    changed lines differ only by `/` against `\`** (`HOLDING/game` against
+    `HOLDING\game`; the verbose runs and the diagnostics print folders).
+    No table and no decoded page differs in any case;
+  - `smoke.py` stops at its first step: `os.symlink` needs administrator
+    rights or Developer Mode on Windows (WinError 1314).
+  - The two browser checks skip (Firefox is installed; why they skip is
+    not looked into yet).
+- **The reference run:** all 265 saves through `vic2_analyzer.py` from an
+  empty scratch cache (`~/vic2speed/opt/runs/03win`), against
+  `speed/runs/11e1f21`: every CSV and `report.html` byte-identical;
+  stdout's 317 lines identical once the Windows game and out folders are
+  written `<GAME>` and `<OUT>` (`cmpruns.py` normalises only the Unix
+  spelling of them, so it reported stdout different) and "on N cores";
+  stderr empty on both; status 0 on both. Wall 2.8 s.
+- `testkit/enginefmt.py` hung on Windows every time (900 s, the suite's
+  limit): its input went to the scanner in the locale's code page, which
+  cannot encode `\x85`, so Python stopped half-way through writing and
+  waited on a scanner waiting for the rest. Now UTF-8 both ways: 72,340
+  checks, 0 differ, 0.3 s.
+- So task 03 is done: checks, real campaign against its answers and the
+  reference, mutations (Windows' share, above), gdb, notes. What only
+  Linux can answer: the 29 mutations UNTESTED here and the BLIND one.
+- Worth a session of its own, for a program that ships on Windows: make
+  the 7 checks hold on Windows (paths printed with `\`), `cmpruns.py`
+  normalise Windows folders, `smoke.py` copy where it cannot link, and
+  find why the browser checks skip.
+- Not pushed. Bundle `~/vic2saveanalyzer-backup-<hash>.bundle` on the
+  Windows PC, named for this commit.
+- Next: task 04 (`04-state-chunk.md`).
