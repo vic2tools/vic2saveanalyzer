@@ -42,6 +42,7 @@ from outcome import SKIPPED                                 # noqa: E402
 
 TREE = ""
 SAVES = ""
+MOD = ""
 
 
 def revert():
@@ -128,12 +129,15 @@ def check(script, args=()):
 def argv_for(extra):
     """
     What a mutation's check is handed: "saves" means the save folder, and
-    "one-save" the first save in it, for the checks that damage a copy of
+    "saves-and-mod" the folder and the mod (the real campaign, for the checks
+    that run it only when given both), and "one-save" the first save in it, for the checks that damage a copy of
     one -- handed with a round count of one, because each round is a save
     read twice over.
     """
     if extra == "saves":
         return (SAVES,)
+    if extra == "saves-and-mod":
+        return (SAVES, "--mod", MOD) if SAVES and MOD else ()
     if extra == "one-save":
         first = next((f for f in sorted(os.listdir(SAVES))
                       if f.endswith(".v2")), "") if SAVES else ""
@@ -455,7 +459,8 @@ def r27():
 
 @mutation("chunk-stream-cut",
           "a save's state-history chunk loses the first byte of its gzip "
-          "stream, so the page's chunk does not decompress", "frontcheck.py")
+          "stream, so the page's chunk does not decompress", "enginecheck.py",
+          "saves-and-mod")
 def m58():
     patch("scanner/src/engine/finish.rs",
           "deflate::gzip_level(raw.as_bytes(), &deflate::LEVEL5))",
@@ -679,16 +684,19 @@ def m85():
 
 
 def main():
-    global TREE, SAVES
+    global TREE, SAVES, MOD
     ap = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])
     ap.add_argument("names", nargs="*", help="only these mutations")
     ap.add_argument("--tree", required=True,
                     help="a git worktree to mutate -- NOT your working tree")
     ap.add_argument("--saves", default="",
                     help="a folder of .v2 saves, for the checks that want one")
+    ap.add_argument("--mod", default="",
+                    help="the campaign's mod folder, for the checks that read both")
     args = ap.parse_args()
     TREE = os.path.abspath(args.tree)
     SAVES = args.saves
+    MOD = args.mod
     if not os.path.isdir(os.path.join(TREE, "testkit")):
         raise SystemExit("%s does not look like a checkout of this tree" % TREE)
     dirty = subprocess.run(["git", "status", "--porcelain"], cwd=TREE,
