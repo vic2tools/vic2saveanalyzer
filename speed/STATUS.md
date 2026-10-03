@@ -225,6 +225,64 @@ Notes for task 03:
   says is not done." The old prompt still works through the pointers.
 - Next: task 03 (`03-countries-from-bytes.md`).
 
+## 2026-10-02, task 03 done on the Windows PC (countries from bytes)
+
+- **Made on the Windows PC, not the laptop.** It had no Rust: rustup with
+  the `x86_64-pc-windows-gnu` toolchain was installed (stable 1.99.0, in
+  `~/.cargo/bin`, not on PATH; no Visual Studio needed). No gdb, no
+  Victoria 2, no 1880s campaign, no `expected-real` there. Its own
+  `speed/local.env` was written (ignored); its `VIC2_PRIVATE` is a guess at
+  that machine's words, so run `prepush.sh` on the laptop before any push.
+- `e9da15c` "Read the countries from the save's bytes, not a decoded copy
+  of them": `read_country(bytes, at, stop, tag, tables)` takes the save's
+  bytes; `Tokens`, `parse_fields`, `Value<'a>`, `Dict<'a>` and the unit
+  `Tally<'a>` borrow from them; only what a `Country` keeps is decoded
+  (`latin1`). `space_len` is gone: `is_space(u8)` takes `09-0d 20 85 a0`.
+  Names against the mod's tables go through `eq_latin1` (by character).
+  Both callers in `engine/mod.rs` (`read_flat`, `bench`) pass a slice.
+  `walk.rs` untouched. INTERNALS.md: "Countries are read from the save's
+  bytes, 2026-10-02".
+- **A quirk kept, for the maintainer to decide:** `skip_to_close` on the
+  UTF-8 copy took the second byte of a no-break space or NEL for a letter,
+  so a `"` right after one did not open a quoted name (where `next()`
+  would). Kept exactly (`is_space(c) && c < 0x80`), with a unit test that
+  was also run against the old code. Fixing it could move a number, so it
+  needs a check, a mutation and the maintainer's say.
+- Verified on Windows:
+  - `testkit/all.py --quick` (no saves): 13/20 hold *on `main` before the
+    change too*; the 7 that fail there fail identically after (recorded
+    answers written on Linux: `/` vs `\` in paths and the like). The whole
+    suite log, before vs after, is identical bar timings and the worktree
+    path. **The full 28 checks with the campaign were not run.** Making
+    the checks pass on Windows is its own job, not done.
+  - `cargo test`: 6/6 (three new in `country.rs`).
+  - Real saves: three 1836-41 saves on that PC, on a stand-in vanilla game
+    (`testkit/matching.a_vanilla`), both trees, ten ways (report, `--tags`,
+    `--split`, one save, `--peek`, `--verify`, four diagnostics): status,
+    stdout, stderr, every file byte-identical.
+  - Mutations: a dry run shows all 57 still apply; none patches
+    `country.rs`. **The full mutation run was not made** (on Windows the 7
+    failing checks would make theirs UNTESTED).
+- Numbers, `vic2scan bench-engine` on the three saves, alternated, 15
+  rounds, median per save (Ryzen 9 7950X): countries 6.5 -> 4.9 ms,
+  read+scan+build 35.3 -> 33.7 ms, every other part unchanged. Empty-cache
+  runs through `vic2_analyzer.py`, `-j 1`, 15 rounds: pass one 158 -> 153
+  ms, wall 245 -> 240 ms. No gdb split.
+- `dist/vic2saveanalyzer.exe` rebuilt on Windows from `e9da15c`, **with the
+  Rust scanner bundled** (the 2 Sep build had none and predates the
+  rewrite). Checked: its report from the three saves is byte-identical to
+  the source's, every file; its `--help` matches the source's bar the usage
+  line's wrapping (the program's name). Committed with this entry.
+- **For the laptop, before task 04:** pull; rebuild the scanner; run the
+  real-campaign comparison against `opt/runs/31a2931` (`refrun.sh` +
+  `cmpruns.py`), `all.py` with the campaign (28/28), the full mutation run
+  on `e9da15c` in `rw/retire-mut`, the bench (empty-cache pass one should
+  drop), and gdb samples to confirm `text::latin1` is gone from pass one.
+  Record them here. If any fails, task 03 is not done.
+- Not pushed. No bundle in the laptop's `~` (made one on the Windows PC:
+  `~/vic2saveanalyzer-backup-<hash>.bundle`, named for this commit).
+- Next: the laptop checks above, then task 04 (`04-state-chunk.md`).
+
 ## 2026-10-03, the real campaign's answers and the reference run in the repo (no task work)
 
 - The maintainer wants to run the checks and the speed comparisons on the
