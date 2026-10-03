@@ -528,74 +528,184 @@ Notes for task 03:
 - Next: task 05 (`05-model-survey.md`). Bundle `~/vic2saveanalyzer-backup-
   <hash>.bundle` on this PC, named for the last commit.
 
-## 2026-10-03, task 05 done on the Windows PC (the survey and the design)
+## 2026-10-03, task 05 done on the Windows PC (the survey and the design), and the order of what follows
 
-- **Made on the Windows PC** (Ryzen 9 7950X), the 1880s campaign and mod
-  there. **No engine code changed**, and none of the checks was run for it:
-  the commit is `speed/` only (notes, a diff, three small scripts). The
-  design is `speed/MODEL.md`; its raw numbers are
+(Committed as `4fb867f`, then rewritten later the same day once the stages
+had been put in order. The first version put units and ships first and called
+the order of payoff "08b, 08, 06, 07". The order below replaces it.)
+
+- **Made on the Windows PC** (Ryzen 9 7950X: 16 cores, 32 logical, so the
+  engine runs 31 workers here; the laptop ran 15), the 1880s campaign and mod
+  there. **No engine code changed** and none of the checks was run: the
+  commits are `speed/` only (notes, task files, a diff, small scripts). The
+  design is `speed/MODEL.md`; the raw numbers are
   `speed/model-census-2026-10-03.txt`.
-- What it found, which changes the plan:
-  - **`Meta` is 70% of what a campaign holds after pass one, not the
-    nation fields.** 9.49 M live allocations (36,000 a save): `Meta` 6.61 M
-    (`wars` 4.14 M, `province_owner` 1.35 M, `market` 1.12 M), `Nation` 2.34 M
-    (25%), `Held` 0.52 M. Tasks 06-08 as drawn cover the 25%, so MODEL.md
-    adds **stage 08b (`08b-model-meta.md`)** for `Meta`, in two halves: the
-    types, then reading wars and market straight from the bytes (today they
-    go through `clause::Tree`, 85,000 of a save's 221,000 pass-one
-    allocations).
-  - **Pass one is 221,000 allocations a save** on an empty cache:
-    `read_rest` 85,200, provinces 45,600, countries 38,100, `build` 35,200,
-    `prepare` 14,500, cache store 2,400; 185,000 are freed again. The warm
-    cache load is 38,200 a save. 2.2 M + 2.3 M of `build`'s Strings (`Group`,
-    `mobilizable_pops`) exist only to be dropped in `prepare`.
-  - **`Row` carries a whole `Nation`** (2.34 M allocations) through the walk
-    and the page; `Row::get` reads a few scalars and `pop_by_type`. `Held`
-    copies what the nation already holds. Both are dropped, not converted.
-  - **The names are few:** about 600 in the nation fields, at most about
-    7,400 in a whole run. Design: one run-wide table, `Sym(u32)`, a
-    per-thread cache in front, strings leaked once; containers keep their
-    shape, order and insertion order and change only their keys; no `Ord` on
-    `Sym`; the cache stores a per-entry name table. A `VIC2_ENGINE_NAMES_SHIFT`
-    knob (stage 06 adds it) moves every id, to show no output depends on one.
-  - **Order** (each field reversed in turn, the campaign run, compared with
-    `speed/runs/11e1f21`): it reaches the output for the nations in a save,
-    `units_at` (both levels), `pop_by_culture` (stable-sort ties), `goods_supply`,
-    `population_by_state`, `Group.types` / `cultures`, `great_nations`, `wars`,
-    battles, goals and a side's units; it did not for the other 19
-    (reasons per field in MODEL.md 3.2). Two are only vacuous here:
-    `reforms` is empty in this campaign, and `mobilizable_pops`'s order is
-    observable in principle (`pooled` carries over). The design keeps those.
-- Numbers on this PC, `398de81`, no probe (the stand-in
-  `speed/minibench.py`: `bench.sh` needs `bc`, `uptime` and `pgrep`, which
-  this shell lacks): empty cache 2.465 s wall (pass one ends 1.469 s),
-  warm 1.206 s (pass one 0.213 s; walk 0.20 s); a second run 2.459 s and
-  1.138 s.
-- Tools added in `speed/`: `model-probe.diff` (applies to `398de81`: a
-  counting global allocator, a census, reverse-this-field switches; env
-  `VIC2_ALLOC`, `VIC2_STAGES`, `VIC2_STATS`, `VIC2_PERMUTE`), `permute.sh
-  TREE FIELD...`, `permexample.py TREE FIELD`, `minibench.py TREE`,
-  `cmpruns_env.py` (their settings).
-  The probe tree is `~/vic2speed/rw/model05` (`398de81` + the diff,
-  uncommitted; its release build is there). A stage's session applies the
-  diff to its own tree and puts the same three numbers beside MODEL.md's.
-- **My mistakes, and what was not clean:** the first stage table I made was
-  polluted by the census's own allocations (it showed `prepare` at 32 M);
-  the numbers in the file come from a run without the census. My first
-  background batch of reversals looked empty because its launcher exited
-  while the loop ran on; I read it later. The 'what is held' tables count a
-  `Box` per call, which MODEL.md subtracts. IDENTICAL after a reversal means
-  only that this campaign's output did not move; MODEL.md says why per field
-  and keeps the order wherever that is free.
-- Not verified: Linux and the mmap path (the counts do not depend on them;
-  the times do); a campaign with many more nations a save, where the weights
-  move toward the nation fields; the cost of the `Group`s of nations that are
-  not kept (every nation is kept here).
-- **For the maintainer:** by live allocations the order of payoff is 08b, 08,
-  06, 07, and 06 is first only because it brings the shared plumbing. If
-  sessions are short, 08b's first half and 08 are worth more than 07. And
-  08b's second half (a typed reader for wars and market) is as big as task 03.
+
+### What the survey found (MODEL.md sections 0-4)
+
+- **`Meta` is 70% of what a campaign holds after pass one**, not the nation
+  fields: 9.49 M live allocations (36,000 a save), `Meta` 6.61 M (`wars` 4.14 M,
+  `province_owner` 1.35 M, `market` 1.12 M), `Nation` 2.34 M, `Held` 0.52 M. A
+  save costs 221,000 allocations in pass one (`read_rest` 85,200, provinces
+  45,600, countries 38,100, `build` 35,200, `prepare` 14,500, store 2,400); the
+  warm cache load is 38,200 a save.
+- **`Row` carries a whole `Nation`** (2.34 M) through the walk and the page,
+  and `Held` copies what the nation already holds: dropped, not converted.
+- **The names are few** (about 600 in the nation fields, at most about 7,400
+  in a run). Design: one run-wide table, `Sym(u32)`, a per-thread cache in
+  front; containers keep their shape and order and change only their keys; no
+  `Ord` on `Sym`; a per-entry name table in the cache; a
+  `VIC2_ENGINE_NAMES_SHIFT` knob that moves every id, to show no output
+  depends on one.
+- **Order** (each field reversed in turn, the campaign compared with
+  `speed/runs/11e1f21`) reaches the output for 13 fields (the nations in a
+  save, both levels of `units_at`, `pop_by_culture`'s ties, `goods_supply`,
+  `population_by_state`, `Group.types` / `cultures`, `great_nations`, `wars`,
+  battles, goals, a side's units) and not for 19; reasons in MODEL.md 3.2.
+- **The clocks** (MODEL.md 4.2). A warm rebuild is 1.17 s, about 0.2 s of it
+  outside the engine. **The walk is 0.197 s and two thirds of it is one thread
+  freeing the saves' war records (0.131 s) that nothing needs after the Book
+  has folded them, while the walk waits.** The cache load is 0.214 s, settle
+  0.050 s on one thread, pass two 0.081 s. In an empty-cache run a save's
+  thread time at 31 workers is 162.9 ms, three times its 54.1 ms alone:
+  provinces 29.5%, countries 17.3%, **reading the file 17.1%** (a buffer copy;
+  the mapping is Linux only), `read_rest` 7.3%, `prepare` 8.1%, `top_level_blocks`
+  6.3%, `build` 5.2%, store 4.7%.
+
+### The order of what follows: the order of the task files
+
+Chosen for completion: each stage passes the suite alone and leaves a tree
+that can ship; the unknown (the shared name table, its threads, the cache) is
+met first, on the smallest surface; the biggest certain gains come before the
+uncertain ones, so stopping anywhere has banked the most; after the plumbing the
+stages are independent, so one that runs long or is judged not worth it can be
+dropped; and nothing is converted that a later stage deletes.
+
+| task file | what | why here | expected, warm / empty cache (estimates) |
+|---|---|---|---|
+| `06-model-names-owners-market.md` | `names.rs`, `Sym`, the cache's `Sym`, the shift knob; `Scan.owners`, `Meta.province_owner`; `Market`. **First commit: the quick win below** | the plumbing on the two parts with least in the way: order-free, built in one place each, 2.47 M of the 9.49 M | 0.05-0.07 s / 0.03-0.05 s |
+| `07-model-wars.md` | `War`, `Goal`, `Battle`, `Side`, `wars::Held`, `Book`, `save_world`, `wars::build` | the largest holder (44%); the warm cache load, the Book's fold (0.066 s) and its free | 0.07-0.10 s beyond the quick win / 0.01-0.03 s |
+| *the gate* | below | | |
+| `08-model-pops-and-cultures.md` | `Counter` and `Interner` in `province.rs`, `pop_by_*`, `accepted_cultures`, `primary_culture`, `Group`, `mobilizable_pops`, `Snapshot`, `Spec.mob_types` | the first-run lever: about 50,000 of a save's 221,000 allocations, in the stage that is 30% of the thread time | 0.01 s / 0.08-0.18 s |
+| `09-model-techs-held-and-the-rates.md` | first half: `Held` gone, `Row.nat` slimmed, `Kept` moved; second: `tech_list`, `modifiers`, `reforms`, `nationalvalue`, the mod's dense lookups; optional: `goods_supply`, `country_flags`, the scalars | settle is 0.050 s on one thread in every run; the carried `Nation` is 2.34 M | 0.04 s / 0.04 s |
+| `10-model-units-and-ships.md` | `Ship`, `Stack`, both readers, `report.rs:345` | the smallest payoff of the nation stages, two readers, two orders that reach the page | 0.02 s / 0.02-0.03 s |
+| `11-model-wars-and-market-from-bytes.md` | `read_rest` without `clause::Tree`. **Optional** | 85,000 allocations a save but 7.3% of the empty-cache thread time; a reader to rewrite; needs 07 | / 0.04-0.08 s |
+| `12-model-cache-and-result.md` | the cache's final form, arenas only if needed, teardown, re-measure everything | the close | 0.01-0.03 s / |
+| `13-reprofile-and-next.md` | re-profile; a Windows file mapping and the worker count head its list | | |
+
+Summed, the estimates are a warm rebuild from 1.17 s to about 0.8 s and an
+empty-cache run from 2.46 s to about 2.15 s. They scale each stage's share of
+the allocations by its share of the clocks; only the quick win was measured.
+
+- **06 is not units and ships** (the first draft's choice): the owners and the
+  market are order-free (reversing them moved nothing) and built in one place
+  each; units and ships have two readers (`country.rs`, `walk.rs`' own), two
+  orders that reach the page and the smallest payoff of the nation stages.
+- **Wars second:** the biggest holder and the biggest warm-rebuild cost the
+  model can reach; it needs only `names.rs`.
+- **Pops before techs and units:** the empty-cache run is what the `Meta`
+  stages hardly help, and pops are what the scanner, `build` and `prepare` make
+  and throw away. It is also the stage with the chunk's exactness to get right,
+  so it is done while there is budget.
+- **`Held` is not a stage of its own:** deleting it saves memory, not time
+  (settle hashes the same strings), and it is cheaper to delete with the tech
+  lists it copies. Task 09 is two halves and may stop between them.
+- **Task 11 is optional and last before the close:** the lowest payoff for the
+  work, and it would be written twice if it came before 07. The scalar names
+  (`tag`, `government`, ...) stay Strings unless the numbers ask.
+- **Not taken:** the nation fields first; "carry less" as a first stage; all of
+  `Meta` in one session; flattening before converting; the typed reader before
+  the types.
+
+### The quick win (not a stage; do it first, on its own or as task 06's first commit)
+
+- **What:** `report.rs`, `walk()`. The closure that folds the saves' war records
+  into the `Book` returns with `wars` (a `Vec<Vec<War>>`, 4.1 M allocations)
+  still in it, so they are dropped there, and the walk's scope waits. Hand the
+  drop to a `std::thread::spawn(move || drop(wars))` that nothing joins.
+- **Measured** (a warm rebuild, six interleaved rounds, medians, in the probe
+  tree): as it is 1.172 s; the free on a thread of its own **1.042 s** (-0.130 s,
+  -11%; the walk 0.197 s to 0.069 s; heap peak 666.8 MB, unchanged);
+  `mem::forget` 0.999 s (-0.173 s, -15%) but a peak of 856.0 MB (+189 MB). The
+  thread is recommended; the forget is the maintainer's to choose.
+- **Check it as task 02 did:** a run that ends differently is checked through a
+  pipe with nothing left running (`speed/pipecheck.sh`), plus the suite and the
+  reference run. Not applied in this session, which was asked for the order.
+  Task 07 makes the free cheaper at its source (4.1 M allocations to about 1 M),
+  but until then this is worth more to a warm rebuild than any stage.
+
+### The gate (after task 07)
+
+Tasks 06 and 07 carry 70% of the allocations. Measure the warm rebuild's pass
+one (0.214 s now; about 0.13 s expected) and the walk. **If pass one is above
+0.17 s, the allocation counts are not what the cache load costs, and the
+estimates for 08-10 fall with it: re-profile (task 13's method) and re-rank
+before starting 08.** In every stage's entry put expected beside measured; if a
+stage gained under half of what was expected, re-rank what remains by the
+numbers before the next. (The standing rule is to keep going when the
+maintainer is away; this is about choosing what to do next, not stopping.)
+
+### The task files were renumbered
+
+`git mv` kept their history. The first version of this entry, MODEL.md in
+`4fb867f` and that commit's message use the old numbers: old 06 (units and
+ships) is now 10; old 07 (pops) 08; old 08 (techs, flags, the rest) 09; old 08b
+(meta) split into 07 (the types) and 11 (the reader); old 09 (cache) 12; old 10
+(re-profile) 13; 06 and 07 are new. `05-model-survey.md` is the task as given
+and still says "tasks 06-09". MODEL.md's section 6 and its stage references
+were brought to the new numbers.
+
+### The rest
+
+- Numbers on this PC, `398de81`, no probe (`speed/minibench.py`: `bench.sh`
+  needs `bc`, `uptime` and `pgrep`, which this shell lacks): empty cache 2.465 s
+  wall (pass one ends 1.469 s), warm 1.206 s (pass one 0.213 s); a second run
+  2.459 s and 1.138 s.
+- **The worker count** (a constant, not a model matter), empty cache, three
+  interleaved rounds each: 8 workers 3.21 s, 12 2.77 s, 16 2.65 s, **20 2.54 s**,
+  24 2.62 s, 31 (the default) 2.68 s. Flat from 20 up, about 0.15 s better at 20
+  than at the default, within what three rounds can say. On task 13's list.
+- Tools in `speed/`: `model-probe.diff` (applies to `398de81`, and so to
+  `4fb867f`: a counting global allocator, a census, reverse-this-field switches
+  and, new, the stage clocks; env `VIC2_ALLOC`, `VIC2_STAGES`, `VIC2_STATS`,
+  `VIC2_TIMES`, `VIC2_PERMUTE`, `VIC2_WARDROP`), `permute.sh TREE FIELD...`,
+  `permexample.py TREE FIELD`, `minibench.py TREE`, `cmpruns_env.py`. The probe
+  tree is `~/vic2speed/rw/model05` (`398de81` plus the diff, uncommitted, its
+  release build there). A stage's session applies the diff to its own tree and
+  puts the same numbers beside MODEL.md's.
+- **My mistakes, and what was not clean:**
+  - The first version of the order was reasoned from allocation counts and from
+    the lines to change, and was wrong about where the time is: the clocks put
+    the biggest warm cost in `Meta` and made units and ships the least valuable
+    nation stage. It was committed before the clocks were taken.
+  - My first stage table was polluted by the census's own allocations (it showed
+    `prepare` at 32 M); the file's numbers come from a run without the census.
+    My first background batch of reversals looked empty because its launcher
+    exited while the loop ran on. The 'what is held' tables count a `Box` per
+    call, which MODEL.md subtracts. Two polling loops I started were killed at
+    their time limit; they changed nothing.
+  - One default-workers timing run read 174 ms a save for the read against 142
+    in the three I kept; I discarded it (the first run after a rebuild) and did
+    not look into it. An explicit `-j 15` run read 81 ms: that is the worker
+    count, not noise.
+  - IDENTICAL after a reversal means only that this campaign's output did not
+    move; MODEL.md says why per field and keeps the order wherever that is free.
+- Not verified: Linux and the mmap path (the allocation counts do not depend on
+  them; the times do); a campaign with many more nations a save, where the
+  weights move toward the nation fields; the cost of the `Group`s of nations
+  that are not kept (every nation is kept here); every estimate in the table
+  above, which is why there is a gate.
+- **For the maintainer:**
+  - The quick win is yours to approve as it stands (the thread) or to take as
+    the forget, at 189 MB more at its peak. It is the cheapest saving found.
+  - If the first run matters more than the model, **a Windows file mapping may
+    be worth more than tasks 08-11 together**: reading the saves is 17% of the
+    empty-cache thread time, as much as the countries. It is on task 13's list
+    because it is not a model change; it needs no `names.rs` and can be done at
+    any point.
+  - The pass-one gain of the nation stages is the most uncertain estimate here;
+    the gate after 07 exists for that.
 - Not pushed. Bundle `~/vic2saveanalyzer-backup-<hash>.bundle` on this PC,
-  named for this commit.
-- Next: task 06 (`06-model-units-and-ships.md`): `names.rs` first (MODEL.md
-  5.2), then units and ships.
+  named for the last commit.
+- Next: the quick win (alone, or as the first commit of task 06), then task 06
+  (`06-model-names-owners-market.md`): `names.rs` first (MODEL.md 5.2).

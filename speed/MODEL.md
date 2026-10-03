@@ -1,8 +1,9 @@
 # The engine's data model: what it holds, what it costs, and the design that replaces it
 
 Written in task 05 (3 Oct 2026) on `398de81`. No code in the engine changed
-for it. Tasks 06-09 follow this file; if the code proves it wrong, fix it
-here and say so in `STATUS.md`.
+for it. Tasks 06-12 follow this file, in the order of their numbers (section 6
+says why that order); if the code proves it wrong, fix it here and say so in
+`STATUS.md`.
 
 Raw numbers: `speed/model-census-2026-10-03.txt` (every figure below that has a
 number is in it). The probe that made them: `speed/model-probe.diff`
@@ -18,8 +19,8 @@ is the 1880s one (265 saves, 9.1 GB) with its mod, on the Windows PC
    (36,000 a save). `Nation` is 2.34 M of them (25%). `Meta` is 6.61 M
    (70%): `wars` 4.14 M, `province_owner` 1.35 M, `market` 1.12 M. `Held`,
    which copies a nation's techs and invention ids so the invention pass can
-   read them, is 0.52 M. Tasks 06-08 as first drawn cover the 25%. The
-   split gets a new stage, 08b, for `Meta` (section 6).
+   read them, is 0.52 M. The first draft of the staging covered the 25%; the
+   order in section 6 starts with `Meta` (tasks 06 and 07).
 2. **The churn is bigger than what stays.** One save costs 221,000
    allocations in pass one on an empty cache: 85,000 reading the wars and the
    market into `clause::Tree` and back (`read_rest`), 46,000 in the
@@ -46,6 +47,13 @@ is the 1880s one (265 saves, 9.1 GB) with its mod, on the Windows PC
    keeping the insertion-ordered containers and changing only their keys;
    alphabetical order made by sorting on the text; per-entry name tables in
    the engine cache. Section 5.
+7. **The clocks agree with the counts, and add a free win** (4.2). In a warm
+   rebuild, the walk waits 0.131 s for one thread to free the saves' war
+   records, which is two thirds of the walk and 11% of the run; handing
+   that free to a thread of its own is three lines (1.172 s to 1.042 s,
+   measured). In an empty-cache run on this PC, provinces are 30% of a
+   save's thread time, the countries 17%, reading the file 17% (a buffer
+   copy; Windows has no mapping yet), the wars and market 7%.
 
 ## 1. How the data moves
 
@@ -142,6 +150,8 @@ scratch cache x3, warm x5, this PC; `bench.sh` does not run in this shell, so
 
 A second run of the stand-in, later the same day: empty cache 2.459 s, warm 1.138 s (pass one
 1.475 s and 0.209 s). Differences under about 5% are noise on this PC.
+This PC has 16 cores and 32 logical processors, so the engine's default is 31
+workers (cores bar one); the laptop's was 15.
 
 ## 2. Every string-keyed or string-holding field
 
@@ -246,8 +256,8 @@ String)>` (once per tech per nation in `finish.rs:704`, 466 k times),
 (`FxMap<String, f64>`, bar `strata` and `culture_groups`, which map to a
 String; looked up by a nation's names in `rules.rs:602-648,685,727`), `localisation`, `unit_kinds`,
 `naval_tech_effects`, `naval_effects`, `invention_rules`. These are built
-once and stay as they are in stage 06; their lookups become indexed in
-stage 08 (section 5.6).
+once and stay as they are in task 06; their lookups become indexed, each
+stage for the names it converts (section 5.6).
 
 ## 3. Where order is observable
 
@@ -373,6 +383,67 @@ and 594 MB are what the process hands the kernel at exit (task 02 measured
 `Kept` 845,676), the per-nation tables 939,637, `supply` 412,547, `Book`
 44,098, naval 12,035.
 
+### 4.2 Where the time goes
+
+Taken after the counts, to rank the stages by what they can buy and not only by
+what they hold. The probe's clocks (`VIC2_TIMES`, no counting) time each stage
+on the thread that runs it; raw tables in `speed/model-census-2026-10-03.txt`
+sections 8-11.
+
+**Empty cache, a save's thread time, one thread alone and the default 31
+workers** (the median of three runs):
+
+| stage | alone ms | share | 31 workers ms | share |
+|---|---|---|---|---|
+| load the file (read into a buffer) | 5.0 | 9.3% | 27.9 | 17.1% |
+| `top_level_blocks` | 4.9 | 9.0% | 10.3 | 6.3% |
+| countries (`country.rs`) | 10.7 | 19.8% | 28.2 | 17.3% |
+| provinces (`province.rs`) | 19.8 | 36.6% | 48.0 | 29.5% |
+| wars and market (`read_rest`) | 3.9 | 7.1% | 12.0 | 7.3% |
+| `model::build` | 2.4 | 4.4% | 8.5 | 5.2% |
+| `prepare` | 4.6 | 8.5% | 13.2 | 8.1% |
+| cache store | 1.7 | 3.2% | 7.6 | 4.7% |
+| the rest of a read | 1.1 | 2.1% | 7.2 | 4.4% |
+| one save | 54.1 | | 162.9 | |
+
+At 31 workers a save costs three times the thread time it costs alone, and the
+parts that allocate or move most grow most (the file load 5.6x, the cache store
+4.4x, `build` 3.5x, `read_rest` 3.1x, against provinces 2.4x): the allocator
+and the file cache are shared. That is the case for fewer allocations, and
+the case against reading the wars through a `Tree` first; it is also why the
+file load, which the model does not touch, is as big as the countries.
+
+**A warm rebuild, the engine's phases** (wall seconds, median of three; the
+whole run is 1.17 s, so about 0.2 s is outside the engine):
+
+| phase | s | what the model touches |
+|---|---|---|
+| pass one (the cache load) | 0.22 | everything the entry holds: 38,200 allocations a save, `Meta` 70% of them |
+| settle | 0.050 | one thread: the tech sets 12 ms, `index_base_for` 37 ms: `Held`'s Strings |
+| pass two | 0.081 | 1.56 s of thread time, of which `rate_for`, `impact_for`, `naval_profile` 0.50 s |
+| the walk | 0.197 | the Book's fold 0.066 s, then **freeing the saves' war records 0.131 s**; `walk_tables` 0.070 s runs beside |
+| the map | 0.131 + 0.044 + 0.015 | the raster and spots (the mod's), the owners (`province_owner`'s Strings), the capitals |
+| the payload's sections | 0.139 | strings of every table |
+| gzip, the page, the tables | 0.09 | |
+
+**The free in the walk, three ways** (a warm rebuild, six interleaved rounds,
+medians; `VIC2_WARDROP` in the probe):
+
+| | wall | the walk | heap peak |
+|---|---|---|---|
+| as it is | 1.172 s | 0.197 s | 666.8 MB |
+| the free on a thread of its own, not waited for | 1.042 s | 0.069 s | 666.8 MB |
+| `mem::forget` | 0.999 s | 0.068 s | 856.0 MB |
+
+The walk takes the saves' war records out of `Spent` and hands them to the
+thread that folds them into the `Book`; when it has folded them it drops them,
+4.1 M allocations, and the walk's scope waits for it. Nothing needs them
+after the fold. A thread of its own that nothing waits for costs no memory;
+forgetting them is quicker still and holds 189 MB more at the peak. Task 07
+makes the free cheaper at its source (4.1 M allocations to about 1 M); until
+then it is a three-line change that is worth more to a warm rebuild than any
+stage of the model.
+
 ## 5. The design
 
 ### 5.1 What it does, in one paragraph
@@ -429,7 +500,7 @@ pub fn cmp(a: Sym, b: Sym) -> std::cmp::Ordering;   // by text
   them.** `Sym` has no `Ord`; `.0` is used only in `names.rs`; the cache
   never stores a run's ids (5.5). To prove it, a debug knob
   `VIC2_ENGINE_NAMES_SHIFT=k` interns `k` placeholder names first, which moves
-  every id and every `FxMap<Sym, _>`'s order; stage 06 adds it, and the suite
+  every id and every `FxMap<Sym, _>`'s order; task 06 adds it, and the suite
   and the reference comparison run once with it on.
 - `Names` for the mod's own tables: the mod is read while the saves are
   (`mod_job`), so its names get ids during pass one; after pass one the
@@ -492,7 +563,7 @@ each sorts by `names::cmp`. The two stable sorts that depend on ties
 
 ### 5.5 The engine-cache format (`V2ENGC03`)
 
-Written in task 09; stages 06-08b change the cache only as far as their
+Finished in task 12; tasks 06-11 change the cache only as far as their
 fields need, writing what they hold the way the old format would, with a
 `Sym` written by its text through the entry's own string table (the
 `W::s` table already in `cache.rs:75-86`).
@@ -524,9 +595,10 @@ The mod's tables are `FxMap<String, f64>` looked up with a nation's names:
 `tech_mob` once per tech per nation (466 k), `event_mob` per modifier,
 `reform_mob`, `nv_mob`, `culture_groups`, `strata`; `Spec.tech_group` and
 `Spec.mob_types` the same (466 k and 1.13 M lookups). After pass one the
-name table is complete, so stage 08 builds dense `Vec<f64>` / bitsets indexed
-by `Sym` (a few KB each, from `names::len()`) once, before pass two, and the
-lookups become an index. The mod's own strings are interned with
+name table is complete, so each stage builds dense `Vec<f64>` / bitsets indexed
+by `Sym` (a few KB each, from `names::len()`) once, before pass two, for the
+names it converts (task 08: pop types and cultures; task 09: techs,
+modifiers, national values, reforms), and the lookups become an index. The mod's own strings are interned with
 `intern_str`; a mod name with a character past U+00FF never equals a save's
 latin-1 name, exactly as now.
 
@@ -551,17 +623,18 @@ no allocation, no hash. They stay on text.
 - It does not touch what is *read* from the bytes beyond the strings:
   `read_rest` parses the wars and the market through `clause::Tree` (85,000
   allocations a save, 22.6 M in all, the largest single piece of pass-one
-  churn). Making `Meta` `Sym`-based (08b) removes the Strings it ends in, not
-  the Tree it goes through. Reading them straight from the bytes, as task 03
-  did for the countries, is the second half of 08b.
+  churn, though only 7.3% of the empty-cache thread time). Making `Meta`
+  `Sym`-based (task 07) removes the Strings it ends in, not the Tree it goes
+  through. Reading them straight from the bytes, as task 03 did for the
+  countries, is task 11, optional.
 - It does not touch the integer tables (`core_provinces`, `province_state`,
   `colonial_*`, `soldier_pops_at`): hash inserts and small `Vec`s, no strings.
-  They are task 10's if the profile still shows them.
+  They are task 13's if the profile still shows them.
 - It does not change the text of any output. Nothing here may.
 
 ### 5.9 What it should buy
 
-Said as a bet, to be measured in 09 and 10, not as a result. The pass-one
+Said as a bet, to be measured in tasks 12 and 13, not as a result. The pass-one
 profile (CONTEXT.md, and 3 Oct on this PC) puts malloc and free at 15-21% of
 a worker's time and the provinces and countries at 59%. This model touches
 every allocation in `build`, `prepare` and the cache load, which is
@@ -575,30 +648,63 @@ checks hold the output to the bytes whatever it buys.
 Each stage passes the whole suite on its own, and the real campaign against
 `speed/runs/11e1f21` (every CSV, the decoded page, stdout, stderr).
 
-The stages after 06 depend on `names.rs` and on nothing else here, so they
-can be done in any order; 09 is last. The order below puts the stages by
-how they were first drawn, with 08b added; **by live allocations held, the
-order of payoff is 08b, 08, 06, 07; by pass-one churn removed, 08b first and
-then 07.** 06 goes first because it has to bring the shared plumbing, and it is the
-smallest surface to bring it on.
+**The order is the order of the task files**, 06 to 12, and was decided after
+this survey from the counts in section 4 and the clocks in 4.2. The first
+draft of this section went units, pops, the rest, `Meta`, cache, because the
+data-model plan was drawn around the nation fields; the counts say `Meta` is
+70% of what is held, and the clocks say the biggest cost of a warm rebuild is
+`Meta`'s too. `STATUS.md` has the reasoning in short.
 
-| stage | what | live allocs now (all saves) | churn it removes (pass one, a save) |
+| task | what | live allocs now (all saves) | what it should buy: a warm rebuild / an empty-cache run (estimates, section 4.2 is the basis) |
 |---|---|---|---|
-| **06** units and ships (task 06) | `names.rs` and `Sym`, per-thread cache, the shift knob; the cache's `Sym`; `ships_by_type` + `ship_crew`, `regiments_by_type`, `units_at` + `men_at` flattened; `Country` and its two readers; `finish.rs` ship and brigade tables, `PerNation`; `Kept` moved, not cloned; `report.rs:345` | 881,000 | the `Tally` and `ints()` allocations of `country.rs` and `walk.rs` (part of the countries' 38,000, not counted apart) |
-| **07** pops and cultures (task 07) | `Interner` and `Counter` in `province.rs` on `Sym`; `pop_by_type`, `pop_by_culture`, `accepted_cultures`, `primary_culture`; `Group`; `mobilizable_pops`; `Snapshot` (`words`, `layouts`: keys on `Sym`, no `Vec<usize>` pair a group); `Spec.mob_types`; `PopulationRules` | 475,000 | about half of the provinces' 45,600 (the `Counter`s copy each name twice), and 16,700 of `build`'s 35,200 (the `Group` and `mobilizable_pops` Strings) |
-| **08** techs, flags and the rest (task 08) | `tech_list`, `invention_ids`, `modifiers`, `country_flags`, `reforms`, `goods_supply`, the seven names; **`Held` removed**; **`Row.nat` slimmed**; the mod's dense lookups (5.6); `rules.rs`, `explain.rs`; `PerNation`'s remainder, `supply`, `naval` | 1,520,000, and 2.34 M in `Row` | `Held`'s 2,000 and the clones in `prepare` (14,500 in all, much of it 07's `Snapshot`) |
-| **08b** meta (new: `08b-model-meta.md`) | `province_owner`, `market`, `war` records and `Book` on `Sym`; then `read_rest` straight from the bytes, no `clause::Tree` | 6,613,000 | `read_rest`'s 85,200 and `build`'s 5,100 owner Strings |
-| **09** the cache and the result (task 09) | `V2ENGC03` (5.5); decide by the numbers whether the containers are flattened further into per-save arenas; teardown (is `mem::forget` still needed); re-measure everything | | the cache load's 38,000 |
+| (06's first commit) | the walk stops waiting for the saves' war records to be freed | | measured: warm 1.172 s to 1.042 s |
+| **06** names, owners, market | `names.rs`, the cache's `Sym`, the shift knob; `Scan.owners` and `Meta.province_owner`; `Market`; `report.rs`, `market.rs` | 2.47 M | warm 0.05-0.07 s quicker; empty 0.03-0.05 s |
+| **07** wars | `War`, `Goal`, `Battle`, `Side`, `wars::Held`, `Book`, `save_world`, `wars::build`, `explain.rs` | 4.14 M | warm 0.07-0.10 s beyond the first commit above (the cache load, the Book's fold); empty 0.01-0.03 s |
+| *gate* | measure the warm rebuild's pass one (0.214 s; about 0.13 s expected). If it is above 0.17 s, the allocations are not what the load costs: re-profile before 08-10 | | |
+| **08** pops and cultures | `Interner` and `Counter` in `province.rs`; `pop_by_type`, `pop_by_culture`, `accepted_cultures`, `primary_culture`; `Group`; `mobilizable_pops`; `Snapshot`; `Spec.mob_types`; `PopulationRules`; dense `strata` and `culture_groups` | 0.475 M, and about 50,000 a save of pass-one churn | warm 0.01 s; empty 0.08-0.18 s |
+| **09** techs, `Held`, the rates | **`Held` gone, `Row.nat` slimmed, `Kept` moved**; `tech_list`, `modifiers`, `reforms`, `nationalvalue`; dense `tech_mob`, `event_mob`, `nv_mob`, `reform_mob`, `tech_group`; (optional: `goods_supply`, `country_flags`, the scalars) | 1.52 M, and 2.34 M carried | settle 0.050 s to about 0.02 s in both; warm 0.04 s, empty 0.04 s |
+| **10** units and ships | `Ship`, `Stack`; `country.rs` and `walk.rs`; `finish.rs`, `report.rs:345` | 0.88 M | warm 0.02 s; empty 0.02-0.03 s |
+| **11** wars and market from the bytes (optional) | `read_rest` without `clause::Tree` | churn 85,200 a save | empty 0.04-0.08 s |
+| **12** the cache and the result | `V2ENGC03` finished; arenas only if the load is still over about 50 ms; teardown; dense lookups finished; re-measure | the cache load's 38,000 a save | warm 0.01-0.03 s |
 
-08b is two sessions' work if it does the second half: the first half (the
-types) is mechanical, the second (a typed reader of wars and market) is like
-task 03 and has its own checks (`testkit/enginefmt.py`, the engine's
-reference answers for wars and prices).
+Why this order:
 
-Do not start a stage by flattening. The first commit of each is the
-`Sym` change with `OMap<Sym, _>` and nothing else, so a difference is the
-change of key and not the change of shape. Flatten in later commits, each
-passing.
+1. **The plumbing goes first, on the part with the least in its way.** The
+   owners and the market are order-free (reversing them moved nothing), are
+   built in one place each, and have one reader of the save between them.
+   Units and ships, the first draft's choice, have two readers (`country.rs`
+   and `walk.rs`' own), a stable sort that depends on order, and the smallest
+   payoff of the nation stages.
+2. **Then the biggest warm-rebuild cost.** The saves' war records are 44% of
+   what is held, a third of the walk (0.066 s of folding) and, until the first
+   commit above, 0.131 s of freeing; the warm rebuild is the everyday run.
+3. **Then a gate**, so that the rest is not done on an estimate: the first two
+   stages carry 70% of the allocations, and if the warm load has not fallen the
+   way the counts say it should, the remaining estimates are wrong too.
+4. **Then the first-run lever.** Pops and cultures are what the scanner and
+   `build` and `prepare` make and throw away: about 22% of a save's pass-one
+   allocations, on the stage that is 30% of the thread time.
+5. **Then what is left, by payoff for the work**, and the optional last: task
+   11 is the lowest payoff for the work (7.3% of the empty-cache thread
+   time, a reader to rewrite) and needs task 07 first, so it is last before
+   the close. The scalar names (`tag`, `government`, ...) stay Strings: 74,000
+   allocations and they touch everything.
+6. **After 06, every stage depends on `names.rs` and on nothing else here**
+   (11 also needs 07), so any of 07-11 can be dropped, or done in another
+   order, without breaking the others. 12 closes.
+
+Alternatives looked at and not taken: the nation fields first (the first
+draft: small payoff, the most to do); "carry less" (`Held`, `Row.nat`) as a
+stage of its own first (it saves memory and a little of the cache, not time,
+and `Held` is cheaper to delete with the tech lists it copies); all of `Meta`
+in one session (the plumbing and the most order-sensitive structure at once);
+the typed reader before the types (it would be written twice).
+
+Task 09 is two halves, carry-less first, and may stop between them; task 11 is
+the severable one. Do not start a stage by flattening: the first commit of
+each is the `Sym` change with `OMap<Sym, _>` and nothing else, so a difference
+is the change of key and not the change of shape. Flatten in later commits,
+each passing.
 
 ## 7. How each stage is verified
 
@@ -607,26 +713,26 @@ passing.
 - The real campaign: `refrun.sh` and `cmpruns.py 11e1f21 NEW --payload`:
   IDENTICAL. The page's bytes are not the reference's (the chunks are level
   5), the decoded payload is.
-- Once, with `VIC2_ENGINE_NAMES_SHIFT=7`, the same two (stage 06 adds the
+- Once, with `VIC2_ENGINE_NAMES_SHIFT=7`, the same two (task 06 adds the
   knob).
 - **Mutations** (`testkit/mutate.py`, a clean worktree, `--saves` and
   `--mod`). These patch files the stages edit; one that no longer applies
   after a stage is re-aimed at the new code, never dropped: in `finish.rs` `cross-min-pop`,
   `cross-player-nations-unread`, `cross-player-ignores-save`,
   `name-runs-as-script`, `chunk-stream-cut`; in `walk.rs`
-  `walk-navy-not-entered`, `walk-colonies-ignored` (stage 06: `count_units`
+  `walk-navy-not-entered`, `walk-colonies-ignored` (task 10: `count_units`
   and `Tally`); in `model.rs` `naval-base-int-becomes-float`; in `cache.rs`
   `save-key-drops-reading`, `save-key-drops-time`, `modread-kept-copy-unsigned`
-  (stage 09); in `rules.rs` `at-war-from-joins`; `explain.rs`
+  (task 12); in `rules.rs` `at-war-from-joins`; `explain.rs`
   `explain-without-wars`; `report.rs` `locked-table-not-refused`,
   `empty-table-left-stale`; `wars.rs` `goal-judged-before-first-save`; `mod.rs`
   `cut-save-read-as-whole`. `mutdry.py` (laptop) or running the mutation
   list on the new tree says which no longer apply.
 - **New mutations** each stage should add, so a wrong order is caught and
-  not only a wrong value: sort `ships_by_type` by id rather than by name
-  (stage 06); break a stable tie in `pop_by_culture` (07); reverse
-  `units_at`'s inner order (06); reverse `goods_supply` (08); reverse
-  `Group.types` (07); reverse `Side.units` (08b). Each of these is a change the
+  not only a wrong value: sort the market's goods by id rather than by name
+  (task 06); reverse `Side.units` (07); break a stable tie in `pop_by_culture`
+  and reverse `Group.types` (08); reverse `goods_supply` (09, if it is done);
+  sort `ships_by_type` by id and reverse `units_at`'s inner order (10). Each of these is a change the
   reversal runs of section 3 showed the campaign notices. Where
   `speed/permute.sh` showed IDENTICAL, there is nothing to catch on this
   campaign and no mutation to add.
@@ -653,6 +759,10 @@ passing.
 - **Linux and the mmap path** were not run. The allocation counts do not
   depend on how the file is read; the stage times on the laptop will differ.
 - **`Group` for unkept nations** (5.7): not measured, as every nation is kept.
-- **Whether arenas are needed** is for 09 to decide from 08b's numbers:
-  the criterion is the warm cache load. If it is below about 50 ms after
-  08b, leave the containers alone and spend the session on task 10.
+- **Whether arenas are needed** is for task 12 to decide from the earlier
+  stages' numbers: the criterion is the warm cache load. If it is below about
+  50 ms by then, leave the containers alone and spend the session on task 13.
+- **The estimates in section 6 are estimates.** They scale a stage's share
+  of the allocations by the stage's share of the clocks; only the first
+  commit's (1.172 s to 1.042 s) was measured. Task 07's gate is there to find
+  out early whether the scaling holds.

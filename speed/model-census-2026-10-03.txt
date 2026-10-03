@@ -236,3 +236,68 @@ war.units                DIFFERENT: report.html differs
 market.current           IDENTICAL
 market.history           IDENTICAL
 market.snapshot          IDENTICAL
+
+== 8. where the time goes in pass one, empty cache (VIC2_TIMES; milliseconds a save of one thread's time)
+== (this PC: 16 cores, 32 logical; the engine's default is 31 workers. -j 1 is one thread alone; the second column is
+== the median of three default runs, where threads share cores and the allocator and the file cache)
+stage                                                 -j 1 ms   share  31 workers ms   share
+load the file (read_to_end into a buffer)                5.01    9.3%          27.93   17.1%
+top_level_blocks                                         4.87    9.0%          10.33    6.3%
+countries (country.rs)                                  10.70   19.8%          28.21   17.3%
+provinces (province.rs)                                 19.78   36.6%          47.99   29.5%
+wars + market (read_rest, via clause::Tree)              3.86    7.1%          11.96    7.3%
+model::build                                             2.40    4.4%           8.49    5.2%
+prepare                                                  4.62    8.5%          13.18    8.1%
+cache store                                              1.74    3.2%           7.61    4.7%
+the rest of a read (stamps, the head, the date)          1.11    2.1%           7.16    4.4%
+one save, all of it                                     54.09                 162.86
+
+== 9. a warm rebuild, the engine's phases (seconds since it started; median of three; wall of the run 1.17 s, so
+== about 0.2 s is outside the engine: the launcher, the process starting, the kernel taking its memory back)
+start                                         0.000   (+0.000)
+pass one: saves read and prepared             0.220   (+0.220)
+mod loaded                                    0.220   (+0.000)
+inventions settled                            0.270   (+0.050)
+pass two: saves finished                      0.351   (+0.081)
+walked                                        0.548   (+0.197)
+map: raster decoded, spots placed             0.679   (+0.131)
+map: owners                                   0.723   (+0.044)
+map: capitals                                 0.738   (+0.015)
+payload sections made                         0.877   (+0.139)
+payload assembled                             0.894   (+0.017)
+payload gzipped                               0.961   (+0.067)
+page filled                                   0.974   (+0.013)
+tables written                                0.983   (+0.009)
+
+== 10. a warm rebuild: thread time of what the model touches (milliseconds, medians of three runs)
+7 cache load                                               calls    265  total   4923.3 ms
+S settle_campaign (the whole)                              calls      1  total     49.7 ms
+S1 settle: all_techs sets                                  calls      1  total     12.5 ms
+S3 settle: index_base_for (holdings, violations)           calls      1  total     37.2 ms
+F finish: the whole                                        calls    265  total   1555.6 ms
+F1 finish: rate_for                                        calls  10569  total    226.7 ms
+F2 finish: impact_for                                      calls  10569  total    142.4 ms
+F3 finish: naval_profile                                   calls   5661  total    126.1 ms
+W1 walk: the wars folded into the Book (own thread)        calls      1  total     66.1 ms
+W1b walk: the saves' war records dropped (own thread)      calls      1  total    130.5 ms
+W2 walk: walk_tables (main thread)                         calls      1  total     67.3 ms
+(cache load is thread time over 31 workers: 0.214 s of wall. `finish` is the same: 0.085 s of wall. settle is one thread.
+ The walk's two threads run side by side, and the walk waits for the longer: fold + drop = 197 ms against walk_tables 70 ms.)
+
+== 11. the war records' free, three ways (a warm rebuild, six interleaved rounds each, medians; VIC2_WARDROP in the probe)
+variant                                   wall     walk phase   tables written   heap peak (allocator)
+drop (as it is)                          1.172 s     0.197 s       0.965 s          666.8 MB
+a thread of its own, not waited for      1.042 s     0.069 s       0.833 s          666.8 MB   (-0.130 s, -11.1%)
+mem::forget                              0.999 s     0.068 s       0.796 s          856.0 MB   (-0.173 s, -14.8%; peak +189 MB)
+
+== 12. the probe's switches, as of this file: VIC2_ALLOC=1 (live counts at every phase), VIC2_STAGES=file, VIC2_STATS=file
+== (census and what is held), VIC2_TIMES=file (the stage clocks above; no counting), VIC2_PERMUTE=a,b (reverse those fields),
+== VIC2_WARDROP=forget|thread. Counting is on only when ALLOC, STAGES or STATS is set.
+
+== 13. the engine's worker count, empty cache, three interleaved rounds each (the main tree's build, no probe; wall of the run, and when pass one ends)
+workers 8          wall median 3.209   pass one median 2.165
+workers 12         wall median 2.766   pass one median 1.730
+workers 16         wall median 2.654   pass one median 1.600
+workers 20         wall median 2.535   pass one median 1.528
+workers 24         wall median 2.616   pass one median 1.549
+workers 31 (default) wall median 2.682   pass one median 1.570

@@ -1,5 +1,5 @@
 diff --git a/scanner/src/engine/finish.rs b/scanner/src/engine/finish.rs
-index b2e5bf2..338d009 100644
+index b2e5bf2..5a7e18e 100644
 --- a/scanner/src/engine/finish.rs
 +++ b/scanner/src/engine/finish.rs
 @@ -264,7 +264,9 @@ pub fn escape_angles(s: &str) -> String {
@@ -40,7 +40,48 @@ index b2e5bf2..338d009 100644
  pub struct Kept {
      pub tag: String,
      pub units_at: OMap<i64, OMap<String, i64>>,
-@@ -756,3 +762,202 @@ fn trim(tag: &str, nat: &Nation) -> Kept {
+@@ -547,8 +553,12 @@ fn csv_line(out: &mut String, vals: &[Val]) {
+ 
+ /// The rest of finishing, and `save_rows`: one prepared save spent.
+ pub fn finish(pre: Pre, spec: &Spec, m: &Mod, live: Option<&FxSet<String>>) -> D<Spent> {
++    crate::probe::staged("F finish: the whole", || finish_inner(pre, spec, m, live))
++}
++
++fn finish_inner(pre: Pre, spec: &Spec, m: &Mod, live: Option<&FxSet<String>>) -> D<Spent> {
+     let Pre { meta, nations, chunk, .. } = pre;
+-    let world: World = save_world(&meta, m);
++    let world: World = crate::probe::staged("F0 finish: save_world", || save_world(&meta, m));
+     let date = meta.date.clone();
+     let year = date.split('.').next().unwrap_or("").to_string();
+     let mut rows = Vec::new();
+@@ -565,7 +575,7 @@ pub fn finish(pre: Pre, spec: &Spec, m: &Mod, live: Option<&FxSet<String>>) -> D
+             kept_out.push(trim(&tag, &nat));
+             continue;
+         }
+-        let rate = rate_for(&nat, m, live, Some(&world), is_player)?;
++        let rate = crate::probe::staged("F1 finish: rate_for", || rate_for(&nat, m, live, Some(&world), is_player))?;
+         let ppr = spec.pop_per_regiment;
+         // `brigades_from_clusters`.
+         let mut brigades = 0i64;
+@@ -601,7 +611,7 @@ pub fn finish(pre: Pre, spec: &Spec, m: &Mod, live: Option<&FxSet<String>>) -> D
+             policy = m.party_policies[index as usize].clone();
+         }
+         if let Some(impact) = m.mob_impacts.get(&policy) {
+-            let impact = impact + impact_for(&nat, m, Some(&world), is_player)?;
++            let impact = impact + crate::probe::staged("F2 finish: impact_for", || impact_for(&nat, m, Some(&world), is_player))?;
+             let floor = trunc_int(match m.define("MIN_MOBILIZE_LIMIT") {
+                 Some(v) => v,
+                 None => 3.0,
+@@ -682,7 +692,7 @@ pub fn finish(pre: Pre, spec: &Spec, m: &Mod, live: Option<&FxSet<String>>) -> D
+             tables.crews.push((tag.clone(), crew_of));
+         }
+         if nat.ships != 0 {
+-            let profile = naval_profile(nat, m);
++            let profile = crate::probe::staged("F3 finish: naval_profile", || naval_profile(nat, m));
+             naval.push((tag.clone(), profile_key(&profile), profile));
+         }
+         for (good, amount) in nat.goods_supply.iter() {
+@@ -756,3 +766,202 @@ fn trim(tag: &str, nat: &Nation) -> Kept {
      }
  }
  
@@ -244,7 +285,7 @@ index b2e5bf2..338d009 100644
 +    }
 +}
 diff --git a/scanner/src/engine/mod.rs b/scanner/src/engine/mod.rs
-index 105844b..5768bc6 100644
+index 105844b..082621a 100644
 --- a/scanner/src/engine/mod.rs
 +++ b/scanner/src/engine/mod.rs
 @@ -36,6 +36,7 @@ pub mod rules;
@@ -265,6 +306,24 @@ index 105844b..5768bc6 100644
      if let Some(to) = TO.get_or_init(|| std::env::var("VIC2_ENGINE_TIMES").ok()) {
          let line = format!("[{:8.3}] {}\n", start.elapsed().as_secs_f64(), what);
          if to == "1" {
+@@ -517,7 +521,7 @@ fn read_once(path: &str, reading: &Reading, raw: &mut Vec<u8>, again: bool) -> R
+             Bytes::Buffer(&raw[..])
+         })
+     } else {
+-        load(path, raw)
++        crate::probe::staged("0a load the file", || load(path, raw))
+     }.map_err(|e| Refused::Skip(os_error_text(&e, path)))?;
+     let got = read_bytes(path, reading, &raw, before);
+     // A file cut short under its mapping was read partly as zeros, whatever
+@@ -570,7 +574,7 @@ fn read_bytes(path: &str, reading: &Reading, raw: &[u8],
+         navy_techs: &reading.navy_techs,
+         reform_keys: &reading.reform_keys,
+     };
+-    let (blocks, date, player, countries) = match top_level_blocks(text) {
++    let (blocks, date, player, countries) = match crate::probe::staged("0b top_level_blocks", || top_level_blocks(text)) {
+         Some(blocks) => {
+             let (date, player, countries) = read_flat(text, &blocks, reading, &tables, &mut scan);
+             (blocks, date, player, countries)
 @@ -584,9 +588,9 @@ fn read_bytes(path: &str, reading: &Reading, raw: &[u8],
              (w.blocks, w.date, w.player, w.countries)
          }
@@ -303,7 +362,15 @@ index 105844b..5768bc6 100644
      (date, player, countries)
  }
  
-@@ -932,13 +941,13 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
+@@ -885,6 +894,7 @@ pub fn bench(args: &[String]) {
+ 
+ /// A run as the front end declares it. A run handed back never returns.
+ pub fn run_spec(spec_j: &J) -> report::Outcome {
++    probe::init();
+     phase("start");
+     let run = parse_run(spec_j);
+     out::set_protocol(run.protocol);
+@@ -932,13 +942,13 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
      thread_local!(static RAW: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) });
      in_order(n, workers, |i| {
          if let Some(slot) = &slots[i] {
@@ -319,7 +386,7 @@ index 105844b..5768bc6 100644
              // A worker holds a save's worth of buffer between saves, not a
              // campaign's: let an outsized one go.
              if raw.capacity() > 96 << 20 {
-@@ -949,9 +958,9 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
+@@ -949,9 +959,9 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
                  Refused::Skip(why) | Refused::Back(why) => Refused::Back(why),
              }).map(|save| {
                  let tags = keys_of(&save);
@@ -331,18 +398,27 @@ index 105844b..5768bc6 100644
                  }
                  (pre, false)
              })
-@@ -1091,6 +1100,9 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
+@@ -1035,7 +1045,7 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
+     };
+     let held: Vec<&[rules::Held]> = pres.iter().map(|p| p.held.as_slice()).collect();
+     phase("mod loaded");
+-    let live = rules::settle_campaign(&mut m, &held);
++    let live = probe::staged("S settle_campaign (the whole)", || rules::settle_campaign(&mut m, &held));
+     phase("inventions settled");
+     if verbose {
+         crate::engine::report::say_mod(&m, &live, &held, &files);
+@@ -1091,6 +1101,9 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
      }
      let spent: Vec<Spent> = spent.into_iter().map(|s| s.unwrap()).collect();
      phase("pass two: saves finished");
-+    if let Ok(path) = std::env::var("VIC2_STATS").or_else(|_| std::env::var("VIC2_STAGES")) {
++    if let Ok(path) = std::env::var("VIC2_STATS").or_else(|_| std::env::var("VIC2_STAGES")).or_else(|_| std::env::var("VIC2_TIMES")) {
 +        probe::dump_to(&path);
 +    }
      // Nothing from here on hands the run back.
      out::release();
      if run.cross_part {
 diff --git a/scanner/src/engine/report.rs b/scanner/src/engine/report.rs
-index 17c985a..46e4726 100644
+index 17c985a..59942a6 100644
 --- a/scanner/src/engine/report.rs
 +++ b/scanner/src/engine/report.rs
 @@ -39,6 +39,7 @@ use std::io::Write;
@@ -353,10 +429,42 @@ index 17c985a..46e4726 100644
  pub struct Kept1 {
      pub meta: Meta,
      pub nations: Vec<Kept>,
-@@ -928,6 +929,28 @@ pub struct CrossPart {
+@@ -78,13 +79,23 @@ fn walk(mut spent: Vec<Spent>) -> Campaign {
+         spent.iter_mut().map(|s| std::mem::take(&mut s.meta.wars)).collect();
+     std::thread::scope(|scope| {
+         let book = scope.spawn(move || {
+-            let mut book = Book::default();
+-            for w in &wars {
+-                book.fold_save(w);
+-            }
++            let book = crate::probe::staged("W1 walk: the wars folded into the Book (own thread)", || {
++                let mut book = Book::default();
++                for w in &wars {
++                    book.fold_save(w);
++                }
++                book
++            });
++            crate::probe::staged("W1b walk: the saves' war records dropped (own thread)", || {
++                match std::env::var("VIC2_WARDROP").as_deref() {
++                    Ok("forget") => std::mem::forget(wars),
++                    Ok("thread") => { std::thread::spawn(move || drop(wars)); }
++                    _ => drop(wars),
++                }
++            });
+             book
+         });
+-        let mut c = walk_tables(spent);
++        let mut c = crate::probe::staged("W2 walk: walk_tables (main thread)", || walk_tables(spent));
+         c.book = book.join().unwrap();
+         c
+     })
+@@ -928,6 +939,31 @@ pub struct CrossPart {
  pub fn run(run: &Run, m: &Mod, live: &FxSet<String>, spent: Vec<Spent>) -> Outcome {
      let c = walk(spent);
      crate::engine::phase("walked");
++    if let Ok(path) = std::env::var("VIC2_TIMES") {
++        crate::probe::dump_to(&path);
++    }
 +    if std::env::var_os("VIC2_STATS").is_some() {
 +        use crate::probe::held as h;
 +        h("walk: Campaign.rows (Vec<Row>)", &c.rows, |v| Box::new(v.clone()));
@@ -382,6 +490,29 @@ index 17c985a..46e4726 100644
      let metas: Vec<&Meta> = c.parsed.iter().map(|k| &k.meta).collect();
      let prices = market::merge_prices(&metas, &run.tables);
      let snaps = market::snapshot_rows(&metas, &run.tables);
+diff --git a/scanner/src/engine/rules.rs b/scanner/src/engine/rules.rs
+index 7aa34f0..d4a9d98 100644
+--- a/scanner/src/engine/rules.rs
++++ b/scanner/src/engine/rules.rs
+@@ -879,6 +879,7 @@ pub fn index_base_for(m: &Mod, every: &[&Held]) -> Option<i64> {
+ pub fn settle_campaign(m: &mut Mod, saves: &[&[Held]]) -> FxSet<String> {
+     let mut all_techs: OMap<&str, FxSet<&str>> = OMap::new();
+     let mut every: Vec<&Held> = Vec::new();
++    crate::probe::staged("S1 settle: all_techs sets", || {
+     for nations in saves {
+         for nat in nations.iter() {
+             every.push(nat);
+@@ -886,7 +887,8 @@ pub fn settle_campaign(m: &mut Mod, saves: &[&[Held]]) -> FxSet<String> {
+                 .extend(nat.tech_list.iter().map(|t| t.as_str()));
+         }
+     }
+-    let live = attainable_inventions(m, &all_techs);
+-    m.index_base = index_base_for(m, &every);
++    });
++    let live = crate::probe::staged("S2 settle: attainable_inventions", || attainable_inventions(m, &all_techs));
++    m.index_base = crate::probe::staged("S3 settle: index_base_for (holdings, violations)", || index_base_for(m, &every));
+     live
+ }
 diff --git a/scanner/src/engine/wars.rs b/scanner/src/engine/wars.rs
 index 202248b..a2db5d6 100644
 --- a/scanner/src/engine/wars.rs
@@ -446,10 +577,10 @@ index 39aac87..25bba3f 100644
      }
 diff --git a/scanner/src/probe.rs b/scanner/src/probe.rs
 new file mode 100644
-index 0000000..8f228fb
+index 0000000..166fb75
 --- /dev/null
 +++ b/scanner/src/probe.rs
-@@ -0,0 +1,182 @@
+@@ -0,0 +1,203 @@
 +// PROBE ONLY (task 05): never committed. A counting allocator, a census of
 +// what a nation holds, and switches that reverse one field's order.
 +
@@ -463,6 +594,7 @@ index 0000000..8f228fb
 +
 +pub struct Counting;
 +
++pub static ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 +pub static LIVE_N: AtomicI64 = AtomicI64::new(0);
 +pub static LIVE_B: AtomicI64 = AtomicI64::new(0);
 +pub static PEAK_B: AtomicI64 = AtomicI64::new(0);
@@ -476,6 +608,9 @@ index 0000000..8f228fb
 +}
 +
 +fn up(size: usize) {
++    if !ENABLED.load(Relaxed) {
++        return;
++    }
 +    LIVE_N.fetch_add(1, Relaxed);
 +    TOTAL_N.fetch_add(1, Relaxed);
 +    let b = LIVE_B.fetch_add(size as i64, Relaxed) + size as i64;
@@ -496,23 +631,38 @@ index 0000000..8f228fb
 +        System.alloc_zeroed(l)
 +    }
 +    unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
-+        LIVE_N.fetch_sub(1, Relaxed);
-+        LIVE_B.fetch_sub(l.size() as i64, Relaxed);
-+        let _ = T_FREES.try_with(|c| c.set(c.get() + 1));
++        if ENABLED.load(Relaxed) {
++            LIVE_N.fetch_sub(1, Relaxed);
++            LIVE_B.fetch_sub(l.size() as i64, Relaxed);
++            let _ = T_FREES.try_with(|c| c.set(c.get() + 1));
++        }
 +        System.dealloc(p, l)
 +    }
 +    unsafe fn realloc(&self, p: *mut u8, l: Layout, new: usize) -> *mut u8 {
-+        LIVE_B.fetch_add(new as i64 - l.size() as i64, Relaxed);
-+        let _ = T_REALLOCS.try_with(|c| c.set(c.get() + 1));
-+        let _ = T_BYTES.try_with(|c| c.set(c.get() + new as u64));
++        if ENABLED.load(Relaxed) {
++            LIVE_B.fetch_add(new as i64 - l.size() as i64, Relaxed);
++            let _ = T_REALLOCS.try_with(|c| c.set(c.get() + 1));
++            let _ = T_BYTES.try_with(|c| c.set(c.get() + new as u64));
++        }
 +        System.realloc(p, l, new)
 +    }
 +}
 +
-+/// This thread's (allocs, reallocs, frees, bytes) so far.
-+pub fn snap() -> [u64; 4] {
++/// This thread's (allocs, reallocs, frees, bytes) so far, and the clock in ns.
++pub fn snap() -> [u64; 5] {
++    use std::sync::OnceLock;
++    static T0: OnceLock<std::time::Instant> = OnceLock::new();
++    let ns = T0.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64;
 +    [T_ALLOCS.with(|c| c.get()), T_REALLOCS.with(|c| c.get()), T_FREES.with(|c| c.get()),
-+     T_BYTES.with(|c| c.get())]
++     T_BYTES.with(|c| c.get()), ns]
++}
++
++/// Counting costs an atomic or two a call: only when a probe output was asked for.
++pub fn init() {
++    if std::env::var_os("VIC2_ALLOC").is_some() || std::env::var_os("VIC2_STAGES").is_some()
++        || std::env::var_os("VIC2_STATS").is_some() {
++        ENABLED.store(true, Relaxed);
++    }
 +}
 +
 +pub fn global_line() -> String {
@@ -520,7 +670,7 @@ index 0000000..8f228fb
 +            LIVE_B.load(Relaxed) as f64 / 1e6, PEAK_B.load(Relaxed) as f64 / 1e6, TOTAL_N.load(Relaxed))
 +}
 +
-+static STAGES: Mutex<BTreeMap<&'static str, [u64; 5]>> = Mutex::new(BTreeMap::new());
++static STAGES: Mutex<BTreeMap<&'static str, [u64; 6]>> = Mutex::new(BTreeMap::new());
 +
 +/// Run `f` and add what this thread allocated in it to `name`:
 +/// [calls, allocs, reallocs, frees, bytes].
@@ -529,11 +679,12 @@ index 0000000..8f228fb
 +    let t = f();
 +    let b = snap();
 +    let mut s = STAGES.lock().unwrap();
-+    let e = s.entry(name).or_insert([0; 5]);
++    let e = s.entry(name).or_insert([0; 6]);
 +    e[0] += 1;
 +    for i in 0..4 {
-+        e[i + 1] += b[i] - a[i];
++        e[i + 1] += b[i].wrapping_sub(a[i]);
 +    }
++    e[5] += b[4] - a[4];
 +    t
 +}
 +
@@ -581,8 +732,8 @@ index 0000000..8f228fb
 +        let s = STAGES.lock().unwrap();
 +        out.push_str("== allocation by stage (this thread; per call: allocs reallocs frees bytes)\n");
 +        for (k, v) in s.iter() {
-+            out.push_str(&format!("{:<28} calls {:>6}  allocs {:>12}  reallocs {:>11}  frees {:>12}  bytes {:>14}\n",
-+                                  k, v[0], v[1], v[2], v[3], v[4]));
++            out.push_str(&format!("{:<28} calls {:>6}  allocs {:>12}  reallocs {:>11}  frees {:>12}  bytes {:>14}  ms {:>9.1}  ms/call {:>7.2}\n",
++                                  k, v[0], v[1], v[2], v[3], v[4], v[5] as f64 / 1e6, v[5] as f64 / 1e6 / v[0].max(1) as f64));
 +        }
 +    }
 +    {
@@ -624,11 +775,12 @@ index 0000000..8f228fb
 +        .map(|s| s.to_string()).collect()).iter().any(|s| s == name)
 +}
 +
-+pub fn add_stage(name: &'static str, a: [u64; 4], b: [u64; 4]) {
++pub fn add_stage(name: &'static str, a: [u64; 5], b: [u64; 5]) {
 +    let mut s = STAGES.lock().unwrap();
-+    let e = s.entry(name).or_insert([0; 5]);
++    let e = s.entry(name).or_insert([0; 6]);
 +    e[0] += 1;
 +    for i in 0..4 {
-+        e[i + 1] += b[i] - a[i];
++        e[i + 1] += b[i].wrapping_sub(a[i]);
 +    }
++    e[5] += b[4] - a[4];
 +}
