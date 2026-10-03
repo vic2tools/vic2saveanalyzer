@@ -30,6 +30,7 @@ mod front;
 mod fx;
 mod jsonr;
 mod md5;
+mod names;
 mod omap;
 mod province;
 mod pyfmt;
