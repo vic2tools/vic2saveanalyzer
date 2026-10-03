@@ -206,7 +206,9 @@ impl Snapshot {
         }
     }
 
-    /// `pack()`: JSON, `<`/`>` turned into look-alikes, gzipped, base64.
+    /// `pack()`: JSON, `<`/`>` turned into look-alikes, gzipped, base64. Level
+    /// 5, not the 6 the Python used: 45% quicker for 0.8% more bytes, and the
+    /// chunk is most of what a worker does outside reading (INTERNALS.md).
     pub fn pack(&self) -> String {
         let mut raw = String::from("[[");
         for (i, w) in self.words.keys().enumerate() {
@@ -247,7 +249,7 @@ impl Snapshot {
         }
         raw.push_str("}]");
         let raw = escape_angles(&raw);
-        deflate::base64(&deflate::gzip(raw.as_bytes()))
+        deflate::base64(&deflate::gzip_level(raw.as_bytes(), &deflate::LEVEL5))
     }
 }
 

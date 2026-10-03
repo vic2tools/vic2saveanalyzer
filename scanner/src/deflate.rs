@@ -28,11 +28,20 @@ const MAX_MATCH: usize = 258;
 const MAX_DIST: usize = WSIZE - (MAX_MATCH + MIN_MATCH + 1);
 const SYMBOLS_PER_BLOCK: usize = 16383;
 
-/// zlib's level 6: (good_length, max_lazy, nice_length, max_chain).
-const GOOD: usize = 8;
-const LAZY: usize = 16;
-const NICE: usize = 128;
-const CHAIN: usize = 128;
+/// One of zlib's configuration rows for the lazy matcher: how hard it looks
+/// for a match (levels 4-9 of `deflate_slow`; 1-3 are `deflate_fast`, which
+/// this does not do, and which did not pay: see INTERNALS.md).
+#[derive(Clone, Copy)]
+pub struct Level {
+    pub good: usize,
+    pub lazy: usize,
+    pub nice: usize,
+    pub chain: usize,
+}
+
+pub const LEVEL4: Level = Level { good: 4, lazy: 4, nice: 16, chain: 16 };
+pub const LEVEL5: Level = Level { good: 8, lazy: 16, nice: 32, chain: 32 };
+pub const LEVEL6: Level = Level { good: 8, lazy: 16, nice: 128, chain: 128 };
 
 // ------------------------------------------------------------------ checks
 
@@ -554,13 +563,13 @@ impl Matcher {
 
     /// The longest match for position `i` along the chain starting at
     /// `cand` (plus one), no shorter than `prev_len` + 1 to count.
-    fn longest(&self, b: &[u8], i: usize, mut cand: usize, prev_len: usize) -> (usize, usize) {
+    fn longest(&self, b: &[u8], i: usize, mut cand: usize, prev_len: usize, lv: &Level) -> (usize, usize) {
         let limit = if i > MAX_DIST { i - MAX_DIST } else { 0 };
         let max = (b.len() - i).min(MAX_MATCH);
-        let mut chain = if prev_len >= GOOD { CHAIN >> 2 } else { CHAIN };
+        let mut chain = if prev_len >= lv.good { lv.chain >> 2 } else { lv.chain };
         let mut best_len = prev_len;
         let mut best_pos = 0usize;
-        let nice = NICE.min(max);
+        let nice = lv.nice.min(max);
         while cand > 0 {
             let c = cand - 1;
             if c < limit || c >= i {
@@ -608,6 +617,11 @@ impl Matcher {
 /// ends the deflate data when `last`, and otherwise stops on a byte boundary
 /// with the stream still open (a sync flush), ready for the next piece.
 pub fn deflate_raw(buf: &[u8], start: usize, last: bool) -> Vec<u8> {
+    deflate_level(buf, start, last, &LEVEL6)
+}
+
+/// `deflate_raw` at any of the levels above.
+pub fn deflate_level(buf: &[u8], start: usize, last: bool, lv: &Level) -> Vec<u8> {
     let mut bits = Bits::new((buf.len() - start) / 3 + 64);
     let mut m = Matcher::new();
     let n = buf.len();
@@ -638,8 +652,8 @@ pub fn deflate_raw(buf: &[u8], start: usize, last: bool) -> Vec<u8> {
             cand = m.insert(buf, pos);
         }
         let (mut len, mut mpos) = (MIN_MATCH - 1, 0usize);
-        if cand > 0 && prev_len < LAZY && pos - (cand - 1) <= MAX_DIST {
-            let (l, p) = m.longest(buf, pos, cand, prev_len);
+        if cand > 0 && prev_len < lv.lazy && pos - (cand - 1) <= MAX_DIST {
+            let (l, p) = m.longest(buf, pos, cand, prev_len, lv);
             if l > prev_len {
                 len = l;
                 mpos = p;
@@ -698,6 +712,15 @@ const GZIP_HEAD: [u8; 10] = [0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 0xff];
 pub fn gzip(data: &[u8]) -> Vec<u8> {
     let mut out = GZIP_HEAD.to_vec();
     out.extend_from_slice(&deflate_raw(data, 0, true));
+    out.extend_from_slice(&crc32(data).to_le_bytes());
+    out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    out
+}
+
+/// `gzip` at one of the levels above.
+pub fn gzip_level(data: &[u8], lv: &Level) -> Vec<u8> {
+    let mut out = GZIP_HEAD.to_vec();
+    out.extend_from_slice(&deflate_level(data, 0, true, lv));
     out.extend_from_slice(&crc32(data).to_le_bytes());
     out.extend_from_slice(&(data.len() as u32).to_le_bytes());
     out
@@ -801,8 +824,31 @@ pub fn selftest(mode: &str, path: &str) {
         println!("{} frequency sets, {} bad", tries, bad);
         return;
     }
+    if mode == "levels" {
+        // Every file in a folder, gzipped at each level on this thread: bytes
+        // out and seconds taken, three rounds, the quickest kept.
+        let mut files: Vec<_> = std::fs::read_dir(path).unwrap()
+            .map(|e| e.unwrap().path()).collect();
+        files.sort();
+        let datas: Vec<Vec<u8>> = files.iter().map(|f| std::fs::read(f).unwrap()).collect();
+        let raw: usize = datas.iter().map(|d| d.len()).sum();
+        println!("{} files, {} bytes in", datas.len(), raw);
+        for (k, lv) in [LEVEL4, LEVEL5, LEVEL6].iter().enumerate() {
+            let (mut best, mut bytes) = (f64::MAX, 0usize);
+            for _ in 0..3 {
+                let t = std::time::Instant::now();
+                bytes = datas.iter().map(|d| gzip_level(d, lv).len()).sum();
+                best = best.min(t.elapsed().as_secs_f64());
+            }
+            println!("level {}: {} bytes ({:.1}%), {:.1} ms a file", k + 4, bytes,
+                     100.0 * bytes as f64 / raw as f64, best * 1e3 / datas.len() as f64);
+        }
+        return;
+    }
     let data = std::fs::read(path).unwrap();
     let out = match mode {
+        "gz4" => gzip_level(&data, &LEVEL4),
+        "gz5" => gzip_level(&data, &LEVEL5),
         "gzip" => gzip(&data),
         "zlib" => zlib(&data),
         "pgzip" => gzip_parallel(&data, 8),

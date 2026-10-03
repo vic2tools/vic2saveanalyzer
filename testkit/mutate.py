@@ -450,6 +450,28 @@ def r27():
     patch("scanner/src/engine/finish.rs", "    if !s.contains(['<', '>']) {", "    if true {")
 
 
+# ---- the state chunk's compressor, level 5, and the stream it makes
+
+
+@mutation("chunk-stream-cut",
+          "a save's state-history chunk loses the first byte of its gzip "
+          "stream, so the page's chunk does not decompress", "enginecheck.py")
+def m58():
+    patch("scanner/src/engine/finish.rs",
+          "deflate::gzip_level(raw.as_bytes(), &deflate::LEVEL5))",
+          "deflate::gzip_level(raw.as_bytes(), &deflate::LEVEL5)[1..])")
+
+
+@mutation("level-five-stream-cut",
+          "the level-5 compressor's stream loses its first byte, so it no "
+          "longer decompresses", "enginecompress.py",
+          (os.path.join("scanner", "target", "release",
+                        "vic2scan" + (".exe" if os.name == "nt" else "")),))
+def m59():
+    patch("scanner/src/deflate.rs", '"gz5" => gzip_level(&data, &LEVEL5),',
+          '"gz5" => gzip_level(&data, &LEVEL5)[1..].to_vec(),')
+
+
 # ---- what the engine keeps between runs
 
 @mutation("save-key-drops-reading",

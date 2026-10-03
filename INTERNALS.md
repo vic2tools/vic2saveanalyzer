@@ -504,6 +504,61 @@ occupied; only that third one took anything.
 
 ## Speed
 
+### The state chunk is compressed at level 5, 2026-10-03
+
+Each save's state-history chunk (`Snapshot::pack`, `finish.rs`) is JSON,
+gzipped, base64, built in the worker. Timed on the 265 saves of the 1880s
+campaign (Ryzen 9 7950X, one thread, quiet machine; the chunk JSON of every
+save dumped by a temporary probe, then `vic2scan selftest-deflate levels
+DIR`):
+
+| per save | |
+|---|---|
+| building the JSON (and `<`/`>` look-alikes) | 0.57 ms |
+| gzip at level 6 | 5.1 ms (7.9 ms with sixteen threads sharing cores) |
+| base64 | 0.08 ms |
+| the chunk, raw / gzipped | 91 KB / 37 KB |
+
+So the chunk is its compression, and its JSON is 7% of its cost: nothing
+to win in fewer allocations there, and none was tried. The chunks are also
+13 MB of the 18.6 MB page, so what a faster level costs shows in
+`report.html`.
+
+`deflate.rs` now takes a `Level` (zlib's good/lazy/nice/chain row);
+`deflate_raw` is level 6 as before, byte for byte (the real campaign's page
+is identical to `speed/runs/11e1f21` with the chunks at 6), and the chunk
+uses `LEVEL5`. Levels 1-3 were written too (zlib's `deflate_fast`: the
+first match taken, a long match's inner positions not entered) and then
+taken out, because they bought nothing over 5 end to end. The rows are
+zlib's, whole campaign from an empty cache, files in the page cache, seven
+rounds of each level in turn, medians:
+
+| chunk level | gz bytes, all chunks | ms a chunk | pass one | wall | `report.html` |
+|---|---|---|---|---|---|
+| 6 (was) | 9,882,507 | 5.1 | 1.521 s | 2.468 s | 18,603,225 |
+| 5 | +0.8% | 2.8 | 1.477 s | 2.419 s | +0.55% |
+| 4 | +3.3% | 1.3 | 1.477 s | 2.423 s | +2.3% |
+| 3 | +5.0% | 1.5 | 1.473 s | 2.443 s | +3.5% |
+| 1 | +9.6% | 0.6 | 1.476 s | 2.450 s | +6.8% |
+
+Level 5 takes 3% off pass one for half a percent of page, and going below
+it buys nothing more: pass one is no longer waiting on the compressor
+(sixteen threads, ~85 ms of it at level 6, so ~45 ms won is what the
+arithmetic said), and the pages only grow. Level 5 it is. The whole page is
+still compressed at 6 in parallel (`gzip_parallel`), and the flag PNGs too:
+they are not in the workers.
+
+- **Checks.** `enginecompress.py` round-trips levels 4 and 5 through
+  Python's `gzip.decompress` as well as 6, on its eleven shapes of input;
+  level 6 is held to what it always was. The state chunks are in the page
+  checks' decoded form, so `enginecheck.py` and the browser checks read what
+  level 5 made. Two mutations: `chunk-stream-cut` (a byte lost from the
+  chunk's stream) and `level-five-stream-cut` (the same in the self-test's
+  level-5 mode).
+- **Old caches.** A kept save carries its chunk, but the cache is keyed by
+  the build id (a hash of `scanner/src`), so a build with level 5 reads none
+  made at level 6: no page mixes the two.
+
 ### The checks hold on Windows, 2026-10-03
 
 On Windows nine of `all.py`'s 28 checks failed and two skipped, every one

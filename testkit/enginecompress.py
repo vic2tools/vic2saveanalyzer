@@ -36,12 +36,12 @@ tmp = tempfile.mkdtemp(prefix="vic2compress")
 for name, data in cases.items():
     path = os.path.join(tmp, "in")
     open(path, "wb").write(data)
-    for mode in ("gzip", "zlib", "pgzip", "b64"):
+    for mode in ("gzip", "gz4", "gz5", "zlib", "pgzip", "b64"):
         t = time.perf_counter()
         out = subprocess.run([binary, "selftest-deflate", mode, path], capture_output=True, check=True).stdout
         took = time.perf_counter() - t
         try:
-            back = (gzip.decompress(out) if mode in ("gzip", "pgzip") else
+            back = (gzip.decompress(out) if mode not in ("zlib", "b64") else
                     zlib.decompress(out) if mode == "zlib" else base64.b64decode(out))
             ok = back == data
             if mode == "b64":
