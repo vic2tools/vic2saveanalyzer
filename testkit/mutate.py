@@ -2,1047 +2,362 @@
 """
 Does a check actually catch the bug it was written for?
 
-A check is only worth what it refuses. This puts a known bug back into a
-*copy* of the tree, one at a time, runs the check that claims to catch it,
-and reports whether the check noticed. A check that still passes with the
-bug in place is not doing its job, however green it looks.
+A check is only worth what it refuses. This puts each known bug in
+`mutations.py` back into a copy of the tree, one at a time, runs the check
+that claims to catch it, and says what happened:
 
-    git worktree add /tmp/mut HEAD
-    cp scanner/target/release/vic2scan /tmp/mut/scanner/target/release/
-    python3 testkit/mutate.py --tree /tmp/mut [--saves DIR] [name ...]
+    CAUGHT    the check failed with the bug in place
+    BLIND     the check still passed: it is not doing its job
+    TIMEOUT   the check did not finish in time; the bug may hang the program
+    SKIPPED   the check could not run here (exit 77), so it saw nothing
+    NOAPPLY   the bug's text is no longer in the file: move the mutation
+    NOBUILD   the scanner did not build with the bug in it
+    UNTESTED  the check does not hold on the tree without the bug, or its
+              inputs were not given, so failing with it would prove nothing
 
-It edits the tree it is pointed at and reverts with `git checkout` between
-mutations, so **point it at a worktree, never at the tree you are working
-in**. It refuses to run anywhere that has uncommitted changes.
+    python3 testkit/mutate.py [--saves DIR] [--mod DIR] [--baseline DIR] [name ...]
+    python3 testkit/mutate.py --dry       # does every mutation still apply?
+    python3 testkit/mutate.py --list
 
-A bug put back in `scanner/` is built before its check runs (`cargo build
---release` in the tree), and the scanner as committed is copied back after,
-so the next mutation starts from it.
+It makes its own git worktree of HEAD in the temp folder, copies the built
+scanner into it, and removes it when done, so the tree you work in is never
+touched; commit what you want tested. A bug put into `scanner/` or the page
+is built first, with a light release profile (no LTO, sixteen codegen
+units, incremental): seconds, where the shipped profile takes the better
+part of a minute. The scanner as committed is put back after each.
 
-Copy the scanner in first. A fresh worktree has no `scanner/target/`, and
-with no scanner every run is refused, so this refuses to start.
-
-Every check it uses is first run on the tree with no bug in it, and must
-pass there. A check that fails anyway is reported UNTESTED for each of its
-mutations rather than counted as catching them: it would have failed
-whatever was put back. It exits non-zero unless every mutation is caught.
-
-This is not one of the checks and `all.py` does not run it. It is the
-thing you reach for when you have written a new check and want to know
-whether it would fail on the code it is supposed to reject.
+It exits 1 on any BLIND, NOAPPLY or NOBUILD; with `--strict`, on TIMEOUT,
+SKIPPED and UNTESTED too. `all.py` does not run it: reach for it after
+writing a check, to see that the check fails on the code it should reject.
 """
 import argparse
+import enum
 import os
 import shutil
+import signal
 import subprocess
 import sys
+import tempfile
+from collections import namedtuple
+from concurrent.futures import ThreadPoolExecutor
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from outcome import SKIPPED                                 # noqa: E402
+from mutations import MUTATIONS
+from outcome import SKIPPED
 
-TREE = ""
-SAVES = ""
-MOD = ""
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SCANNER = os.path.join("scanner", "target", "release",
+                       "vic2scan" + (".exe" if os.name == "nt" else ""))
+
+# Set in the environment rather than Cargo.toml, so the build id the
+# scanner stamps into its reports is the committed one's.
+FAST_BUILD_ENV = {"CARGO_PROFILE_RELEASE_LTO": "false",
+                  "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+                  "CARGO_PROFILE_RELEASE_INCREMENTAL": "true"}
+
+# Checks that drive a window or a browser run on their own, never beside
+# another.
+ALONE = {"window.py", "boots.py", "war_legacy_ui.py", "state_history_ui.py"}
+
+Outcome = namedtuple("Outcome", "code timed_out output")
 
 
-def revert():
-    subprocess.run(["git", "checkout", "--", "."], cwd=TREE, check=True)
+class Verdict(enum.Enum):
+    CAUGHT = "caught"
+    BLIND = "BLIND"
+    TIMEOUT = "TIMEOUT"
+    SKIPPED = "SKIPPED"
+    NOAPPLY = "NOAPPLY"
+    NOBUILD = "NOBUILD"
+    UNTESTED = "UNTESTED"
 
 
-def scanner_touched():
-    """Whether the mutation put back is in the Rust, which must be rebuilt --
-    or in the page, which `scanner/build.rs` builds into it."""
-    out = subprocess.run(["git", "diff", "--name-only"], cwd=TREE,
-                         capture_output=True, text=True).stdout
-    return any(line.startswith("scanner/") or line == "template.py"
-               for line in out.splitlines())
+def holds(outcome):
+    return not outcome.timed_out and outcome.code == 0
 
 
-def build_scanner():
-    """Build the tree's scanner. Returns (built, what cargo said)."""
-    cargo = shutil.which("cargo") or os.path.expanduser("~/.cargo/bin/cargo")
-    done = subprocess.run([cargo, "build", "--release"], cwd=os.path.join(TREE, "scanner"),
-                          capture_output=True, text=True)
+def verdict(control, mutated):
+    """What the check's run with the bug says, given its run without."""
+    if not holds(control):
+        return Verdict.UNTESTED
+    if mutated.timed_out:
+        return Verdict.TIMEOUT
+    if mutated.code == SKIPPED:
+        return Verdict.SKIPPED
+    return Verdict.BLIND if mutated.code == 0 else Verdict.CAUGHT
+
+
+# ------------------------------------------------------------ the tree
+
+class Unapplied(Exception):
+    pass
+
+
+def patch(tree, path, old, new, count=1):
+    """Replace `old` with `new` in tree/path; `old` must appear `count`
+    times (0: at least once)."""
+    full = os.path.join(tree, path)
+    with open(full, encoding="utf-8", newline="") as fh:
+        src = fh.read()
+    n = src.count(old)
+    if n < 1:
+        raise Unapplied("%r not found in %s" % (old[:70], path))
+    if count and n != count:
+        raise Unapplied("%r appears %d times in %s, not %d" % (old[:70], n, path, count))
+    with open(full, "w", encoding="utf-8", newline="") as fh:
+        fh.write(src.replace(old, new))
+
+
+def revert(tree):
+    subprocess.run(["git", "checkout", "--", "."], cwd=tree, check=True)
+
+
+def rebuilds(mutation):
+    """Whether the bug is in the scanner, or in the page it builds in."""
+    return any(p[0].startswith("scanner/") or p[0] == "template.py"
+               for p in mutation.patches)
+
+
+def cargo():
+    found = shutil.which("cargo")
+    if found:
+        return found
+    home = os.path.join(os.path.expanduser("~"), ".cargo", "bin", "cargo")
+    return home + ".exe" if os.name == "nt" else home
+
+
+def build(tree):
+    """Build the tree's scanner the fast way. (built, what cargo said)."""
+    done = subprocess.run([cargo(), "build", "--release"],
+                          cwd=os.path.join(tree, "scanner"),
+                          env=dict(os.environ, **FAST_BUILD_ENV),
+                          capture_output=True, text=True, errors="replace")
     return done.returncode == 0, done.stderr[-2000:]
 
 
 def put_back(pristine, binary):
-    """
-    The scanner as committed, back in place, by renaming a copy over it.
-
-    Written into, the file cannot be while any process is still running it
-    (ETXTBSY), and one run of this harness met exactly that the moment a
-    check returned. A rename replaces the name and leaves a running copy
-    alone. Anything of this tree's still running is named, since a check
-    leaving a scanner behind is a bug of its own.
-    """
-    if sys.platform.startswith("linux"):
-        mine = os.path.realpath(os.path.join(TREE, "scanner"))
-        for pid in os.listdir("/proc"):
-            try:
-                exe = os.readlink(os.path.join("/proc", pid, "exe"))
-            except OSError:
-                continue
-            if exe.startswith(mine):
-                print("  note: process %s is still running %s" % (pid, exe))
+    """The committed scanner back in place, renamed over the built one, so
+    a process still running the old file is left alone."""
     fresh = binary + ".next"
     shutil.copyfile(pristine, fresh)
     shutil.copymode(pristine, fresh)
     os.replace(fresh, binary)
 
 
-def patch(path, old, new, count=1):
-    """Replace `old` with `new` in TREE/path. Fails loudly if it does not match."""
-    full = os.path.join(TREE, path)
-    with open(full, encoding="utf-8") as fh:
-        src = fh.read()
-    n = src.count(old)
-    if n < 1:
-        raise SystemExit("MUTATION DID NOT APPLY: %r not found in %s" % (old[:70], path))
-    if count and n != count:
-        raise SystemExit("MUTATION AMBIGUOUS: %r appears %d times in %s"
-                         % (old[:70], n, path))
-    with open(full, "w", encoding="utf-8") as fh:
-        fh.write(src.replace(old, new))
-
-
-class Said(str):
-    """A check's output, and whether it said it could not all run here."""
-    skipped = False
-
-
-def check(script, args=()):
-    """
-    Run a check. Returns (passed, output).
-
-    A check that skips part of itself here (`outcome.SKIPPED`) has not
-    passed: a mutation it could not have seen would be counted as blind,
-    and its control run as good.
-    """
-    done = subprocess.run([sys.executable, os.path.join("testkit", script)] + list(args),
-                          capture_output=True, text=True, cwd=TREE, timeout=900)
-    said = Said(done.stdout + done.stderr)
-    said.skipped = done.returncode == SKIPPED
-    return done.returncode == 0, said
-
-
-def argv_for(extra):
-    """
-    What a mutation's check is handed: "saves" means the save folder,
-    "saves-and-mod" the folder and the mod (the real campaign, for the checks
-    that run it only when given both), and "one-save" the first save in it,
-    for the checks that damage a copy of one -- handed with a round count of
-    one, because each round is a save read twice over.
-    """
-    if extra == "saves":
-        return (SAVES,)
-    if extra == "saves-and-mod":
-        return (SAVES, "--mod", MOD) if SAVES and MOD else ()
-    if extra == "one-save":
-        first = next((f for f in sorted(os.listdir(SAVES))
-                      if f.endswith(".v2")), "") if SAVES else ""
-        return (os.path.join(SAVES, first), "1")
-    return tuple(extra)
-
-
-# --- the mutations -------------------------------------------------------
-# Each: (name, what bug is being put back, which check should catch it,
-#        a function that applies it)
-
-MUTATIONS = []
-
-
-def mutation(name, bug, catcher, args=()):
-    """args may be "saves" to mean "hand this check the save folder"."""
-    def wrap(fn):
-        MUTATIONS.append((name, bug, catcher, args, fn))
-        return fn
-    return wrap
-
-
-# ---- the window, the keeper, publishing and the fixtures, which stay Python
-
-@mutation("window-shows-refusal-as-traceback",
-          "the window does not catch a refused run, so the sentence the "
-          "analyzer refused it with reaches the log as a traceback",
-          "window.py", "saves")
-def m54():
-    patch("gui.py", "        except RunError as refused:\n",
-          "        except ZeroDivisionError as refused:\n")
-
-
-# ---- the event-flag rule, which the keeper and --cross each had a copy of
-
-
-@mutation("flag-gap-too-wide",
-          "the flag gap that tells two games apart is ten times too wide, so "
-          "a second game joins the first", "histories.py")
-def m50():
-    patch("savehead.py", "FLAG_GAP = 6\n", "FLAG_GAP = 60\n")
-
-
-@mutation("keeper-ignores-flag-gap",
-          "the keeper files a save with the campaign whatever its flags say",
-          "histories.py")
-def m51():
-    patch("keeper.py", "        elif gap < FLAG_GAP:\n", "        elif True:\n")
-
-
-@mutation("analyze-erases-share-settings",
-          "remembering the window's paths writes them as the whole settings "
-          "file, erasing the GitHub token and the report host", "window.py",
-          "saves")
-def m35():
-    patch("settings.py", "    held = load(path)\n", "    held = {}\n")
-
-
-@mutation("refused-token-kept",
-          "a token GitHub refuses stays held and is handed back on every press",
-          "sharing.py")
-def m36():
-    patch("app.py", "            settings.remember(github_token=None)\n", "")
-
-
-# ---- a mod file named in other case was read beside the game's
-
-
-@mutation("scanner-opens-console-window",
-          "on Windows the window starts the scanner without CREATE_NO_WINDOW, "
-          "so the windowed executable flashes a console window per run",
-          "packing.py")
-def m38():
-    patch("vic2_analyzer.py", "            status = _relayed(argv, fastscan._no_window(), hosted)",
-          "            status = _relayed(argv, 0, hosted)")
-
-
-# ---- a name out of a save ran as script in the report
-
-
-@mutation("war-infobox-throws",
-          "the infobox a war opens into throws, where no check had ever "
-          "opened a war", "boots.py", ("--hostile",))
-def m56():
-    patch("template.py", "  const opening = warOpening(w);\n",
-          "  const opening = warOpening(w.unset.start);\n")
-
-
-# ---- casualties credited to the nation leading each battle, as its own
-
-
-@mutation("war-casualties-by-nation",
-          "the infobox lists what each nation lost, summed from the battles it "
-          "led, which credits an ally's dead to whoever led the army",
-          "war_legacy_ui.py")
-def m106():
-    patch("template.py",
-          "  const column = side => `<div class=\"ibtotal\"><div class=\"ibwho\">Total</div>`\n",
-          "  const by = {1: new Map(), '-1': new Map()};\n"
-          "  for (const b of w.battles) sides.battle(b).forEach((m, k) => {\n"
-          "    const s = k ? b.d : b.a;\n"
-          "    if (m) by[m].set(s[0], (by[m].get(s[0]) || 0) + s[2]);\n"
-          "  });\n"
-          "  const column = side => [...by[side]].map(([t, n]) => `<div class=\"ibnat\">${ibFlag(t)}`\n"
-          "      + `<div class=\"ibwho\">${nameOf(t)}</div><span class=\"ibnum\">${n}</span></div>`).join('')\n"
-          "    + `<div class=\"ibtotal\"><div class=\"ibwho\">Total</div>`\n")
-
-
-@mutation("legacy-losses-by-country",
-          "the legacy layout's country tables have the old window's Losses "
-          "column back, each nation's losses summed from the battles it led",
-          "war_legacy_ui.py")
-def m107():
-    patch("template.py", "    + `<th class=\"num\">Ended</th></tr></thead><tbody>`\n",
-          "    + `<th class=\"num\">Ended</th><th class=\"num\">Losses</th></tr></thead><tbody>`\n")
-    patch("template.py",
-          "        + `<td class=\"num\">${p.joined || '—'}</td><td class=\"num\">${ended(p)}</td></tr>`)\n",
-          "        + `<td class=\"num\">${p.joined || '—'}</td><td class=\"num\">${ended(p)}</td>`\n"
-          "        + `<td class=\"num\">${w.battles.reduce((n, b) => n + (b.a[0] === p.tag ? b.a[2] : 0)\n"
-          "            + (b.d[0] === p.tag ? b.d[2] : 0), 0).toLocaleString()}</td></tr>`)\n")
-
-
-@mutation("legacy-side-totals-swapped",
-          "the legacy layout puts the defenders' losses in the attackers' panel "
-          "and theirs in the defenders'",
-          "war_legacy_ui.py")
-def m108():
-    patch("template.py", "    + legacySide(w, 'attacker', lost, 1)\n",
-          "    + legacySide(w, 'attacker', lost, -1)\n")
-    patch("template.py", "    + legacySide(w, 'defender', lost, -1)\n",
-          "    + legacySide(w, 'defender', lost, 1)\n")
-
-
-@mutation("legacy-layout-forgotten",
-          "the layout chosen for one war is not kept for the next one opened",
-          "war_legacy_ui.py")
-def m109():
-    patch("template.py", "document.getElementById('warback').onclick = () => {\n",
-          "document.getElementById('warback').onclick = () => {\n  warView = 'infobox';\n")
-
-
-# ---- publishing: the token followed redirects, and failures came out raw
-
-
-@mutation("token-follows-redirect",
-          "a redirect to another address is handed the GitHub token",
-          "sharing.py")
-def m40():
-    patch("publish.py",
-          "        with _OPENER.open(request, timeout=TIMEOUT) as answer:",
-          "        with urllib.request.urlopen(request, timeout=TIMEOUT) as answer:")
-
-
-@mutation("publish-stall-raw",
-          "GitHub stalling mid-answer raises a bare TimeoutError, not a sentence",
-          "sharing.py")
-def m41():
-    patch("publish.py",
-          "    except (OSError, http.client.HTTPException) as err:\n"
-          "        # Once connected",
-          "    except ZeroDivisionError as err:\n        # Once connected")
-
-
-# ---- the keeper's "Open the folder" worked on Windows alone
-
-
-@mutation("keeper-folder-windows-only",
-          "the keeper's Open the folder calls os.startfile, which exists only "
-          "on Windows", "window.py", "saves")
-def m42():
-    patch("keeper_gui.py",
-          "            keeper.open_with_system(where)\n        except OSError as err:",
-          "            os.startfile(where)\n        except (OSError, AttributeError) as err:")
-
-
-# ---- the mod cache key, written by hand, the way the parse key went wrong
-
-
-@mutation("stamp-leaves-out-min-pop",
-          "--min-pop is declared as not changing the report, so a run that "
-          "changes it is answered with the old one", "staleness.py")
-def m44():
-    # REVIEW.md §25, in the form it can take now: the declaration is wrong
-    # rather than a list. Taken off the old hand-written list it passed
-    # every check there was.
-    patch("run.py", "    min_pop: int = _setting(0, report=True)",
-          "    min_pop: int = _setting(0, report=False)")
-
-
-@mutation("relay-progress-lost",
-          "the window's relay passes @progress on as text instead of moving the bar",
-          "engine_runtime.py")
-def m68():
-    patch("vic2_analyzer.py", '                    if word == "@progress":',
-          '                    if word == "@progresss":')
-
-
-@mutation("fixture-writes-through-link",
-          "a test fixture truncates a real file through a symlink", "engine_runtime.py")
-def m69():
-    patch("testkit/matching.py", "        if _linked(check):",
-          "        if False:")
-
-
-@mutation("stop-leaves-scanner-running",
-          "Stop raises in the window but leaves the scanner reading",
-          "engine_runtime.py")
-def m70():
-    patch("vic2_analyzer.py", "        if proc.poll() is None:\n            proc.kill()\n", "")
-
-
-# ---- what the Python fallback was held to, put back into the Rust that
-# ---- does it now: --cross and the report reading a campaign the same way
-
-@mutation("cross-min-pop", "the filter silently raises --min-pop to 1", "crossrows.py")
-def r1():
-    patch("scanner/src/engine/finish.rs", "        wanted && nat.total_pop >= self.min_pop\n",
-          "        wanted && nat.total_pop >= self.min_pop.max(1)\n")
-
-
-@mutation("cross-player-nations-unread", "--player-nations goes unread", "crossrows.py")
-def r2():
-    patch("scanner/src/engine/finish.rs",
-          "    if let Some(t) = told {\n        return t.iter().cloned().collect();\n    }\n", "")
-
-
-@mutation("cross-player-ignores-save", "the save's own player= marker goes unread",
-          "crossrows.py")
-def r3():
-    patch("scanner/src/engine/finish.rs", "    if !meta.player.is_empty() {", "    if false {")
-
-
-@mutation("mod-overrides-explicit-default",
-          "asking for the vanilla regiment size reads as asking for nothing", "crossrows.py")
-def r4():
-    patch("scanner/src/front/mod.rs", "    let pop_per_regiment = match args.pop_per_regiment {",
-          "    let pop_per_regiment = match args.pop_per_regiment"
-          ".filter(|n| *n != POP_SIZE_PER_REGIMENT) {")
-
-
-@mutation("cross-regiment-size", "the mod's POP_SIZE_PER_REGIMENT is ignored", "crossrows.py")
-def r5():
-    patch("scanner/src/front/mod.rs",
-          "            Some(v) if v.is_finite() && v.abs() < 9.0e18 => v.trunc() as i64,",
-          "            Some(v) if v.is_finite() && v.abs() < 9.0e18 => POP_SIZE_PER_REGIMENT,")
-
-
-@mutation("cross-mob-types", "the mod's pop list overrides --mob-types instead of deferring",
-          "crossrows.py")
-def r6():
-    patch("scanner/src/front/mod.rs",
-          "    let mob_types: Vec<String> = match &args.mob_types {\n        Some(t) => t.clone(),\n"
-          "        None => {",
-          "    let mob_types: Vec<String> = match &args.mob_types {\n        _ => {")
-
-
-# ---- who is at war, and the diagnostic that explains the rate
-
-@mutation("at-war-from-joins",
-          "war = yes is answered from the history's joins, which keep a nation "
-          "that made peace and miss one put into the war by hand", "mobrate.py")
-def r7():
-    patch("scanner/src/engine/rules.rs", "        if !war.fighting.is_empty() {",
-          "        if false {")
-
-
-@mutation("explain-without-wars",
-          "the save kept for the diagnostics loses its wars, so --explain-mob "
-          "explains a rate without the war modifiers in it", "mobrate.py")
-def r8():
-    patch("scanner/src/engine/explain.rs", "    let world = rules::save_world(meta, m);",
-          "    let world = rules::save_world(&crate::engine::model::Meta "
-          "{ wars: Vec::new(), ..meta.clone() }, m);", count=0)
-
-
-# ---- the stamp, and what a run that does not finish leaves
-
-@mutation("cross-stamp-primary-only",
-          "the --cross stamp covers only the largest campaign, so a new save "
-          "in another is answered with the old report", "staleness.py")
-def r9():
-    patch("scanner/src/front/cross.rs",
-          "    let read: Vec<&Surveyed> = found.iter().filter(|e| e.mod_path.is_some()).collect();",
-          "    let read: Vec<&Surveyed> = found.iter().max_by_key(|e| e.files.len())"
-          ".into_iter().collect();")
-
-
-@mutation("stamp-outlives-unfinished-run",
-          "the stamp is not taken away before the files it describes are "
-          "rewritten, so a run that dies -- or --no-html -- leaves it vouching "
-          "for files it never saw", "staleness.py")
-def r10():
-    patch("scanner/src/front/mod.rs", "        forget_stamp(&args.out);\n", "")
-
-
-@mutation("locked-table-not-refused",
-          "a table open in Excel is not refused in a sentence", "frontcheck.py")
-def r11():
-    patch("scanner/src/engine/report.rs",
-          "            Err(e) if held_elsewhere(&e) => refused.push(shown),",
-          "            Err(e) if false && held_elsewhere(&e) => refused.push(shown),")
-
-
-@mutation("stamp-ignores-a-setting",
-          "the stamp leaves --min-pop out of the settings it hashes", "staleness.py")
-def r15():
-    patch("scanner/src/front/mod.rs", '        ("min_pop", J::Int(args.min_pop)),\n', "")
-
-
-@mutation("empty-table-left-stale",
-          "a table with nothing in it this run is not written, so the last "
-          "run's copy stays in the folder", "staleness.py")
-def r13():
-    patch("scanner/src/engine/report.rs", "    for (k, name, cols) in order {\n",
-          "    for (k, name, cols) in order {\n"
-          "        if k > 0 && k < 100 && c.text[k].iter().all(|s| s.is_empty()) { continue; }\n")
-
-
-# ---- the edges a campaign has
-
-@mutation("goal-judged-before-first-save",
-          "a war that ended before the first save has its goal judged by "
-          "that save against itself, and reads 'none taken'", "edges.py")
-def r12():
-    patch("scanner/src/engine/wars.rs",
-          "        if !end.is_empty() && !ledger_dates.is_empty()\n"
-          "            && ledger_dates[0] >= year_fraction(names::text(end)) {",
-          "        if false {")
-
-
-@mutation("same-date-read-twice",
-          "two saves with the same in-game date are both read, doubling "
-          "their rows in every table while the report shows one", "edges.py")
-def r14():
-    patch("scanner/src/front/mod.rs",
-          "            *kept.last_mut().unwrap() = path;\n            continue;\n",
-          "            kept.push(path);\n            keys.push(key);\n            continue;\n")
-
-
-@mutation("run-never-pairs-a-game",
-          "the run takes --mod-path and --game-root as given, unchecked", "edges.py")
-def r28():
-    patch("scanner/src/front/mod.rs",
-          "        let (mod_path, game) = settle_game(args.mod_path.as_deref(), args.game_root.as_deref())?;",
-          "        let (mod_path, game) = (args.mod_path.clone().or(args.game_root.clone())"
-          ".unwrap_or_default(), args.game_root.clone().unwrap_or_default());")
-
-
-@mutation("cut-save-read-as-whole",
-          "a save that stops part-way through is read as if it were whole",
-          "mangled.py")
-def r16():
-    patch("scanner/src/engine/mod.rs", "    if end.map(|i| tail[i]) != Some(b'}') {",
-          "    if false {")
-
-
-@mutation("naval-base-int-becomes-float",
-          "a nation with no naval base carries 0.0 where the table wrote 0",
-          "saveshapes.py")
-def r17():
-    patch("scanner/src/engine/model.rs", "    if n.naval_base_levels != 0.0 {", "    if true {")
-
-
-@mutation("name-runs-as-script",
-          "a war named <img onerror=...> runs its script when the report's "
-          "Wars tab draws", "boots.py", ("--hostile",))
-def r27():
-    patch("scanner/src/engine/finish.rs", "    if !s.contains(['<', '>']) {", "    if true {")
-
-
-# ---- the state chunk's compressor, level 5, and the stream it makes
-
-
-@mutation("chunk-stream-cut",
-          "a save's state-history chunk loses the first byte of its gzip "
-          "stream, so the page's chunk does not decompress", "enginecheck.py",
-          "saves-and-mod")
-def m58():
-    patch("scanner/src/engine/finish.rs",
-          "deflate::gzip_level(raw.as_bytes(), &deflate::LEVEL5))",
-          "deflate::gzip_level(raw.as_bytes(), &deflate::LEVEL5)[1..])")
-
-
-@mutation("level-five-stream-cut",
-          "the level-5 compressor's stream loses its first byte, so it no "
-          "longer decompresses", "enginecompress.py",
-          (os.path.join("scanner", "target", "release",
-                        "vic2scan" + (".exe" if os.name == "nt" else "")),))
-def m59():
-    patch("scanner/src/deflate.rs", '"gz5" => gzip_level(&data, &LEVEL5),',
-          '"gz5" => gzip_level(&data, &LEVEL5)[1..].to_vec(),')
-
-
-# ---- what the engine keeps between runs
-
-@mutation("save-key-drops-reading",
-          "a kept save is keyed without what it was read for, so a run asking "
-          "for other pop types is served the last run's reading", "caching.py")
-def r18():
-    patch("scanner/src/engine/cache.rs", "                     self.version, context))",
-          "                     self.version, \"\"))")
-
-
-@mutation("save-key-drops-time",
-          "a kept save is keyed by its size alone, so a save rewritten to the "
-          "same size is served from the old read", "caching.py")
-def r19():
-    patch("scanner/src/engine/cache.rs", "full.to_string_lossy(), meta.len(), mtime,",
-          "full.to_string_lossy(), meta.len(), 0,")
-
-
-# ---- the map's province bitmap
-
-@mutation("raster-runs-merged-by-colour",
-          "two colours naming one province, or a run carrying into the next "
-          "row, ship as two runs where the map had one", "raster.py")
-def r20():
-    patch("scanner/src/engine/mapflags.rs", "            if Some(pid) == last {",
-          "            if false {")
-
-
-@mutation("raster-red-channel-dropped",
-          "the bitmap is read without its red channel, so provinces told "
-          "apart only by red come out as one", "raster.py")
-def r21():
-    patch("scanner/src/engine/mapflags.rs",
-          "row[at] as u32 | (row[at + 1] as u32) << 8 | (row[at + 2] as u32) << 16",
-          "row[at] as u32 | (row[at + 1] as u32) << 8")
-
-
-@mutation("raster-samples-wrong-rows",
-          "a scaled map samples every row instead of every scale-th", "raster.py")
-def r22():
-    patch("scanner/src/engine/mapflags.rs", "offset + (oy * scale * stride) as u64",
-          "offset + (oy * stride) as u64")
-
-
-@mutation("raster-text-miscounted",
-          "the map's runs are spelled with every count one short", "raster.py")
-def r23():
-    patch("scanner/src/engine/mapflags.rs", "            b36(*c, &mut out);",
-          "            b36(*c - 1, &mut out);")
-
-
-@mutation("anchor-nearer-column-skipped",
-          "a province's anchor measures only the column left of its middle",
-          "raster.py")
-def r24():
-    patch("scanner/src/engine/mapflags.rs", "vec![left, (left + 1).min(x1)]", "vec![left]")
-
-
-@mutation("anchor-sum-of-first-columns",
-          "a stretch of a row counts only its first column toward the "
-          "province's middle", "raster.py")
-def r25():
-    patch("scanner/src/engine/mapflags.rs", "        t[0] += ((x0 + x1) * n).div_euclid(2);",
-          "        t[0] += x0 * n;")
-
-
-@mutation("anchor-run-not-split-at-row-end",
-          "a run carrying into the next row is measured as one stretch "
-          "running off the edge of the map", "raster.py")
-def r26():
-    patch("scanner/src/engine/mapflags.rs", "let x1 = width.min(x0 + end - at) - 1;",
-          "let x1 = x0 + end - at - 1;")
-
-
-# ---- the engine's mod reader, which is Rust held to mod_reader.py
-
-@mutation("modread-ascii-words",
-          "the pattern matcher's \\w takes ASCII only, where Python's takes the "
-          "latin-1 letters too", "modread.py", ("--rounds", "40"))
-def m71():
-    patch("scanner/src/pyre.rs",
-          "        | 0xb9 | 0xba | 0xbc..=0xbe | 0xc0..=0xd6 | 0xd8..=0xf6 | 0xf8..=0xff)",
-          "        | 0xb9 | 0xba | 0xbc..=0xbe)")
-
-
-@mutation("modread-lazy-is-greedy",
-          "a lazy repeat is tried longest first", "modread.py", ("--rounds", "40"))
-def m72():
-    patch("scanner/src/pyre.rs", "                            for c in *min..=run {",
-          "                            for c in (*min..=run).rev() {")
-
-
-@mutation("modread-file-case-counted-twice",
-          "the Rust reads a mod's Army_Tech.txt beside the game's army_tech.txt",
-          "modread.py", ("--rounds", "40"))
-def m73():
-    patch("scanner/src/engine/modread.rs",
-          "                chosen.set(lower(&name), (name, full));",
-          "                chosen.set(name.clone(), (name, full));")
-
-
-@mutation("modread-no-underscores",
-          "the Rust's float() refuses 1_000, which Python reads as a thousand",
-          "modread.py", ("--rounds", "40"))
-def m74():
-    patch("scanner/src/engine/modread.rs",
-          "    let t = no_underscores(num_trim(s))?;",
-          "    let t = num_trim(s).to_vec();")
-
-
-@mutation("modread-block-name-empty",
-          "a block where a flag type belongs reads as nothing, where Python "
-          "keeps its repr", "modread.py", ("--rounds", "40"))
-def m75():
-    patch("scanner/src/engine/modread.rs",
-          "                Some(v) => unquote(unquote(&str_of(v))).to_vec(),",
-          "                Some(V::Str(v)) => unquote(v).to_vec(),\n"
-          "                Some(_) => Vec::new(),")
-
-
-@mutation("modread-ellipsis-is-space",
-          "the localisation's 0x85 is stripped as a space, where Windows-1252 "
-          "makes it an ellipsis", "modread.py", ("--rounds", "40"))
-def m76():
-    patch("scanner/src/engine/modread.rs",
-          "    let sp = |c: u8| matches!(c, 0x09..=0x0d | 0x1c..=0x20 | 0xa0);",
-          "    let sp = |c: u8| matches!(c, 0x09..=0x0d | 0x1c..=0x20 | 0x85 | 0xa0);")
-
-
-@mutation("modread-last-name-wins",
-          "a name defined twice in the localisation takes the later one",
-          "modread.py", ("--rounds", "40"))
-def m77():
-    patch("scanner/src/engine/modread.rs",
-          "            if wanted.contains(&l.key) && !out.contains_key(&l.key) {",
-          "            if wanted.contains(&l.key) {")
-
-
-@mutation("modread-kept-copy-unsigned",
-          "the engine keeps its read of a mod without the mod's signature in "
-          "the key, so an edited mod is served from the old read",
-          "modread.py", ("--rounds", "1"))
-def m78():
-    patch("scanner/src/engine/cache.rs",
-          '    let key = format!("mod|{}|{}|{}", path, signature, store.version);',
-          '    let key = format!("mod|{}|{}|{}", path, signature.len() * 0, store.version);')
-
-
-# ---- the run's front end in Rust, held to the Python's
-
-@mutation("front-stamp-ignores-settings",
-          "the Rust's report stamp leaves the settings out, so a changed "
-          "--min-pop is answered with the old report", "frontcheck.py")
-def m79():
-    patch("scanner/src/front/mod.rs", "    digest.update(settings.as_bytes());\n", "")
-
-
-@mutation("front-keeps-first-of-a-date",
-          "two saves of one date keep the first-named rather than the later",
-          "frontcheck.py")
-def m80():
-    patch("scanner/src/front/mod.rs", "            *kept.last_mut().unwrap() = path;\n", "")
-
-
-@mutation("front-no-expandvars",
-          "$VAR in a path is taken literally", "frontcheck.py")
-def m81():
-    patch("scanner/src/front/mod.rs",
-          "    let saves_path = pypath::expanduser(&pypath::expandvars(&args.saves));",
-          "    let saves_path = pypath::expanduser(&args.saves);")
-
-
-@mutation("walk-navy-not-entered",
-          "a save laid out another way loses the ships and embarked armies "
-          "inside its navies", "frontcheck.py")
-def m82():
-    patch("scanner/src/engine/walk.rs",
-          '        } else if key == b"army" || key == b"navy" {',
-          '        } else if key == b"army" {')
-
-
-@mutation("walk-colonies-ignored",
-          "a save laid out another way reads no state as colonial",
-          "frontcheck.py")
-def m83():
-    patch("scanner/src/engine/walk.rs",
-          '                        let colonial = get(&block, b"is_colonial").is_some();',
-          '                        let colonial = false;')
-
-
-@mutation("cross-last-fit-wins",
-          "of the mods that fit a campaign, the one it leaves most unused wins",
-          "frontcheck.py")
-def m84():
-    patch("scanner/src/front/cross.rs",
-          "    fits.sort_by(|a, b| a.partial_cmp(b).unwrap());\n    let (_r, label, root) = fits.remove(0);",
-          "    fits.sort_by(|a, b| a.partial_cmp(b).unwrap());\n    let (_r, label, root) = fits.pop().unwrap();")
-
-
-@mutation("cross-flags-never-break",
-          "a save from another game is never named, however many event flags it lacks",
-          "frontcheck.py")
-def m85():
-    patch("scanner/src/front/cross.rs", "        if worst >= 6 {", "        if worst >= 600 {")
-
-
-@mutation("market-snapshot-goods-by-id",
-          "the market snapshot's goods come out in the order the run met their "
-          "names, not by name",
-          "enginecheck.py", "saves-and-mod")
-def m86():
-    patch("scanner/src/names.rs", "/// Order by what the names say",
-          "pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say")
-    patch("scanner/src/engine/market.rs",
-          "        goods.sort_by(|a, b| names::cmp(*a, *b));\n        let get",
-          "        goods.sort_by_key(|g| names::id(*g));\n        let get")
-
-
-@mutation("market-prices-goods-by-id",
-          "a day's prices come out in the order the run met the goods' names, "
-          "not by name",
-          "enginecheck.py", "saves-and-mod")
-def m87():
-    patch("scanner/src/names.rs", "/// Order by what the names say",
-          "pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say")
-    patch("scanner/src/engine/market.rs",
-          "        goods.sort_by(|a, b| names::cmp(*a, *b));\n        for good in goods {",
-          "        goods.sort_by_key(|g| names::id(*g));\n        for good in goods {")
-
-
-@mutation("war-side-units-reversed",
-          "a battle's unit kinds are listed in the opposite order to the file's, "
-          "which shows where two kinds have as many men",
-          "enginecheck.py", "saves-and-mod")
-def m88():
-    patch("scanner/src/engine/wars.rs",
-          "    let mut v: Vec<(&Sym, &i64)> = s.units.iter().collect();\n",
-          "    let mut v: Vec<(&Sym, &i64)> = s.units.iter().collect();\n    v.reverse();\n")
-
-
-@mutation("war-battles-reversed",
-          "a war's battles are held in the opposite order to the file's, which "
-          "shows where two battles share a date and a name",
-          "enginecheck.py", "saves-and-mod")
-def m89():
-    patch("scanner/src/engine/wars.rs",
-          "        let mut battles: Vec<&Battle> = war.battles.values().collect();\n",
-          "        let mut battles: Vec<&Battle> = war.battles.values().collect();\n"
-          "        battles.reverse();\n")
-
-
-@mutation("culture-ties-broken-by-name",
-          "two cultures of the same size are listed alphabetically, not in the "
-          "order the save first named them",
-          "enginecheck.py", "saves-and-mod")
-def m90():
-    patch("scanner/src/engine/finish.rs",
-          "        cultures.sort_by(|a, b| b.1.cmp(a.1));\n",
-          "        cultures.sort_by(|a, b| b.1.cmp(a.1).then(names::cmp(*a.0, *b.0)));\n")
-
-
-@mutation("group-types-reversed",
-          "a state's pop types are numbered in the opposite order to the one the "
-          "save met them in, so the state chunk's words and layouts change",
-          "enginecheck.py", "saves-and-mod")
-def m91():
-    patch("scanner/src/engine/model.rs",
-          "Group { group: *group, size: st.total, literate: st.literate, types: pairs(&st.types),",
-          "Group { group: *group, size: st.total, literate: st.literate, "
-          "types: { let mut v = pairs(&st.types); v.reverse(); v },")
-
-
-@mutation("techs-ordered-by-name-number",
-          "a nation's technologies are written in the order their names were first met "
-          "in the run, not alphabetically, so technologies.csv and the page's lists change",
-          "enginecheck.py", "saves-and-mod")
-def m92():
-    patch("scanner/src/engine/finish.rs",
-          "        techs.sort_by(|a, b| names::cmp(*a, *b));\n",
-          "        techs.sort_by_key(|t| t.index());\n")
-
-
-@mutation("reform-mob-key-swapped",
-          "a reform's mobilisation size is looked up with the option and the reform the "
-          "wrong way round, so no reform grants any",
-          "enginecheck.py", "saves-and-mod")
-def m93():
-    patch("scanner/src/engine/rules.rs",
-          "        let v = d.reform_mob(*reform, *option);\n",
-          "        let v = d.reform_mob(*option, *reform);\n")
-
-
-@mutation("national-value-ignored",
-          "a nation's national value grants no mobilisation size",
-          "enginecheck.py", "saves-and-mod")
-def m94():
-    patch("scanner/src/engine/rules.rs",
-          "    let v = d.nv_mob(nat.nationalvalue);\n",
-          "    let v = 0.0 * d.nv_mob(nat.nationalvalue);\n")
-
-
-@mutation("modifier-impacts-ignored",
-          "a nation's event modifiers add nothing to its mobilisation cap",
-          "enginecheck.py", "saves-and-mod")
-def m95():
-    patch("scanner/src/engine/rules.rs",
-          "        total += d.modifier_impact(*name);\n",
-          "        total += 0.0 * d.modifier_impact(*name);\n")
-
-
-@mutation("techs-without-branch",
-          "every technology is filed under 'other' in technologies.csv and the page",
-          "enginecheck.py", "saves-and-mod")
-def m96():
-    patch("scanner/src/engine/finish.rs",
-          "dense.tech_group(*tech).unwrap_or((\"other\", \"Other\"))",
-          "dense.tech_group(*tech).filter(|_| false).unwrap_or((\"other\", \"Other\"))")
-
-
-@mutation("cross-names-never-built",
-          "a --cross run has no government names for its nations, so every label is the tag",
-          "enginecheck.py", "saves-and-mod")
-def m97():
-    patch("scanner/src/engine/mod.rs",
-          "    let held_names: Vec<(String, String)> = if run.cross_part {",
-          "    let held_names: Vec<(String, String)> = if false && run.cross_part {")
-
-
-@mutation("row-facts-pop-types-dropped",
-          "the pop_<type> columns of the main table read nought, as if the row had kept no "
-          "pop types",
-          "enginecheck.py", "saves-and-mod")
-def m98():
-    patch("scanner/src/engine/finish.rs",
-          "            pop_by_type: std::mem::take(&mut nat.pop_by_type),\n",
-          "            pop_by_type: OMap::new(),\n")
-
-
-@mutation("kept-units-left-behind",
-          "a kept nation's units are not carried to the page, so no army is drawn",
-          "enginecheck.py", "saves-and-mod")
-def m99():
-    patch("scanner/src/engine/finish.rs",
-          "        units_at: std::mem::take(&mut nat.units_at),\n",
-          "        units_at: Vec::new(),\n")
-
-
-@mutation("invention-trigger-inverted",
-          "a trigger that asks whether a nation holds an invention is answered the other way",
-          "enginecheck.py", "saves-and-mod")
-def m100():
-    patch("scanner/src/engine/rules.rs",
-          ".as_ref().map(|held| held.contains(text)));",
-          ".as_ref().map(|held| !held.contains(text)));")
-
-
-@mutation("army-kinds-tie-reversed",
-          "two kinds with as many regiments in a province change places on the page's "
-          "armies, as if the province's kinds were read last first",
-          "enginecheck.py", "saves-and-mod")
-def m101():
-    patch("scanner/src/engine/report.rs",
-          "                let mut ranked: Vec<&Stack> = types.iter().collect();",
-          "                let mut ranked: Vec<&Stack> = types.iter().rev().collect();")
-
-
-@mutation("army-provinces-reversed",
-          "a nation's armies come out on the page with its provinces in the order "
-          "last met first",
-          "enginecheck.py", "saves-and-mod")
-def m102():
-    patch("scanner/src/country.rs",
-          "        None => {\n            stacks.push(stack);\n            return;\n        }",
-          "        None => {\n            stacks.insert(0, stack);\n            return;\n        }")
-
-
-@mutation("ship-types-by-id",
-          "ships_by_type.csv lists a nation's ships in the order the run met the "
-          "names, not by name",
-          "enginecheck.py", "saves-and-mod")
-def m103():
-    patch("scanner/src/names.rs", "/// Order by what the names say",
-          "pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say")
-    patch("scanner/src/engine/finish.rs",
-          "        ship_types.sort_by(|a, b| names::cmp(a.kind, b.kind));",
-          "        ship_types.sort_by_key(|s| names::id(s.kind));")
-
-
-@mutation("regiment-types-by-id",
-          "brigades_by_type.csv lists a nation's regiments in the order the run met "
-          "the names, not by name",
-          "enginecheck.py", "saves-and-mod")
-def m104():
-    patch("scanner/src/names.rs", "/// Order by what the names say",
-          "pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say")
-    patch("scanner/src/engine/finish.rs",
-          "        regiments.sort_by(|a, b| names::cmp(a.0, b.0));",
-          "        regiments.sort_by_key(|r| names::id(r.0));")
-
-
-@mutation("ship-crew-dropped",
-          "a ship's crew is not counted, so every fleet reads as crewed by its hull count",
-          "enginecheck.py", "saves-and-mod")
-def m105():
-    patch("scanner/src/engine/finish.rs",
-          "            let effective = Num::F(round(ship.crew, 3));",
-          "            let effective = Num::I(ship.count);")
+def remove_tree(path):
+    """Delete a folder whose build output nests past Windows' 260-character
+    limit, which plain deletion fails on."""
+    if os.name == "nt":
+        path = "\\\\?\\" + os.path.abspath(path)
+    shutil.rmtree(path, ignore_errors=True)
+
+
+class Worktree:
+    """A worktree of HEAD in the temp folder, with the built scanner in it,
+    removed again however the run ends."""
+
+    def __init__(self, need_scanner=True):
+        self.need_scanner = need_scanner
+        self.path = None
+
+    def __enter__(self):
+        built = os.path.join(ROOT, SCANNER)
+        if self.need_scanner and not os.path.isfile(built):
+            raise SystemExit("no scanner built at %s, so every run would be refused. "
+                             "Build it: cargo build --release --manifest-path "
+                             "scanner/Cargo.toml" % SCANNER)
+        self.path = tempfile.mkdtemp(prefix="vm")
+        os.rmdir(self.path)
+        subprocess.run(["git", "worktree", "add", "-q", "--detach", self.path, "HEAD"],
+                       cwd=ROOT, check=True)
+        if self.need_scanner:
+            target = os.path.join(self.path, SCANNER)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copy2(built, target)
+        return self.path
+
+    def __exit__(self, *exc):
+        done = subprocess.run(["git", "worktree", "remove", "--force", self.path],
+                              cwd=ROOT, capture_output=True)
+        if done.returncode or os.path.exists(self.path):
+            remove_tree(self.path)
+        subprocess.run(["git", "worktree", "prune"], cwd=ROOT)
+
+
+# ------------------------------------------------------------ the checks
+
+def kill_tree(proc):
+    """The check and everything it started: a hung scanner would otherwise
+    hold the binary that has to be put back."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                       capture_output=True)
+    else:
+        os.killpg(proc.pid, signal.SIGKILL)
+
+
+def check(tree, script, argv, timeout):
+    """Run one check in the tree. An Outcome, never an exception."""
+    proc = subprocess.Popen([sys.executable, os.path.join("testkit", script)] + list(argv),
+                            cwd=tree, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, encoding="utf-8", errors="replace",
+                            start_new_session=os.name != "nt")
+    try:
+        out, _ = proc.communicate(timeout=timeout)
+        return Outcome(proc.returncode, False, out)
+    except subprocess.TimeoutExpired:
+        kill_tree(proc)
+        out, _ = proc.communicate()
+        return Outcome(None, True, (out or "") + "\n(timed out after %d s)" % timeout)
+
+
+def argv_for(needs, saves, mod, baseline):
+    """What a catcher is handed, or a sentence saying which input is missing."""
+    argv = []
+    for need in needs:
+        if need == "saves":
+            if not saves:
+                return "needs --saves"
+            argv.append(saves)
+        elif need == "mod":
+            if not mod:
+                return "needs --mod"
+            argv += ["--mod", mod]
+        elif need == "baseline":
+            if not baseline:
+                return "needs --baseline or $VIC2_BASELINE"
+            argv += ["--from", baseline]
+        elif need == "one-save":
+            first = next((f for f in sorted(os.listdir(saves)) if f.endswith(".v2")),
+                         "") if saves else ""
+            if not first:
+                return "needs --saves with a save in it"
+            argv += [os.path.join(saves, first), "1"]
+        else:
+            argv.append(need)
+    return argv
+
+
+def tail(text, lines=25):
+    return "\n".join("      " + l for l in text.rstrip().splitlines()[-lines:])
 
 
 def main():
-    global TREE, SAVES, MOD
     ap = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])
     ap.add_argument("names", nargs="*", help="only these mutations")
-    ap.add_argument("--tree", required=True,
-                    help="a git worktree to mutate -- NOT your working tree")
-    ap.add_argument("--saves", default="",
-                    help="a folder of .v2 saves, for the checks that want one")
-    ap.add_argument("--mod", default="",
-                    help="the campaign's mod folder, for the checks that read both")
+    ap.add_argument("--saves", default="", help="a folder of .v2 saves")
+    ap.add_argument("--mod", default="", help="the campaign's mod folder")
+    ap.add_argument("--baseline", default=os.environ.get("VIC2_BASELINE", ""),
+                    help="a recorded baseline (default $VIC2_BASELINE)")
+    ap.add_argument("--timeout", type=int, default=120,
+                    help="seconds a check may take (default 120)")
+    ap.add_argument("--strict", action="store_true",
+                    help="fail on TIMEOUT, SKIPPED and UNTESTED too")
+    ap.add_argument("--dry", action="store_true",
+                    help="only apply and revert each mutation")
+    ap.add_argument("--list", action="store_true", help="list the mutations")
     args = ap.parse_args()
-    TREE = os.path.abspath(args.tree)
-    SAVES = args.saves
-    MOD = args.mod
-    if not os.path.isdir(os.path.join(TREE, "testkit")):
-        raise SystemExit("%s does not look like a checkout of this tree" % TREE)
-    dirty = subprocess.run(["git", "status", "--porcelain"], cwd=TREE,
-                           capture_output=True, text=True).stdout.strip()
-    if dirty:
-        raise SystemExit(
-            "%s has uncommitted changes. This reverts with `git checkout` "
-            "between mutations and would throw them away:\n%s" % (TREE, dirty))
-    scanner = "scanner/target/release/vic2scan" + (".exe" if sys.platform == "win32" else "")
-    if not os.path.exists(os.path.join(TREE, scanner)):
-        raise SystemExit("no scanner in %s, so every run would be refused. Copy "
-                         "%s in first." % (TREE, scanner))
-    chosen = [m for m in MUTATIONS if not args.names or m[0] in args.names]
-    # The scanner as committed, to put back after each bug put into it.
-    binary = os.path.join(TREE, scanner)
-    pristine = binary + ".pristine"
-    if os.path.exists(binary):
-        shutil.copyfile(binary, pristine)
-        shutil.copymode(binary, pristine)
 
-    # Every check first runs on the tree with no bug in it, and has to pass.
-    # A check that fails anyway fails for some reason of its own, and then
-    # failing with a bug in place says nothing about the bug. This harness
-    # reported five mutations "caught" that way: it handed `caching.py` the
-    # save folder as an argument, `unittest` read the folder as the name of
-    # a test, and every run failed on that before any test had been tried.
-    revert()
-    control = {}
-    for _name, _bug, catcher, extra, _fn in chosen:
-        if (catcher, extra) not in control:
-            control[(catcher, extra)] = check(catcher, argv_for(extra))
-    for (catcher, extra), (passed, out) in control.items():
-        if not passed:
-            print("CONTROL FAILED: %s %s %s, so its mutations are not "
-                  "tried:\n%s\n"
-                  % (catcher, " ".join(argv_for(extra)),
-                     "cannot all run on this machine" if out.skipped
-                     else "fails with no bug put back",
-                     "\n".join("      " + l for l in out.splitlines()[-25:])))
+    unknown = set(args.names) - {m.name for m in MUTATIONS}
+    if unknown:
+        raise SystemExit("no such mutation: %s" % ", ".join(sorted(unknown)))
+    chosen = [m for m in MUTATIONS if not args.names or m.name in args.names]
+    if args.list:
+        for m in chosen:
+            print("%-38s %-20s %s" % (m.name, m.catcher, " ".join(m.needs)))
+        return 0
 
-    print("%-34s %-10s %s" % ("MUTATION", "VERDICT", "BUG PUT BACK"))
-    print("-" * 100)
+    saves = os.path.abspath(args.saves) if args.saves else ""
+    mod = os.path.abspath(args.mod) if args.mod else ""
+    baseline = os.path.abspath(args.baseline) if args.baseline else ""
     results = []
-    for name, bug, catcher, extra, fn in chosen:
-        if not control[(catcher, extra)][0]:
-            print("%-34s %-10s %s  [%s]" % (name, "UNTESTED", bug, catcher))
-            results.append((name, "UNTESTED", bug, catcher, ""))
-            continue
-        revert()
-        try:
-            fn()
-        except SystemExit as e:
-            print("%-34s %-10s %s" % (name, "NOAPPLY", e))
-            results.append((name, "NOAPPLY", bug, catcher, ""))
-            continue
-        # A bug put back in the Rust is only there once it is built, and
-        # the scanner the other checks use is put back after.
-        rust = scanner_touched()
-        if rust:
-            built, said = build_scanner()
-            if not built:
-                print("%-34s %-10s %s" % (name, "NOAPPLY", "does not build:\n" + said))
-                results.append((name, "NOAPPLY", bug, catcher, ""))
-                revert()
-                put_back(pristine, binary)
-                continue
-        try:
-            passed, out = check(catcher, argv_for(extra))
-        except subprocess.TimeoutExpired:
-            passed, out = True, "TIMEOUT"
-        if rust:
-            revert()
-            put_back(pristine, binary)
-        verdict = "BLIND" if passed else "caught"
-        print("%-34s %-10s %s  [%s]" % (name, verdict, bug, catcher))
-        results.append((name, verdict, bug, catcher, out))
-    revert()
+    with Worktree(need_scanner=not args.dry) as tree:
+        if args.dry:
+            for m in chosen:
+                try:
+                    for p in m.patches:
+                        patch(tree, *p)
+                    got = Verdict.CAUGHT
+                except Unapplied as why:
+                    got = Verdict.NOAPPLY
+                    print("%-38s NOAPPLY  %s" % (m.name, why))
+                revert(tree)
+                results.append((m, got, ""))
+            bad = sum(1 for _m, v, _o in results if v is Verdict.NOAPPLY)
+            print("%d mutations: %d apply, %d do not" % (len(results), len(results) - bad, bad))
+            return 1 if bad else 0
+
+        binary = os.path.join(tree, SCANNER)
+        pristine = binary + ".pristine"
+        shutil.copy2(binary, pristine)
+
+        # Each check first runs on the tree without the bug, and has to
+        # hold there: failing anyway, its failing with the bug says nothing.
+        controls, unmet = {}, {}
+        for m in chosen:
+            key = (m.catcher, m.needs)
+            argv = argv_for(m.needs, saves, mod, baseline)
+            if isinstance(argv, str):
+                unmet[key] = argv
+            else:
+                controls[key] = argv
+        def control(key):
+            return key, check(tree, key[0], controls[key], args.timeout)
+        together = [k for k in controls if k[0] not in ALONE]
+        alone = [k for k in controls if k[0] in ALONE]
+        with ThreadPoolExecutor(4) as pool:
+            held = dict(pool.map(control, together))
+        held.update(map(control, alone))
+        for (catcher, needs), outcome in held.items():
+            if not holds(outcome):
+                print("CONTROL %s: %s %s, so its mutations are untested:\n%s\n"
+                      % ("TIMED OUT" if outcome.timed_out else
+                         "SKIPPED" if outcome.code == SKIPPED else "FAILED",
+                         catcher, " ".join(needs), tail(outcome.output)))
+
+        print("%-38s %-9s %s" % ("MUTATION", "VERDICT", "BUG PUT BACK"))
+        print("-" * 100)
+        for m in chosen:
+            key = (m.catcher, m.needs)
+            output = ""
+            if key in unmet:
+                got, output = Verdict.UNTESTED, unmet[key]
+            elif not holds(held[key]):
+                got = Verdict.UNTESTED
+            else:
+                revert(tree)
+                try:
+                    for p in m.patches:
+                        patch(tree, *p)
+                except Unapplied as why:
+                    got, output = Verdict.NOAPPLY, str(why)
+                else:
+                    rust = rebuilds(m)
+                    built, said = build(tree) if rust else (True, "")
+                    if not built:
+                        got, output = Verdict.NOBUILD, said
+                    else:
+                        outcome = check(tree, m.catcher, controls[key], args.timeout)
+                        got, output = verdict(held[key], outcome), outcome.output
+                    if rust:
+                        revert(tree)
+                        put_back(pristine, binary)
+            print("%-38s %-9s %s  [%s]" % (m.name, got.value, m.bug, m.catcher))
+            results.append((m, got, output))
+        revert(tree)
 
     print("\n" + "=" * 100)
-    blind = [r for r in results if r[1] == "BLIND"]
-    noapply = [r for r in results if r[1] == "NOAPPLY"]
-    untested = [r for r in results if r[1] == "UNTESTED"]
-    caught = len(results) - len(blind) - len(noapply) - len(untested)
-    print("%d mutations: %d caught, %d BLIND, %d did not apply, %d untested"
-          % (len(results), caught, len(blind), len(noapply), len(untested)))
-    for name, _v, bug, catcher, out in blind:
-        print("\n--- BLIND: %s (%s)\n    bug: %s\n    check output:\n%s"
-              % (name, catcher, bug, "\n".join("      " + l for l in out.splitlines()[-25:])))
-    return 0 if caught == len(results) else 1
+    counts = {v: sum(1 for _m, g, _o in results if g is v) for v in Verdict}
+    print("%d mutations: %s" % (len(results), ", ".join(
+        "%d %s" % (n, v.value) for v, n in counts.items() if n)))
+    for m, got, output in results:
+        if got in (Verdict.BLIND, Verdict.TIMEOUT, Verdict.SKIPPED,
+                   Verdict.NOAPPLY, Verdict.NOBUILD):
+            print("\n--- %s: %s (%s)\n    bug: %s\n%s"
+                  % (got.value, m.name, m.catcher, m.bug, tail(output)))
+    failing = {Verdict.BLIND, Verdict.NOAPPLY, Verdict.NOBUILD}
+    if args.strict:
+        failing |= {Verdict.TIMEOUT, Verdict.SKIPPED, Verdict.UNTESTED}
+    return 1 if any(counts[v] for v in failing) else 0
 
 
 if __name__ == "__main__":
