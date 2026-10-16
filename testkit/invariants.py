@@ -23,7 +23,7 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, HERE)
+import kit                                                  # noqa: E402
 
 from outcome import SKIPPED                                 # noqa: E402
 

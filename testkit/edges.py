@@ -25,59 +25,15 @@ import tempfile
 import traceback
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, HERE)
+import kit                                                  # noqa: E402
 
 import savefmt                                             # noqa: E402
 
 
-def a_save(path, date, tags=("ENG",), provinces=2, techs=(), inventions=(),
-           player="ENG", wars="", extra=""):
-    """
-    One save with exactly the pieces a case is about, and nothing else.
-
-    The layout comes from `savefmt`, which is checked against both readers
-    -- this file used to wrap its own braces with a loop that guessed
-    where a block ended from the indentation, which is the sort of thing
-    that works until the day it does not.
-    """
-    parts = [savefmt.head(date, player=player)]
-    pid = 1
-    for tag in tags:
-        for _ in range(provinces):
-            parts.append(savefmt.province(
-                pid, tag, [savefmt.pop("farmers", pid, 1000 + pid * 10)]))
-            pid += 1
-    first = 1
-    for tag in tags:
-        parts.append(savefmt.country(tag, techs=techs, inventions=inventions,
-                                     capital=first))
-        first += provinces
-    if wars:
-        parts.append(wars)
-    if extra:
-        parts.append(extra)
-    return savefmt.write(path, *parts)
+from fixtures import edge_save as a_save, vanilla  # noqa: E402
 
 
 WAR = savefmt.war("The Test War", "ENG", "FRA")
-
-
-_VANILLA = []
-
-
-def vanilla():
-    """
-    An unmodded install to read the cases on, made once. Every report is
-    read on an installed game, and a case that named none would only ever
-    be refused -- which passes here, and tests nothing.
-    """
-    if not _VANILLA:
-        import atexit
-        import matching
-        where = tempfile.mkdtemp(prefix="vic2edgegame")
-        atexit.register(shutil.rmtree, where, True)
-        _VANILLA.append(matching.a_vanilla(os.path.join(where, "Victoria 2")))
-    return _VANILLA[0]
 
 
 def run(saves, out, extra_argv=(), game=True):
@@ -208,15 +164,15 @@ def _(folder, out):
     # the game is the only place England is called Englandia, so a report
     # that says so was read on it.
     from invariants import payload_of
-    import matching
+    import fixtures
     for name, date in (("a.v2", "1860.1.1"), ("b.v2", "1861.1.1")):
         a_save(os.path.join(folder, name), date, tags=("ENG", "FRA"))
-    game = matching.a_vanilla(os.path.join(folder, "Victoria 2"))
+    game = fixtures.a_vanilla(os.path.join(folder, "Victoria 2"))
     os.makedirs(os.path.join(game, "localisation"))
     with open(os.path.join(game, "localisation", "names.csv"), "w") as fh:
         fh.write("ENG;Englandia;x\n")
-    away = matching.a_mod(os.path.join(folder, "downloads", "amod"))
-    home = matching.a_mod(os.path.join(game, "mod", "amod"))
+    away = fixtures.a_mod(os.path.join(folder, "downloads", "amod"))
+    home = fixtures.a_mod(os.path.join(game, "mod", "amod"))
 
     def england(where, argv, game_given=True):
         got = run(folder, os.path.join(out, where), argv, game=game_given)

@@ -24,8 +24,7 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, "testkit"))
+import kit                                                  # noqa: E402
 
 import fake_game                                           # noqa: E402
 import keeper                                              # noqa: E402

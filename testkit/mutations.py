@@ -160,7 +160,7 @@ MUTATIONS = [
         'a test fixture truncates a real file through a symlink',
         'engine_runtime.py', (),
         [
-            ('testkit/matching.py', '        if _linked(check):', '        if False:'),
+            ('testkit/fixtures.py', '        if _linked(check):', '        if False:'),
         ]),
     Mutation(
         'stop-leaves-scanner-running',

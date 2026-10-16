@@ -28,7 +28,7 @@ import threading
 import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, HERE)
+import kit                                                  # noqa: E402
 
 import publish                                             # noqa: E402
 

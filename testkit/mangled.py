@@ -31,11 +31,10 @@ import threading
 import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, "testkit"))
+import kit                                                  # noqa: E402
 
 import expected                                            # noqa: E402
-import matching                                            # noqa: E402
+import fixtures                                            # noqa: E402
 import savefmt                                             # noqa: E402
 
 SEED = 20260921
@@ -186,7 +185,7 @@ def main():
     book = None if args.save else expected.Book(expected.REPO, "mangled", args.update)
     crashes, misread, differ, read, refused = [], [], [], 0, 0
     try:
-        game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
+        game = fixtures.a_vanilla(os.path.join(holding, "Victoria 2"))
         source = args.save or savefmt.furnished(os.path.join(holding, "furnished.v2"))
         raw = open(source, "rb").read()
         rng = random.Random(SEED)

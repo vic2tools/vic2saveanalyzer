@@ -26,6 +26,7 @@ import sys
 import tempfile
 
 import browser
+import kit                                                  # noqa: E402
 from outcome import SKIPPED
 
 # Dumped by the page, read back off Firefox's stdout. `dump()` rather than
@@ -208,7 +209,6 @@ def hostile_names():
     joining it, each of which reports back if it ever runs.
     """
     import subprocess
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
     import savefmt
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -238,12 +238,10 @@ def hostile_names():
                  '\toriginal_attacker="ENG"', '\toriginal_defender="FRA"',
                  '\taction="1869.5.1"', "}"])
         out = os.path.join(holding, "out")
-        import matching
-        game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
-        built = subprocess.run(
-            [sys.executable, os.path.join(here, "vic2_analyzer.py"), saves,
+        import fixtures
+        game = fixtures.a_vanilla(os.path.join(holding, "Victoria 2"))
+        built = kit.analyze(*[saves,
              "--out", out, "--game-root", game, "--no-cache", "-q"],
-            capture_output=True, text=True,
             env=dict(os.environ, TMPDIR=holding))
         report = os.path.join(out, "report.html")
         if built.returncode or not os.path.isfile(report):

@@ -35,8 +35,7 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, "testkit"))
+import kit                                                  # noqa: E402
 
 import expected                                                # noqa: E402
 from outcome import SKIPPED                                    # noqa: E402
@@ -408,19 +407,18 @@ def kept_copy(holding):
     carry the new year, and a third run with nothing changed must find the
     copy it kept.
     """
-    import matching
+    import fixtures
     from invariants import payload_of
-    mod = matching.a_mod_in_a_game(holding, "Kept", mob_size=0.05)
+    mod = fixtures.a_mod_in_a_game(holding, "Kept", mob_size=0.05)
     saves = os.path.join(holding, "saves")
     os.makedirs(saves)
-    matching.a_save(os.path.join(saves, "a.v2"))
+    fixtures.a_save(os.path.join(saves, "a.v2"))
     out = os.path.join(holding, "out")
     env = dict(os.environ)
 
     def years():
-        run = subprocess.run([sys.executable, os.path.join(HERE, "vic2_analyzer.py"), saves,
-                              "--out", out, "--mod-path", mod, "--rebuild", "-q"],
-                             capture_output=True, text=True, env=env)
+        run = kit.analyze(*[saves,
+                              "--out", out, "--mod-path", mod, "--rebuild", "-q"], env=env)
         if run.returncode:
             print("the analyzer failed:\n" + (run.stdout + run.stderr)[-2000:])
             return None

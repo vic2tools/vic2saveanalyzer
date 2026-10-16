@@ -27,10 +27,10 @@ import sys
 import tempfile
 
 HERE = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(HERE / "testkit"))
 import expected                                             # noqa: E402
-import matching                                             # noqa: E402
+import fixtures                                             # noqa: E402
 import savefmt                                              # noqa: E402
+import kit                                                  # noqa: E402
 
 # (red, green, blue) -> province; 9 and 10 share province 5.
 NAMED = {(10, 20, 30): 1, (200, 0, 0): 2, (0, 200, 0): 3, (0, 0, 200): 4,
@@ -127,7 +127,7 @@ POSITIONS = {1: (10.0, 12.0), 2: (5.5, 6.0)}
 
 def a_world(holding, width, height):
     """(the mod, a folder with one save whose armies stand in every province)."""
-    mod = matching.a_mod_in_a_game(str(holding), "Mapped")
+    mod = fixtures.a_mod_in_a_game(str(holding), "Mapped")
     rows = picture(width, height)
     write_map(Path(mod), rows)
     with open(os.path.join(mod, "map", "positions.txt"), "w") as fh:
@@ -153,9 +153,8 @@ def shipped(saves, mod, scale, holding):
     out = holding / ("out%d" % scale)
     env = dict(os.environ, TMPDIR=str(holding / "tmp"))
     (holding / "tmp").mkdir(exist_ok=True)
-    done = subprocess.run([sys.executable, str(HERE / "vic2_analyzer.py"), saves, "--mod-path",
-                           mod, "--out", str(out), "--map-scale", str(scale), "-q", "--no-cache"],
-                          capture_output=True, text=True, env=env)
+    done = kit.analyze(*[saves, "--mod-path",
+                           mod, "--out", str(out), "--map-scale", str(scale), "-q", "--no-cache"], env=env)
     if done.returncode:
         raise AssertionError("the run failed: %s" % (done.stdout + done.stderr)[-1500:])
     return json.loads(expected.page(str(out))[0])["map"]

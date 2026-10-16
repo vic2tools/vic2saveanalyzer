@@ -26,7 +26,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, HERE)
+import kit                                                  # noqa: E402
 
 
 def head(date, player="ENG", flags=(), start="1836.1.1"):
@@ -159,11 +159,10 @@ def read_back(save, holding, *extra, game=None):
     import json
     import shutil
     import subprocess
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import expected
-    import matching
+    import fixtures
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    game = game or matching.a_vanilla(os.path.join(holding, "Victoria 2"), inventions=20)
+    game = game or fixtures.a_vanilla(os.path.join(holding, "Victoria 2"), inventions=20)
     folder = os.path.join(holding, "saves")
     shutil.rmtree(folder, ignore_errors=True)
     os.makedirs(folder)
@@ -171,9 +170,8 @@ def read_back(save, holding, *extra, game=None):
     out = os.path.join(holding, "out")
     shutil.rmtree(out, ignore_errors=True)
     env = dict(os.environ, TMPDIR=holding)
-    done = subprocess.run([sys.executable, os.path.join(here, "vic2_analyzer.py"), folder,
-                           "--out", out, "--game-root", game, "--no-cache", "-q"] + list(extra),
-                          capture_output=True, text=True, env=env)
+    done = kit.analyze(*[folder,
+                           "--out", out, "--game-root", game, "--no-cache", "-q"] + list(extra), env=env)
     said = done.stdout + done.stderr
     rows, techs, cultures, payload = {}, {}, {}, {}
     if done.returncode == 0 and os.path.isfile(os.path.join(out, "nations_timeseries.csv")):
@@ -206,7 +204,7 @@ def selfcheck(path):
     and why checking against the tolerant reader alone would have caught
     nothing.
     """
-    import matching
+    import fixtures
     holding = os.path.dirname(path)
     techs = ["flintlock_rifles", "clipper_design"]
     write(path,
@@ -250,16 +248,14 @@ def selfcheck(path):
     import shutil
     import subprocess
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    game = matching.a_game(os.path.join(holding, "sniffed"))
-    matching.a_mod(os.path.join(game, "mod", "Lacks"), tags=["ENG", "FRA"], techs=techs[:1],
+    game = fixtures.a_game(os.path.join(holding, "sniffed"))
+    fixtures.a_mod(os.path.join(game, "mod", "Lacks"), tags=["ENG", "FRA"], techs=techs[:1],
                    provinces=[1, 2], inventions=20)
     camp = os.path.join(holding, "campaigns", "one")
     os.makedirs(camp)
     shutil.copy(path, camp)
-    done = subprocess.run([sys.executable, os.path.join(here, "vic2_analyzer.py"),
-                           os.path.dirname(camp), "--cross", "--game-root", game, "--out",
-                           os.path.join(holding, "xout"), "--no-cache", "--no-html"],
-                          capture_output=True, text=True, env=dict(os.environ, TMPDIR=holding))
+    done = kit.analyze(*[os.path.dirname(camp), "--cross", "--game-root", game, "--out",
+                           os.path.join(holding, "xout"), "--no-cache", "--no-html"], env=dict(os.environ, TMPDIR=holding))
     survey = (done.stdout + done.stderr).split("Reading ")[0]
     if "clipper_design" not in survey:
         wrong.append("the mod sniffer did not see clipper_design, which the mod it was "

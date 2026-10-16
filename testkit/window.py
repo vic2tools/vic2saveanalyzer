@@ -29,7 +29,7 @@ import tempfile
 import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, HERE)
+import kit                                                  # noqa: E402
 
 from outcome import SKIPPED                                 # noqa: E402
 
@@ -216,8 +216,8 @@ def a_start_keeps_other_settings(app, holding):
     real = settings.ANALYZER
     settings.ANALYZER = os.path.join(holding, "settings.json")
     saves = os.path.join(holding, "keep-saves")
-    import matching
-    game = matching.a_game(os.path.join(holding, "keep-game"))
+    import fixtures
+    game = fixtures.a_game(os.path.join(holding, "keep-game"))
     mod = os.path.join(game, "mod", "keep-mod")
     os.makedirs(saves)
     os.makedirs(os.path.join(mod, "common"))
@@ -308,8 +308,8 @@ def main():
     root, app = made
     holding = tempfile.mkdtemp(prefix="vic2window")
     try:
-        import matching
-        app.game.set(matching.a_vanilla(os.path.join(holding, "game")))
+        import fixtures
+        app.game.set(fixtures.a_vanilla(os.path.join(holding, "game")))
         # Unexpected dialogs fail immediately instead of hanging the suite.
         from tkinter import messagebox
         def unexpected_dialog(*args, **kwargs):

@@ -70,7 +70,7 @@ def the_scanner_opens_no_window():
     this asks what the window's run (`vic2_analyzer._front`, hosted) would
     hand `Popen` there -- and here, where the same flag is refused outright.
     """
-    sys.path.insert(0, HERE)
+    import kit  # noqa: F401  (puts the repo on the import path)
     import subprocess
     from unittest.mock import patch
     import vic2_analyzer
@@ -110,7 +110,7 @@ def the_scanner_opens_no_window():
 
 
 def main():
-    sys.path.insert(0, HERE)
+    import kit  # noqa: F401  (puts the repo on the import path)
     import build_exe
     from unittest.mock import patch
     # Refuse before writing icons or invoking PyInstaller, not after making

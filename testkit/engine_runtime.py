@@ -11,9 +11,9 @@ import time
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import kit                                                  # noqa: E402
 import vic2_analyzer
-from matching import a_game
+from fixtures import a_game
 from enginecheck import copies_of
 
 

@@ -29,6 +29,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import kit
 import suite
 from outcome import SKIPPED
 
@@ -42,13 +43,6 @@ def say(text):
         print(text, flush=True)
 
 
-def env_in(folder):
-    """The environment with every temp-folder variable pointing into
-    `folder`, so nothing run under it touches the real caches."""
-    os.makedirs(folder, exist_ok=True)
-    return dict(os.environ, TMPDIR=folder, TEMP=folder, TMP=folder)
-
-
 def run(check, argv, holding, verbose):
     """(check, "ok" | "skip" | "FAIL", seconds, output)."""
     began = time.monotonic()
@@ -57,7 +51,7 @@ def run(check, argv, holding, verbose):
     try:
         done = subprocess.run([sys.executable] + argv, capture_output=True, text=True,
                               encoding="utf-8", errors="replace", cwd=ROOT, timeout=900,
-                              env=env_in(os.path.join(holding, "tmp-" + check.script
+                              env=kit.env_in(os.path.join(holding, "tmp-" + check.script
                                                       + "-" + str(id(check)))))
         code, out = done.returncode, done.stdout + done.stderr
     except subprocess.TimeoutExpired as late:
@@ -72,10 +66,9 @@ def run(check, argv, holding, verbose):
 def build_report(saves, mod, holding):
     """The report the after_report checks read, or exit with why not."""
     out = os.path.join(holding, "out")
-    built = subprocess.run(
-        [sys.executable, os.path.join(ROOT, "vic2_analyzer.py"), saves, "--out", out,
-         "--rebuild", "-q"] + (["--mod-path", mod] if mod else []),
-        capture_output=True, text=True, cwd=ROOT, env=env_in(os.path.join(holding, "tmp-report")))
+    built = kit.analyze(saves, "--out", out, "--rebuild", "-q",
+                        *(["--mod-path", mod] if mod else []),
+                        env=kit.env_in(os.path.join(holding, "tmp-report")))
     if built.returncode:
         sys.exit("could not build a report to check:\n%s" % (built.stdout + built.stderr)[-2000:])
     return os.path.join(out, "report.html")

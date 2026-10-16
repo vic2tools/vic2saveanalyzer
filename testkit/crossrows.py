@@ -13,7 +13,7 @@ against the mod's own list, `--player-nations` and the save's own
     python3 testkit/crossrows.py [--update]
 
 Two campaigns under two mods that disagree about every one of those, built
-from `matching.a_mod` and `savefmt`, run once per way of asking. Each run is
+from `fixtures.a_mod` and `savefmt`, run once per way of asking. Each run is
 held to the answer recorded for it (`expected.py`): the Python's, taken
 while it was still here and checked then, case by case, for what that way
 of asking had to come back with -- the mod's pop list unless `--mob-types`
@@ -30,11 +30,10 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, "testkit"))
+import kit                                                  # noqa: E402
 
 import expected                                            # noqa: E402
-import matching                                            # noqa: E402
+import fixtures                                            # noqa: E402
 import savefmt                                             # noqa: E402
 
 
@@ -45,7 +44,7 @@ import savefmt                                             # noqa: E402
 ALPHA_REGIMENT = 1000
 BETA_REGIMENT = 5000
 VANILLA_REGIMENT = 3000
-MOD_POPS = matching.POPS + ["serfs"]
+MOD_POPS = fixtures.POPS + ["serfs"]
 RATE = 0.5
 
 
@@ -97,19 +96,19 @@ def a_campaign_save(path, date, scale):
     # nation of nought people that the caller has asked to see.
     parts.append(savefmt.province(6, "PRU", []))
 
-    parts.append(savefmt.country("ENG", techs=matching.TECHS, inventions=[1]))
+    parts.append(savefmt.country("ENG", techs=fixtures.TECHS, inventions=[1]))
     parts.append(savefmt.country("FRA", culture="french", capital=4,
-                                 techs=matching.TECHS[:2], inventions=[1]))
+                                 techs=fixtures.TECHS[:2], inventions=[1]))
     parts.append(savefmt.country("PRU", culture="prussian", capital=1))
     return savefmt.write(path, *parts)
 
 
 def a_world(holding):
     """Two campaigns, two mods, and the folder that holds them both."""
-    mod_a = matching.a_mod_in_a_game(holding, "mod-alpha", pops=MOD_POPS,
+    mod_a = fixtures.a_mod_in_a_game(holding, "mod-alpha", pops=MOD_POPS,
                                      pop_per_regiment=ALPHA_REGIMENT,
                                      mob_size=RATE)
-    mod_b = matching.a_mod_in_a_game(holding, "mod-beta",
+    mod_b = fixtures.a_mod_in_a_game(holding, "mod-beta",
                                      pop_per_regiment=BETA_REGIMENT,
                                      mob_size=RATE)
     parent = os.path.join(holding, "campaigns")
@@ -151,12 +150,10 @@ def main():
                     help="write what the program answers now as the expected answers")
     args = ap.parse_args()
     holding = tempfile.mkdtemp(prefix="vic2cross")
-    book = expected.Book(expected.REPO, "crossrows", args.update)
-    bad = 0
     try:
         parent, mod_a, mod_b = a_world(holding)
-        width = max(len(n) for n, _e in CASES)
-        for name, extra in CASES:
+
+        def run(extra):
             out = os.path.join(holding, "out")
             env = dict(os.environ)
             env["TMPDIR"] = os.path.join(holding, "tmp")
@@ -167,18 +164,16 @@ def main():
                  "--out", out, "--no-cache", "-j", "1"] + extra,
                 holding, env, out, [(env["TMPDIR"], "TMP"), (holding, "HOLDING")])
             shutil.rmtree(out, ignore_errors=True)
-            found = book.hold(name, got)
-            bad += bool(found)
-            expected.report(name, found, width)
-        book.finish()
+            return got
+
+        bad = expected.hold_cases(expected.REPO, "crossrows",
+                                  [(name, lambda e=extra: run(e)) for name, extra in CASES],
+                                  args.update)
     finally:
         shutil.rmtree(holding, ignore_errors=True)
-    print()
-    if bad:
-        print("%d of %d ways of asking differ from the recorded answers" % (bad, len(CASES)))
-        return 1
-    print("the cross block and the report give the recorded answers, %d ways" % len(CASES))
-    return 0
+    if not bad and not args.update:
+        print("the cross block and the report give the recorded answers, %d ways" % len(CASES))
+    return bad
 
 
 if __name__ == "__main__":

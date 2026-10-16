@@ -34,8 +34,7 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, "testkit"))
+import kit                                                  # noqa: E402
 
 import expected                                            # noqa: E402
 from outcome import SKIPPED                                 # noqa: E402
@@ -268,10 +267,10 @@ def an_edge_world(holding):
     its people to mobilisation and charges a thousand a regiment, and has
     no map, no defines past that and no flags, which are paths of their own.
     """
-    import matching
+    import fixtures
     import savefmt
-    pops = matching.POPS + ["serfs"]
-    mod = matching.a_mod_in_a_game(holding, "edges", pops=pops, pop_per_regiment=1000,
+    pops = fixtures.POPS + ["serfs"]
+    mod = fixtures.a_mod_in_a_game(holding, "edges", pops=pops, pop_per_regiment=1000,
                                    mob_size=0.5)
     folder = os.path.join(holding, "edge-saves")
     os.makedirs(folder)
@@ -296,10 +295,10 @@ def an_edge_world(holding):
                 extra=['controller="FRA"']),
             savefmt.province(4, "FRA", people(4, [
                 ("farmers", 3000, "french"), ("soldiers", 1000, "french")])),
-            savefmt.country("ENG", techs=matching.TECHS, inventions=[1],
+            savefmt.country("ENG", techs=fixtures.TECHS, inventions=[1],
                             extra=["ruling_party=1", "human=yes"]),
             savefmt.country("FRA", culture="french", capital=4,
-                            techs=matching.TECHS[:1], inventions=[1]),
+                            techs=fixtures.TECHS[:1], inventions=[1]),
             savefmt.war("The Edge War", "ENG", "FRA", active=n < 2,
                         action="1870.5.%d" % (n + 1)))
     return mod, folder

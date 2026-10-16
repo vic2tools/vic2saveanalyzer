@@ -38,10 +38,10 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(HERE, "testkit"))
 
-import matching                                            # noqa: E402
+import fixtures                                            # noqa: E402
 import savefmt                                             # noqa: E402
+import kit                                                  # noqa: E402
 
 TECHS = """folder = army_tech
 flintlock_rifles = {
@@ -103,7 +103,7 @@ WAR = ["active_war=", "{", '\tname="The Merged War"', "\thistory=", "\t{",
 def a_world(holding):
     """(the mod, a folder of two saves a year apart)."""
     tags = [t for t, _h, _r, _w in NATIONS]
-    mod = matching.a_mod_in_a_game(holding, "mod", tags=tags, pop_per_regiment=1000)
+    mod = fixtures.a_mod_in_a_game(holding, "mod", tags=tags, pop_per_regiment=1000)
     with open(os.path.join(mod, "technologies", "army_tech.txt"), "w") as fh:
         fh.write(TECHS)
     with open(os.path.join(mod, "common", "triggered_modifiers.txt"), "w") as fh:
@@ -132,9 +132,9 @@ def main():
         mod, saves = a_world(holding)
         out = os.path.join(holding, "out")
         env = dict(os.environ, TMPDIR=holding)
-        run = [sys.executable, os.path.join(HERE, "vic2_analyzer.py"), saves, "--mod-path", mod,
-               "--out", out, "--no-cache", "-q", "--mobilisation-size", "1.0"]
-        done = subprocess.run(run, cwd=HERE, env=env, capture_output=True, text=True)
+        run = [saves, "--mod-path", mod, "--out", out, "--no-cache", "-q",
+               "--mobilisation-size", "1.0"]
+        done = kit.analyze(*run, env=env)
         if done.returncode:
             print("the run failed:\n" + (done.stdout + done.stderr)[-2000:])
             return 1
@@ -145,8 +145,7 @@ def main():
         width = max(len(t) for t, _h, _r, _w in NATIONS)
         for tag, _holds, want, why in NATIONS:
             got = rates.get(tag)
-            said = subprocess.run(run + ["--explain-mob", tag], cwd=HERE, env=env,
-                                  capture_output=True, text=True).stdout
+            said = kit.analyze(*run, "--explain-mob", tag, env=env).stdout
             total = re.search(r"TOTAL[^\n%]*?\s(-?[\d.]+)%", said)
             explained = float(total.group(1)) / 100 if total else None
             bad = []

@@ -24,11 +24,11 @@ import subprocess
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import boots                                                # noqa: E402
 import browser                                              # noqa: E402
-import matching                                             # noqa: E402
+import fixtures                                             # noqa: E402
 import savefmt                                              # noqa: E402
+import kit                                                  # noqa: E402
 from outcome import SKIPPED                                 # noqa: E402
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -262,16 +262,14 @@ def fixture_report(holding):
             savefmt.country("ENG"),
             savefmt.country("FRA", culture="french", capital=2),
             war_block())
-    game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
+    game = fixtures.a_vanilla(os.path.join(holding, "Victoria 2"))
     os.makedirs(os.path.join(game, "units"), exist_ok=True)
     for unit, kind in (("infantry", "land"), ("frigate", "naval")):
         with open(os.path.join(game, "units", unit + ".txt"), "w") as fh:
             fh.write("%s = {\n\ttype = %s\n}\n" % (unit, kind))
     out = os.path.join(holding, "out")
-    built = subprocess.run(
-        [sys.executable, os.path.join(HERE, "vic2_analyzer.py"), saves,
-         "--out", out, "--game-root", game, "--no-cache", "-q"],
-        capture_output=True, text=True, env=dict(os.environ, TMPDIR=holding))
+    built = kit.analyze(*[saves,
+         "--out", out, "--game-root", game, "--no-cache", "-q"], env=dict(os.environ, TMPDIR=holding))
     report = os.path.join(out, "report.html")
     if built.returncode or not os.path.isfile(report):
         print("the test campaign did not build: %s" % (built.stdout + built.stderr).strip()[-400:])

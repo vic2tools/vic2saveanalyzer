@@ -25,10 +25,9 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(HERE, "testkit"))
 
 import expected                                            # noqa: E402
-import matching                                            # noqa: E402
+import fixtures                                            # noqa: E402
 import savefmt                                             # noqa: E402
 
 
@@ -46,7 +45,7 @@ def write_save(path, date, invention, craftsmen=2000):
 class World:
     def __init__(self, holding):
         self.holding = holding
-        self.game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
+        self.game = fixtures.a_vanilla(os.path.join(holding, "Victoria 2"))
         self.saves = os.path.join(holding, "saves")
         os.makedirs(self.saves)
         for i in range(3):

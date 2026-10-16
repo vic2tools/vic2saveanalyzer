@@ -29,13 +29,12 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, "testkit"))
+import kit                                                  # noqa: E402
 
 import expected                                            # noqa: E402
-import matching                                            # noqa: E402
+import fixtures                                            # noqa: E402
 import savefmt                                             # noqa: E402
-from edges import a_save                                   # noqa: E402
+from fixtures import edge_save as a_save                                   # noqa: E402
 from outcome import SKIPPED                                # noqa: E402
 
 BIN = os.path.join(HERE, "scanner", "target", "release",
@@ -69,7 +68,7 @@ def shut(path):
 
 def world(holding):
     """A game with a mod in it, and a campaign of four saves played on it."""
-    mod = matching.a_mod_in_a_game(holding, "Mod", tags=list(TAGS), mob_size=0.05,
+    mod = fixtures.a_mod_in_a_game(holding, "Mod", tags=list(TAGS), mob_size=0.05,
                                    pop_per_regiment=2000,
                                    pops=["farmers", "labourers", "craftsmen", "soldiers",
                                          "aristocrats", "bankers"])
@@ -120,9 +119,9 @@ def cross_world(holding):
     it came from another game. (the game, the folder of campaigns)
     """
     tags8 = ["ENG", "FRA", "PRU", "RUS", "AUS", "TUR", "SPA", "USA"]
-    game = matching.a_game(os.path.join(holding, "xgame"))
-    matching.a_mod(os.path.join(game, "mod", "Alpha"), tags=tags8, provinces=range(1, 41))
-    matching.a_mod(os.path.join(game, "mod", "Beta"), tags=tags8 + ["NEW"], provinces=range(1, 41))
+    game = fixtures.a_game(os.path.join(holding, "xgame"))
+    fixtures.a_mod(os.path.join(game, "mod", "Alpha"), tags=tags8, provinces=range(1, 41))
+    fixtures.a_mod(os.path.join(game, "mod", "Beta"), tags=tags8 + ["NEW"], provinces=range(1, 41))
     top = os.path.join(holding, "xcampaigns")
 
     def campaign(rel, tags, dates, flags=None):
@@ -215,7 +214,7 @@ def main():
         mod, saves = world(holding)
         game = os.path.join(holding, "game")
         # An empty mod in an install with no rules of its own to lend it.
-        bare_game = matching.a_game(os.path.join(holding, "bare"))
+        bare_game = fixtures.a_game(os.path.join(holding, "bare"))
         empty_mod = os.path.join(bare_game, "mod", "Empty")
         os.makedirs(os.path.join(empty_mod, "common"))
         # Two saves of one date, and a folder with none.
@@ -391,7 +390,6 @@ def main():
         ]
         bad = 0
         temps = []
-        book = expected.Book(expected.REPO, "frontcheck", args.update)
         # What --cross reads a save for, found by hand-written scanners, held
         # to the patterns they stand for on the saves here and on random text.
         sniffed = subprocess.run([BIN, "selftest-sniff"] + sorted(
@@ -409,8 +407,7 @@ def main():
             if mine != theirs:
                 bad += 1
                 print("DIFFERS: the signature of %s: %s against %s" % (folder, mine, theirs))
-        width = max(len(n) for n, _a, _h in cases)
-        for name, argv, how in cases:
+        def run(name, argv, how):
             place = os.path.join(holding, "case", expected.slug(name))
             os.makedirs(place)
             out = os.path.join(place, "out")
@@ -443,15 +440,12 @@ def main():
             got = expected.run(full, holding, env, out, places)
             if how == "locked":
                 os.chmod(locked, stat.S_IREAD | stat.S_IWRITE)
-            found = book.hold(name, got)
-            if found:
-                bad += 1
-            expected.report(name, found, width)
-        gone = book.finish()
-        if gone:
-            print("dropped the record of %d cases no longer asked: %s" % (len(gone), gone))
-        print("\n%d of %d cases differ" % (bad, len(cases)))
-        return 1 if bad else 0
+            return got
+
+        differ = expected.hold_cases(expected.REPO, "frontcheck",
+                                     [(n, lambda n=n, a=a, h=h: run(n, a, h)) for n, a, h in cases],
+                                     args.update)
+        return 1 if bad or differ else 0
     finally:
         for t in locals().get("temps", ()):
             shutil.rmtree(t, ignore_errors=True)

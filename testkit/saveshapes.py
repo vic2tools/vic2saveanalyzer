@@ -36,11 +36,10 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, "testkit"))
+import kit                                                  # noqa: E402
 
 import expected                                            # noqa: E402
-import matching                                            # noqa: E402
+import fixtures                                            # noqa: E402
 import savefmt                                             # noqa: E402
 
 AWKWARD = '''date="1881.3.1"
@@ -343,7 +342,7 @@ REGIONS = ("shared = { 1 2\n3 # the third\n}\n"
 
 def worlds(holding):
     """[(name, the saves folder, the arguments naming the game or mod)]."""
-    game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
+    game = fixtures.a_vanilla(os.path.join(holding, "Victoria 2"))
     plain = ["--game-root", game]
     out = []
 
@@ -359,8 +358,8 @@ def worlds(holding):
     savefmt.furnished(os.path.join(folder("furnished"), "furnished.v2"))
     out.append(("furnished", os.path.join(holding, "saves", "furnished"), plain))
 
-    mod = matching.a_mod_in_a_game(os.path.join(holding, "regions"), "Regions",
-                                   pops=matching.POPS + ["clerks"])
+    mod = fixtures.a_mod_in_a_game(os.path.join(holding, "regions"), "Regions",
+                                   pops=fixtures.POPS + ["clerks"])
     with open(os.path.join(mod, "map", "region.txt"), "w") as fh:
         fh.write(REGIONS)
     # A map of the five provinces, with runs of every awkward kind in it
@@ -397,13 +396,11 @@ def main():
                     help="write what the program answers now as the expected answers")
     args = ap.parse_args()
     holding = tempfile.mkdtemp(prefix="vic2shapes")
-    book = expected.Book(expected.REPO, "saveshapes", args.update)
-    bad = 0
     try:
         cases = [(("%s, %s" % (name, how)) if how else name, saves, game + asked)
                  for name, saves, game in worlds(holding) for how, asked in ASKED]
-        width = max(len(c[0]) for c in cases)
-        for name, saves, argv in cases:
+
+        def run(saves, argv):
             out = os.path.join(holding, "out")
             env = dict(os.environ)
             env["TMPDIR"] = os.path.join(holding, "tmp")
@@ -411,18 +408,16 @@ def main():
             got = expected.run([saves, "--out", out, "--no-cache", "-j", "1"] + argv,
                                holding, env, out, [(env["TMPDIR"], "TMP"), (holding, "HOLDING")])
             shutil.rmtree(out, ignore_errors=True)
-            found = book.hold(name, got)
-            bad += bool(found)
-            expected.report(name, found, width)
-        book.finish()
+            return got
+
+        bad = expected.hold_cases(expected.REPO, "saveshapes",
+                                  [(name, lambda s=saves, a=argv: run(s, a))
+                                   for name, saves, argv in cases], args.update)
     finally:
         shutil.rmtree(holding, ignore_errors=True)
-    print()
-    if bad:
-        print("%d of %d differ from the recorded answers" % (bad, len(cases)))
-        return 1
-    print("every shape gives the recorded answer, %d ways" % len(cases))
-    return 0
+    if not bad and not args.update:
+        print("every shape gives the recorded answer, %d ways" % len(cases))
+    return bad
 
 
 if __name__ == "__main__":

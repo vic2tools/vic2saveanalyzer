@@ -30,7 +30,7 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, HERE)
+import kit                                                  # noqa: E402
 
 from outcome import SKIPPED                                 # noqa: E402
 
@@ -142,7 +142,6 @@ def the_template_loop():
     Taken from `template.py` rather than copied, so this cannot be testing
     a loop the report does not contain.
     """
-    sys.path.insert(0, os.path.join(HERE, "testkit"))
     from expected import template
     TEMPLATE = template()
     found = re.search(r"for \(const tag in DATA\.series\) \{.*?\n\}\n",

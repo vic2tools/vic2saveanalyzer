@@ -50,6 +50,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import kit                                                  # noqa: E402
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -119,13 +120,12 @@ def the_build_id_covers_every_source():
 
 def cross_campaigns():
     """[what went wrong] in what makes a `--cross` report stale."""
-    sys.path.insert(0, os.path.join(HERE, "testkit"))
-    import matching
+    import fixtures
     import savefmt
 
     holding = tempfile.mkdtemp(prefix="vic2xstale")
     try:
-        mods = {name: matching.a_mod_in_a_game(holding, "mod-" + name,
+        mods = {name: fixtures.a_mod_in_a_game(holding, "mod-" + name,
                                                pop_per_regiment=1000)
                 for name in ("alpha", "beta")}
         parent = os.path.join(holding, "campaigns")
@@ -136,7 +136,7 @@ def cross_campaigns():
                           savefmt.head("%d.1.1" % year),
                           savefmt.province(1, "ENG", [savefmt.pop(
                               "farmers", 100 + n, 20000 + 100 * n)]),
-                          savefmt.country("ENG", techs=matching.TECHS))
+                          savefmt.country("ENG", techs=fixtures.TECHS))
 
         # Alpha stays the larger by more than the save beta gains, so the
         # campaign that changes is never the one the report is about.
@@ -148,12 +148,9 @@ def cross_campaigns():
         env = dict(os.environ, TMPDIR=holding)
 
         def run():
-            done = subprocess.run(
-                [sys.executable, os.path.join(HERE, "vic2_analyzer.py"),
-                 parent, "--cross", "--out", out, "--no-cache",
+            done = kit.analyze(*[parent, "--cross", "--out", out, "--no-cache",
                  "--campaign-mod", "alpha=" + mods["alpha"],
-                 "--campaign-mod", "beta=" + mods["beta"]],
-                capture_output=True, text=True, cwd=HERE, env=env)
+                 "--campaign-mod", "beta=" + mods["beta"]], env=env)
             if done.returncode:
                 return None
             return "Nothing has changed" in done.stdout
@@ -191,8 +188,7 @@ def cross_campaigns():
 
 def unfinished_runs():
     """[what went wrong] when a run rewrites the files and does not finish."""
-    sys.path.insert(0, os.path.join(HERE, "testkit"))
-    import matching
+    import fixtures
     import savefmt
 
     holding = tempfile.mkdtemp(prefix="vic2ustale")
@@ -211,13 +207,11 @@ def unfinished_runs():
         out = os.path.join(holding, "out")
         table = os.path.join(out, "nations_timeseries.csv")
         env = dict(os.environ, TMPDIR=holding)
-        game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
+        game = fixtures.a_vanilla(os.path.join(holding, "Victoria 2"))
 
         def run(*extra):
-            return subprocess.run(
-                [sys.executable, os.path.join(HERE, "vic2_analyzer.py"), saves,
-                 "--out", out, "--game-root", game, "--no-cache"] + list(extra),
-                capture_output=True, text=True, cwd=HERE, env=env)
+            return kit.analyze(*[saves,
+                 "--out", out, "--game-root", game, "--no-cache"] + list(extra), env=env)
 
         wrong = []
         run("--tags", "ENG")
@@ -263,8 +257,7 @@ def unfinished_runs():
 def leftover_tables():
     """[what went wrong] when a table in the folder is from an earlier run."""
     import csv
-    sys.path.insert(0, os.path.join(HERE, "testkit"))
-    import matching
+    import fixtures
     import savefmt
 
     holding = tempfile.mkdtemp(prefix="vic2lstale")
@@ -285,12 +278,10 @@ def leftover_tables():
                 savefmt.country("FRA", culture="french", capital=2))
         out = os.path.join(holding, "out")
         env = dict(os.environ, TMPDIR=holding)
-        game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
+        game = fixtures.a_vanilla(os.path.join(holding, "Victoria 2"))
         for extra in ([], ["--tags", "FRA"]):
-            subprocess.run([sys.executable, os.path.join(HERE, "vic2_analyzer.py"),
-                            saves, "--out", out, "--game-root", game,
-                            "--no-cache", "-q"] + extra,
-                           capture_output=True, text=True, cwd=HERE, env=env)
+            kit.analyze(*[saves, "--out", out, "--game-root", game,
+                            "--no-cache", "-q"] + extra, env=env)
         wrong = []
         for name in sorted(os.listdir(out)):
             if not name.endswith(".csv"):
@@ -353,10 +344,9 @@ CHANGED_BY = {
 def the_settings_the_stamp_covers():
     """[what went wrong] in which settings the report stamp covers."""
     import dataclasses
-    sys.path.insert(0, HERE)
-    sys.path.insert(0, os.path.join(HERE, "testkit"))
+    import kit  # noqa: F401  (puts the repo on the import path)
     import run as settings
-    import matching
+    import fixtures
     import savefmt
 
     wrong = []
@@ -376,7 +366,7 @@ def the_settings_the_stamp_covers():
 
     holding = tempfile.mkdtemp(prefix="vic2sstale")
     try:
-        mods = {n: matching.a_mod_in_a_game(holding, n, pop_per_regiment=1000)
+        mods = {n: fixtures.a_mod_in_a_game(holding, n, pop_per_regiment=1000)
                 for n in ("Mod", "Other")}
         game = os.path.join(holding, "game")
         parent = os.path.join(holding, "campaigns")
@@ -388,7 +378,7 @@ def the_settings_the_stamp_covers():
                               savefmt.province(1, "ENG", [savefmt.pop("farmers", 10, 20000)]),
                               savefmt.province(2, "FRA", [savefmt.pop("farmers", 20, 20000,
                                                                       culture="french")]),
-                              savefmt.country("ENG", techs=matching.TECHS),
+                              savefmt.country("ENG", techs=fixtures.TECHS),
                               savefmt.country("FRA", culture="french", capital=2))
         out = os.path.join(holding, "out")
         env = dict(os.environ, TMPDIR=holding)
@@ -397,9 +387,7 @@ def the_settings_the_stamp_covers():
                    "--campaign-mod", "beta=" + mods["Mod"]]
 
         def skipped(argv):
-            done = subprocess.run([sys.executable, os.path.join(HERE, "vic2_analyzer.py")]
-                                  + argv + ["--out", out],
-                                  capture_output=True, text=True, cwd=HERE, env=env)
+            done = kit.analyze(*argv + ["--out", out], env=env)
             if done.returncode:
                 raise AssertionError("a run failed: %s\n%s" % (argv, (done.stdout + done.stderr)[-800:]))
             return "Nothing has changed" in done.stdout

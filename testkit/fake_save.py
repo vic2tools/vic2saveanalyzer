@@ -18,7 +18,7 @@ import random
 import sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, HERE)
+import kit                                                  # noqa: E402
 
 import savefmt                                             # noqa: E402
 

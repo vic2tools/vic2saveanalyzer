@@ -36,6 +36,7 @@ import shutil
 import subprocess
 import sys
 import zlib
+import kit                                                  # noqa: E402
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO = os.path.join(HERE, "testkit", "expected")
@@ -201,8 +202,7 @@ def answer(status, stdout, stderr, out, places=()):
 
 def run(argv, cwd, env, out, places=(), timeout=900):
     """Run the analyzer with `argv` and take its answer."""
-    done = subprocess.run([sys.executable, os.path.join(HERE, "vic2_analyzer.py")] + argv,
-                          capture_output=True, text=True, cwd=cwd, env=env, timeout=timeout)
+    done = kit.analyze(*argv, env=env, cwd=cwd, timeout=timeout)
     return answer(done.returncode, done.stdout, done.stderr, out,
                   [(out, "OUT")] + list(places))
 
@@ -294,8 +294,44 @@ def text_difference(name, want, got, context=3, most=40):
     return "\n".join(l[:300] for l in lines)
 
 
-def differences(want, got):
-    """[a readable difference] between an expected answer and a run's."""
+def without(want, got, ignore):
+    """`want` and `got` with each ignored payload key taken out of both.
+    A key is a dotted path into the payload, `[]` meaning every element of
+    a list: `payload.wars[].side_losses`."""
+    name = "report.payload.json"
+    paths = [k.split(".")[1:] for k in ignore if k.startswith("payload.")]
+    if not paths or name not in want or name not in got:
+        return want, got
+
+    def drop(node, path):
+        if not path:
+            return
+        key, rest = path[0], path[1:]
+        many = key.endswith("[]")
+        key = key[:-2] if many else key
+        if not isinstance(node, dict) or key not in node:
+            return
+        if not rest:
+            del node[key]
+        elif many:
+            for item in node[key]:
+                drop(item, rest)
+        else:
+            drop(node[key], rest)
+
+    def cut(text):
+        data = json.loads(text)
+        for path in paths:
+            drop(data, path)
+        return json.dumps(data, indent=1, ensure_ascii=False) + "\n"
+
+    return dict(want, **{name: cut(want[name])}), dict(got, **{name: cut(got[name])})
+
+
+def differences(want, got, ignore=()):
+    """[a readable difference] between an expected answer and a run's,
+    leaving out the payload keys in `ignore` (see `without`)."""
+    want, got = without(want, got, ignore)
     out = []
     for name in sorted(set(want) | set(got)):
         if name not in got:
@@ -324,8 +360,8 @@ class Book:
     instead of comparing.
     """
 
-    def __init__(self, root, check, update=False):
-        self.root, self.check, self.update = root, check, update
+    def __init__(self, root, check, update=False, ignore=()):
+        self.root, self.check, self.update, self.ignore = root, check, update, ignore
         self.asked, self.wrong, self.missing = [], [], []
 
     def hold(self, case, got):
@@ -338,7 +374,7 @@ class Book:
         if want is None:
             self.missing.append(case)
             return ["no answer is recorded for this case (run with --update)"]
-        found = differences(want, got)
+        found = differences(want, got, self.ignore)
         if found:
             self.wrong.append(case)
         return found
@@ -355,3 +391,29 @@ def report(case, found, width=0):
     print("  %-*s %s" % (width, case, "ok" if not found else "DIFFERS"))
     for f in found:
         print("      " + f.replace("\n", "\n      "))
+
+
+def hold_cases(root, check, cases, update, ignore=()):
+    """
+    Hold each of `cases` -- (name, a function that runs it and returns its
+    answer) -- to its record under `root/check`, or record it when
+    `update`. Prints each case's outcome; 0 if all held, 1 if not.
+    """
+    book = Book(root, check, update, ignore)
+    width = max((len(name) for name, _run in cases), default=0)
+    bad = 0
+    for name, run in cases:
+        found = book.hold(name, run())
+        bad += bool(found)
+        report(name, found, width)
+    gone = book.finish()
+    if gone:
+        print("dropped the record of %d cases no longer asked: %s" % (len(gone), gone))
+    print()
+    if update:
+        print("recorded %d" % len(cases))
+        return 0
+    if bad:
+        print("%d of %d differ from the recorded answers" % (bad, len(cases)))
+        return 1
+    return 0

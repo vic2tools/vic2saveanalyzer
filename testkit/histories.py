@@ -25,8 +25,7 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, "testkit"))
+import kit                                                  # noqa: E402
 
 import fake_game                                           # noqa: E402
 import keeper                                              # noqa: E402
@@ -65,7 +64,7 @@ def a_stray_save(holding):
     [what went wrong] when `--cross` surveys a campaign folder whose first
     save is from another game, beside one that is all one game.
     """
-    import matching
+    import fixtures
     import subprocess
     parent = os.path.join(holding, "campaigns")
     for name, first in (("stray", OTHER), ("whole", fake_game.FLAGS)):
@@ -75,12 +74,12 @@ def a_stray_save(holding):
                                             (fake_game.FLAGS, 3), (fake_game.FLAGS, 4))):
             with open(os.path.join(folder, "save%d.v2" % n), "wb") as fh:
                 fh.write(fake_game.a_save(1840, month, "PRU", 20000, n=12, flags=flags))
-    game = matching.a_vanilla(os.path.join(holding, "Victoria 2"))
+    game = fixtures.a_vanilla(os.path.join(holding, "Victoria 2"))
     env = dict(os.environ, TMPDIR=os.path.join(holding, "tmp"))
     os.makedirs(env["TMPDIR"])
-    done = subprocess.run([sys.executable, os.path.join(HERE, "vic2_analyzer.py"), parent,
+    done = kit.analyze(*[parent,
                            "--cross", "--game-root", game, "--out", os.path.join(holding, "out"),
-                           "--no-html", "--no-cache"], capture_output=True, text=True, env=env)
+                           "--no-html", "--no-cache"], env=env)
     said = done.stdout + done.stderr
     if "Traceback" in said or "panicked" in said:
         return ["--cross crashed:\n" + said[-1500:]]

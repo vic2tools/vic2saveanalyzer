@@ -205,8 +205,8 @@ def main():
     xout = os.path.join(holding, "xout")
     xin = os.path.join(holding, "campaigns")
     try:
-        import matching
-        game = matching.a_vanilla(os.path.join(holding, "vanilla"))
+        import fixtures
+        game = fixtures.a_vanilla(os.path.join(holding, "vanilla"))
         todo = cases(args.saves, args.mod, out, args.analyzer, game)
         # Explicit mods carry their own install; do not pair them with the
         # synthetic vanilla install used by the otherwise mod-free cases.
