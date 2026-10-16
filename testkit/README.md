@@ -36,40 +36,14 @@ junction instead for the fixture builder's refusal of linked folders
 (`matching._linked` sees both); only its second half, a link to a file,
 is not run there.
 
-Or one at a time:
+Or one at a time: every check, what it is for and what it needs, is listed
+by
 
 ```
-python3 testkit/tooearly.py                       # no saves needed
-python3 testkit/saveshapes.py                     # no saves needed
-python3 testkit/edges.py                          # no saves needed
-python3 testkit/facts.py out/report.html          # the report is optional
-python3 testkit/invariants.py out/nations_timeseries.csv out/report.html
-python3 testkit/mangled.py ["/path/to/one/save.v2"]
-python3 testkit/boots.py out/report.html
-python3 testkit/state_history_ui.py out/report.html # every decoded state value and order
-python3 testkit/war_legacy_ui.py [out/report.html]  # both war layouts; no losses by nation
-python3 testkit/map_rendering.py out/report.html # map pixels, seams, and cache reuse
-python3 testkit/looks.py out/report.html shot.png   # for eyes, not for CI
-python3 testkit/keeping.py                        # no saves needed
-python3 testkit/histories.py                      # no saves needed
-python3 testkit/sharing.py                       # no saves needed
-python3 testkit/savefmt.py                       # no saves needed
-python3 testkit/packing.py                       # no saves needed
-python3 testkit/matching.py                      # no saves needed
-python3 testkit/raster.py                        # no saves needed
-python3 testkit/staleness.py                     # no saves needed
-python3 testkit/mobrate.py                       # no saves needed
-python3 testkit/crossrows.py                     # no saves needed
-python3 testkit/caching.py                       # no saves needed
-python3 testkit/engine_runtime.py                # no saves needed
-python3 testkit/enginefmt.py scanner/target/release/vic2scan 20000
-python3 testkit/enginecompress.py scanner/target/release/vic2scan
-python3 testkit/modread.py [--mod "/path/to/mod"] # no saves needed
-python3 testkit/frontcheck.py                    # no saves needed
-python3 testkit/window.py "/path/to/saves"
-python3 testkit/enginecheck.py "/path/to/saves" --mod "/path/to/mod"
-python3 testkit/smoke.py "/path/to/saves" --mod "/path/to/mod"
+python3 testkit/suite.py --list
 ```
+
+and each takes the arguments `testkit/suite.py` hands it.
 
 **Recorded answers.** Until 1 Oct 2026 every run could be made two ways,
 by the Rust scanner and by the Python it replaced, and the checks held the

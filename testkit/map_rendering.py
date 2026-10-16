@@ -12,6 +12,8 @@ import sys
 import tempfile
 
 import boots
+import browser
+from outcome import SKIPPED
 
 PROBE = r"""
 window.checkMapRendering = function () {
@@ -89,7 +91,10 @@ window.checkMapRendering = function () {
 
 
 def main():
-    html = Path(sys.argv[1]).read_text()
+    if browser.firefox() is None:
+        print('no firefox here, so nothing was opened')
+        return SKIPPED
+    html = Path(sys.argv[1]).read_text(encoding='utf-8')
     anchor = '/* Export the visible view;'
     if anchor not in html:
         raise RuntimeError('Report does not contain the expected renderer')
@@ -100,7 +105,7 @@ def main():
         "catch(e) { bad.push('mapRendering: '+e.message); } verdict();")
     with tempfile.TemporaryDirectory(prefix='vic2-map-rendering-') as folder:
         report = Path(folder) / 'report.html'
-        report.write_text(html)
+        report.write_text(html, encoding='utf-8')
         result = boots.looked(str(report))
     print(json.dumps(result))
     return 0 if result and not result['error'] and result.get('mapRendering') else 1

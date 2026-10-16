@@ -43,6 +43,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from mutations import MUTATIONS
 from outcome import SKIPPED
+from suite import CHECKS
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCANNER = os.path.join("scanner", "target", "release",
@@ -56,7 +57,7 @@ FAST_BUILD_ENV = {"CARGO_PROFILE_RELEASE_LTO": "false",
 
 # Checks that drive a window or a browser run on their own, never beside
 # another.
-ALONE = {"window.py", "boots.py", "war_legacy_ui.py", "state_history_ui.py"}
+ALONE = {c.script for c in CHECKS if c.exclusive}
 
 Outcome = namedtuple("Outcome", "code timed_out output")
 
