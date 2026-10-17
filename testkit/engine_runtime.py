@@ -139,5 +139,88 @@ class Fixtures(unittest.TestCase):
             self.assertFalse(any(p.is_symlink() for p in dst.rglob("*")))
 
 
+def scanners_running():
+    """The ids of the scanner processes running now, or None if this machine
+    has no way to list them -- which must never be read as "none left"."""
+    import shutil
+    if os.name == "nt" and shutil.which("tasklist"):
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq vic2scan.exe", "/FO", "CSV",
+                              "/NH"], capture_output=True, text=True).stdout
+        return {line.split('","')[1] for line in out.splitlines() if line.startswith('"vic2scan')}
+    if shutil.which("pgrep"):
+        out = subprocess.run(["pgrep", "-x", "vic2scan"], capture_output=True, text=True).stdout
+        return set(out.split())
+    return None
+
+
+class Pipes(unittest.TestCase):
+    """
+    A run's way out: piped into a reader that stops reading, and hosted by
+    the window. Neither may crash on the way out, leak the protocol the
+    scanner speaks to the window, or leave a scanner running.
+    """
+
+    def setUp(self):
+        if not os.path.isfile(kit.SCANNER):
+            self.skipTest("needs the scanner built")
+        import fixtures
+        self.where = tempfile.mkdtemp(prefix="vic2pipes")
+        self.addCleanup(__import__("shutil").rmtree, self.where, True)
+        self.env = kit.env_in(os.path.join(self.where, "tmp"))
+        self.game = fixtures.a_vanilla(os.path.join(self.where, "Victoria 2"))
+        self.saves = os.path.join(self.where, "saves")
+        os.makedirs(self.saves)
+        for n, date in enumerate(("1840.1.1", "1841.1.1", "1842.1.1")):
+            fixtures.edge_save(os.path.join(self.saves, "s%d.v2" % n), date, tags=("ENG", "FRA"))
+        self.before = scanners_running()
+        self.addCleanup(self.none_left)
+
+    def none_left(self):
+        if self.before is None:
+            return
+        # A scanner told to stop can take a moment to go; one still there
+        # after five seconds was left behind.
+        for _ in range(50):
+            left = scanners_running() - self.before
+            if not left:
+                break
+            time.sleep(0.1)
+        self.assertFalse(left, "a scanner was left running: %s" % sorted(left))
+
+    def test_a_reader_that_goes_away_early(self):
+        proc = subprocess.Popen(
+            [sys.executable, os.path.join(kit.ROOT, "vic2_analyzer.py"), self.saves,
+             "--out", os.path.join(self.where, "out"), "--game-root", self.game, "--rebuild"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env, cwd=kit.ROOT)
+        for _ in range(3):
+            proc.stdout.readline()
+        proc.stdout.close()
+        proc.stdout = None                  # gone: communicate() reads stderr only
+        try:
+            err = proc.communicate(timeout=60)[1].decode("utf-8", "replace")
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            self.fail("the run did not end within 60 s once its reader went away")
+        self.assertNotIn("Traceback", err)
+        self.assertNotIn("panicked", err)
+
+    def test_a_hosted_run_leaks_no_protocol_lines(self):
+        import run as run_module
+        argv = ["vic2_analyzer.py", self.saves, "--out", os.path.join(self.where, "hosted"),
+                "--game-root", self.game, "--rebuild"]
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(sys, "argv", argv), patch.dict(os.environ, self.env):
+            run = run_module.Run.from_command_line(vic2_analyzer.command_line())
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                vic2_analyzer.analyze(run)
+        leaked = [l for l in (out.getvalue() + err.getvalue()).splitlines() if l.startswith("@")]
+        self.assertFalse(leaked, "protocol lines reached the log: %s" % leaked[:3])
+        self.assertTrue(out.getvalue().strip(), "the hosted run said nothing at all")
+
+    def test_processes_can_be_listed_here(self):
+        if scanners_running() is None:
+            self.skipTest("no tasklist or pgrep here, so leftover scanners cannot be looked for")
+
+
 if __name__ == "__main__":
     unittest.main()
