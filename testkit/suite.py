@@ -49,6 +49,7 @@ CHECKS = [
     # First: every check below that writes a save writes it with savefmt.
     _c("savefmt.py", "the save-builder the tests use", ["scanner"]),
     _c("tooearly.py", "names read before they exist"),
+    _c("docrefs.py", "every file the docs name exists"),
     _c("saveshapes.py", "the shapes a save can take", ["scanner"], records=True),
     _c("keeping.py", "the keeper"),
     _c("histories.py", "one game's saves told from another's", ["scanner"]),

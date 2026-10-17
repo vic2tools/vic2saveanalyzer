@@ -15,7 +15,10 @@ Works with vanilla and with mods, including total conversions.
 
 ## Getting started
 
-Double-click **`vic2saveanalyzer.exe`**. One window, two tabs, and a bar along
+Download `vic2saveanalyzer.zip` from the
+[latest release](https://github.com/vic2tools/vic2saveanalyzer/releases/latest),
+unzip it anywhere, and double-click **`vic2saveanalyzer.exe`**. Nothing else
+to install. One window, two tabs, and a bar along
 the bottom that joins them:
 
 | Tab | What it is for |
@@ -643,8 +646,9 @@ still the right answer for a campaign of a few dozen saves.
 ## Running it from a terminal
 
 The executable works as a command-line tool when given arguments, and
-`vic2_analyzer.py` does the same with Python 3.8 or newer and the scanner
-built ([below](#the-rust-scanner)). No other dependencies.
+`vic2_analyzer.py` does the same from a copy of the source, with Python 3.8
+or newer and the scanner built (see [DEVELOPING.md](DEVELOPING.md)). No other
+dependencies.
 
 ```bash
 vic2saveanalyzer.exe "C:\path\to\saves" --mod-path "C:\path\to\mod"
@@ -775,67 +779,14 @@ Five things worth knowing:
 
 If you want the whole story — how the mobilization rule was measured, which
 models failed, what is still not modelled — it is in
-[INTERNALS.md](INTERNALS.md).
+[docs/how-it-works/](docs/how-it-works/).
 
 ---
 
-## The Rust scanner
+## Working on it
 
-Every run is made by `scanner/`, in Rust: finding the saves, settling the
-game and the mod, reading every save on every core, the report, the tables,
-the diagnostics and `--cross`. The Python is the window, the keeper and the
-command line, which hand the run to the scanner and pass on what it says.
-From source, build it once:
-
-```
-cargo build --release --manifest-path scanner/Cargo.toml
-```
-
-No dependencies, so that works on a machine that has never talked to
-crates.io. Without it a run is refused with that command. `build_exe.py`
-requires the binary and carries it inside the executable.
-
-The checks in `testkit/` hold it to answers recorded for every case they
-run -- what was printed, the exit status, every table and what the page
-carries -- most of them taken from the Python the scanner replaced, which
-checked out the same, while it was still here to ask:
-
-```
-python3 testkit/all.py "/path/to/saves" --mod "/path/to/mod"
-python3 testkit/all.py --update-expected     # after a deliberate change
-```
-
----
-
-## Building the executable
-
-```bash
-cargo build --release --manifest-path scanner/Cargo.toml
-python build_exe.py
-```
-
-Needs PyInstaller (`pip install pyinstaller`). Writes
-`dist/vic2saveanalyzer.exe`, about 13 MB, no Python needed on the machine that
-runs it.
-
-## Files
-
-| | |
-|---|---|
-| `app.py` | The executable: the window, or the command line when given arguments |
-| `gui.py` | The window: the folder pickers and the log box |
-| `keeper.py`, `keeper_gui.py` | Keeping every autosave, and its tab |
-| `publish.py`, `settings.py` | Sharing a report, and what the window remembers |
-| `vic2_analyzer.py` | The command line: hands the run to the scanner and relays what it says |
-| `run.py` | Every setting of a run, declared once, and the command line that fills them |
-| `fastscan.py` | Where the scanner is, and how to start it with no window |
-| `readfolder.py` | The Stop button and progress bar, and the scanner's cache folder |
-| `mod_reader.py` | Which folder is a game install, and where a mod may be read from |
-| `cross.py` | Which folders under a folder hold campaigns |
-| `savehead.py`, `dates.py` | What the head of a save says, for the keeper |
-| `scanner/` | The Rust that makes every run: reading, the report, the tables |
-| `template.py` | The report's HTML, CSS and JavaScript, built into the scanner |
-| `build_exe.py` | Draws the icon and packs the executable |
+[DEVELOPING.md](DEVELOPING.md) says where everything lives, how a run
+flows through it, how to check a change and how to build a release.
 
 ---
 
