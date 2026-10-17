@@ -19,9 +19,10 @@ that claims to catch it, and says what happened:
     python3 testkit/mutate.py --dry       # does every mutation still apply?
     python3 testkit/mutate.py --list
 
-It makes its own git worktree of HEAD in the temp folder, copies the built
-scanner into it, and removes it when done, so the tree you work in is never
-touched; commit what you want tested. A bug put into `scanner/` or the page
+It makes its own git worktree of HEAD in the temp folder, builds HEAD's
+scanner there, and removes it when done, so the tree you work in is never
+touched and every check runs on what is committed; commit what you want
+tested. A bug put into `scanner/` or the page
 is built first, with a light release profile (no LTO, sixteen codegen
 units, incremental): seconds, where the shipped profile takes the better
 part of a minute. The scanner as committed is put back after each.
@@ -153,27 +154,27 @@ def remove_tree(path):
 
 
 class Worktree:
-    """A worktree of HEAD in the temp folder, with the built scanner in it,
-    removed again however the run ends."""
+    """A worktree of HEAD in the temp folder, with HEAD's scanner built in
+    it, removed again however the run ends -- including when building it
+    fails or is interrupted."""
 
     def __init__(self, need_scanner=True):
         self.need_scanner = need_scanner
         self.path = None
 
     def __enter__(self):
-        built = os.path.join(ROOT, SCANNER)
-        if self.need_scanner and not os.path.isfile(built):
-            raise SystemExit("no scanner built at %s, so every run would be refused. "
-                             "Build it: cargo build --release --manifest-path "
-                             "scanner/Cargo.toml" % SCANNER)
         self.path = tempfile.mkdtemp(prefix="vm")
         os.rmdir(self.path)
         subprocess.run(["git", "worktree", "add", "-q", "--detach", self.path, "HEAD"],
                        cwd=ROOT, check=True)
-        if self.need_scanner:
-            target = os.path.join(self.path, SCANNER)
-            os.makedirs(os.path.dirname(target), exist_ok=True)
-            shutil.copy2(built, target)
+        try:
+            if self.need_scanner:
+                built, said = build(self.path)
+                if not built:
+                    raise SystemExit("HEAD's scanner does not build:\n" + said)
+        except BaseException:
+            self.__exit__()
+            raise
         return self.path
 
     def __exit__(self, *exc):
@@ -182,6 +183,9 @@ class Worktree:
         if done.returncode or os.path.exists(self.path):
             remove_tree(self.path)
         subprocess.run(["git", "worktree", "prune"], cwd=ROOT)
+        if os.path.exists(self.path):
+            print("could not remove all of %s (a file still in use?); remove it with\n"
+                  "  git worktree remove --force %s" % (self.path, self.path))
 
 
 # ------------------------------------------------------------ the checks

@@ -74,6 +74,21 @@ class Cleanup(unittest.TestCase):
         self.assertNotIn(os.path.basename(made[0]), listed)
 
 
+    def test_a_failure_while_setting_up_leaves_no_worktree(self):
+        import subprocess
+        from unittest import mock
+        import mutate
+        before = subprocess.run(["git", "worktree", "list"], cwd=ROOT,
+                                capture_output=True, text=True).stdout
+        with mock.patch.object(mutate, "build", side_effect=RuntimeError("on purpose")):
+            with self.assertRaises(RuntimeError):
+                with mutate.Worktree(need_scanner=True):
+                    pass
+        after = subprocess.run(["git", "worktree", "list"], cwd=ROOT,
+                               capture_output=True, text=True).stdout
+        self.assertEqual(before, after)
+
+
 class Untested(unittest.TestCase):
     def test_each_missing_input_is_explained_once_with_a_count(self):
         from mutate import argv_for, untested_notes
