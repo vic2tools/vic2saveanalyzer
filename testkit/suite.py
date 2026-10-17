@@ -105,6 +105,25 @@ def scanner_path():
                         "vic2scan" + (".exe" if os.name == "nt" else ""))
 
 
+# What to do about each need that is not met here.
+HOW = {
+    "scanner": "build it: cargo build --release --manifest-path scanner/Cargo.toml",
+    "saves": "give a folder of a campaign's saves",
+    "mod": "give that campaign's mod with --mod",
+    "report": "give saves, and a report is built from them",
+    "firefox": "install Firefox",
+    "display": "run it on a desktop",
+    "rustc": "install Rust (rustup.rs)",
+    "baseline": "record one with `python testkit/baseline.py record CAMPAIGN --mod MOD "
+                "--into DIR`, then set VIC2_BASELINE=DIR",
+}
+
+
+def why(missing):
+    """One line saying which needs are not met and what to do about each."""
+    return "needs %s: %s" % (", ".join(missing), "; ".join(HOW.get(m, m) for m in missing))
+
+
 def unmet(check, *, saves="", mod="", report="", baseline="", have=None):
     """The needs of `check` not met here, by name. `have` overrides the
     probes for tools (a set of the tool needs present)."""

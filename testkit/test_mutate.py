@@ -74,5 +74,18 @@ class Cleanup(unittest.TestCase):
         self.assertNotIn(os.path.basename(made[0]), listed)
 
 
+class Untested(unittest.TestCase):
+    def test_each_missing_input_is_explained_once_with_a_count(self):
+        from mutate import argv_for, untested_notes
+        rows = [m for m in mutations.MUTATIONS if "baseline" in m.needs][:2]
+        rows += [m for m in mutations.MUTATIONS if m.needs == ("saves",)][:1]
+        unmet = {(m.catcher, m.needs): argv_for(m.needs, "", "", "") for m in rows}
+        notes = untested_notes(rows, unmet)
+        self.assertEqual(len(notes), 2)
+        baseline = next(n for n in notes if "baseline" in n)
+        self.assertIn("2 mutations", baseline)
+        self.assertIn("baseline.py record", baseline)
+
+
 if __name__ == "__main__":
     unittest.main()

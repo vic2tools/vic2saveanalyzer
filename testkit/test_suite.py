@@ -58,5 +58,16 @@ class Arguments(unittest.TestCase):
                                     os.path.join("o", "report.html")])
 
 
+class Hints(unittest.TestCase):
+    def test_a_missing_baseline_says_how_to_record_one(self):
+        self.assertIn("baseline.py record", suite.why(["baseline"]))
+
+    def test_every_need_has_a_hint(self):
+        for need in ("scanner", "saves", "mod", "report", "firefox", "display", "rustc",
+                     "baseline"):
+            with self.subTest(need=need):
+                self.assertNotEqual(suite.why([need]), "needs " + need)
+
+
 if __name__ == "__main__":
     unittest.main()

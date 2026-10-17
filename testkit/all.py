@@ -125,7 +125,7 @@ def main():
             argv = suite.argv_for(c, saves=args.saves, mod=args.mod, report=report,
                                   baseline=args.baseline, have=have)
             if argv is None:
-                skipped.append((c, "skip", 0.0, "needs " + ", ".join(suite.unmet(
+                skipped.append((c, "skip", 0.0, suite.why(suite.unmet(
                     c, saves=args.saves, mod=args.mod, report=report, baseline=args.baseline,
                     have=have))))
             else:

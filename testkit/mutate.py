@@ -43,7 +43,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from mutations import MUTATIONS
 from outcome import SKIPPED
-from suite import CHECKS
+from suite import CHECKS, why
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCANNER = os.path.join("scanner", "target", "release",
@@ -212,30 +212,39 @@ def check(tree, script, argv, timeout):
 
 
 def argv_for(needs, saves, mod, baseline):
-    """What a catcher is handed, or a sentence saying which input is missing."""
-    argv = []
+    """What a catcher is handed, or a line saying which inputs are missing
+    and how to supply them."""
+    argv, missing = [], []
     for need in needs:
         if need == "saves":
-            if not saves:
-                return "needs --saves"
+            missing += [] if saves else ["saves"]
             argv.append(saves)
         elif need == "mod":
-            if not mod:
-                return "needs --mod"
+            missing += [] if mod else ["mod"]
             argv += ["--mod", mod]
         elif need == "baseline":
-            if not baseline:
-                return "needs --baseline or $VIC2_BASELINE"
+            missing += [] if baseline else ["baseline"]
             argv += ["--from", baseline]
         elif need == "one-save":
             first = next((f for f in sorted(os.listdir(saves)) if f.endswith(".v2")),
                          "") if saves else ""
-            if not first:
-                return "needs --saves with a save in it"
+            missing += [] if first else ["saves"]
             argv += [os.path.join(saves, first), "1"]
         else:
             argv.append(need)
-    return argv
+    return why(missing) if missing else argv
+
+
+def untested_notes(chosen, unmet):
+    """One line per distinct missing input, with how many mutations it
+    leaves untested."""
+    counts = {}
+    for m in chosen:
+        reason = unmet.get((m.catcher, m.needs))
+        if reason:
+            counts[reason] = counts.get(reason, 0) + 1
+    return ["UNTESTED, %d mutation%s: %s" % (n, "" if n == 1 else "s", reason)
+            for reason, n in counts.items()]
 
 
 def tail(text, lines=25):
@@ -315,6 +324,9 @@ def main():
                          "SKIPPED" if outcome.code == SKIPPED else "FAILED",
                          catcher, " ".join(needs), tail(outcome.output)))
 
+        for note in untested_notes(chosen, unmet):
+            print(note)
+        print()
         print("%-38s %-9s %s" % ("MUTATION", "VERDICT", "BUG PUT BACK"))
         print("-" * 100)
         for m in chosen:
