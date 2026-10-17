@@ -113,13 +113,10 @@ def main():
     import kit  # noqa: F401  (puts the repo on the import path)
     import build_exe
     from unittest.mock import patch
-    # Refuse before writing icons or invoking PyInstaller, not after making
-    # a slow release.
+    # Refuse before invoking PyInstaller, not after making a slow release.
     with patch.object(build_exe, 'scanner_binary', return_value=None), \
-         patch.object(build_exe, 'write_icon') as icon, \
          patch.object(build_exe.subprocess, 'call') as bundle:
         assert build_exe.build() == 1
-        icon.assert_not_called()
         bundle.assert_not_called()
     named = carried()
     if named is None:

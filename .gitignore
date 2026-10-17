@@ -23,17 +23,11 @@ __pycache__/
 Thumbs.db
 desktop.ini
 
-# Everything the build leaves behind. `python build_exe.py` regenerates all of
-# it, including the icon, so none of it is worth tracking -- except the finished
-# executable, which is tracked deliberately: it is what someone who does not
-# have Python installed actually downloads. Note `dist/*` rather than `dist/`:
-# git will not re-include a file underneath an excluded directory, so the
-# directory has to stay listed for the negation below to be read at all.
+# Everything the build leaves behind, the executable included: it is built
+# for a release and attached to it (build_exe.py), not committed.
 build/
-dist/*
-!dist/vic2saveanalyzer.exe
+dist/
 dist_new/
-vic2.ico
 
 # Working notes and superseded files from before the first release. They stay
 # on disk and in git history; they are not part of what ships.
