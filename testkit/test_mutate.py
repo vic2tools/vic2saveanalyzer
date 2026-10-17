@@ -78,15 +78,16 @@ class Cleanup(unittest.TestCase):
         import subprocess
         from unittest import mock
         import mutate
-        before = subprocess.run(["git", "worktree", "list"], cwd=ROOT,
-                                capture_output=True, text=True).stdout
+        # Only this worktree is looked for: another run may be making its own.
+        tree = mutate.Worktree(need_scanner=True)
         with mock.patch.object(mutate, "build", side_effect=RuntimeError("on purpose")):
             with self.assertRaises(RuntimeError):
-                with mutate.Worktree(need_scanner=True):
+                with tree:
                     pass
-        after = subprocess.run(["git", "worktree", "list"], cwd=ROOT,
-                               capture_output=True, text=True).stdout
-        self.assertEqual(before, after)
+        self.assertFalse(os.path.exists(tree.path))
+        listed = subprocess.run(["git", "worktree", "list"], cwd=ROOT,
+                                capture_output=True, text=True).stdout
+        self.assertNotIn(os.path.basename(tree.path), listed)
 
 
 class Untested(unittest.TestCase):
