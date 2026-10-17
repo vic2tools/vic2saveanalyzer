@@ -56,6 +56,6 @@ scanner/target/
 !speed/runs/**/*.csv
 !speed/runs/**/report.html
 
-# The speed job's settings for this machine: its campaign, its mod and what
-# must stay private (speed/prepush.sh).
-speed/local.env
+# This machine's settings: its campaign, its mod, its baseline and the words
+# that must stay private (tools/prepush.sh).
+tools/local.env

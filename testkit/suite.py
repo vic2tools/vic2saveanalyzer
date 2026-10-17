@@ -16,6 +16,7 @@ What a check can need:
     firefox   Firefox, run headless
     display   a desktop for a Tk window
     rustc     the Rust compiler
+    bash      a bash shell (Git for Windows has one)
     baseline  a recorded baseline ($VIC2_BASELINE)
 
 A check whose needs are not met here is skipped and says which; one that
@@ -94,6 +95,7 @@ CHECKS = [
     _c("enginecheck.py", "the report engine against its recorded answers", ["scanner"],
        records=True),
     _c("baselinecheck.py", "recording and comparing a baseline", ["scanner"]),
+    _c("prepushcheck.py", "the privacy guard run before a push", ["bash"]),
     # The maintainer's verified campaign, where $VIC2_BASELINE names one.
     _c("baseline.py", "the campaign against its baseline", ["scanner", "saves", "mod", "baseline"],
        lead=("compare",)),
@@ -114,6 +116,7 @@ HOW = {
     "firefox": "install Firefox",
     "display": "run it on a desktop",
     "rustc": "install Rust (rustup.rs)",
+    "bash": "install Git for Windows, or any bash",
     "baseline": "record one with `python testkit/baseline.py record CAMPAIGN --mod MOD "
                 "--into DIR`, then set VIC2_BASELINE=DIR",
 }
@@ -153,6 +156,8 @@ def tools_here():
         pass
     if os.name == "nt" or os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
         found.add("display")
+    if shutil.which("bash"):
+        found.add("bash")
     if shutil.which("rustc") or os.path.isfile(os.path.join(
             os.path.expanduser("~"), ".cargo", "bin", "rustc" + (".exe" if os.name == "nt" else ""))):
         found.add("rustc")

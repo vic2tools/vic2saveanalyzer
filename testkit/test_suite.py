@@ -8,7 +8,7 @@ import unittest
 
 import suite
 
-EVERYTHING = {"scanner", "firefox", "display", "rustc"}
+EVERYTHING = {"scanner", "firefox", "display", "rustc", "bash"}
 
 
 def named(script, title=None):
@@ -64,7 +64,7 @@ class Hints(unittest.TestCase):
 
     def test_every_need_has_a_hint(self):
         for need in ("scanner", "saves", "mod", "report", "firefox", "display", "rustc",
-                     "baseline"):
+                     "bash", "baseline"):
             with self.subTest(need=need):
                 self.assertNotEqual(suite.why([need]), "needs " + need)
 
