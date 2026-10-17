@@ -99,6 +99,8 @@ def patch(tree, path, old, new, count=1):
     """Replace `old` with `new` in tree/path; `old` must appear `count`
     times (0: at least once)."""
     full = os.path.join(tree, path)
+    if not os.path.isfile(full):
+        raise Unapplied("%s is not in the tree" % path)
     with open(full, encoding="utf-8", newline="") as fh:
         src = fh.read()
     n = src.count(old)
@@ -115,9 +117,8 @@ def revert(tree):
 
 
 def rebuilds(mutation):
-    """Whether the bug is in the scanner, or in the page it builds in."""
-    return any(p[0].startswith("scanner/") or p[0] == "template.py"
-               for p in mutation.patches)
+    """Whether the bug is in the scanner, the page included."""
+    return any(p[0].startswith("scanner/") for p in mutation.patches)
 
 
 def cargo():

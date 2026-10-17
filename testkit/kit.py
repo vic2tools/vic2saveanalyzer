@@ -74,3 +74,34 @@ def need_rustc():
         os.path.expanduser("~"), ".cargo", "bin", "rustc" + (".exe" if os.name == "nt" else "")))
     if not found:
         skip("needs rustc")
+
+
+def rustc():
+    """The Rust compiler, or None."""
+    found = shutil.which("rustc") or os.path.join(
+        os.path.expanduser("~"), ".cargo", "bin", "rustc" + (".exe" if os.name == "nt" else ""))
+    return found if os.path.isfile(found) else None
+
+
+def build_script(scanner, holding):
+    """`scanner/build.rs` of the folder `scanner`, compiled on its own into
+    `holding`: a function that runs it into a fresh OUT_DIR and returns
+    (exit status, what it printed, OUT_DIR). Raises RuntimeError when it will
+    not compile."""
+    os.makedirs(holding, exist_ok=True)
+    script = os.path.join(holding, "build" + (".exe" if os.name == "nt" else ""))
+    made = subprocess.run([rustc(), "--edition", "2021", "-O", "-o", script,
+                           os.path.join(scanner, "build.rs")], capture_output=True, text=True,
+                          env=dict(os.environ, CARGO_MANIFEST_DIR=scanner))
+    if made.returncode:
+        raise RuntimeError("the build script would not compile on its own: %s" % made.stderr[-500:])
+    runs = [0]
+
+    def run():
+        runs[0] += 1
+        out_dir = os.path.join(holding, "out%d" % runs[0])
+        os.makedirs(out_dir)
+        done = subprocess.run([script], capture_output=True, text=True,
+                              env=dict(os.environ, OUT_DIR=out_dir, CARGO_MANIFEST_DIR=scanner))
+        return done.returncode, done.stdout + done.stderr, out_dir
+    return run

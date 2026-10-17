@@ -10,9 +10,10 @@ cargo build --release              # from here; the binary is target/release/vic
 ```
 
 No crate dependencies, on purpose: it builds on a machine that has never
-reached crates.io. `build.rs` cuts the page out of `../template.py`, builds
-it in, and stamps the build with a hash of every source file, which keys the
-cache so a new build never reads an old build's entries.
+reached crates.io. `build.rs` joins the report page from `src/page/`, in the
+order `src/page/order.txt` gives, builds it in, and stamps the build with a
+hash of every source file, which keys the cache so a new build never reads an
+old build's entries.
 
 ## src/
 
@@ -28,6 +29,13 @@ cache so a new build never reads an old build's entries.
 | `md5.rs` | MD5, for the mod's signature. |
 | `jsonr.rs` | JSON in, and out the way the recorded answers were written. |
 | `pyfmt.rs`, `pyre.rs` | Numbers formatted, and the mod reader's patterns matched, exactly as the recorded answers expect. |
+
+## src/page/
+
+The report page: `head.html` and `body.html`, the stylesheets in `css/`, and
+the script in `js/`, one file per part of the page. The script files are
+fragments of one script, joined in order, not modules. Every file here is
+named in `order.txt` exactly once, or the build stops.
 
 ## src/front/
 

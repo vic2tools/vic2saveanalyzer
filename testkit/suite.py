@@ -66,6 +66,7 @@ CHECKS = [
     _c("raster.py", "the map's province bitmap", ["scanner"]),
     _c("caching.py", "what the engine keeps between runs", ["scanner"]),
     _c("staleness.py", "what can make a report stale", ["scanner"]),
+    _c("pagebuild.py", "the page built from its files, in order", ["rustc"]),
     _c("mobrate.py", "the mobilisation rate rule", ["scanner"]),
     _c("crossrows.py", "the cross block against the report", ["scanner"], records=True),
     # The real campaign.

@@ -1,0 +1,109 @@
+/* Centre labels sit over the donut hole; they must never eat hover events. */
+#milpies text{pointer-events:none}
+/* A note explains the figure above it, so it is set to the same width. It had
+   a reading measure of its own for a while, which only made it look like the
+   text had been cut short of the chart it belongs to -- a paragraph ending
+   half a screen inside the frame above it reads as a mistake, and the long
+   line is the smaller cost. */
+.note{color:var(--ink-dim);font-size:13px;margin:10px 2px 0}
+.stackwrap{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
+.slegend{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;
+  color:var(--ink-dim);display:flex;align-items:center;gap:6px}
+#popchart rect[data-pop-type]{cursor:pointer}
+#popchart rect[data-pop-type]:hover,#popchart rect[data-pop-type]:focus-visible{fill-opacity:1;stroke:var(--brass);stroke-width:1.5}
+.slegend i{width:9px;height:9px;display:block}
+footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
+  padding-top:14px;margin-top:8px}
+/* Strength returns: one compact ledger with details on demand. */
+.segments{display:inline-flex;gap:0;flex-wrap:wrap}
+.segments button{border-radius:0;margin:0}
+.segments button[aria-pressed="true"]{background:var(--brass);color:var(--ground-deep);box-shadow:inset 0 -3px 0 var(--gilt-lo)}
+.ledger-heading{display:flex;align-items:center;justify-content:space-between;gap:18px}
+.ledger-heading h2{border:0;margin:0;padding:0}
+.ledger-heading .tb-label{margin:0 0 5px}
+.ledger-toolbar{padding:14px 0;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}
+.strength-ledger{width:100%;font-variant-numeric:tabular-nums}
+.strength-ledger th button{border:0;background:transparent;color:var(--ink-dim);padding:5px 0}
+.strength-ledger th[aria-sort="ascending"] button::after{content:" ↑"}
+.strength-ledger th[aria-sort="descending"] button::after{content:" ↓"}
+.strength-ledger td:first-child,.strength-ledger th:first-child{text-align:left}
+.strength-ledger .nation-toggle{text-align:left;background:transparent;border:0;color:var(--ink);padding:6px 0;white-space:normal}
+.strength-ledger .nation-toggle[aria-expanded="true"]{color:var(--brass)}
+.strength-ledger .return-details>td{text-align:left;white-space:normal;background:rgba(0,0,0,.15);padding:18px}
+.return-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px}
+.return-grid h3{margin:0 0 10px;color:var(--brass);font-size:14px}
+.return-grid dl{margin:0}.return-grid dl>div{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid var(--grid);padding:5px 0}
+.return-grid dd{margin:0;font-family:'IBM Plex Mono',monospace}.return-grid dt{color:var(--ink-dim)}
+.return-details[hidden],[id^="compare-"][hidden]{display:none}
+@media(max-width:650px){.ledger-heading{align-items:flex-start;flex-direction:column}.strength-ledger{min-width:650px}}
+.military-ledger-wrap{max-height:none}
+.tablewrap>table.strength-ledger{min-width:650px;table-layout:fixed}
+.strength-ledger>thead>tr>th:first-child{width:34%}
+.strength-ledger>thead>tr>th{white-space:normal}
+.strength-ledger>thead>tr>th button{white-space:normal}
+/* Country dossiers share the infobox vocabulary of Population and Wars. */
+.strength-ledger .strength-row{cursor:pointer}
+.strength-ledger .strength-row:hover{background:rgba(231,196,100,.09)}
+.strength-ledger .strength-row:has([aria-expanded="true"]){background:rgba(231,196,100,.12)}
+.strength-ledger .nation-toggle{display:inline-flex;align-items:center;gap:10px;font-size:14px}
+.military-flag{width:30px;height:20px;object-fit:fill;box-shadow:0 0 0 1px rgba(0,0,0,.5);flex:none}
+.military-flag.blank{display:inline-block;border:1px solid var(--rule)}
+.military-dossier{display:grid;grid-template-columns:minmax(240px,1fr) minmax(0,2fr);gap:20px;align-items:start}
+.military-dossier .ib{max-width:none;min-width:0}
+.military-identity{padding:22px 16px;text-align:center;border-bottom:1px solid var(--rule);background:rgba(8,25,44,.35)}
+.military-identity .military-flag{width:90px;height:60px;margin-bottom:12px}
+.military-number{font-family:'Barlow Condensed',sans-serif;font-size:46px;line-height:1.2;color:var(--brass)}
+.military-identity .tb-label{margin:5px 0 0}
+.military-facts{padding:16px}.military-facts .return-grid{display:block}
+.military-main{min-width:0}.military-main .ibtitle{text-align:left;font-size:18px}
+.military-rivals{margin-bottom:20px}.military-rivals .controls{padding:12px 14px;margin:0}
+.military-rivals .note{padding:0 14px 12px;margin:0}
+.strength-ledger .rival-table{width:100%;min-width:0;table-layout:auto;font-size:12px}
+.strength-ledger .rival-table td,.strength-ledger .rival-table th{padding:10px;text-align:right;white-space:nowrap}
+.strength-ledger .rival-table td:first-child,.strength-ledger .rival-table th:first-child{text-align:left}
+.rival-name{white-space:normal;display:flex;align-items:center;gap:8px}.rival-name .military-flag{width:24px;height:16px}
+.military-rivals .tablewrap{max-height:none;border:0;margin-bottom:12px}
+.military-menu{padding:14px}.military-menu .segments{margin-bottom:16px}
+.military-menu .return-grid{grid-template-columns:1fr}
+.military-menu .note{margin-bottom:0}
+@media(max-width:1000px){.military-dossier{grid-template-columns:1fr}.military-identity{padding:12px}.military-identity .military-flag{width:60px;height:40px}}
+#military-browse[hidden],#military-country[hidden]{display:none}
+#miloverview.country-open>.ledger-heading,#miloverview.country-open>.note,#miloverview.country-open>.ledger-toolbar .picker{display:none}
+.military-country-header{display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap}
+.military-country-header h2{margin:0;padding:0;border:0;font-size:23px;letter-spacing:.03em;text-transform:none}
+.military-country-header .military-flag{width:42px;height:28px}
+.military-country-header .note{margin-left:auto}
+.military-strength-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border:1px solid var(--rule);background:rgba(8,25,44,.65);margin-bottom:20px}
+.military-strength-strip>div{padding:14px 18px;border-right:1px solid var(--grid)}
+.military-strength-strip>div:last-child{border:0}
+.military-stat{font:32px 'Barlow Condensed',sans-serif;color:var(--brass)}
+.military-country-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start;margin-bottom:20px}
+.military-country-page .ib{max-width:none}
+.military-country-page .ibtitle{text-align:left;font-size:17px}
+.military-capacity-content{padding:14px}
+.military-capacity .return-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.military-capacity .return-grid dl>div{align-items:baseline;gap:10px}
+.military-capacity .return-grid dd{flex:none}
+.military-capacity .return-grid>div:only-child{grid-column:1/-1}
+.military-capacity .note:empty{display:none}
+.military-inventory .tablewrap{border:0;max-height:none;margin:0}
+.military-inventory th:first-child,.military-inventory td:first-child{text-align:left}
+.military-rivals .rival-table{min-width:0;width:100%}
+.military-help{font-size:12px;color:var(--ink-dim);padding:10px 14px}
+.military-help summary{cursor:pointer}.military-help p{margin-bottom:0}
+.military-delta{display:block;font-size:10px;color:var(--ink-dim);font-weight:normal}
+@media(max-width:900px){.military-country-body{grid-template-columns:1fr}.military-strength-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:550px){.military-capacity .return-grid{grid-template-columns:1fr}.military-strength-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.military-country-header h2{font-size:19px}}
+.military-forces-column{display:flex;flex-direction:column;gap:20px;min-width:0}
+.military-forces-column .military-rivals{margin-bottom:0}
+.military-forces-column .rival-table{font-size:11px}
+.military-forces-column .rival-table td,.military-forces-column .rival-table th{padding:8px 6px}
+.military-forces-column .rival-table button{font-size:11px;padding:5px 7px}
+.military-forces-column .military-delta{white-space:normal}
+.military-composition-history{margin-top:6px}
+.nation-identity{display:inline-flex;align-items:center;gap:10px;text-align:left}
+#poptable .nation-identity{font-size:14px}
+#poptable th:nth-child(2),#poptable td:nth-child(2){text-align:left}
+#popcountryfacts .ibtitle .military-flag{width:42px;height:28px}
+#popcountryfacts .ibtitle .nation-identity{justify-content:center}
+</style>

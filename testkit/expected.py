@@ -64,11 +64,16 @@ def chunk_text(b64):
 
 
 def template():
-    """The page as `template.py` holds it, which the scanner is built from."""
-    with open(os.path.join(HERE, "template.py"), encoding="utf-8") as fh:
-        text = fh.read()
-    start = text.index('TEMPLATE = r"""') + len('TEMPLATE = r"""')
-    return text[start:text.index('"""', start)]
+    """The page the scanner is built from: the files `scanner/src/page/order.txt`
+    names, joined in its order, as `scanner/build.rs` joins them."""
+    page = os.path.join(HERE, "scanner", "src", "page")
+    with open(os.path.join(page, "order.txt"), encoding="utf-8") as fh:
+        names = [l.strip() for l in fh if l.strip() and not l.startswith("#")]
+    text = []
+    for name in names:
+        with open(os.path.join(page, name), encoding="utf-8", newline="") as fh:
+            text.append(fh.read())
+    return "".join(text)
 
 
 def page(folder):

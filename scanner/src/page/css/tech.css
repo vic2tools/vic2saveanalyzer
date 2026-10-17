@@ -1,0 +1,47 @@
+/* A search only means anything relative to its misses: a highlighted match
+   reads as "found" mainly because everything else has visibly stepped back. */
+.techbox.techmatch{outline:2px solid var(--brass);outline-offset:-1px;
+  background:linear-gradient(180deg,#6B4A24,#4A3018);color:var(--ink)}
+.techbox.techmatch.done{background:linear-gradient(180deg,#5C7A3E,#3E5828)}
+.techbox.techdim{opacity:.32}
+.techcatbadge{display:inline-block;margin-left:5px;padding:0 5px;
+  border-radius:8px;background:var(--brass);color:#2A0F17;font-size:10px;
+  font-weight:700;line-height:15px;vertical-align:1px}
+.techinv{margin:1px 0}
+.techinv .rk{font-size:10.5px}
+.techtitle{font-family:'Playfair Display',Georgia,serif;font-size:16px;
+  color:var(--brass);width:100%;margin-bottom:4px}
+.techcols2{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:14px;width:100%}
+.techsub{font-family:'Playfair Display',Georgia,serif;font-size:11px;
+  text-transform:uppercase;letter-spacing:.14em;color:var(--ink-dim);margin-bottom:4px}
+.techcols2 ul{margin:0;padding-left:16px}
+.techcols2 li{margin:1px 0}
+#techdetail{display:block}
+@media(max-width:760px){.techgrid{grid-template-columns:1fr !important}}
+.warrow{cursor:pointer}
+.warrow.on{background:rgba(231,196,100,.14)}
+.warname{white-space:normal;min-width:230px}
+.tagflag{width:18px;height:12px;object-fit:fill;vertical-align:-1px;
+  margin-right:5px;border:1px solid rgba(0,0,0,.55)}
+table.mini{width:auto;min-width:100%}
+table.mini td{vertical-align:top}
+table.mini td .rk{font-size:11px;white-space:normal}
+.selsearch{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;
+  background:linear-gradient(180deg,var(--panel),#431B26);color:var(--ink);
+  border:1px solid var(--rule);border-radius:0;padding:7px 11px;width:150px}
+.selsearch::placeholder{color:var(--ink-dim);opacity:.8}
+.mapwrap{position:relative;width:100%;overflow:hidden;background:var(--ground-deep);
+  border:1px solid var(--rule);box-shadow:0 0 0 1px rgba(124,94,34,.35) inset}
+.mapwrap canvas{position:absolute;inset:0;width:100%!important;height:100%!important;
+  image-rendering:pixelated;cursor:grab;touch-action:none}
+@media(max-width:640px){
+  figure{overflow-x:auto}
+  figure svg{min-width:640px}
+  .readout{position:sticky;left:0}
+}
+.axis text{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;fill:var(--ink-dim)}
+.gridline{stroke:var(--grid);stroke-width:1}
+.axisline{stroke:var(--rule);stroke-width:1}
+.plotline{fill:none;stroke-width:1.75;stroke-linejoin:round;stroke-linecap:round}
+.plotline.thin{stroke-width:1.35}

@@ -1,0 +1,70 @@
+/* The map is a fixed-aspect box with the canvas stretched over it. Without the
+   explicit CSS size the canvas falls back to its width/height attributes, which
+   are the raster's -- 2808px -- and it bursts straight out of the page. */
+/* Controls float over the atlas; the canvas alone owns pan and zoom. */
+.world-atlas{position:relative;isolation:isolate}
+.world-atlas .mapwrap{min-height:660px;border:0}
+.map-overlay{position:absolute;z-index:2;background:rgba(30,15,23,.78);border:1px solid rgba(183,155,110,.65);
+  box-shadow:0 3px 14px rgba(0,0,0,.22);backdrop-filter:blur(5px)}
+.map-caption{top:14px;left:14px;max-width:calc(100% - 360px);padding:10px 12px;pointer-events:none}
+.map-caption h2{font-size:14px;margin:0;padding:0;border:0}
+.map-caption #mapworld{display:block;font-size:10px;letter-spacing:.04em;margin-top:4px}
+.map-console{left:14px;bottom:14px;width:min(620px,calc(100% - 360px))}
+.map-overlay>summary{padding:9px 12px;color:var(--brass);cursor:pointer;font-size:13px}
+.map-console .chart-toolbar{border:0;padding:8px 12px}
+.map-console #mapstep{flex:1;min-width:70px;max-width:none}
+.map-console .export-controls{margin:0 0 0 auto}
+.map-console .map-options{border-top:1px solid var(--grid);border-bottom:0}
+.map-console .map-options .note{font-size:11px;margin:6px 0}
+.map-inspection{position:absolute;z-index:2;left:14px;top:86px;max-width:min(580px,calc(100% - 360px))}
+.map-inspection>summary{width:fit-content;background:rgba(30,15,23,.78);padding:5px 9px;font-size:11px;cursor:pointer;color:var(--ink-dim)}
+.map-inspection .readout{background:rgba(30,15,23,.86);max-height:220px;overflow:auto;font-size:11px}
+.gpstrip{right:14px;top:14px;width:304px;max-height:calc(100% - 28px);overflow:auto}
+.gpstrip[hidden]{display:none}
+.gpstrip>summary{font-family:'Playfair Display',Georgia,serif;font-size:17px}
+.gpstrip[open]>summary{padding-bottom:4px}
+.gpbody{padding:0 12px 8px}
+.gplabel{font-size:10px;color:var(--ink-dim);margin-bottom:8px}
+.gpgrid{display:grid;gap:0}
+.gpcard{padding:5px 0;border-top:1px solid var(--grid);min-width:0}
+.gpidentity{line-height:20px;display:flex;align-items:center;gap:8px;border-left:3px solid var(--nation-colour);padding-left:7px}
+.gprank{color:var(--brass);font-size:18px;font-family:'Playfair Display',Georgia,serif;min-width:15px}
+.gpflag{width:27px;height:18px;flex:none;object-fit:fill}
+.gpname{font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;font-weight:600;min-width:0;text-align:left;border:0;background:none;padding:0;color:var(--ink)}
+.gpname:hover{color:var(--brass);text-decoration:underline}
+.gpstats{display:grid;grid-template-columns:1fr 1fr;gap:2px 12px;margin:4px 0 0 10px;font-size:11px;line-height:14px}
+.gpstats span{display:flex;justify-content:space-between;gap:5px;color:var(--ink-dim)}
+.gpstats b{color:var(--ink);font-weight:500;font-family:'IBM Plex Mono',monospace}
+.map-options{border-bottom:1px solid var(--grid);padding:7px 12px;font-size:12px;color:var(--ink-dim)}
+.map-options summary{cursor:pointer;width:fit-content}
+.map-options .chart-toolbar{border:0;padding:10px 0 3px}
+@media(max-width:900px){
+  .gpstrip{width:264px}
+  .gpstats{font-size:10px;gap:2px 8px;margin-left:0}
+  .map-caption{max-width:calc(100% - 310px)}
+  .map-console{width:calc(100% - 310px)}
+  .map-inspection{max-width:calc(100% - 310px)}
+}
+@media(max-width:600px){
+  .world-atlas .mapwrap{min-height:850px}
+  .map-caption{top:8px;left:8px;max-width:calc(100% - 16px)}
+  .map-caption #mapworld{display:none}
+  .gpstrip{top:55px;right:8px;width:244px;max-height:610px}
+  .map-console{left:8px;bottom:8px;width:calc(100% - 16px)}
+  .map-inspection{top:55px;left:8px;max-width:calc(100% - 16px)}
+  .map-inspection[open]{z-index:3}
+}
+.techgrid{display:grid;gap:6px;align-items:start;margin-bottom:12px}
+.techcol{display:flex;flex-direction:column;gap:5px;min-width:0}
+.techhead{font-family:'Playfair Display',Georgia,serif;font-size:12px;
+  text-transform:uppercase;letter-spacing:.1em;color:var(--brass);
+  text-align:center;padding:5px 4px;border:1px solid var(--rule);
+  background:linear-gradient(180deg,#6B2E3C,#4A1C28)}
+.techbox{font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:12px;
+  text-align:left;padding:7px 8px;border:1px solid var(--grid);
+  background:rgba(42,15,23,.55);color:var(--ink-dim);cursor:pointer;
+  white-space:normal;line-height:1.25;min-height:34px}
+.techbox.done{background:linear-gradient(180deg,#4C6B3A,#38502A);
+  color:var(--ink);border-color:var(--rule)}
+.techbox.open{outline:2px solid var(--brass);outline-offset:-2px}
+.techbox:hover{border-color:var(--brass)}

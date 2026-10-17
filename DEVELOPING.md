@@ -9,7 +9,7 @@ change, and how to make a release. `README.md` is the guide to using it;
 | | |
 |---|---|
 | `scanner/` | The Rust that makes every run: finding and reading the saves, reading the game and the mod, every number, the tables and the report. See `scanner/README.md`. |
-| `template.py` | The report page -- its HTML, CSS and JavaScript -- in one string, cut out and built into the scanner by `scanner/build.rs`. No Python runs it. |
+| `scanner/src/page/` | The report page: its HTML, CSS and JavaScript, one file per part, joined in the order `order.txt` gives and built into the scanner by `scanner/build.rs`. |
 | `vic2_analyzer.py` | The command line. Hands a run to the scanner and relays what it says; `analyze()` is the same for the window, with the report-ready callback. |
 | `run.py` | Every setting of a run, declared once, and the command line that fills them. |
 | `fastscan.py` | Where the scanner binary is, and how to start it with no console window. |
@@ -50,7 +50,7 @@ change, and how to make a release. `README.md` is the guide to using it;
 ## Checking a change
 
 ```
-cargo build --release --manifest-path scanner/Cargo.toml   # after any change to scanner/ or template.py
+cargo build --release --manifest-path scanner/Cargo.toml   # after any change under scanner/, the page included
 python testkit/all.py "/path/to/saves" --mod "/path/to/mod" [--baseline ~/vic2-baseline]
 ```
 

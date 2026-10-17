@@ -1,0 +1,59 @@
+/* A tag longer than the gutter still reaches back over the plot, so each
+   one carries its own dark outline rather than relying on the space it
+   landed in being empty. The leader joining a moved tag to its line is
+   drawn faint: it is there to be followed when asked, not to be read. */
+.endlab{font-family:'IBM Plex Mono',ui-monospace,monospace;
+  paint-order:stroke;stroke:var(--ground-deep);stroke-width:3.2px;
+  stroke-linejoin:round;stroke-linecap:round}
+.leader{fill:none;stroke-width:.9;opacity:.5}
+@media(prefers-reduced-motion:no-preference){
+  .plotline{stroke-dasharray:var(--len);stroke-dashoffset:var(--len);
+    animation:draw .9s cubic-bezier(.3,.7,.3,1) forwards}
+  @keyframes draw{to{stroke-dashoffset:0}}
+}
+.readout{
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px;
+  border-top:1px solid var(--rule);padding:11px 14px;
+  display:flex;flex-wrap:wrap;gap:5px 22px;min-height:42px;align-items:center;
+}
+/* Several nations on one tile ran as one long wrapping sentence, which put
+   Austria's brigade count under Spain's composition and left the widest column
+   of the readout empty. One row a nation, and the numbers line up down the
+   page where they can be compared. */
+.readout .natgrid{
+  display:grid;grid-template-columns:auto auto auto auto minmax(0,1fr);
+  gap:3px 16px;width:100%;align-items:baseline;margin-top:2px;
+}
+.readout .natgrid .num{text-align:right;font-variant-numeric:tabular-nums}
+.readout .natgrid .mix{color:var(--ink-dim);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.readout .sidehead{width:100%;margin-top:5px;
+  border-top:1px solid var(--rule);padding-top:5px}
+.readout .sidehead:first-of-type{border-top:0;margin-top:0}
+.readout .rk{color:var(--ink-dim)}
+.readout b{font-weight:500}
+table{width:100%;border-collapse:collapse;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12.5px}
+th,td{padding:7px 9px;text-align:right;border-bottom:1px solid var(--grid);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{
+  font-family:'Barlow Condensed','Arial Narrow',sans-serif;font-size:12px;
+  text-transform:uppercase;letter-spacing:.13em;color:var(--ink-dim);
+  cursor:pointer;user-select:none;border-bottom:1px solid var(--rule);
+}
+th:hover{color:var(--ink)}
+th[aria-sort]{color:var(--brass)}
+tbody tr:hover{background:rgba(231,196,100,.10)}
+.tablewrap{overflow:auto;max-height:560px;
+  border:1px solid var(--rule);background:rgba(42,15,23,.62);
+  box-shadow:0 0 0 1px rgba(124,94,34,.35) inset}
+/* Without this the table shrinks to the wrapper instead of overflowing, so
+   wide tables clip their right-hand columns with nothing to scroll to. */
+.tablewrap table{min-width:max-content}
+.tablewrap thead th{position:sticky;top:0;background:#3A1420;z-index:2}
+/* Pin the label column so nation columns stay identifiable when scrolled. */
+.tablewrap.pinned td:first-child,
+.tablewrap.pinned th:first-child{position:sticky;left:0;background:#3A1420}
+.tablewrap.pinned td:first-child{z-index:1}
+.tablewrap.pinned thead th:first-child{z-index:3}
+.tablewrap.pinned tbody tr:hover td:first-child{background:#5A2532}

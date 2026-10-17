@@ -81,7 +81,7 @@ MUTATIONS = [
         'opened a war',
         'boots.py', ('--hostile',),
         [
-            ('template.py', '  const opening = warOpening(w);\n', '  const opening = warOpening(w.unset.start);\n'),
+            ('scanner/src/page/js/wars.js', '  const opening = warOpening(w);\n', '  const opening = warOpening(w.unset.start);\n'),
         ]),
     Mutation(
         'war-casualties-by-nation',
@@ -89,7 +89,7 @@ MUTATIONS = [
         "it led, which credits an ally's dead to whoever led the army",
         'war_legacy_ui.py', (),
         [
-            ('template.py', '  const column = side => `<div class="ibtotal"><div class="ibwho">Total</div>`\n', '  const by = {1: new Map(), \'-1\': new Map()};\n  for (const b of w.battles) sides.battle(b).forEach((m, k) => {\n    const s = k ? b.d : b.a;\n    if (m) by[m].set(s[0], (by[m].get(s[0]) || 0) + s[2]);\n  });\n  const column = side => [...by[side]].map(([t, n]) => `<div class="ibnat">${ibFlag(t)}`\n      + `<div class="ibwho">${nameOf(t)}</div><span class="ibnum">${n}</span></div>`).join(\'\')\n    + `<div class="ibtotal"><div class="ibwho">Total</div>`\n'),
+            ('scanner/src/page/js/wars.js', '  const column = side => `<div class="ibtotal"><div class="ibwho">Total</div>`\n', '  const by = {1: new Map(), \'-1\': new Map()};\n  for (const b of w.battles) sides.battle(b).forEach((m, k) => {\n    const s = k ? b.d : b.a;\n    if (m) by[m].set(s[0], (by[m].get(s[0]) || 0) + s[2]);\n  });\n  const column = side => [...by[side]].map(([t, n]) => `<div class="ibnat">${ibFlag(t)}`\n      + `<div class="ibwho">${nameOf(t)}</div><span class="ibnum">${n}</span></div>`).join(\'\')\n    + `<div class="ibtotal"><div class="ibwho">Total</div>`\n'),
         ]),
     Mutation(
         'legacy-losses-by-country',
@@ -97,8 +97,8 @@ MUTATIONS = [
         "column back, each nation's losses summed from the battles it led",
         'war_legacy_ui.py', (),
         [
-            ('template.py', '    + `<th class="num">Ended</th></tr></thead><tbody>`\n', '    + `<th class="num">Ended</th><th class="num">Losses</th></tr></thead><tbody>`\n'),
-            ('template.py', '        + `<td class="num">${p.joined || \'—\'}</td><td class="num">${ended(p)}</td></tr>`)\n', '        + `<td class="num">${p.joined || \'—\'}</td><td class="num">${ended(p)}</td>`\n        + `<td class="num">${w.battles.reduce((n, b) => n + (b.a[0] === p.tag ? b.a[2] : 0)\n            + (b.d[0] === p.tag ? b.d[2] : 0), 0).toLocaleString()}</td></tr>`)\n'),
+            ('scanner/src/page/js/wars-legacy.js', '    + `<th class="num">Ended</th></tr></thead><tbody>`\n', '    + `<th class="num">Ended</th><th class="num">Losses</th></tr></thead><tbody>`\n'),
+            ('scanner/src/page/js/wars-legacy.js', '        + `<td class="num">${p.joined || \'—\'}</td><td class="num">${ended(p)}</td></tr>`)\n', '        + `<td class="num">${p.joined || \'—\'}</td><td class="num">${ended(p)}</td>`\n        + `<td class="num">${w.battles.reduce((n, b) => n + (b.a[0] === p.tag ? b.a[2] : 0)\n            + (b.d[0] === p.tag ? b.d[2] : 0), 0).toLocaleString()}</td></tr>`)\n'),
         ]),
     Mutation(
         'legacy-side-totals-swapped',
@@ -106,15 +106,15 @@ MUTATIONS = [
         "panel and theirs in the defenders'",
         'war_legacy_ui.py', (),
         [
-            ('template.py', "    + legacySide(w, 'attacker', lost, 1)\n", "    + legacySide(w, 'attacker', lost, -1)\n"),
-            ('template.py', "    + legacySide(w, 'defender', lost, -1)\n", "    + legacySide(w, 'defender', lost, 1)\n"),
+            ('scanner/src/page/js/wars-legacy.js', "    + legacySide(w, 'attacker', lost, 1)\n", "    + legacySide(w, 'attacker', lost, -1)\n"),
+            ('scanner/src/page/js/wars-legacy.js', "    + legacySide(w, 'defender', lost, -1)\n", "    + legacySide(w, 'defender', lost, 1)\n"),
         ]),
     Mutation(
         'legacy-layout-forgotten',
         'the layout chosen for one war is not kept for the next one opened',
         'war_legacy_ui.py', (),
         [
-            ('template.py', "document.getElementById('warback').onclick = () => {\n", "document.getElementById('warback').onclick = () => {\n  warView = 'infobox';\n"),
+            ('scanner/src/page/js/wars-legacy.js', "document.getElementById('warback').onclick = () => {\n", "document.getElementById('warback').onclick = () => {\n  warView = 'infobox';\n"),
         ]),
     Mutation(
         'token-follows-redirect',

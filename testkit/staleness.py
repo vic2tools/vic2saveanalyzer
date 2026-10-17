@@ -60,8 +60,7 @@ def the_build_id_covers_every_source():
     compiled on its own against a copy of the scanner's sources and run
     with each file edited in turn; the id it gives must move every time.
     """
-    rustc = shutil.which("rustc") or os.path.expanduser("~/.cargo/bin/rustc")
-    if not os.path.isfile(rustc):
+    if not kit.rustc():
         print("  the build id: no rustc here, so not checked")
         return []
     holding = tempfile.mkdtemp(prefix="vic2buildid")
@@ -69,31 +68,28 @@ def the_build_id_covers_every_source():
         copy = os.path.join(holding, "tree")
         shutil.copytree(os.path.join(HERE, "scanner"), os.path.join(copy, "scanner"),
                         ignore=shutil.ignore_patterns("target"))
-        shutil.copy2(os.path.join(HERE, "template.py"), os.path.join(copy, "template.py"))
-        script = os.path.join(holding, "build")
-        made = subprocess.run([rustc, "--edition", "2021", "-O", "-o", script,
-                               os.path.join(copy, "scanner", "build.rs")],
-                              capture_output=True, text=True,
-                              env=dict(os.environ, CARGO_MANIFEST_DIR=os.path.join(copy, "scanner")))
-        if made.returncode:
-            return ["the build script would not compile on its own: %s" % made.stderr[-500:]]
-        out_dir = os.path.join(holding, "out")
-        os.makedirs(out_dir)
+        try:
+            run = kit.build_script(os.path.join(copy, "scanner"), os.path.join(holding, "script"))
+        except RuntimeError as why:
+            return [str(why)]
 
         def build_id():
-            done = subprocess.run([script], capture_output=True, text=True,
-                                  env=dict(os.environ, OUT_DIR=out_dir))
-            found = [l.split("=", 2)[2] for l in done.stdout.splitlines()
+            _status, said, _out = run()
+            found = [l.split("=", 2)[2] for l in said.splitlines()
                      if l.startswith("cargo:rustc-env=VIC2_BUILD_ID=")]
             return found[0] if found else None
 
         first = build_id()
         if not first:
             return ["the build script names no VIC2_BUILD_ID"]
-        sources = [os.path.join(copy, "template.py")]
-        for root, _dirs, names in os.walk(os.path.join(copy, "scanner")):
-            # Cargo.lock pins the crates the scanner uses, and it uses none.
-            sources += [os.path.join(root, n) for n in names if n != "Cargo.lock"]
+        sources = []
+        # What the scanner is built from: its manifest, its build script, and
+        # everything under src/, the page included. Not its README, and not
+        # Cargo.lock, which pins crates it does not use.
+        scanner = os.path.join(copy, "scanner")
+        sources += [os.path.join(scanner, "Cargo.toml"), os.path.join(scanner, "build.rs")]
+        for root, _dirs, names in os.walk(os.path.join(scanner, "src")):
+            sources += [os.path.join(root, n) for n in names]
         deaf = []
         for path in sorted(sources):
             with open(path, "rb") as fh:
