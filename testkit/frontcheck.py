@@ -200,6 +200,40 @@ def _sign_folder(digest, folder, under):
             _sign_folder(digest, path, os.path.join(under, entry.name))
 
 
+# A war that ended in 1851, kept in saves of 1860 and 1861: nothing saw who
+# held the state going in, so its goal cannot be judged.
+OLD_WAR = ["previous_war=", "{", '\tname="The Old War"', "\thistory=", "\t{",
+           "\t\t1850.1.1=", "\t\t{", '\t\t\tadd_attacker="ENG"', "\t\t}",
+           "\t\t1850.1.1=", "\t\t{", '\t\t\tadd_defender="FRA"', "\t\t}",
+           "\t\t1851.6.1=", "\t\t{", '\t\t\trem_attacker="ENG"', "\t\t}",
+           "\t}", '\toriginal_attacker="ENG"', '\toriginal_defender="FRA"',
+           "\toriginal_wargoal=", "\t{", '\t\tcasus_belli="acquire_state"',
+           '\t\tactor="ENG"', '\t\treceiver="FRA"', "\t\tstate_province_id=3",
+           "\t}", '\taction="1850.1.1"', "}"]
+
+
+def edge_worlds(holding):
+    """{name: a folder of saves} for the campaigns nobody has: a first
+    month, a war over before the first save, saves whose names sort against
+    their dates, nations with no pops, a war with no battles."""
+    def folder(name, *saves):
+        where = os.path.join(holding, "edge", name)
+        os.makedirs(where)
+        for file, date, kw in saves:
+            a_save(os.path.join(where, file), date, **kw)
+        return where
+    return {
+        "first month": folder("first", ("a.v2", "1836.1.1", {})),
+        "old war": folder("oldwar", ("a.v2", "1860.1.1", {"tags": ("ENG", "FRA"), "wars": OLD_WAR}),
+                          ("b.v2", "1861.1.1", {"tags": ("ENG", "FRA"), "wars": OLD_WAR})),
+        "out of order": folder("order", ("zzz.v2", "1840.1.1", {}), ("aaa.v2", "1850.1.1", {})),
+        "no pops": folder("nopops", ("a.v2", "1840.1.1", {"provinces": 0})),
+        "quiet war": folder("quietwar", ("a.v2", "1870.6.1", {
+            "tags": ("ENG", "FRA"), "wars": savefmt.war("The Test War", "ENG", "FRA")})),
+        "plain": folder("plain", ("a.v2", "1840.1.1", {})),
+    }
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])
@@ -304,6 +338,8 @@ def main():
         shutil.copytree(mod, away)
 
         xgame, xtop = cross_world(holding)
+        edge = edge_worlds(holding)
+        G = ["--game-root", fixtures.a_vanilla(os.path.join(holding, "vanilla", "Victoria 2"))]
         X = [xtop, "--cross", "--game-root", xgame]
         M = ["--mod-path", mod]
         cases = [
@@ -387,7 +423,20 @@ def main():
             ("verified", [saves, "--verify"] + M, None),
             ("verified, laid out another way", [walked, "--verify", "-j", "1"], None),
             ("verified among files it cannot read", [mixed, "--verify"] + M, None),
-        ]
+            # Campaigns nobody has.
+            ("a first-month save", [edge["first month"]] + G, None),
+            ("a war over before the first save", [edge["old war"]] + G, None),
+            ("saves out of order on disk", [edge["out of order"]] + G, None),
+            ("nations with no pops", [edge["no pops"]] + G, None),
+            ("a war with no battles and no end", [edge["quiet war"]] + G, None),
+            ("--tags naming a nation not there", [edge["plain"], "--tags", "ZZZ"] + G, None),
+            ("--min-pop above every nation", [edge["plain"], "--min-pop", "999999999"] + G, None),
+            ("--mod-path at a folder not there",
+             [edge["plain"], "--mod-path", os.path.join(holding, "nope")], None),
+        ] + [("a number it cannot use: %s" % " ".join(bad), [edge["plain"]] + bad + G, None)
+             for bad in (["--pop-per-regiment", "0"], ["--map-scale", "0"],
+                         ["--mobilisation-size", "-1"], ["--mobilisation-size", "2"],
+                         ["--jobs", "0"], ["--min-pop", "-5"])]
         bad = 0
         temps = []
         # What --cross reads a save for, found by hand-written scanners, held

@@ -18,7 +18,7 @@ time, `--explain-mob-pool` wrote `rate_for(...) or args.mob_rate`, and
 because `--mobilisation-size` defaults to 1.0, it printed **100%** and a
 matching brigade ceiling for every nation the report itself scored at
 **0%**. It survived because the only campaign it was ever run against had
-no uncivilized nation in it, and `smoke.py` only ever asks about ENG.
+no uncivilized nation in it, and the checks only ever asked about ENG.
 
     python3 testkit/mobrate.py
 

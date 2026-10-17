@@ -1,0 +1,14 @@
+usage: vic2_analyzer.py [-h] [-o OUT] [--tags [TAGS ...]]
+                        [--mod-path MOD_PATH] [--check-inventions]
+                        [--inventions TAG] [--explain-mob TAG]
+                        [--mobilisation-size MOB_RATE]
+                        [--pop-per-regiment POP_PER_REGIMENT]
+                        [--mob-types [MOB_TYPES ...]] [--mob-include-occupied]
+                        [-j N] [--no-cache] [--map-scale N]
+                        [--player-nations [TAG ...]] [--explain-mob-pool TAG]
+                        [--min-pop MIN_POP] [--no-html] [--rebuild] [--split]
+                        [--peek] [--verify] [--cross]
+                        [--campaign-mod NAME=PATH] [--primary NAME]
+                        [--game-root GAME_ROOT] [-q]
+                        saves
+vic2_analyzer.py: error: argument --mobilisation-size: -1 is not allowed here; it must be between 0.0 and 1.0

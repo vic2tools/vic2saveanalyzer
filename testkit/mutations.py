@@ -270,7 +270,7 @@ MUTATIONS = [
         'goal-judged-before-first-save',
         'a war that ended before the first save has its goal judged by that '
         "save against itself, and reads 'none taken'",
-        'edges.py', (),
+        'frontcheck.py', (),
         [
             ('scanner/src/engine/wars.rs', '        if !end.is_empty() && !ledger_dates.is_empty()\n            && ledger_dates[0] >= year_fraction(names::text(end)) {', '        if false {'),
         ]),
@@ -278,14 +278,14 @@ MUTATIONS = [
         'same-date-read-twice',
         'two saves with the same in-game date are both read, doubling their '
         'rows in every table while the report shows one',
-        'edges.py', (),
+        'frontcheck.py', (),
         [
             ('scanner/src/front/mod.rs', '            *kept.last_mut().unwrap() = path;\n            continue;\n', '            kept.push(path);\n            keys.push(key);\n            continue;\n'),
         ]),
     Mutation(
         'run-never-pairs-a-game',
         'the run takes --mod-path and --game-root as given, unchecked',
-        'edges.py', (),
+        'frontcheck.py', (),
         [
             ('scanner/src/front/mod.rs', '        let (mod_path, game) = settle_game(args.mod_path.as_deref(), args.game_root.as_deref())?;', '        let (mod_path, game) = (args.mod_path.clone().or(args.game_root.clone()).unwrap_or_default(), args.game_root.clone().unwrap_or_default());'),
         ]),

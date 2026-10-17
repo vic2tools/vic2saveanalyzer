@@ -51,7 +51,6 @@ CHECKS = [
     _c("saveshapes.py", "the shapes a save can take", ["scanner"], records=True),
     _c("keeping.py", "the keeper"),
     _c("histories.py", "one game's saves told from another's", ["scanner"]),
-    _c("edges.py", "campaigns nobody has", ["scanner"]),
     _c("mangled.py", "damaged saves", ["scanner"], records=True),
     _c("sharing.py", "sharing a report", ["display"], exclusive=True),
     _c("packing.py", "what the executable carries", ["scanner"]),
@@ -93,7 +92,6 @@ CHECKS = [
     _c("window.py", "the window", ["saves", "display"], exclusive=True),
     _c("enginecheck.py", "the report engine against its recorded answers",
        ["scanner"], optional=["saves", "mod"], records=True),
-    _c("smoke.py", "every way of running it", ["scanner", "saves", "mod"]),
 ]
 
 

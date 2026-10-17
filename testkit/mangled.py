@@ -2,7 +2,7 @@
 """
 Feed the reader damaged saves and check it never crashes.
 
-`edges.py` writes saves that are unusual but well formed. This writes ones
+`frontcheck.py` runs saves that are unusual but well formed. This writes ones
 that are broken: a file cut in half, bytes flipped at random, a chunk
 missing from the middle, braces rubbed out, digits turned into letters. A
 save folder collects these in real life -- a crash while the game was

@@ -99,7 +99,6 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])
     ap.add_argument("saves", nargs="?", default="", help="a folder of .v2 saves")
     ap.add_argument("--mod", default="", help="that campaign's mod folder")
-    ap.add_argument("--quick", action="store_true", help="leave out the slow smoke matrix")
     ap.add_argument("--update-expected", action="store_true",
                     help="re-record the checks that hold recorded answers")
     ap.add_argument("-v", "--verbose", action="store_true",
@@ -118,7 +117,7 @@ def main():
         report = build_report(args.saves, args.mod, holding) if args.saves else ""
         if not args.saves:
             print("no saves given, so only the checks that need none run\n")
-        chosen = [c for c in suite.CHECKS if not (args.quick and c.script == "smoke.py")]
+        chosen = list(suite.CHECKS)
         planned, skipped = [], []
         for c in chosen:
             argv = suite.argv_for(c, saves=args.saves, mod=args.mod, report=report, have=have)
