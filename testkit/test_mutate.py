@@ -102,5 +102,30 @@ class Untested(unittest.TestCase):
         self.assertIn("baseline.py record", baseline)
 
 
+class Checks(unittest.TestCase):
+    def test_each_check_gets_a_temp_folder_of_its_own(self):
+        import tempfile
+        from unittest import mock
+        import mutate
+        seen = []
+
+        class Done:
+            returncode = 0
+            def communicate(self, timeout=None):
+                return "", None
+
+        def popen(*args, **kw):
+            seen.append(kw["env"])
+            return Done()
+        with mock.patch.object(mutate.subprocess, "Popen", side_effect=popen):
+            mutate.check(ROOT, "x.py", [], 5)
+            mutate.check(ROOT, "x.py", [], 5)
+        real = tempfile.gettempdir()
+        for env in seen:
+            for name in ("TMPDIR", "TEMP", "TMP"):
+                self.assertNotEqual(os.path.normcase(env[name]), os.path.normcase(real))
+        self.assertNotEqual(seen[0]["TMPDIR"], seen[1]["TMPDIR"])
+
+
 if __name__ == "__main__":
     unittest.main()

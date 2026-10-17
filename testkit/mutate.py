@@ -42,6 +42,7 @@ import tempfile
 from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor
 
+import kit
 from mutations import MUTATIONS
 from outcome import SKIPPED
 from suite import CHECKS, why
@@ -201,18 +202,23 @@ def kill_tree(proc):
 
 
 def check(tree, script, argv, timeout):
-    """Run one check in the tree. An Outcome, never an exception."""
-    proc = subprocess.Popen([sys.executable, os.path.join("testkit", script)] + list(argv),
-                            cwd=tree, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, encoding="utf-8", errors="replace",
-                            start_new_session=os.name != "nt")
+    """Run one check in the tree, in a temp folder of its own so it never
+    writes the real engine cache. An Outcome, never an exception."""
+    own = tempfile.mkdtemp(prefix="vmc")
     try:
-        out, _ = proc.communicate(timeout=timeout)
-        return Outcome(proc.returncode, False, out)
-    except subprocess.TimeoutExpired:
-        kill_tree(proc)
-        out, _ = proc.communicate()
-        return Outcome(None, True, (out or "") + "\n(timed out after %d s)" % timeout)
+        proc = subprocess.Popen([sys.executable, os.path.join("testkit", script)] + list(argv),
+                                cwd=tree, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, encoding="utf-8", errors="replace",
+                                env=kit.env_in(own), start_new_session=os.name != "nt")
+        try:
+            out, _ = proc.communicate(timeout=timeout)
+            return Outcome(proc.returncode, False, out)
+        except subprocess.TimeoutExpired:
+            kill_tree(proc)
+            out, _ = proc.communicate()
+            return Outcome(None, True, (out or "") + "\n(timed out after %d s)" % timeout)
+    finally:
+        shutil.rmtree(own, ignore_errors=True)
 
 
 def argv_for(needs, saves, mod, baseline):
