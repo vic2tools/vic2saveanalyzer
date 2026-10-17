@@ -1,0 +1,13 @@
+date,year,good,category,price
+1879.11.1,1879,ammunition,military,3.0
+1879.11.1,1879,cement,industrial,2.0
+1879.11.1,1879,wool,raw,1.0
+1879.12.1,1879,ammunition,military,4.0
+1879.12.1,1879,cement,industrial,3.0
+1879.12.1,1879,wool,raw,2.0
+1880.1.1,1880,ammunition,military,4.5
+1880.1.1,1880,cement,industrial,3.0
+1880.1.1,1880,wool,raw,1.5
+1881.1.1,1881,ammunition,military,4.5
+1881.1.1,1881,cement,industrial,3.0
+1881.1.1,1881,wool,raw,1.5

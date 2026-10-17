@@ -1,0 +1,15 @@
+date,year,tag,pop_type,size
+1880.1.1,1880,ENG,craftsmen,2000
+1880.1.1,1880,ENG,farmers,8500
+1880.1.1,1880,ENG,labourers,4000
+1880.1.1,1880,ENG,soldiers,3000
+1880.1.1,1880,FRA,craftsmen,2000
+1880.1.1,1880,FRA,farmers,3000
+1880.1.1,1880,FRA,soldiers,1000
+1881.1.1,1881,ENG,craftsmen,2010
+1881.1.1,1881,ENG,farmers,8530
+1881.1.1,1881,ENG,labourers,4020
+1881.1.1,1881,ENG,soldiers,3020
+1881.1.1,1881,FRA,craftsmen,2010
+1881.1.1,1881,FRA,farmers,3010
+1881.1.1,1881,FRA,soldiers,1010

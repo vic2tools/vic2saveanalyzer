@@ -1,0 +1,5 @@
+date,year,tag,ship_type,count,effective
+1880.1.1,1880,ENG,frigate,1,1.0
+1880.1.1,1880,ENG,monitor,2,2.0
+1881.1.1,1881,ENG,frigate,1,1.0
+1881.1.1,1881,ENG,monitor,2,2.0

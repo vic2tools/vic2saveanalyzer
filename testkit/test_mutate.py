@@ -92,7 +92,11 @@ class Cleanup(unittest.TestCase):
 class Untested(unittest.TestCase):
     def test_each_missing_input_is_explained_once_with_a_count(self):
         from mutate import argv_for, untested_notes
-        rows = [m for m in mutations.MUTATIONS if "baseline" in m.needs][:2]
+        # Made up here: whether the list holds a row the baseline catches
+        # changes as made-up worlds learn to catch them.
+        rows = [mutations.Mutation(name, "a bug", "baseline.py",
+                                   ("compare", "saves", "mod", "baseline"), [])
+                for name in ("one", "two")]
         rows += [m for m in mutations.MUTATIONS if m.needs == ("saves",)][:1]
         unmet = {(m.catcher, m.needs): argv_for(m.needs, "", "", "") for m in rows}
         notes = untested_notes(rows, unmet)
