@@ -65,8 +65,7 @@ every table and the page's payload identical.
 
 A bug fix comes with a check that fails without it, and a row in
 `testkit/mutations.py` that puts the bug back. `python testkit/mutate.py`
-proves each check still catches its bug: about ten minutes, or eighteen
-with a baseline. `testkit/README.md` has the details.
+proves each check still catches its bug, in about fifteen minutes. `testkit/README.md` has the details.
 
 ## Making a release
 
