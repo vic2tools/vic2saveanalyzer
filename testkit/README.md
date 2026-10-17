@@ -82,9 +82,9 @@ bug back there, rebuilds the scanner if the bug is in it (a light build, a
 few seconds), runs the check, and says CAUGHT, BLIND (the check passed with
 the bug in), TIMEOUT, SKIPPED, NOAPPLY (the code moved: move the mutation),
 NOBUILD or UNTESTED, with what an untested one needs. The full run takes
-about ten minutes without a baseline and about eighteen with one, since the
-sixteen mutations only a real campaign catches each run the campaign's two
-dozen cases. Commit first: it tests HEAD. A fix that comes
+about fifteen minutes with the saves and the mod; every engine mutation is
+caught on `enginecheck.py`'s made-up worlds, so a baseline adds nothing to
+it. Commit first: it tests HEAD. A fix that comes
 with a check comes with a row in `mutations.py`, run once by hand with its
 failure read.
 

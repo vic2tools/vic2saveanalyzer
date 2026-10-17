@@ -1,0 +1,4 @@
+date,year,good,category,price,world_pool,supply,demand,real_demand,actual_sold,discovered
+1880.1.1,1880,ammunition,military,4.5,30.0,21.0,18.0,15.0,12.0,1
+1880.1.1,1880,cement,industrial,3.0,20.0,14.0,12.0,10.0,8.0,1
+1880.1.1,1880,wool,raw,1.5,10.0,7.0,6.0,5.0,4.0,1
