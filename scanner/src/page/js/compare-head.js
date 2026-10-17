@@ -14,17 +14,11 @@ const CAP_COLOUR = '#6B7C8C';
 const SIDE_COLOUR = ['#5E8CB8', '#9DA08D'];
 
 const milSave = document.getElementById('milsave');
-DATA.dates.forEach(d => {
-  const o = document.createElement('option'); o.value = d; o.textContent = d;
-  milSave.appendChild(o);
-});
+fillSelect(milSave, DATA.dates);
 milSave.value = DATA.lastDate;
 
 const fleetSave = document.getElementById('fleetsave');
-DATA.dates.forEach(d => {
-  const o = document.createElement('option'); o.value = d; o.textContent = d;
-  fleetSave.appendChild(o);
-});
+fillSelect(fleetSave, DATA.dates);
 fleetSave.value = DATA.lastDate;
 fleetSave.onchange = () => {
   milPicker.refresh();
@@ -80,20 +74,11 @@ document.getElementById('mil-compare').onclick = () => {
   selectTab('tab-compare'); showCompareView('head');
   document.getElementById('compare-head-button').focus();
 };
-const milViewBtn = document.getElementById('milview');
-milViewBtn.onclick = () => {
-  milView = milView === 'totals' ? 'composition' : 'totals';
-  milViewBtn.setAttribute('aria-pressed', milView === 'composition');
-  milViewBtn.textContent = milView === 'totals' ? 'Totals' : 'Composition';
-  drawMilPies();
-};
-const milMobBtn = document.getElementById('milmob');
-milMobBtn.onclick = () => {
-  milPotential = !milPotential;
-  milMobBtn.setAttribute('aria-pressed', milPotential);
-  milMobBtn.textContent = milPotential ? 'Potential' : 'Current';
-  drawMilPies();
-};
+toggleButton(document.getElementById('milview'),
+             () => (milView = milView === 'totals' ? 'composition' : 'totals') === 'composition',
+             () => drawMilPies(), ['Totals', 'Composition']);
+toggleButton(document.getElementById('milmob'), () => (milPotential = !milPotential),
+             () => drawMilPies(), ['Current', 'Potential']);
 document.getElementById('milswap').onclick = () => {
   const a = sideA.slice();
   pickerA.set(sideB.slice());
@@ -136,10 +121,14 @@ const groupTotal = (tags, date) => {
  * mobilized so far, so adding it to `groupTotal` (which also already
  * includes those same mobilized brigades) counted them twice.
  */
+// One fact summed over a side's nations at one save; a nation without it adds 0.
+function sumFact(tags, date, key) {
+  const at = DATA.facts[date] || {};
+  return tags.reduce((sum, t) => sum + ((at[t] || {})[key] || 0), 0);
+}
 function groupStanding(tags, date) {
   if (milMode !== 'army') return groupTotal(tags, date);
-  const at = DATA.facts[date] || {};
-  return tags.reduce((sum, t) => sum + ((at[t] || {}).regular_brigades || 0), 0);
+  return sumFact(tags, date, 'regular_brigades');
 }
 /**
  * The standing brigades a side's soldier pops could support.
@@ -151,22 +140,19 @@ function groupStanding(tags, date) {
  */
 function groupCap(tags, date) {
   if (milMode !== 'army') return groupTotal(tags, date);
-  const at = DATA.facts[date] || {};
-  return tags.reduce((sum, t) => sum + ((at[t] || {}).brigade_cap || 0), 0);
+  return sumFact(tags, date, 'brigade_cap');
 }
 /** Mobilization ceiling for a side. Naval hulls cannot be mobilized. */
 function groupMob(tags, date) {
   if (milMode !== 'army') return 0;
-  const at = DATA.facts[date] || {};
-  return tags.reduce((sum, t) => sum + ((at[t] || {}).mobilization_brigades || 0), 0);
+  return sumFact(tags, date, 'mobilization_brigades');
 }
 /** How many of a side's current brigades came from mobilizing already,
     rather than standing recruitment -- regular_brigades + this always sums
     to groupTotal, since a brigade is one or the other, never both. */
 function groupMobilized(tags, date) {
   if (milMode !== 'army') return 0;
-  const at = DATA.facts[date] || {};
-  return tags.reduce((sum, t) => sum + ((at[t] || {}).mobilized_brigades || 0), 0);
+  return sumFact(tags, date, 'mobilized_brigades');
 }
 /**
  * A side's headline total: its brigades right now, or -- with "Potential"
@@ -272,10 +258,7 @@ function drawMilPies() {
   const mobilized = [groupMobilized(sideA, date), groupMobilized(sideB, date)];
   const totals = [sideTotal(sideA, date), sideTotal(sideB, date)];
   if (!sideA.length && !sideB.length) {
-    const t = el('text', {x: 500, y: 200, 'text-anchor': 'middle', fill: '#C9AC80',
-      'font-family': 'IBM Plex Mono, monospace', 'font-size': 14});
-    t.textContent = 'Pick at least one nation for a side.';
-    svg.appendChild(t);
+    svgMessage(svg, 500, 200, 'Pick at least one nation for a side.');
     readout.textContent = '';
     return;
   }
@@ -310,12 +293,10 @@ function drawMilPies() {
       + (heavyPowers ? `<span><span class="rk">vs heavy</span> `
         + `<b>${fmtPower(heavyPowers[0])}</b> <span class="rk">v</span> `
         + `<b>${fmtPower(heavyPowers[1])}</b></span>` : '');
-  const mobOf = tags => tags.reduce((sum, t) =>
-    sum + (((DATA.facts[date] || {})[t] || {}).mobilized_brigades || 0), 0);
   const mobBits = milMode === 'army'
     ? [sideA, sideB].map(mobilizedSide).filter(Boolean).join('') : '';
   function mobilizedSide(tags) {
-    const n = mobOf(tags);
+    const n = sumFact(tags, date, 'mobilized_brigades');
     if (!n) return '';
     return `<span><span class="rk">${sideLabel(tags)} mobilized</span> <b>${n.toLocaleString()}</b></span>`;
   }

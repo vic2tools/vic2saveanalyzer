@@ -153,6 +153,14 @@ const formatters = {
   decimal: v => v.toFixed(2),
 };
 
+/* A game date, `1872.9.1`, as years: the axis DATA.years is on, and an order
+   that text gets wrong (it puts October before September). A missing month
+   or day counts as the first. */
+function dateYear(d) {
+  const p = String(d).split('.');
+  return (+p[0]) + ((+(p[1] || 1)) - 1) / 12 + ((+(p[2] || 1)) - 1) / 365;
+}
+
 function niceTicks(lo, hi, count) {
   if (hi <= lo) return [lo];
   const raw = (hi - lo) / count;

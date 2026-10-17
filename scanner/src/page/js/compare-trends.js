@@ -87,20 +87,11 @@ metricSel.onchange = () => { metricMemory.set(familySel.value, metricSel.value);
 const nationsPicker = makePicker(document.getElementById('pick-nations'),
   tagPickerCfg(natTags, sel => { natTags = sel; drawChart(); }));
 
-const scaleBtn = document.getElementById('scale');
-scaleBtn.onclick = () => {
-  logScale = !logScale;
-  scaleBtn.setAttribute('aria-pressed', logScale);
-  scaleBtn.textContent = logScale ? 'Logarithmic' : 'Linear';
-  drawChart();
-};
+const scaleBtn = toggleButton(document.getElementById('scale'), () => (logScale = !logScale),
+                              () => drawChart(), ['Linear', 'Logarithmic']);
 
-const worldBtn = document.getElementById('worldline');
-worldBtn.onclick = () => {
-  worldLine = !worldLine;
-  worldBtn.setAttribute('aria-pressed', worldLine);
-  drawChart();
-};
+const worldBtn = toggleButton(document.getElementById('worldline'), () => (worldLine = !worldLine),
+                              () => drawChart());
 
 /* [predecessor, successor] for every nation that turned into another one. */
 const SUCCESSIONS = Object.entries(DATA.succession).flatMap(

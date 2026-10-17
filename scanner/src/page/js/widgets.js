@@ -129,10 +129,7 @@ function plot(svg, cfg) {
   const readout = cfg.readout;
   const idle = cfg.idle || 'Hover the plot to read values.';
   if (!cfg.series.length || !cfg.series.some(s => s.pts.length)) {
-    const t = el('text', {x: W/2, y: H/2, 'text-anchor': 'middle', fill: '#C9AC80',
-      'font-family': 'IBM Plex Mono, monospace', 'font-size': 14});
-    t.textContent = cfg.emptyMsg || 'Nothing to plot.';
-    svg.appendChild(t);
+    svgMessage(svg, W/2, H/2, cfg.emptyMsg || 'Nothing to plot.');
     if (readout) readout.textContent = '';
     return;
   }
@@ -141,10 +138,7 @@ function plot(svg, cfg) {
   let vals = [];
   cfg.series.forEach(s => s.pts.forEach(([, v]) => { if (!log || v > 0) vals.push(v); }));
   if (!vals.length) {
-    const t = el('text', {x: W/2, y: H/2, 'text-anchor': 'middle', fill: '#C9AC80',
-      'font-family': 'IBM Plex Mono, monospace', 'font-size': 14});
-    t.textContent = 'No positive values to show on a log scale.';
-    svg.appendChild(t);
+    svgMessage(svg, W/2, H/2, 'No positive values to show on a log scale.');
     if (readout) readout.textContent = '';
     return;
   }
@@ -323,6 +317,36 @@ function plot(svg, cfg) {
 }
 
 /* =============== generic sortable table =============== */
+// A sentence in the middle of an empty chart, in the page's dim ink
+// (--ink-dim; an SVG fill attribute cannot read a CSS variable).
+function svgMessage(svg, x, y, text) {
+  const t = el('text', {x, y, 'text-anchor': 'middle', fill: '#C9AC80',
+    'font-family': 'IBM Plex Mono, monospace', 'font-size': 14});
+  t.textContent = text;
+  svg.appendChild(t);
+}
+
+// A button that turns something on and off: `flip` changes the state and
+// returns whether it is now on; the button's pressed state and, given
+// `labels` [off, on], its text follow it; then `redraw`.
+function toggleButton(button, flip, redraw, labels) {
+  button.onclick = () => {
+    const on = flip();
+    button.setAttribute('aria-pressed', on);
+    if (labels) button.textContent = labels[on ? 1 : 0];
+    redraw();
+  };
+  return button;
+}
+
+// A <select>'s options, one per value, each shown as `label` says.
+function fillSelect(select, values, label = v => v) {
+  values.forEach(v => {
+    const o = document.createElement('option'); o.value = v; o.textContent = label(v);
+    select.appendChild(o);
+  });
+}
+
 /* =============== sorting, shared by every sortable table ===============
    A table's sort is {key, dir}: dir 1 ascending, -1 descending. */
 // Rows in the order `state` asks for. A blank -- null or undefined -- sorts

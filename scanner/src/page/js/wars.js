@@ -21,19 +21,13 @@ function warEnd(w) {
 // The date an open war last saw a battle, if that was over a year before the
 // last save; '' while it is still being fought.
 function warQuietSince(w) {
-  /* Years as a number, because these are `1872.9.1` strings and sorting them
-     as text puts October before September. */
-  const when = d => {
-    const p = String(d).split('.');
-    return (+p[0]) + ((+(p[1] || 1)) - 1) / 12;
-  };
   let last = 0, shown = w.start;
   for (const b of w.battles) {
-    if (b.date && when(b.date) > last) { last = when(b.date); shown = b.date; }
+    if (b.date && dateYear(b.date) > last) { last = dateYear(b.date); shown = b.date; }
   }
-  if (!last && w.start) last = when(w.start);
+  if (!last && w.start) last = dateYear(w.start);
   let finish = 0;
-  for (const d of DATA.dates) finish = Math.max(finish, when(d));
+  for (const d of DATA.dates) finish = Math.max(finish, dateYear(d));
   return last && finish && finish - last > 1 ? shown : '';
 }
 
@@ -150,11 +144,6 @@ function warSpan(from, to) {
 }
 const ordinal = n => n + (n % 100 >= 11 && n % 100 <= 13 ? 'th'
   : ['th', 'st', 'nd', 'rd'][n % 10] || 'th');
-// The same year axis as DATA.years, which Python's `year_fraction` fills.
-const dateYear = d => {
-  const p = String(d).split('.');
-  return (+p[0]) + (+p[1] - 1) / 12 + (+p[2] - 1) / 365;
-};
 
 /* Which side of the war a nation fought on: 1 attacking, -1 defending, 0 when
    the two lists cannot say -- the same tag on both, as in a civil war. The two

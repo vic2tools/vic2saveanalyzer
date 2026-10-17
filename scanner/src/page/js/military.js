@@ -370,11 +370,8 @@ function drawMilTable() {
 /* =============== FLEETS =============== */
 
 const shipSel = document.getElementById('shiptype');
-[['__all', 'All ships'],
- ...[...DATA.shipTypes].sort(byGameName).map(s => [s, gameName(s)])].forEach(([v, label]) => {
-  const o = document.createElement('option'); o.value = v; o.textContent = label;
-  shipSel.appendChild(o);
-});
+fillSelect(shipSel, ['__all', ...[...DATA.shipTypes].sort(byGameName)],
+           s => s === '__all' ? 'All ships' : gameName(s));
 shipSel.onchange = drawChart;
 
 const shipCount = (tag, date, type) => {

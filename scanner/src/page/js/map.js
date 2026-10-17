@@ -375,22 +375,17 @@ let mapStackCache = null;
 let mapWarBook = null;
 function mapEnemiesAt(date) {
   if (!mapWarBook) {
-    const num = d => {
-      const p = String(d).split('.');
-      return (+p[0]) * 10000 + (+(p[1] || 1)) * 100 + (+(p[2] || 1));
-    };
     mapWarBook = [];
     for (const w of DATA.wars) {
       if (!w.attackers.length || !w.defenders.length) continue;
       mapWarBook.push({
-        from: w.start ? num(w.start) : 0,
-        to: w.active || !w.end ? Infinity : num(w.end),
+        from: w.start ? dateYear(w.start) : 0,
+        to: w.active || !w.end ? Infinity : dateYear(w.end),
         a: new Set(w.attackers), d: new Set(w.defenders),
       });
     }
-    mapWarBook.num = num;
   }
-  const n = mapWarBook.num(date);
+  const n = dateYear(date);
   return mapWarBook.filter(w => w.from <= n && n <= w.to);
 }
 
@@ -878,10 +873,7 @@ if (MAP) {
   wrap.style.aspectRatio = MAP.w + ' / ' + MAP.h;
 
   const mapSave = document.getElementById('mapsave');
-  DATA.dates.forEach(d => {
-    const o = document.createElement('option'); o.value = d; o.textContent = d;
-    mapSave.appendChild(o);
-  });
+  fillSelect(mapSave, DATA.dates);
   mapSave.value = DATA.lastDate;
   mapSave.onchange = () => {
     mapStep.value = DATA.dates.indexOf(mapSave.value);
@@ -971,20 +963,11 @@ if (MAP) {
     mapTimer = setTimeout(tick, frameDelay());
   };
 
-  const borderBtn = document.getElementById('mapborders');
-  borderBtn.onclick = () => {
-    mapShowProvinceBorders = !mapShowProvinceBorders;
-    borderBtn.setAttribute('aria-pressed', mapShowProvinceBorders);
-    mapRender();
-  };
+  toggleButton(document.getElementById('mapborders'),
+               () => (mapShowProvinceBorders = !mapShowProvinceBorders), () => mapRender());
 
-  const occBtn = document.getElementById('mapocc');
-  occBtn.onclick = () => {
-    mapHatchOccupied = !mapHatchOccupied;
-    occBtn.setAttribute('aria-pressed', mapHatchOccupied);
-    occBtn.textContent = mapHatchOccupied ? 'Occupation' : 'Ownership';
-    mapRender();
-  };
+  toggleButton(document.getElementById('mapocc'), () => (mapHatchOccupied = !mapHatchOccupied),
+               () => mapRender(), ['Ownership', 'Occupation']);
   document.getElementById('mapreset').onclick = () => {
     mapZoom = 1; mapOX = 0; mapOY = 0; mapPinned = null; mapRender();
   };

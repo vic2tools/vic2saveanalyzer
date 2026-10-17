@@ -1,20 +1,12 @@
 /* =============== POPS =============== */
 const popSave = document.getElementById('popsave');
-DATA.dates.forEach(d => {
-  const o = document.createElement('option'); o.value = d; o.textContent = d;
-  popSave.appendChild(o);
-});
+fillSelect(popSave, DATA.dates);
 popSave.value = DATA.lastDate;
 popSave.onchange = () => { drawPopTable(); refreshPopulation(); };
 
 let popShare = false;
-const popShareBtn = document.getElementById('popshare');
-popShareBtn.onclick = () => {
-  popShare = !popShare;
-  popShareBtn.setAttribute('aria-pressed', popShare);
-  popShareBtn.textContent = popShare ? 'Shares' : 'Counts';
-  drawPopTable();
-};
+toggleButton(document.getElementById('popshare'), () => (popShare = !popShare),
+             () => drawPopTable(), ['Counts', 'Shares']);
 
 const popState = {key: 'total', dir: -1};
 function drawPopTable() {

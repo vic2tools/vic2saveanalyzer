@@ -132,17 +132,10 @@ function drawTechTree() {
 
 if (TECH) {
   const tagSel = document.getElementById('techtag');
-  DATA.tags.forEach(t => {
-    const o = document.createElement('option'); o.value = t;
-    o.textContent = nameOf(t) === t ? t : `${t} · ${nameOf(t)}`;
-    tagSel.appendChild(o);
-  });
+  fillSelect(tagSel, DATA.tags, t => nameOf(t) === t ? t : `${t} · ${nameOf(t)}`);
   tagSel.onchange = () => { techPick = null; drawTechTree(); };
   const saveSel = document.getElementById('techsave');
-  DATA.dates.forEach(d => {
-    const o = document.createElement('option'); o.value = d; o.textContent = d;
-    saveSel.appendChild(o);
-  });
+  fillSelect(saveSel, DATA.dates);
   saveSel.value = DATA.lastDate;
   const techLimit = () => limitSelect(tagSel, tagsAt(saveSel.value),
                                       biggestAt(saveSel.value, 'total_pop', 1)[0]);

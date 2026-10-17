@@ -29,20 +29,10 @@ const goodsPicker = makePicker(document.getElementById('pick-goods'), {
 });
 document.getElementById('topmovers').onclick = () => goodsPicker.set(topMovers(6));
 
-const pscale = document.getElementById('pscale');
-pscale.onclick = () => {
-  priceLog = !priceLog;
-  pscale.setAttribute('aria-pressed', priceLog);
-  pscale.textContent = priceLog ? 'Logarithmic' : 'Linear';
-  drawPrices();
-};
-const pindex = document.getElementById('pindex');
-pindex.onclick = () => {
-  priceIndex = !priceIndex;
-  pindex.setAttribute('aria-pressed', priceIndex);
-  pindex.textContent = priceIndex ? 'Indexed (=100)' : 'Absolute';
-  drawPrices();
-};
+toggleButton(document.getElementById('pscale'), () => (priceLog = !priceLog),
+             () => drawPrices(), ['Linear', 'Logarithmic']);
+toggleButton(document.getElementById('pindex'), () => (priceIndex = !priceIndex),
+             () => drawPrices(), ['Absolute', 'Indexed (=100)']);
 
 function priceSeries(good) {
   const by = DATA.prices[good] || [];
@@ -95,10 +85,7 @@ const unsoldShare = (good, snap) =>
     : Math.max(0, (snap.supply - snap.actual_sold) / snap.supply * 100);
 
 const snapSel = document.getElementById('snapsel');
-DATA.snapshotDates.forEach(d => {
-  const o = document.createElement('option'); o.value = d; o.textContent = d;
-  snapSel.appendChild(o);
-});
+fillSelect(snapSel, DATA.snapshotDates);
 if (DATA.snapshotDates.length)
   snapSel.value = DATA.snapshotDates[DATA.snapshotDates.length - 1];
 snapSel.onchange = drawMarketTable;
@@ -181,19 +168,12 @@ const SUPPLY = DATA.supply || {};
 const prodSave = document.getElementById('prodsave');
 const prodGood = document.getElementById('prodgood');
 const prodDates = DATA.dates.filter(d => Object.values(SUPPLY).some(by => by[d]));
-prodDates.forEach(d => {
-  const o = document.createElement('option'); o.value = d; o.textContent = d;
-  prodSave.appendChild(o);
-});
+fillSelect(prodSave, prodDates);
 if (prodDates.length) prodSave.value = prodDates[prodDates.length - 1];
 prodSave.onchange = drawSupply;
 
 const prodGoods = DATA.goods.filter(g => SUPPLY[g]).sort(byGameName);
-prodGoods.forEach(g => {
-  const o = document.createElement('option'); o.value = g;
-  o.textContent = gameName(g);
-  prodGood.appendChild(o);
-});
+fillSelect(prodGood, prodGoods, gameName);
 prodGood.onchange = drawSupply;
 // Open on whatever the world makes most of, which is a good with enough
 // suppliers to be worth a chart rather than whatever sorts first.
@@ -221,12 +201,9 @@ function drawSupply() {
   const rec = (SUPPLY[good] || {})[date];
   const PW = 1000, PH = 430;
   if (!rec || !rec.t) {
-    const t = el('text', {x: PW / 2, y: PH / 2, 'text-anchor': 'middle', fill: '#C9AC80',
-      'font-family': 'IBM Plex Mono, monospace', 'font-size': 14});
-    t.textContent = prodDates.length
+    svgMessage(svg, PW / 2, PH / 2, prodDates.length
       ? `Nobody supplied ${good ? gameName(good) : 'this good'} at ${date}.`
-      : 'These saves carry no per-nation supply.';
-    svg.appendChild(t);
+      : 'These saves carry no per-nation supply.');
     readout.textContent = '';
     note.textContent = '';
     return;

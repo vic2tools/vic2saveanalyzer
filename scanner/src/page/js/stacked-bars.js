@@ -40,10 +40,7 @@ function stackedBars(svgId, legendId, byDate, keys, emptyMsg, populationTag = nu
   const peak = Math.max(1, ...totals);
 
   if (!used.length) {
-    const t = el('text', {x: NW/2, y: NH/2, 'text-anchor': 'middle', fill: '#C9AC80',
-      'font-family': 'IBM Plex Mono, monospace', 'font-size': 14});
-    t.textContent = emptyMsg;
-    svg.appendChild(t);
+    svgMessage(svg, NW/2, NH/2, emptyMsg);
     return;
   }
 
