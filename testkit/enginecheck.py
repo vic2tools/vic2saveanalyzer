@@ -5,7 +5,12 @@ every boundary a count has.
 
 The world is made here (`an_edge_world`): a mod and a few saves whose pops,
 pools, soldiers, land, wars, armies, fleets, markets and technologies are
-chosen so that each rule the engine applies shows in its answer. Each run --
+chosen so that each rule the engine applies shows in its answer. Beside it,
+`a_furnished_world` reads `savefmt.furnished` under the baseline's extra
+rules, and `a_mapped_world` gives a mod a map and the rules that grant
+mobilisation, so the page's armies and state chunks, the world market, the
+battles and `--cross`'s names all carry something an ordering or a lookup
+could get wrong. Each run --
 the nine outputs and the printed words -- is held to `testkit/expected/
 enginecheck/` (`expected.py`).
 
