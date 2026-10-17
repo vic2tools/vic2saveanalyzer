@@ -28,7 +28,7 @@ const saveHovers = DATA.dates.map((d, i) => ({v: years[i], label: d}));
    being looked at. This is the same list the Nations tab ranks, read from the
    save's `great_nations`, so a picker and the ranking never disagree. */
 function greatPowersAt(date) {
-  const list = (DATA.greatPowers || {})[date] || [];
+  const list = DATA.greatPowers[date] || [];
   return list.map(([tag]) => tag);
 }
 function greatPowersNear(date) {
@@ -79,7 +79,6 @@ function biggestAt(date, key, n) {
    whether or not they were still steering it at the end. */
 const PLAYER_TAGS = DATA.tags.filter(t =>
   DATA.dates.some(d => ((DATA.facts[d] || {})[t] || {}).is_player));
-const isPlayer = t => PLAYER_TAGS.includes(t);
 
 function tagPickerCfg(selected, onChange, dateOf) {
   return {
@@ -166,7 +165,7 @@ function fleetPower(tags, date, vsHeavy, atStrength) {
   let total = 0;
   tags.forEach(tag => {
     const at = (DATA.ships[tag] || {})[date] || {};
-    const crew = atStrength ? ((DATA.crews || {})[tag] || {})[date] || {} : null;
+    const crew = atStrength ? (DATA.crews[tag] || {})[date] || {} : null;
     for (const type in at) {
       const hulls = crew && crew[type] !== undefined ? crew[type] : at[type];
       total += shipPowerOf(tag, date, type, vsHeavy) * hulls;

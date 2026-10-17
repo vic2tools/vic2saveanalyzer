@@ -145,7 +145,7 @@ function drawMarketTable() {
     for (let i = 0; i < PD.length; i++) if (by[i] != null) seen.push(i);
     const first = seen.length ? by[seen[0]] : 0;
     const last = seen.length ? by[seen[seen.length - 1]] : 0;
-    const base = (DATA.basePrices || {})[good];
+    const base = DATA.basePrices[good];
     return {
       good, category: DATA.goodCategory[good] || 'other',
       price: snap[good].price,
@@ -241,7 +241,7 @@ function drawSupply() {
     bars.push({tag: '', value: rest, colour: 'var(--grid)', rest: true});
 
   const snap = (DATA.snapshot[date] || {})[good] || {};
-  const base = (DATA.basePrices || {})[good];
+  const base = DATA.basePrices[good];
   const unsold = unsoldShare(good, snap);
 
   const left = 132, right = 156, top = 58, bottom = 14;

@@ -224,7 +224,7 @@ function renderPopulationDetails(){
     for(const d of DATA.dates){const r=populationStateAt(d);if(r?.[2]){series[d]=r[2];totals[d]=r[0];}}
     const keys=[...new Set([...DATA.popTypes,...Object.values(series).flatMap(v=>Object.keys(v))])];
     populationHistory(series,keys,'State history is unavailable in these saves.',populationCountry,totals);
-  }else{popTag.value=populationCountry;drawPopChart();}
+  }else{popChartTag=populationCountry;drawPopChart();}
 }
 populationCountrySelect.onchange=()=>openPopulationCountry(populationCountrySelect.value);
 populationRegionSelect.onchange=()=>{populationAllLand=false;populationRegion=populationRegionSelect.value;refreshPopulation();};

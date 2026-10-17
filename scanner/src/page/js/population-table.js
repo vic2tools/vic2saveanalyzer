@@ -67,49 +67,10 @@ function drawPopTable() {
   filterPopulationTable();
 }
 
-const culSel = document.getElementById('cultagsel');
-DATA.tags.forEach(t => {
-  const o = document.createElement('option'); o.value = t;
-  o.textContent = nameOf(t) === t ? t : `${t} · ${nameOf(t)}`;
-  culSel.appendChild(o);
-});
-culSel.value = largestBy('total_pop');
-const culLimit = () => limitSelect(culSel, tagsAt(popSave.value),
-                                   biggestAt(popSave.value, 'total_pop', 1)[0]);
-culLimit();
-culSel.onchange = drawCultureTable;
-
-const culState = {key: 'size', dir: -1};
-function drawCultureTable() {
-  const tag = culSel.value, date = popSave.value;
-  document.getElementById('cultag').textContent =
-    (nameOf(tag) === tag ? tag : `${tag} · ${nameOf(tag)}`) + ' at ' + date;
-  const list = ((DATA.cultures[tag] || {})[date]) || [];
-  const total = list.reduce((s, c) => s + c[1], 0);
-  const rows = list.map(([culture, size, accepted]) => ({
-    culture: cultureName(culture), key: culture, size, accepted,
-    share: total ? size / total * 100 : 0,
-  }));
-  const cols = [
-    {key: 'culture', label: 'Culture'},
-    {key: 'size', label: 'Pops', fmt: v => v.toLocaleString()},
-    {key: 'share', label: 'Share', fmt: v => v.toFixed(1) + '%'},
-    {key: 'accepted', label: 'Accepted', fmt: v => v ? 'yes' : '—',
-     cls: r => r.accepted ? 'up' : 'down'},
-  ];
-  renderTable(document.getElementById('cultable'), cols, rows, culState);
-}
-
-const popTag = document.getElementById('poptag');
-DATA.tags.forEach(t => {
-  const o = document.createElement('option'); o.value = t;
-  o.textContent = nameOf(t) === t ? t : `${t} · ${nameOf(t)}`;
-  popTag.appendChild(o);
-});
-popTag.value = largestBy('total_pop');
-popTag.onchange = () => drawPopChart();
+// The nation the population history chart is drawn for.
+let popChartTag = largestBy('total_pop');
 
 const drawPopChart = () => populationHistory(
-  DATA.pops[popTag.value] || {}, DATA.popTypes,
-  nameOf(popTag.value) + ' has no pops in these saves.', popTag.value);
+  DATA.pops[popChartTag] || {}, DATA.popTypes,
+  nameOf(popChartTag) + ' has no pops in these saves.', popChartTag);
 

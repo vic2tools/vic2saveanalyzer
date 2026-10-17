@@ -29,12 +29,11 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
 .strength-ledger td:first-child,.strength-ledger th:first-child{text-align:left}
 .strength-ledger .nation-toggle{text-align:left;background:transparent;border:0;color:var(--ink);padding:6px 0;white-space:normal}
 .strength-ledger .nation-toggle[aria-expanded="true"]{color:var(--brass)}
-.strength-ledger .return-details>td{text-align:left;white-space:normal;background:rgba(0,0,0,.15);padding:18px}
 .return-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px}
 .return-grid h3{margin:0 0 10px;color:var(--brass);font-size:14px}
 .return-grid dl{margin:0}.return-grid dl>div{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid var(--grid);padding:5px 0}
 .return-grid dd{margin:0;font-family:'IBM Plex Mono',monospace}.return-grid dt{color:var(--ink-dim)}
-.return-details[hidden],[id^="compare-"][hidden]{display:none}
+[id^="compare-"][hidden]{display:none}
 @media(max-width:650px){.ledger-heading{align-items:flex-start;flex-direction:column}.strength-ledger{min-width:650px}}
 .military-ledger-wrap{max-height:none}
 .tablewrap>table.strength-ledger{min-width:650px;table-layout:fixed}
@@ -48,14 +47,6 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
 .strength-ledger .nation-toggle{display:inline-flex;align-items:center;gap:10px;font-size:14px}
 .military-flag{width:30px;height:20px;object-fit:fill;box-shadow:0 0 0 1px rgba(0,0,0,.5);flex:none}
 .military-flag.blank{display:inline-block;border:1px solid var(--rule)}
-.military-dossier{display:grid;grid-template-columns:minmax(240px,1fr) minmax(0,2fr);gap:20px;align-items:start}
-.military-dossier .ib{max-width:none;min-width:0}
-.military-identity{padding:22px 16px;text-align:center;border-bottom:1px solid var(--rule);background:rgba(8,25,44,.35)}
-.military-identity .military-flag{width:90px;height:60px;margin-bottom:12px}
-.military-number{font-family:'Barlow Condensed',sans-serif;font-size:46px;line-height:1.2;color:var(--brass)}
-.military-identity .tb-label{margin:5px 0 0}
-.military-facts{padding:16px}.military-facts .return-grid{display:block}
-.military-main{min-width:0}.military-main .ibtitle{text-align:left;font-size:18px}
 .military-rivals{margin-bottom:20px}.military-rivals .controls{padding:12px 14px;margin:0}
 .military-rivals .note{padding:0 14px 12px;margin:0}
 .strength-ledger .rival-table{width:100%;min-width:0;table-layout:auto;font-size:12px}
@@ -63,10 +54,6 @@ footer{color:var(--ink-dim);font-size:12.5px;border-top:1px solid var(--rule);
 .strength-ledger .rival-table td:first-child,.strength-ledger .rival-table th:first-child{text-align:left}
 .rival-name{white-space:normal;display:flex;align-items:center;gap:8px}.rival-name .military-flag{width:24px;height:16px}
 .military-rivals .tablewrap{max-height:none;border:0;margin-bottom:12px}
-.military-menu{padding:14px}.military-menu .segments{margin-bottom:16px}
-.military-menu .return-grid{grid-template-columns:1fr}
-.military-menu .note{margin-bottom:0}
-@media(max-width:1000px){.military-dossier{grid-template-columns:1fr}.military-identity{padding:12px}.military-identity .military-flag{width:60px;height:40px}}
 #military-browse[hidden],#military-country[hidden]{display:none}
 #miloverview.country-open>.ledger-heading,#miloverview.country-open>.note,#miloverview.country-open>.ledger-toolbar .picker{display:none}
 .military-country-header{display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap}

@@ -2,18 +2,18 @@
 function drawGreatPowers() {
   const grid = document.getElementById('gpgrid');
   const date = document.getElementById('mapsave').value || DATA.lastDate;
-  const list = (DATA.greatPowers || {})[date] || [];
+  const list = DATA.greatPowers[date] || [];
   document.getElementById('gpstrip').hidden = !list.length;
   grid.replaceChildren();
   list.forEach((entry, i) => {
-    const [tag, flagKey] = Array.isArray(entry) ? entry : [entry, ''];
+    const [tag, flagKey] = entry;
     const card = document.createElement('div'); card.className = 'gpcard';
     card.setAttribute('role', 'listitem');
     card.style.setProperty('--nation-colour', (DATA.map?.colours || {})[tag] || colourFor(tag));
     const identity = document.createElement('div'); identity.className = 'gpidentity';
     const rank = document.createElement('span'); rank.className = 'gprank'; rank.textContent = i + 1;
     let flag = nationFlag(tag); flag.className = 'gpflag';
-    if ((DATA.flags || {})[flagKey]) {
+    if (DATA.flags[flagKey]) {
       flag = document.createElement('img'); flag.src = DATA.flags[flagKey]; flag.alt = ''; flag.className = 'gpflag';
     }
     const name = document.createElement('button'); name.className = 'gpname'; name.textContent = nameOf(tag);

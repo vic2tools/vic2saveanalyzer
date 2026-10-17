@@ -132,7 +132,7 @@ if (said) said.remove();
    change the other. */
 for (const tag in DATA.series) {
   const metrics = DATA.series[tag];
-  for (const key of (DATA.factKeys || [])) {
+  for (const key of DATA.factKeys) {
     const column = metrics[key];
     if (!column) continue;
     for (let i = 0; i < column.length; i++) {

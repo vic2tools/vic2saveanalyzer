@@ -1,5 +1,5 @@
 /* =============== WARS =============== */
-const WARS = DATA.wars || [];
+const WARS = DATA.wars;
 let warPick = null;
 /* What to write in a war's "to" column.
 
@@ -33,7 +33,7 @@ function warQuietSince(w) {
   }
   if (!last && w.start) last = when(w.start);
   let finish = 0;
-  for (const d of (DATA.dates || [])) finish = Math.max(finish, when(d));
+  for (const d of DATA.dates) finish = Math.max(finish, when(d));
   return last && finish && finish - last > 1 ? shown : '';
 }
 
@@ -115,7 +115,7 @@ let warBattleSort = {key: 'date', dir: 1};
 let expandedBattles = new Set();
 
 function warFlag(tag) {
-  const src = (DATA.flags || {})[tag + '|'];
+  const src = DATA.flags[tag + '|'];
   return src ? `<img class="tagflag" src="${src}" alt="">` : '';
 }
 function warTag(tag) {
@@ -124,13 +124,9 @@ function warTag(tag) {
 }
 
 // A war's own attackers/defenders lists are flat tags with no join info; the
-// *_parties lists (when present) carry a join date and an original/later
-// split per tag. Older data that predates that field falls back to treating
-// everyone as original, so the layout still works either way.
+// *_parties lists carry a join date and an original/later split per tag.
 function belParties(w, side) {
-  const parties = w[side + '_parties'];
-  if (parties) return parties;
-  return (w[side + 's'] || []).map(tag => ({tag, joined: '', original: true}));
+  return w[side + '_parties'];
 }
 /* =============== THE WAR INFOBOX =============== */
 
@@ -208,8 +204,8 @@ function warOpening(w) {
 function warGreatPowers(opening) {
   const rank = {};
   if (!opening) return rank;
-  ((DATA.greatPowers || {})[opening.date] || []).forEach((e, i) => {
-    rank[Array.isArray(e) ? e[0] : e] = i + 1;
+  (DATA.greatPowers[opening.date] || []).forEach((e, i) => {
+    rank[e[0]] = i + 1;
   });
   return rank;
 }
@@ -217,7 +213,7 @@ function warGreatPowers(opening) {
 /* A flag at one of three sizes: '' in a list, 'big' for a principal
    belligerent, 'hero' across the top. */
 function ibFlag(tag, size) {
-  const src = (DATA.flags || {})[tag + '|'];
+  const src = DATA.flags[tag + '|'];
   const cls = 'ibflag' + (size ? ' ' + size : '');
   if (src) return `<img class="${cls}" src="${src}" alt="">`;
   return `<span class="${cls} blank" style="background-color:${colourFor(tag)}">`
@@ -540,7 +536,7 @@ function warInfobox(w) {
         + `neither side&rsquo;s list could place.`);
   }
   if (!w.battles.length) body += band('Casualties and losses') + '<div class="ibcaption" style="padding-bottom:10px">No battle casualties recorded.</div>';
-  if (Object.keys(DATA.greatPowers || {}).length) {
+  if (Object.keys(DATA.greatPowers).length) {
     notes.push(opening
       ? `Great-power ranks as of ${opening.date}, ${opening.what}.`
       : 'No save shows this war going in, so great powers are not marked: '

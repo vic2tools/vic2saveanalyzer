@@ -32,7 +32,7 @@ function strengthDetails(sections, note) {
 
 // Use the report's embedded flags; a nation-colour swatch is the honest fallback.
 function nationFlag(tag) {
-  const src = (DATA.flags || {})[tag + '|'];
+  const src = DATA.flags[tag + '|'];
   const flag = document.createElement(src ? 'img' : 'span');
   flag.className = 'military-flag' + (src ? '' : ' blank');
   if (src) { flag.src = src; flag.alt = ''; }
@@ -167,7 +167,7 @@ function militaryInventory(row, branch, date) {
   labels.forEach(label => { const th = document.createElement('th'); th.scope = 'col'; th.textContent = label; head.appendChild(th); });
   const counts = branch === 'army' ? (DATA.brigades[row.tag] || {})[date] || {} : row.counts;
   const total = Object.values(counts).reduce((sum,n) => sum+n,0);
-  const stats = navalStats(row.tag,date), crew = ((DATA.crews || {})[row.tag] || {})[date] || {};
+  const stats = navalStats(row.tag,date), crew = (DATA.crews[row.tag] || {})[date] || {};
   const body = table.createTBody();
   Object.entries(counts).filter(([,count]) => count > 0).sort((a,b) => b[1]-a[1]).forEach(([type,count]) => {
     const tr = body.insertRow(); tr.insertCell().textContent = gameName(type);

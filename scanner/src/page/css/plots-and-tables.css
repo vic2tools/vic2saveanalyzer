@@ -51,9 +51,3 @@ tbody tr:hover{background:rgba(231,196,100,.10)}
    wide tables clip their right-hand columns with nothing to scroll to. */
 .tablewrap table{min-width:max-content}
 .tablewrap thead th{position:sticky;top:0;background:#3A1420;z-index:2}
-/* Pin the label column so nation columns stay identifiable when scrolled. */
-.tablewrap.pinned td:first-child,
-.tablewrap.pinned th:first-child{position:sticky;left:0;background:#3A1420}
-.tablewrap.pinned td:first-child{z-index:1}
-.tablewrap.pinned thead th:first-child{z-index:3}
-.tablewrap.pinned tbody tr:hover td:first-child{background:#5A2532}

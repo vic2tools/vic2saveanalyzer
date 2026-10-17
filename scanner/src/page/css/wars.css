@@ -85,17 +85,6 @@
   font-family:'Playfair Display',Georgia,serif;font-size:21px;font-weight:600;
   line-height:1.2;color:var(--brass);text-shadow:0 1px 0 rgba(0,0,0,.5);
   overflow-wrap:anywhere}
-/* The picture slot: the principal belligerents' flags, large, facing each
-   other across a "v". */
-.ibbanner{display:flex;align-items:center;gap:14px;padding:16px 14px 15px;
-  border-bottom:1px solid var(--grid);
-  background:radial-gradient(80% 130% at 50% 0%,rgba(231,196,100,.09),transparent 70%)}
-.ibflags{flex:1;min-width:0;display:flex;gap:8px;align-items:center}
-.ibflags.left{justify-content:flex-end}
-.ibvs{flex:none;font-family:'Playfair Display',Georgia,serif;font-style:italic;
-  font-size:19px;color:var(--ink-dim)}
-.ibmore{flex:none;font-family:'IBM Plex Mono',ui-monospace,monospace;
-  font-size:12px;color:var(--ink-dim)}
 .ibflag{flex:none;display:block;width:21px;height:14px;object-fit:fill;
   border:1px solid rgba(0,0,0,.6);box-shadow:0 1px 2px rgba(0,0,0,.35)}
 .ibflag.big{width:36px;height:24px}
@@ -210,7 +199,4 @@
 table.mini.fitmini{width:100%;min-width:0;table-layout:auto}
 table.mini.fitmini th,table.mini.fitmini td{white-space:normal;
   overflow-wrap:anywhere}
-.groupcell{color:var(--brass);background:#54212E !important;position:static !important}
-/* A full-width colspan cell cannot stick, so pin the label inside it. */
-.groupcell span{position:sticky;left:9px;display:inline-block}
 .up{color:#9BD65E}.down{color:var(--minium)}

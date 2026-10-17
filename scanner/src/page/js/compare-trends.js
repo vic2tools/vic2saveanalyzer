@@ -103,17 +103,17 @@ worldBtn.onclick = () => {
 };
 
 /* [predecessor, successor] for every nation that turned into another one. */
-const SUCCESSIONS = Object.entries(DATA.succession || {}).flatMap(
+const SUCCESSIONS = Object.entries(DATA.succession).flatMap(
   ([to, info]) => (info.from || []).map(([from]) => [from, to]));
 
 (() => {
   const note = document.getElementById('succnote');
   if (!note) return;
-  const lines = Object.entries(DATA.succession || {}).map(([to, info]) =>
+  const lines = Object.entries(DATA.succession).map(([to, info]) =>
     `${(info.from || []).map(([f, , decided]) =>
         nameOf(f) + (decided ? '' : '*')).join(' and ')} became `
     + `<b>${nameOf(to)}</b> by ${info.date}`);
-  const guessed = Object.values(DATA.succession || {})
+  const guessed = Object.values(DATA.succession)
     .some(i => (i.from || []).some(([, , d]) => !d));
   note.innerHTML = lines.length
     ? 'A dashed line joins a nation to the one it became. A save records none '

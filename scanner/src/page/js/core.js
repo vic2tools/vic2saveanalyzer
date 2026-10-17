@@ -125,13 +125,13 @@ const colourFor = t => NATION_INK[t] || seriesColour(tagSlot(t));
 /* A save names a culture by its key. The mod's localisation has the name the
    game shows; without a mod folder there is none, so the key stands in, tidied
    the way every other raw key here is. */
-const cultureName = c => (DATA.cultureNames || {})[c] || (c || '').replace(/_/g, ' ');
+const cultureName = c => DATA.cultureNames[c] || (c || '').replace(/_/g, ' ');
 /* Same again for the other bare keys a save writes down -- goods, unit types,
    pop types, technologies, casus belli. The mod's localisation holds the name
    the game shows, so `cattle` reads Livestock in IGoR and Cattle in vanilla;
    with no mod folder there is nothing to look it up in and the key stands in,
    tidied. */
-const gameName = k => (DATA.names || {})[k] || (k || '').replace(/_/g, ' ');
+const gameName = k => DATA.names[k] || (k || '').replace(/_/g, ' ');
 // Any list a reader scans for a name has to be in the order of the names it
 // shows, not of the keys behind them: IGoR calls `barrels` Tanks and `cattle`
 // Livestock, and sorted by key those land under B and C.

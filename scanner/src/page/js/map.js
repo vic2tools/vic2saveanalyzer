@@ -3,10 +3,8 @@ const MAP = DATA.map;
 let mapTags = null;          // null means every nation
 let mapHatchOccupied = true;
 let mapShowProvinceBorders = false;
-/* Contested tiles are always marked. It was a toggle while the rule was a
-   guess about recent battles and worth being able to switch off; now that it
-   is simply "enemies are standing here", there is nothing to disbelieve. */
-const mapShowBattles = true;
+/* Contested tiles are always marked: "enemies are standing here" is a fact
+   of the save, not a guess worth switching off. */
 let mapProv = null;          // province id for every pixel
 let mapOwners = null;        // date -> {own: Map, occ: Map}
 let mapDots = [];            // what is currently drawn, for hit testing
@@ -382,7 +380,7 @@ function mapEnemiesAt(date) {
       return (+p[0]) * 10000 + (+(p[1] || 1)) * 100 + (+(p[2] || 1));
     };
     mapWarBook = [];
-    for (const w of (DATA.wars || [])) {
+    for (const w of DATA.wars) {
       if (!w.attackers.length || !w.defenders.length) continue;
       mapWarBook.push({
         from: w.start ? num(w.start) : 0,
@@ -496,9 +494,9 @@ function mapRenderSoon() {
 function mapWorldPop(date) {
   const el = document.getElementById('mapworld');
   if (!el) return;
-  const n = (DATA.worldPop || {})[date];
+  const n = DATA.worldPop[date];
   if (!n) { el.textContent = ''; return; }
-  const first = (DATA.worldPop || {})[DATA.dates[0]] || 0;
+  const first = DATA.worldPop[DATA.dates[0]] || 0;
   const since = first && n !== first
     ? '  ' + (n > first ? '+' : '−')
       + Math.abs((n / first - 1) * 100).toFixed(1) + '% since ' + DATA.dates[0]
@@ -631,7 +629,7 @@ function mapRender() {
        and an orange edge was lost against whichever nation owned the ground.
        The first go put small sabres above the counter, which collided with
        whatever was drawn north of it and vanished at anything but full zoom. */
-    const inFight = mapShowBattles && dot.fighting;
+    const inFight = dot.fighting;
     // Below this the diamond is smaller than the counter it sits behind
     // and only its tips show, so the counter's own edge carries it instead.
     const burstFits = half >= 4.5;
