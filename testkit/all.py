@@ -99,6 +99,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])
     ap.add_argument("saves", nargs="?", default="", help="a folder of .v2 saves")
     ap.add_argument("--mod", default="", help="that campaign's mod folder")
+    ap.add_argument("--baseline", default=os.environ.get("VIC2_BASELINE", ""),
+                    help="a recorded baseline of that campaign (default $VIC2_BASELINE)")
     ap.add_argument("--update-expected", action="store_true",
                     help="re-record the checks that hold recorded answers")
     ap.add_argument("-v", "--verbose", action="store_true",
@@ -120,10 +122,12 @@ def main():
         chosen = list(suite.CHECKS)
         planned, skipped = [], []
         for c in chosen:
-            argv = suite.argv_for(c, saves=args.saves, mod=args.mod, report=report, have=have)
+            argv = suite.argv_for(c, saves=args.saves, mod=args.mod, report=report,
+                                  baseline=args.baseline, have=have)
             if argv is None:
                 skipped.append((c, "skip", 0.0, "needs " + ", ".join(suite.unmet(
-                    c, saves=args.saves, mod=args.mod, report=report, have=have))))
+                    c, saves=args.saves, mod=args.mod, report=report, baseline=args.baseline,
+                    have=have))))
             else:
                 planned.append((c, argv))
 

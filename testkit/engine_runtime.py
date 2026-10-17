@@ -14,7 +14,7 @@ from unittest.mock import patch
 import kit                                                  # noqa: E402
 import vic2_analyzer
 from fixtures import a_game
-from enginecheck import copies_of
+from fixtures import copies_of
 
 
 class Relay(unittest.TestCase):

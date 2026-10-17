@@ -8,7 +8,7 @@ recorded as refused (status 3) must still be refused. The answers were
 those of `mod_reader.load_mod`, the Python reader, taken on 1 Oct 2026
 while it was still here; before then this ran every case both ways.
 
-Five parts:
+Four parts:
 
 - the regular expressions the reader runs, against Python's `re`, on
   random text built from the pieces mod files are made of;
@@ -17,11 +17,12 @@ Five parts:
   where a name belongs, numbers Python spells its own way -- read as the
   mod and as the game;
 - that world, damaged at random a thousand times;
-- the real mod, when `--mod` names one;
 - and the copy the engine keeps of a mod it has read: a report run twice
   with the mod edited in between must show the edit.
 
-    python3 testkit/modread.py [--mod MOD] [--rounds N] [--update]
+    python3 testkit/modread.py [--rounds N] [--update]
+
+The real mod, as the program reads it, is held by `baseline.py`.
 """
 
 import argparse
@@ -442,7 +443,6 @@ def kept_copy(holding):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mod", default="")
     ap.add_argument("--rounds", type=int, default=1000)
     ap.add_argument("--update", action="store_true",
                     help="write what the reader answers now as the expected answers")
@@ -506,26 +506,6 @@ def main():
                     fh.write(json.dumps(packed(one, answers), separators=(",", ":")) + "\n")
             print("recorded %d answers in %s" % (len(answers), record))
         ok &= kept_copy(os.path.join(holding, "kept"))
-        if args.mod:
-            # The real mod's answer is keyed by the mod's folder name, with
-            # the folders it was read from written as MOD and GAME.
-            real = os.path.join(expected.REAL, "modread",
-                                expected.slug(os.path.basename(os.path.abspath(args.mod))) + ".json")
-            if not os.path.isdir(args.mod):
-                print("no mod at %s" % args.mod)
-                ok = False
-            elif args.update:
-                os.makedirs(os.path.dirname(real), exist_ok=True)
-                with open(real, "w", encoding="utf-8") as fh:
-                    json.dump(portable(answer_of(args.mod)), fh)
-                print("recorded the real mod's answer in %s" % real)
-            elif not os.path.isfile(real):
-                print("no answer is recorded for the real mod in %s" % real)
-            else:
-                with open(real, encoding="utf-8") as fh:
-                    found = held(args.mod, portable(json.load(fh)), portable(answer_of(args.mod)))
-                print("the real mod: %s" % (found[0] if found else "as recorded"))
-                ok &= not found
     finally:
         shutil.rmtree(holding, ignore_errors=True)
     print("the mod reader holds" if ok else "the mod reader DIFFERS")

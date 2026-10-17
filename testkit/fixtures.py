@@ -188,3 +188,16 @@ def vanilla():
         atexit.register(shutil.rmtree, where, True)
         _VANILLA.append(a_vanilla(os.path.join(where, "Victoria 2")))
     return _VANILLA[0]
+
+
+def copies_of(src, dst, skip=()):
+    """Copy fixture inputs, dereferencing links so writes stay in the fixture."""
+    os.makedirs(dst, exist_ok=True)
+    for name in os.listdir(src):
+        if name in skip:
+            continue
+        source, target = os.path.join(src, name), os.path.join(dst, name)
+        if os.path.isdir(source):
+            shutil.copytree(source, target, symlinks=False)
+        elif os.path.isfile(source):
+            shutil.copy2(source, target)

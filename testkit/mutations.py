@@ -315,7 +315,7 @@ MUTATIONS = [
         'chunk-stream-cut',
         "a save's state-history chunk loses the first byte of its gzip "
         "stream, so the page's chunk does not decompress",
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/engine/finish.rs', 'deflate::gzip_level(raw.as_bytes(), &deflate::LEVEL5))', 'deflate::gzip_level(raw.as_bytes(), &deflate::LEVEL5)[1..])'),
         ]),
@@ -514,7 +514,7 @@ MUTATIONS = [
         'market-snapshot-goods-by-id',
         "the market snapshot's goods come out in the order the run met "
         'their names, not by name',
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
             ('scanner/src/engine/market.rs', '        goods.sort_by(|a, b| names::cmp(*a, *b));\n        let get', '        goods.sort_by_key(|g| names::id(*g));\n        let get'),
@@ -523,7 +523,7 @@ MUTATIONS = [
         'market-prices-goods-by-id',
         "a day's prices come out in the order the run met the goods' names, "
         'not by name',
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
             ('scanner/src/engine/market.rs', '        goods.sort_by(|a, b| names::cmp(*a, *b));\n        for good in goods {', '        goods.sort_by_key(|g| names::id(*g));\n        for good in goods {'),
@@ -532,7 +532,7 @@ MUTATIONS = [
         'war-side-units-reversed',
         "a battle's unit kinds are listed in the opposite order to the "
         "file's, which shows where two kinds have as many men",
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/engine/wars.rs', '    let mut v: Vec<(&Sym, &i64)> = s.units.iter().collect();\n', '    let mut v: Vec<(&Sym, &i64)> = s.units.iter().collect();\n    v.reverse();\n'),
         ]),
@@ -540,7 +540,7 @@ MUTATIONS = [
         'war-battles-reversed',
         "a war's battles are held in the opposite order to the file's, "
         'which shows where two battles share a date and a name',
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/engine/wars.rs', '        let mut battles: Vec<&Battle> = war.battles.values().collect();\n', '        let mut battles: Vec<&Battle> = war.battles.values().collect();\n        battles.reverse();\n'),
         ]),
@@ -548,7 +548,7 @@ MUTATIONS = [
         'culture-ties-broken-by-name',
         'two cultures of the same size are listed alphabetically, not in '
         'the order the save first named them',
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/engine/finish.rs', '        cultures.sort_by(|a, b| b.1.cmp(a.1));\n', '        cultures.sort_by(|a, b| b.1.cmp(a.1).then(names::cmp(*a.0, *b.0)));\n'),
         ]),
@@ -557,7 +557,7 @@ MUTATIONS = [
         "a state's pop types are numbered in the opposite order to the one "
         "the save met them in, so the state chunk's words and layouts "
         'change',
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/engine/model.rs', 'Group { group: *group, size: st.total, literate: st.literate, types: pairs(&st.types),', 'Group { group: *group, size: st.total, literate: st.literate, types: { let mut v = pairs(&st.types); v.reverse(); v },'),
         ]),
@@ -566,7 +566,7 @@ MUTATIONS = [
         "a nation's technologies are written in the order their names were "
         'first met in the run, not alphabetically, so technologies.csv and '
         "the page's lists change",
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/engine/finish.rs', '        techs.sort_by(|a, b| names::cmp(*a, *b));\n', '        techs.sort_by_key(|t| t.index());\n'),
         ]),
@@ -574,21 +574,21 @@ MUTATIONS = [
         'reform-mob-key-swapped',
         "a reform's mobilisation size is looked up with the option and the "
         'reform the wrong way round, so no reform grants any',
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/engine/rules.rs', '        let v = d.reform_mob(*reform, *option);\n', '        let v = d.reform_mob(*option, *reform);\n'),
         ]),
     Mutation(
         'national-value-ignored',
         "a nation's national value grants no mobilisation size",
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/engine/rules.rs', '    let v = d.nv_mob(nat.nationalvalue);\n', '    let v = 0.0 * d.nv_mob(nat.nationalvalue);\n'),
         ]),
     Mutation(
         'modifier-impacts-ignored',
         "a nation's event modifiers add nothing to its mobilisation cap",
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/engine/rules.rs', '        total += d.modifier_impact(*name);\n', '        total += 0.0 * d.modifier_impact(*name);\n'),
         ]),
@@ -596,7 +596,7 @@ MUTATIONS = [
         'techs-without-branch',
         "every technology is filed under 'other' in technologies.csv and "
         'the page',
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/engine/finish.rs', 'dense.tech_group(*tech).unwrap_or(("other", "Other"))', 'dense.tech_group(*tech).filter(|_| false).unwrap_or(("other", "Other"))'),
         ]),
@@ -604,7 +604,7 @@ MUTATIONS = [
         'cross-names-never-built',
         'a --cross run has no government names for its nations, so every '
         'label is the tag',
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/engine/mod.rs', '    let held_names: Vec<(String, String)> = if run.cross_part {', '    let held_names: Vec<(String, String)> = if false && run.cross_part {'),
         ]),
@@ -612,7 +612,7 @@ MUTATIONS = [
         'row-facts-pop-types-dropped',
         'the pop_<type> columns of the main table read nought, as if the '
         'row had kept no pop types',
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/engine/finish.rs', '            pop_by_type: std::mem::take(&mut nat.pop_by_type),\n', '            pop_by_type: OMap::new(),\n'),
         ]),
@@ -620,7 +620,7 @@ MUTATIONS = [
         'kept-units-left-behind',
         "a kept nation's units are not carried to the page, so no army is "
         'drawn',
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/engine/finish.rs', '        units_at: std::mem::take(&mut nat.units_at),\n', '        units_at: Vec::new(),\n'),
         ]),
@@ -628,7 +628,7 @@ MUTATIONS = [
         'invention-trigger-inverted',
         'a trigger that asks whether a nation holds an invention is '
         'answered the other way',
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/engine/rules.rs', '.as_ref().map(|held| held.contains(text)));', '.as_ref().map(|held| !held.contains(text)));'),
         ]),
@@ -636,7 +636,7 @@ MUTATIONS = [
         'army-kinds-tie-reversed',
         'two kinds with as many regiments in a province change places on '
         "the page's armies, as if the province's kinds were read last first",
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/engine/report.rs', '                let mut ranked: Vec<&Stack> = types.iter().collect();', '                let mut ranked: Vec<&Stack> = types.iter().rev().collect();'),
         ]),
@@ -644,7 +644,7 @@ MUTATIONS = [
         'army-provinces-reversed',
         "a nation's armies come out on the page with its provinces in the "
         'order last met first',
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/country.rs', '        None => {\n            stacks.push(stack);\n            return;\n        }', '        None => {\n            stacks.insert(0, stack);\n            return;\n        }'),
         ]),
@@ -652,7 +652,7 @@ MUTATIONS = [
         'ship-types-by-id',
         "ships_by_type.csv lists a nation's ships in the order the run met "
         'the names, not by name',
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
             ('scanner/src/engine/finish.rs', '        ship_types.sort_by(|a, b| names::cmp(a.kind, b.kind));', '        ship_types.sort_by_key(|s| names::id(s.kind));'),
@@ -661,7 +661,7 @@ MUTATIONS = [
         'regiment-types-by-id',
         "brigades_by_type.csv lists a nation's regiments in the order the "
         'run met the names, not by name',
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
             ('scanner/src/engine/finish.rs', '        regiments.sort_by(|a, b| names::cmp(a.0, b.0));', '        regiments.sort_by_key(|r| names::id(r.0));'),
@@ -670,7 +670,7 @@ MUTATIONS = [
         'ship-crew-dropped',
         "a ship's crew is not counted, so every fleet reads as crewed by "
         'its hull count',
-        'enginecheck.py', ('saves', 'mod'),
+        'enginecheck.py', (),
         [
             ('scanner/src/engine/finish.rs', '            let effective = Num::F(round(ship.crew, 3));', '            let effective = Num::I(ship.count);'),
         ]),

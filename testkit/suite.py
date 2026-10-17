@@ -36,12 +36,12 @@ class Check:
     records: bool = False       # holds recorded answers; --update re-records
     exclusive: bool = False     # drives a window or a browser: runs alone
     after_report: bool = False  # reads the report all.py builds first
-    optional: frozenset = frozenset()  # handed when given: "saves", "mod"
+    lead: tuple = ()            # arguments before the needs
     extra: tuple = ()           # arguments after the needs
 
 
-def _c(script, title, needs=(), optional=(), **kw):
-    return Check(script, title, frozenset(needs), optional=frozenset(optional), **kw)
+def _c(script, title, needs=(), **kw):
+    return Check(script, title, frozenset(needs), **kw)
 
 
 CHECKS = [
@@ -56,7 +56,7 @@ CHECKS = [
     _c("packing.py", "what the executable carries", ["scanner"]),
     _c("matching.py", "matching a campaign to its mod", ["scanner"]),
     _c("engine_runtime.py", "the engine process and test fixtures", ["scanner"]),
-    _c("modread.py", "the mod reader", ["scanner"], optional=["mod"], records=True),
+    _c("modread.py", "the mod reader", ["scanner"], records=True),
     _c("frontcheck.py", "the run's front end", ["scanner"], records=True),
     _c("enginefmt.py", "the engine's number formatting", ["scanner"],
        extra=("SCANNER", "20000")),
@@ -91,8 +91,12 @@ CHECKS = [
     _c("map_rendering.py", "the map's pixels, seams and cache", ["report", "firefox"],
        after_report=True, exclusive=True, extra=("REPORT",)),
     _c("window.py", "the window", ["saves", "display"], exclusive=True),
-    _c("enginecheck.py", "the report engine against its recorded answers",
-       ["scanner"], optional=["saves", "mod"], records=True),
+    _c("enginecheck.py", "the report engine against its recorded answers", ["scanner"],
+       records=True),
+    _c("baselinecheck.py", "recording and comparing a baseline", ["scanner"]),
+    # The maintainer's verified campaign, where $VIC2_BASELINE names one.
+    _c("baseline.py", "the campaign against its baseline", ["scanner", "saves", "mod", "baseline"],
+       lead=("compare",)),
 ]
 
 
@@ -143,8 +147,8 @@ def argv_for(check, *, saves="", mod="", report="", baseline="", have=None):
     out = os.path.dirname(report) if report else ""
     words = {"SCANNER": scanner_path(), "REPORT": report,
              "TABLE": os.path.join(out, "nations_timeseries.csv")}
-    argv = [os.path.join(ROOT, "testkit", check.script)]
-    wanted = check.needs | {o for o in check.optional if {"saves": saves, "mod": mod}[o]}
+    argv = [os.path.join(ROOT, "testkit", check.script)] + list(check.lead)
+    wanted = check.needs
     if "saves" in wanted and "ONE-SAVE" not in check.extra:
         argv.append(saves)
     if "mod" in wanted:

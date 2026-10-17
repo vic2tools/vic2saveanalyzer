@@ -42,13 +42,14 @@ class Skips(unittest.TestCase):
 
 
 class Arguments(unittest.TestCase):
-    def test_optional_mod_is_handed_when_given(self):
-        argv = suite.argv_for(named("modread.py"), mod="M", have=EVERYTHING)
-        self.assertEqual(argv[1:], ["--mod", "M"])
+    def test_the_baseline_is_compared_with_the_campaign_it_names(self):
+        argv = suite.argv_for(named("baseline.py"), saves="S", mod="M", baseline="B",
+                              have=EVERYTHING)
+        self.assertEqual(argv[1:], ["compare", "S", "--mod", "M", "--from", "B"])
 
-    def test_optional_mod_is_left_out_when_not(self):
-        argv = suite.argv_for(named("modread.py"), have=EVERYTHING)
-        self.assertEqual(argv[1:], [])
+    def test_no_baseline_means_the_comparison_is_skipped(self):
+        self.assertEqual(suite.unmet(named("baseline.py"), saves="S", mod="M",
+                                     have=EVERYTHING), ["baseline"])
 
     def test_report_words_become_paths(self):
         argv = suite.argv_for(named("invariants.py"), report=os.path.join("o", "report.html"),
