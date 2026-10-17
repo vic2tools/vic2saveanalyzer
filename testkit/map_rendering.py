@@ -99,14 +99,11 @@ def main():
     if anchor not in html:
         raise RuntimeError('Report does not contain the expected renderer')
     html = html.replace(anchor, PROBE + '\n' + anchor, 1)
-    boots.WATCHER = boots.WATCHER.replace(
-        'tourWars(verdict);',
-        "try { say('mapRendering', JSON.stringify(window.checkMapRendering())); } "
-        "catch(e) { bad.push('mapRendering: '+e.message); } verdict();")
     with tempfile.TemporaryDirectory(prefix='vic2-map-rendering-') as folder:
         report = Path(folder) / 'report.html'
         report.write_text(html, encoding='utf-8')
-        result = boots.looked(str(report))
+        result = boots.looked(str(report), tour=False,
+                              probes=[('mapRendering', 'return JSON.stringify(window.checkMapRendering());')])
     print(json.dumps(result))
     return 0 if result and not result['error'] and result.get('mapRendering') else 1
 

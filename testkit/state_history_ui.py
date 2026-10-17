@@ -92,18 +92,13 @@ if (checkedHash !== EXPECTED) throw new Error('State history differs from the Py
 document.documentElement.dataset.stateHistoryChecked = String(checkedStates.length);
 '''.replace('EXPECTED', json.dumps(expected))
     html = html.replace('clearTimeout(slow);', probe + '\nclearTimeout(slow);', 1)
-    original = boots.WATCHER
-    boots.WATCHER = original.replace('  function verdict() {',
-        "  function verdict() {\n    say('states', document.documentElement.dataset.stateHistoryChecked);")
-    try:
-        with tempfile.TemporaryDirectory(prefix='vic2states-') as tmp:
-            watched = Path(tmp) / 'report.html'
-            watched.write_text(html, encoding='utf-8')
-            result = boots.looked(str(watched))
-    finally:
-        boots.WATCHER = original
+    with tempfile.TemporaryDirectory(prefix='vic2states-') as tmp:
+        watched = Path(tmp) / 'report.html'
+        watched.write_text(html, encoding='utf-8')
+        result = boots.looked(str(watched), probes=[
+            ('states', 'return document.documentElement.dataset.stateHistoryChecked;')])
     assert result and not result['error'], result
-    assert result.get('states') == str(len(rows)), result
+    assert result['probes'].get('states') == str(len(rows)), result
     print('Browser and Python agree on all %d state records' % len(rows))
 
 

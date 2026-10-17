@@ -43,9 +43,7 @@ if __name__ == '__main__':
     if browser.firefox() is None:
         print('no firefox here, so nothing was opened')
         sys.exit(SKIPPED)
-    boots.WATCHER = boots.WATCHER.replace('  function verdict() {', CHECKS + '\n  function verdict() {')
-    boots.WATCHER = boots.WATCHER.replace('tourWars(verdict);', 'populationHistoryChecks(); verdict();')
-    result = boots.looked(sys.argv[1])
+    result = boots.looked(sys.argv[1], probes=[('checks', CHECKS + 'await populationHistoryChecks();')], tour=False)
     print(result)
     if not result or result['error'] or result.get('pop-history') != 'passed':
         sys.exit(1)

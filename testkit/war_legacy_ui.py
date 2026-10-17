@@ -278,14 +278,8 @@ def fixture_report(holding):
 
 
 def look(report, checks):
-    keep = boots.WATCHER
-    try:
-        boots.WATCHER = keep.replace('  function verdict() {', checks + '\n  function verdict() {')
-        boots.WATCHER = boots.WATCHER.replace('tourWars(verdict);',
-                                              'warLegacyChecks(); verdict();')
-        return boots.looked(report, seconds=300)
-    finally:
-        boots.WATCHER = keep
+    return boots.looked(report, seconds=300, tour=False,
+                        probes=[('checks', checks + 'await warLegacyChecks();')])
 
 
 def verdict(what, said):

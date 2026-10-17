@@ -147,57 +147,43 @@ def cross_world(holding):
     return game, top
 
 
-def mod_signature(mod_path):
+def signature_problems(binary, mod, game):
     """
-    What `vic2scan mod-signature` has to answer, as the Python it replaced
-    worked it out: an MD5 of the mod folder's path and every file below it
-    (its path under the folder, size and time, `os.walk` order with names
-    sorted, linked folders not followed), and of the game folders beneath
-    a mod that sits in an install's mod folder.
+    [what is wrong] with `vic2scan mod-signature`, which keys the engine's
+    copy of a mod and goes into the stamp: it must change when a file the
+    mod or its game's rule folders hold is edited, stay put when the game
+    gains a file outside those folders, and come back when an edit is put
+    back as it was.
     """
-    import hashlib
-    from mod_reader import _base_game_path
-    if not mod_path:
-        return "no-mod"
-    mod_path = os.path.abspath(os.path.expanduser(os.path.expandvars(mod_path)))
-    roots = [mod_path]
-    base = _base_game_path(mod_path)
-    if base:
-        roots.extend(os.path.join(base, folder) for folder in (
-            "common", "decisions", "gfx/flags", "inventions", "localisation",
-            "map", "poptypes", "technologies", "units"))
-    digest = hashlib.md5()
-    for source in roots:
-        digest.update(source.encode("utf-8", "replace"))
-        _sign_folder(digest, source, "")
-    return digest.hexdigest()
+    def sign():
+        done = subprocess.run([binary, "mod-signature", mod], capture_output=True, text=True)
+        return done.stdout.strip() if done.returncode == 0 else None
 
-
-def _sign_folder(digest, folder, under):
-    files, folders = [], []
-    try:
-        with os.scandir(folder) as entries:
-            for entry in entries:
-                try:
-                    is_dir = entry.is_dir()
-                except OSError:
-                    is_dir = False
-                (folders if is_dir else files).append(entry)
-    except OSError:
-        return
-    files.sort(key=lambda entry: entry.name)
-    for entry in files:
-        try:
-            st = entry.stat()
-        except OSError:
-            continue
-        digest.update(("%s|%d|%d\n" % (os.path.join(under, entry.name), st.st_size,
-                                        st.st_mtime_ns)).encode("utf-8", "replace"))
-    folders.sort(key=lambda entry: entry.name)
-    for entry in folders:
-        path = os.path.join(folder, entry.name)
-        if not os.path.islink(path):
-            _sign_folder(digest, path, os.path.join(under, entry.name))
+    first = sign()
+    if not first:
+        return ["mod-signature gave no signature for %s" % mod]
+    wrong = []
+    for path in (os.path.join(mod, "common", "countries.txt"),
+                 os.path.join(game, "map", "default.map")):
+        st = os.stat(path)
+        with open(path, "rb") as fh:
+            kept = fh.read()
+        with open(path, "ab") as fh:
+            fh.write(b"\n")
+        if sign() == first:
+            wrong.append("editing %s left the signature as it was" % os.path.relpath(path, game))
+        with open(path, "wb") as fh:
+            fh.write(kept)
+        os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+        if sign() != first:
+            wrong.append("%s put back as it was did not give the signature back"
+                         % os.path.relpath(path, game))
+    os.makedirs(os.path.join(game, "music"), exist_ok=True)
+    with open(os.path.join(game, "music", "theme.txt"), "w") as fh:
+        fh.write("not a rule")
+    if sign() != first:
+        wrong.append("a file outside the game's rule folders changed the signature")
+    return wrong
 
 
 # A war that ended in 1851, kept in saves of 1860 and 1861: nothing saw who
@@ -447,15 +433,9 @@ def main():
         print(sniffed.stdout.strip())
         if sniffed.returncode:
             bad += 1
-        # The mod's signature, which keys the engine's copy of the mod and
-        # goes into the stamp: Python's MD5 over the same walk.
-        for folder in (mod, game, away, empty_mod, os.path.join(holding, "nowhere")):
-            mine = subprocess.run([BIN, "mod-signature", folder], capture_output=True,
-                                  text=True).stdout.strip()
-            theirs = mod_signature(folder)
-            if mine != theirs:
-                bad += 1
-                print("DIFFERS: the signature of %s: %s against %s" % (folder, mine, theirs))
+        for wrong in signature_problems(BIN, mod, game):
+            bad += 1
+            print("WRONG: " + wrong)
         def run(name, argv, how):
             place = os.path.join(holding, "case", expected.slug(name))
             os.makedirs(place)

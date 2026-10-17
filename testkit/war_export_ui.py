@@ -57,9 +57,7 @@ if __name__ == '__main__':
     if browser.firefox() is None:
         print('no firefox here, so nothing was opened')
         sys.exit(SKIPPED)
-    boots.WATCHER = boots.WATCHER.replace('  function verdict() {', CHECKS + '\n  function verdict() {')
-    boots.WATCHER = boots.WATCHER.replace('tourWars(verdict);', 'warExportChecks().then(verdict);')
-    result = boots.looked(sys.argv[1], seconds=150)
+    result = boots.looked(sys.argv[1], probes=[('checks', CHECKS + 'await warExportChecks();')], tour=False, seconds=150)
     print(result)
     if not result or result['error'] or result.get('war-export') != 'passed':
         sys.exit(1)

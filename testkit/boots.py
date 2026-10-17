@@ -19,6 +19,7 @@ put up its own "could not be unpacked" note, or on one that rendered
 nothing.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -146,8 +147,33 @@ WATCHER = """<script>
 """ % {"mark": MARK, "wait": 5000, "settle": 700}
 
 
-def looked(html_path, seconds=90, wait_ms=6000):
-    """{what the page said}, or None if the browser never reported."""
+def probing(probes, tour):
+    """The watcher, running `probes` -- (name, a block of JavaScript run in
+    an async function inside the watcher, where `say` and `bad` are in
+    reach) -- in order once the tabs have been visited, after the war tour
+    or in its place. A probe's return value is said under its name, as
+    JSON; anything it throws is an error."""
+    if not probes and tour:
+        return WATCHER
+    blocks = ",\n".join("[%s, async function () {\n%s\n}]" % (json.dumps(name), body)
+                        for name, body in probes)
+    run = ("  function runProbes(then) {\n"
+           "    (async function () {\n"
+           "      for (const [name, probe] of [%s]) {\n"
+           "        try { const r = await probe(); if (r !== undefined) say(name, JSON.stringify(r)); }\n"
+           "        catch (e) { bad.push(name + ': ' + (e && e.message)); }\n"
+           "      }\n"
+           "      then();\n"
+           "    })();\n"
+           "  }\n" % blocks)
+    after = "tourWars(function () { runProbes(verdict); });" if tour else "runProbes(verdict);"
+    return (WATCHER.replace("  function verdict() {", run + "  function verdict() {", 1)
+            .replace("tourWars(verdict);", after, 1))
+
+
+def looked(html_path, seconds=90, wait_ms=6000, probes=(), tour=True):
+    """{what the page said}, or None if the browser never reported. With
+    `probes`, each one's answer is under its name in `said["probes"]`."""
     firefox = browser.firefox()
     if firefox is None:
         return None
@@ -170,7 +196,7 @@ def looked(html_path, seconds=90, wait_ms=6000):
         at = html.index("</head>")
         watched = os.path.join(holding, "watched.html")
         with open(watched, "w", encoding="utf-8") as fh:
-            fh.write(html[:at] + WATCHER + html[at:])
+            fh.write(html[:at] + probing(probes, tour) + html[at:])
 
         try:
             done = subprocess.run(
@@ -191,7 +217,11 @@ def looked(html_path, seconds=90, wait_ms=6000):
                 said[key].append(value)
             else:
                 said[key] = value
-        return said if said.get("done") else None
+        if not said.get("done"):
+            return None
+        said["probes"] = {name: json.loads(said[name]) for name, _body in probes
+                          if isinstance(said.get(name), str)}
+        return said
     finally:
         shutil.rmtree(holding, ignore_errors=True)
 

@@ -89,9 +89,7 @@ if __name__ == '__main__':
     if browser.firefox() is None:
         print('no firefox here, so nothing was opened')
         sys.exit(SKIPPED)
-    boots.WATCHER = boots.WATCHER.replace('  function verdict() {', CHECKS + '\n  function verdict() {')
-    boots.WATCHER = boots.WATCHER.replace('tourWars(verdict);', 'militaryChecks(); verdict();')
-    result = boots.looked(sys.argv[1])
+    result = boots.looked(sys.argv[1], probes=[('checks', CHECKS + 'await militaryChecks();')], tour=False)
     if not result or result['error'] or result.get('military') != 'passed':
         print(result or 'Firefox did not report back')
         sys.exit(1)
