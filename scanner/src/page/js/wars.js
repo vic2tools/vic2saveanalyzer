@@ -109,7 +109,7 @@ let warBattleSort = {key: 'date', dir: 1};
 let expandedBattles = new Set();
 
 function warFlag(tag) {
-  const src = DATA.flags[tag + '|'];
+  const src = flagSrc(tag);
   return src ? `<img class="tagflag" src="${src}" alt="">` : '';
 }
 function warTag(tag) {
@@ -207,7 +207,7 @@ function warGreatPowers(opening) {
 /* A flag at one of three sizes: '' in a list, 'big' for a principal
    belligerent, 'hero' across the top. */
 function ibFlag(tag, size) {
-  const src = DATA.flags[tag + '|'];
+  const src = flagSrc(tag);
   const cls = 'ibflag' + (size ? ' ' + size : '');
   if (src) return `<img class="${cls}" src="${src}" alt="">`;
   return `<span class="${cls} blank" style="background-color:${colourFor(tag)}">`

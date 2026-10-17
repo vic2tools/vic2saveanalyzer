@@ -31,8 +31,15 @@ function strengthDetails(sections, note) {
 }
 
 // Use the report's embedded flags; a nation-colour swatch is the honest fallback.
-function nationFlag(tag) {
-  const src = DATA.flags[tag + '|'];
+// A nation's flag as the payload carries it: the one `key` names (the great
+// powers' cards name the flag of their government), else its usual one,
+// else ''.
+function flagSrc(tag, key) {
+  return (key && DATA.flags[key]) || DATA.flags[tag + '|'] || '';
+}
+
+function nationFlag(tag, key) {
+  const src = flagSrc(tag, key);
   const flag = document.createElement(src ? 'img' : 'span');
   flag.className = 'military-flag' + (src ? '' : ' blank');
   if (src) { flag.src = src; flag.alt = ''; }

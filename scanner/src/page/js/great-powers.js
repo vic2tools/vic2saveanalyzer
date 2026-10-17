@@ -12,10 +12,7 @@ function drawGreatPowers() {
     card.style.setProperty('--nation-colour', (DATA.map?.colours || {})[tag] || colourFor(tag));
     const identity = document.createElement('div'); identity.className = 'gpidentity';
     const rank = document.createElement('span'); rank.className = 'gprank'; rank.textContent = i + 1;
-    let flag = nationFlag(tag); flag.className = 'gpflag';
-    if (DATA.flags[flagKey]) {
-      flag = document.createElement('img'); flag.src = DATA.flags[flagKey]; flag.alt = ''; flag.className = 'gpflag';
-    }
+    const flag = nationFlag(tag, flagKey); flag.className = 'gpflag';
     const name = document.createElement('button'); name.className = 'gpname'; name.textContent = nameOf(tag);
     name.title = 'View trends for ' + nameOf(tag);
     name.onclick = () => {
