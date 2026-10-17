@@ -139,18 +139,71 @@ class Fixtures(unittest.TestCase):
             self.assertFalse(any(p.is_symlink() for p in dst.rglob("*")))
 
 
-def scanners_running():
-    """The ids of the scanner processes running now, or None if this machine
-    has no way to list them -- which must never be read as "none left"."""
+def scanners_started_by(parents):
+    """The ids (as text) of the scanner processes running now whose parent is
+    one of `parents`, or None if this machine has no way to list them --
+    which must never be read as "none left". Only a scanner this test
+    started counts: another run on the machine may have its own going."""
     import shutil
-    if os.name == "nt" and shutil.which("tasklist"):
-        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq vic2scan.exe", "/FO", "CSV",
-                              "/NH"], capture_output=True, text=True).stdout
-        return {line.split('","')[1] for line in out.splitlines() if line.startswith('"vic2scan')}
+    parents = {str(p) for p in parents}
+    if os.name == "nt" and shutil.which("powershell"):
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Process -Filter \"Name='vic2scan.exe'\" | "
+             "ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId)\" }"],
+            capture_output=True, text=True).stdout
+        pairs = [line.split() for line in out.splitlines() if line.strip()]
+        return {pid for pid, parent in pairs if parent in parents}
     if shutil.which("pgrep"):
-        out = subprocess.run(["pgrep", "-x", "vic2scan"], capture_output=True, text=True).stdout
-        return set(out.split())
+        found = set()
+        for parent in parents:
+            out = subprocess.run(["pgrep", "-x", "-P", parent, "vic2scan"],
+                                 capture_output=True, text=True).stdout
+            found |= set(out.split())
+        return found
     return None
+
+
+class Leftovers(unittest.TestCase):
+    """Only a scanner this test started counts as left behind: another run on
+    the machine -- another session's suite -- may have its own going."""
+
+    def fake_scanner(self):
+        import shutil
+        where = tempfile.mkdtemp(prefix="vic2fake")
+        self.addCleanup(shutil.rmtree, where, True)
+        fake = os.path.join(where, "vic2scan" + (".exe" if os.name == "nt" else ""))
+        shutil.copy(shutil.which("ping"), fake)
+        return fake
+
+    def test_a_scanner_this_process_started_is_seen(self):
+        fake = self.fake_scanner()
+        proc = subprocess.Popen([fake, "-n" if os.name == "nt" else "-c", "20", "127.0.0.1"],
+                                stdout=subprocess.DEVNULL)
+        self.addCleanup(proc.wait)
+        self.addCleanup(proc.kill)
+        time.sleep(0.5)
+        seen = scanners_started_by({os.getpid()})
+        if seen is None:
+            self.skipTest("no way to list processes here")
+        self.assertIn(str(proc.pid), seen)
+
+    def test_a_scanner_someone_else_started_is_not(self):
+        fake = self.fake_scanner()
+        flag = "-n" if os.name == "nt" else "-c"
+        starter = subprocess.run(
+            [sys.executable, "-c",
+             "import subprocess, sys; p = subprocess.Popen([sys.argv[1], sys.argv[2], '20', "
+             "'127.0.0.1'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); print(p.pid)", fake, flag],
+            capture_output=True, text=True)
+        other = starter.stdout.strip()
+        self.addCleanup(subprocess.run, ["taskkill", "/F", "/PID", other] if os.name == "nt"
+                        else ["kill", other], capture_output=True)
+        time.sleep(0.5)
+        seen = scanners_started_by({os.getpid()})
+        if seen is None:
+            self.skipTest("no way to list processes here")
+        self.assertNotIn(other, seen)
 
 
 class Pipes(unittest.TestCase):
@@ -172,26 +225,27 @@ class Pipes(unittest.TestCase):
         os.makedirs(self.saves)
         for n, date in enumerate(("1840.1.1", "1841.1.1", "1842.1.1")):
             fixtures.edge_save(os.path.join(self.saves, "s%d.v2" % n), date, tags=("ENG", "FRA"))
-        self.before = scanners_running()
+        self.parents = {os.getpid()}
         self.addCleanup(self.none_left)
 
     def none_left(self):
-        if self.before is None:
-            return
-        # A scanner told to stop can take a moment to go; one still there
-        # after five seconds was left behind.
-        for _ in range(50):
-            left = scanners_running() - self.before
-            if not left:
+        # A scanner told to stop can take a moment to go; one of this test's
+        # still there after five seconds was left behind.
+        give_up = time.monotonic() + 5
+        while True:
+            left = scanners_started_by(self.parents)
+            if not left or time.monotonic() > give_up:
                 break
-            time.sleep(0.1)
-        self.assertFalse(left, "a scanner was left running: %s" % sorted(left))
+            time.sleep(0.2)
+        if left:
+            self.fail("a scanner was left running: %s" % sorted(left))
 
     def test_a_reader_that_goes_away_early(self):
         proc = subprocess.Popen(
             [sys.executable, os.path.join(kit.ROOT, "vic2_analyzer.py"), self.saves,
              "--out", os.path.join(self.where, "out"), "--game-root", self.game, "--rebuild"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env, cwd=kit.ROOT)
+        self.parents.add(proc.pid)
         for _ in range(3):
             proc.stdout.readline()
         proc.stdout.close()
@@ -218,7 +272,7 @@ class Pipes(unittest.TestCase):
         self.assertTrue(out.getvalue().strip(), "the hosted run said nothing at all")
 
     def test_processes_can_be_listed_here(self):
-        if scanners_running() is None:
+        if scanners_started_by({os.getpid()}) is None:
             self.skipTest("no tasklist or pgrep here, so leftover scanners cannot be looked for")
 
 
