@@ -311,7 +311,7 @@ MUTATIONS = [
         [
             ('scanner/src/engine/finish.rs', "    if !s.contains(['<', '>']) {", '    if true {'),
         ]),
-    # The made-up worlds have no a state-history chunk large enough to compress in streams: held by the baseline.
+    # Held by the baseline: the made-up worlds lack a state-history chunk large enough to compress in streams.
     Mutation(
         'chunk-stream-cut',
         "a save's state-history chunk loses the first byte of its gzip "
@@ -511,7 +511,7 @@ MUTATIONS = [
         [
             ('scanner/src/front/cross.rs', '        if worst >= 6 {', '        if worst >= 600 {'),
         ]),
-    # The made-up worlds have no a world market: held by the baseline.
+    # Held by the baseline: the made-up worlds lack a world market.
     Mutation(
         'market-snapshot-goods-by-id',
         "the market snapshot's goods come out in the order the run met "
@@ -521,7 +521,7 @@ MUTATIONS = [
             ('scanner/src/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
             ('scanner/src/engine/market.rs', '        goods.sort_by(|a, b| names::cmp(*a, *b));\n        let get', '        goods.sort_by_key(|g| names::id(*g));\n        let get'),
         ]),
-    # The made-up worlds have no a world market: held by the baseline.
+    # Held by the baseline: the made-up worlds lack a world market.
     Mutation(
         'market-prices-goods-by-id',
         "a day's prices come out in the order the run met the goods' names, "
@@ -531,7 +531,7 @@ MUTATIONS = [
             ('scanner/src/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
             ('scanner/src/engine/market.rs', '        goods.sort_by(|a, b| names::cmp(*a, *b));\n        for good in goods {', '        goods.sort_by_key(|g| names::id(*g));\n        for good in goods {'),
         ]),
-    # The made-up worlds have no a battle with tied unit kinds on a side: held by the baseline.
+    # Held by the baseline: the made-up worlds lack a battle with tied unit kinds on a side.
     Mutation(
         'war-side-units-reversed',
         "a battle's unit kinds are listed in the opposite order to the "
@@ -540,7 +540,7 @@ MUTATIONS = [
         [
             ('scanner/src/engine/wars.rs', '    let mut v: Vec<(&Sym, &i64)> = s.units.iter().collect();\n', '    let mut v: Vec<(&Sym, &i64)> = s.units.iter().collect();\n    v.reverse();\n'),
         ]),
-    # The made-up worlds have no two battles on one date: held by the baseline.
+    # Held by the baseline: the made-up worlds lack two battles on one date.
     Mutation(
         'war-battles-reversed',
         "a war's battles are held in the opposite order to the file's, "
@@ -549,7 +549,7 @@ MUTATIONS = [
         [
             ('scanner/src/engine/wars.rs', '        let mut battles: Vec<&Battle> = war.battles.values().collect();\n', '        let mut battles: Vec<&Battle> = war.battles.values().collect();\n        battles.reverse();\n'),
         ]),
-    # The made-up worlds have no two cultures of equal size: held by the baseline.
+    # Held by the baseline: the made-up worlds lack two cultures of equal size.
     Mutation(
         'culture-ties-broken-by-name',
         'two cultures of the same size are listed alphabetically, not in '
@@ -558,7 +558,7 @@ MUTATIONS = [
         [
             ('scanner/src/engine/finish.rs', '        cultures.sort_by(|a, b| b.1.cmp(a.1));\n', '        cultures.sort_by(|a, b| b.1.cmp(a.1).then(names::cmp(*a.0, *b.0)));\n'),
         ]),
-    # The made-up worlds have no states whose pop types the save names out of order: held by the baseline.
+    # Held by the baseline: the made-up worlds lack states whose pop types the save names out of order.
     Mutation(
         'group-types-reversed',
         "a state's pop types are numbered in the opposite order to the one "
@@ -577,7 +577,7 @@ MUTATIONS = [
         [
             ('scanner/src/engine/finish.rs', '        techs.sort_by(|a, b| names::cmp(*a, *b));\n', '        techs.sort_by_key(|t| t.index());\n'),
         ]),
-    # The made-up worlds have no a reform option that grants mobilisation: held by the baseline.
+    # Held by the baseline: the made-up worlds lack a reform option that grants mobilisation.
     Mutation(
         'reform-mob-key-swapped',
         "a reform's mobilisation size is looked up with the option and the "
@@ -586,7 +586,7 @@ MUTATIONS = [
         [
             ('scanner/src/engine/rules.rs', '        let v = d.reform_mob(*reform, *option);\n', '        let v = d.reform_mob(*option, *reform);\n'),
         ]),
-    # The made-up worlds have no a national value that grants mobilisation: held by the baseline.
+    # Held by the baseline: the made-up worlds lack a national value that grants mobilisation.
     Mutation(
         'national-value-ignored',
         "a nation's national value grants no mobilisation size",
@@ -594,7 +594,7 @@ MUTATIONS = [
         [
             ('scanner/src/engine/rules.rs', '    let v = d.nv_mob(nat.nationalvalue);\n', '    let v = 0.0 * d.nv_mob(nat.nationalvalue);\n'),
         ]),
-    # The made-up worlds have no an event modifier with a mobilization impact: held by the baseline.
+    # Held by the baseline: the made-up worlds lack an event modifier with a mobilization impact.
     Mutation(
         'modifier-impacts-ignored',
         "a nation's event modifiers add nothing to its mobilisation cap",
@@ -610,7 +610,7 @@ MUTATIONS = [
         [
             ('scanner/src/engine/finish.rs', 'dense.tech_group(*tech).unwrap_or(("other", "Other"))', 'dense.tech_group(*tech).filter(|_| false).unwrap_or(("other", "Other"))'),
         ]),
-    # The made-up worlds have no government names that differ from the tag: held by the baseline.
+    # Held by the baseline: the made-up worlds lack government names that differ from the tag.
     Mutation(
         'cross-names-never-built',
         'a --cross run has no government names for its nations, so every '
@@ -627,7 +627,7 @@ MUTATIONS = [
         [
             ('scanner/src/engine/finish.rs', '            pop_by_type: std::mem::take(&mut nat.pop_by_type),\n', '            pop_by_type: OMap::new(),\n'),
         ]),
-    # The made-up worlds have no units kept from an earlier save: held by the baseline.
+    # Held by the baseline: the made-up worlds lack units kept from an earlier save.
     Mutation(
         'kept-units-left-behind',
         "a kept nation's units are not carried to the page, so no army is "
@@ -636,7 +636,7 @@ MUTATIONS = [
         [
             ('scanner/src/engine/finish.rs', '        units_at: std::mem::take(&mut nat.units_at),\n', '        units_at: Vec::new(),\n'),
         ]),
-    # The made-up worlds have no a trigger asking for a held invention: held by the baseline.
+    # Held by the baseline: the made-up worlds lack a trigger asking for a held invention.
     Mutation(
         'invention-trigger-inverted',
         'a trigger that asks whether a nation holds an invention is '
@@ -645,7 +645,7 @@ MUTATIONS = [
         [
             ('scanner/src/engine/rules.rs', '.as_ref().map(|held| held.contains(text)));', '.as_ref().map(|held| !held.contains(text)));'),
         ]),
-    # The made-up worlds have no two unit kinds tied in one province: held by the baseline.
+    # Held by the baseline: the made-up worlds lack two unit kinds tied in one province.
     Mutation(
         'army-kinds-tie-reversed',
         'two kinds with as many regiments in a province change places on '
@@ -654,7 +654,7 @@ MUTATIONS = [
         [
             ('scanner/src/engine/report.rs', '                let mut ranked: Vec<&Stack> = types.iter().collect();', '                let mut ranked: Vec<&Stack> = types.iter().rev().collect();'),
         ]),
-    # The made-up worlds have no armies spread over provinces met out of order: held by the baseline.
+    # Held by the baseline: the made-up worlds lack armies spread over provinces met out of order.
     Mutation(
         'army-provinces-reversed',
         "a nation's armies come out on the page with its provinces in the "
@@ -663,7 +663,7 @@ MUTATIONS = [
         [
             ('scanner/src/country.rs', '        None => {\n            stacks.push(stack);\n            return;\n        }', '        None => {\n            stacks.insert(0, stack);\n            return;\n        }'),
         ]),
-    # The made-up worlds have no ship types met out of name order: held by the baseline.
+    # Held by the baseline: the made-up worlds lack ship types met out of name order.
     Mutation(
         'ship-types-by-id',
         "ships_by_type.csv lists a nation's ships in the order the run met "
