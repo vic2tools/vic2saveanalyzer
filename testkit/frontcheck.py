@@ -147,16 +147,17 @@ def cross_world(holding):
     return game, top
 
 
-def signature_problems(binary, mod, game):
+def signature_problems(binary, mod, game, away=None):
     """
     [what is wrong] with `vic2scan mod-signature`, which keys the engine's
     copy of a mod and goes into the stamp: it must change when a file the
-    mod or its game's rule folders hold is edited, stay put when the game
-    gains a file outside those folders, and come back when an edit is put
-    back as it was.
+    mod or its game's rule folders hold is edited, added or removed, stay
+    put when the game gains a file outside those folders, and come back when
+    an edit is put back as it was. A mod `away` from any game must not
+    change with the game's files.
     """
-    def sign():
-        done = subprocess.run([binary, "mod-signature", mod], capture_output=True, text=True)
+    def sign(folder=mod):
+        done = subprocess.run([binary, "mod-signature", folder], capture_output=True, text=True)
         return done.stdout.strip() if done.returncode == 0 else None
 
     first = sign()
@@ -183,6 +184,28 @@ def signature_problems(binary, mod, game):
         fh.write("not a rule")
     if sign() != first:
         wrong.append("a file outside the game's rule folders changed the signature")
+    first = sign()
+    added = os.path.join(mod, "common", "added.txt")
+    with open(added, "w") as fh:
+        fh.write("x = 1")
+    if sign() == first:
+        wrong.append("a file added to the mod left the signature as it was")
+    os.remove(added)
+    if sign() != first:
+        wrong.append("the added file removed again did not give the signature back")
+    if away:
+        alone = sign(away)
+        path = os.path.join(game, "map", "default.map")
+        st = os.stat(path)
+        with open(path, "rb") as fh:
+            kept = fh.read()
+        with open(path, "ab") as fh:
+            fh.write(b"\n")
+        if sign(away) != alone:
+            wrong.append("a mod outside any game changed with that game's files")
+        with open(path, "wb") as fh:
+            fh.write(kept)
+        os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
     return wrong
 
 
@@ -433,7 +456,7 @@ def main():
         print(sniffed.stdout.strip())
         if sniffed.returncode:
             bad += 1
-        for wrong in signature_problems(BIN, mod, game):
+        for wrong in signature_problems(BIN, mod, game, away):
             bad += 1
             print("WRONG: " + wrong)
         def run(name, argv, how):
