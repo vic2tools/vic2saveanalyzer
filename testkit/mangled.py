@@ -18,7 +18,7 @@ its numbers go into the report as though they were true.
 The damage is seeded, so a failure is reproducible. Each damaged save is
 run through the analyzer. Without a save named, the furnished save the
 builders write is damaged, and each run must also give the answer recorded
-for it (`expected.py`) -- the Python reader's, taken while it was here.
+for it (`expected.py`).
 """
 
 import argparse

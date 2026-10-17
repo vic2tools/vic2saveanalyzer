@@ -14,9 +14,9 @@ against the mod's own list, `--player-nations` and the save's own
 
 Two campaigns under two mods that disagree about every one of those, built
 from `fixtures.a_mod` and `savefmt`, run once per way of asking. Each run is
-held to the answer recorded for it (`expected.py`): the Python's, taken
-while it was still here and checked then, case by case, for what that way
-of asking had to come back with -- the mod's pop list unless `--mob-types`
+held to the answer recorded for it (`expected.py`), which was checked
+case by case, when it was recorded, for what that way of asking had to
+come back with -- the mod's pop list unless `--mob-types`
 was given, ENG playing unless `--player-nations` said otherwise, PRU (a
 province and nobody in it) measured at `--min-pop 0` and dropped at 1000,
 the regiment size asked for winning even at the vanilla 3000 -- and for the

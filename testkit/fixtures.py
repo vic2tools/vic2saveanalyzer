@@ -149,10 +149,8 @@ def edge_save(path, date, tags=("ENG",), provinces=2, techs=(), inventions=(),
     """
     One save with exactly the pieces a case is about, and nothing else.
 
-    The layout comes from `savefmt`, which is checked against both readers
-    -- this file used to wrap its own braces with a loop that guessed
-    where a block ended from the indentation, which is the sort of thing
-    that works until the day it does not.
+    The layout comes from `savefmt`, which `savefmt.selfcheck` reads back
+    through the reader.
     """
     parts = [savefmt.head(date, player=player)]
     pid = 1

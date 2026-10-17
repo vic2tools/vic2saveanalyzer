@@ -4,9 +4,7 @@ recorded answers.
 
 What `vic2scan mod-export` makes of a folder, as JSON text, must be what is
 recorded for it (`testkit/expected/modread/exports.jsonl`), and a folder
-recorded as refused (status 3) must still be refused. The answers were
-those of `mod_reader.load_mod`, the Python reader, taken on 1 Oct 2026
-while it was still here; before then this ran every case both ways.
+recorded as refused (status 3) must still be refused.
 
 Four parts:
 

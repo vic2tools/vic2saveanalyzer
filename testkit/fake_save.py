@@ -59,7 +59,7 @@ def a_pop(rng, kind, pid):
 
     That is why the shape comes from `savefmt` now and not from a format
     string here. `savefmt.selfcheck` reads a pop of exactly this kind back
-    through both readers, so a depth that drifts fails a test instead of
+    through the reader, so a depth that drifts fails a test instead of
     quietly halving the benchmark.
     """
     return savefmt.pop(

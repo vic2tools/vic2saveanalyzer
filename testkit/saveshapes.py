@@ -22,9 +22,7 @@ of which has broken a reader or come within one rule of it:
 
 Each is read as a report, with `--peek` and with `--verify`, and every
 answer -- what was printed, the status, the nine tables and what the page
-carries -- must be the one recorded (`expected.py`). The answers were the
-Python reader's, taken while it was still here; before then these checks
-held the Rust scanner to that reader field by field.
+carries -- must be the one recorded (`expected.py`).
 
     python3 testkit/saveshapes.py [--update]
 """
