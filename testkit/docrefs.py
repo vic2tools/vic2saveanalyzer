@@ -14,11 +14,11 @@ as a link), and fails on each one that is not there, with the doc and line.
 What counts as a path to check:
 - one with a `/` ending in .py .rs .md .js .css .toml or .sh, relative to
   the repository or to the doc's own folder;
-- a folder (ending in `/`) under one of the repository's own top folders;
+- a folder (ending in `/`) under a top folder the repository has, or had;
 - a bare file name with one of those endings, which has to exist somewhere
   in the repository.
-Anything with `~`, `$`, `<`, `*`, a drive or a scheme, or an all-capitals
-placeholder (`testkit/NAME.py`), is an example, not a path. docs/superpowers/
+Anything with `~`, `$`, `<`, `*`, a drive or a scheme, or a stand-in like
+`testkit/NAME.py` (`PLACEHOLDERS`), is an example, not a path. docs/superpowers/
 is the record of the cleanup that made these docs, and is not read.
 """
 import os
@@ -48,10 +48,24 @@ def docs(files):
     return sorted(set(out))
 
 
+# Stand-ins the docs use for a name the reader supplies: `testkit/NAME.py`.
+PLACEHOLDERS = {"NAME", "TREE", "DIR", "FILE", "MOD", "TAG", "KEY", "GLOB", "CAMPAIGN",
+                "SAVES", "PATH", "N"}
+
+
 def is_example(word):
     return (any(c in word for c in "~$<>*{}") or re.match(r"^[A-Za-z]:", word)
             or "://" in word or word.startswith("/")
-            or any(part.isupper() and len(part) > 1 for part in re.split(r"[/.]", word)))
+            or any(part.split(".")[0] in PLACEHOLDERS for part in word.split("/")))
+
+
+def tops_ever():
+    """Every top folder or file the repository has had: a doc naming one that
+    has since gone is held to it, a game folder never is."""
+    out = subprocess.run(["git", "log", "--all", "--format=", "--name-only"], cwd=kit.ROOT,
+                         capture_output=True, text=True).stdout
+    return {p.split("/")[0] for p in out.splitlines() if p} | {
+        p.split("/")[0] for p in tracked()}
 
 
 def wanted(word, tops):
@@ -83,7 +97,7 @@ def missing(doc, word, files, names):
 def main():
     files = set(tracked())
     names = {p.rsplit("/", 1)[-1] for p in files}
-    tops = {p.split("/")[0] for p in files}
+    tops = tops_ever()
     wrong = []
     read = docs(files)
     for doc in read:

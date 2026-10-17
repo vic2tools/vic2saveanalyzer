@@ -10,10 +10,10 @@ change, and how to make a release. `README.md` is the guide to using it;
 |---|---|
 | `scanner/` | The Rust that makes every run: finding and reading the saves, reading the game and the mod, every number, the tables and the report. See `scanner/README.md`. |
 | `template.py` | The report page -- its HTML, CSS and JavaScript -- in one string, cut out and built into the scanner by `scanner/build.rs`. No Python runs it. |
-| `vic2_analyzer.py` | The command line. Hands a run to the scanner and relays what it says; `analyze()` is the same for the window. |
+| `vic2_analyzer.py` | The command line. Hands a run to the scanner and relays what it says; `analyze()` is the same for the window, with the report-ready callback. |
 | `run.py` | Every setting of a run, declared once, and the command line that fills them. |
 | `fastscan.py` | Where the scanner binary is, and how to start it with no console window. |
-| `readfolder.py` | The Stop, progress and report-ready callbacks a hosted run calls, and the scanner's cache folder. |
+| `readfolder.py` | The Stop and progress callbacks a hosted run calls, and the scanner's cache folder. |
 | `app.py` | The executable's entry: the window, or the command line when given arguments. |
 | `gui.py` | The window's report tab: the folder pickers, the log, Analyze and Stop. |
 | `mod_reader.py`, `cross.py` | What the window asks before a run: which folder is a game install, where a mod may be read from, which folders hold campaigns. |

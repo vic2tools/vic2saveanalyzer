@@ -214,16 +214,15 @@ thirty-eighth.
 numbers into invention names, and it cannot be known when the mod is read: the
 engine's invention array is rebuilt from the folder and then *checked against
 a save*, so the base is only decidable once a campaign is in hand. The mod as
-read (`Mod`, in `scanner/src/engine/rules.rs`) carries it as `index_base`,
-unset until the campaign has settled it (`index_base_for`).
+read (`Mod`, in `scanner/src/engine/rules.rs`) carries it as `index_base`, and
+`settle_campaign` sets it from the campaign (`index_base_for`) before anything
+asks for a rate. Until then the rate tables are not built, and asking for one
+stops the run rather than answering from nothing.
 
-Unset and "could not be decoded" are different answers. A campaign whose
-indices genuinely do not decode falls back to assuming a nation holds every
-invention whose requirements it meets -- an upper bound that overstates
-nations with poor luck. A question asked before the base was settled is
-refused instead of answered from that fallback, which would put every
-nation's mobilisation size quietly too high. `testkit/mobrate.py` holds both
-halves.
+After settling, `None` means the indices cannot be decoded for this campaign.
+A nation is then assumed to hold every invention whose requirements it meets
+-- an upper bound that overstates nations with poor luck -- and
+`--check-inventions` says how well the decode fits.
 
 ## A gate that never closes
 
