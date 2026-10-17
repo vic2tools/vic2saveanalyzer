@@ -51,10 +51,6 @@ scanner/target/
 
 # Except the tables the checks are held to (testkit/expected.py).
 !testkit/expected/**/*.csv
-!testkit/expected-real/**/*.csv
-# and the speed job's reference run (speed/runs/).
-!speed/runs/**/*.csv
-!speed/runs/**/report.html
 
 # This machine's settings: its campaign, its mod, its baseline and the words
 # that must stay private (tools/prepush.sh).
