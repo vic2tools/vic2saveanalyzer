@@ -59,16 +59,12 @@ function drawWarTable() {
     land: w => w.transfers.length,
     outcome: w => w.outcome || 'zz',
   }[warSort.key] || warLosses;
-  rows.sort((a, b) => {
-    const x = get(a), y = get(b);
-    return (x < y ? -1 : x > y ? 1 : 0) * warSort.dir;
-  });
 
   const head = [['name', 'War'], ['start', 'From'], ['start', 'To'],
                 ['losses', 'Casualties'], ['battles', 'Battles'],
                 ['land', 'States'], ['outcome', 'Goals taken']];
   const wide = k => k === 'name' ? '' : ' class="num"';
-  const body = rows.map((w, i) => {
+  const body = sortRows(rows, get, warSort).map((w, i) => {
     const idx = WARS.indexOf(w);
     return `<tr class="warrow${warPick === idx ? ' on' : ''}" data-war="${idx}">`
       + `<td class="warname">${w.name}`
@@ -84,14 +80,12 @@ function drawWarTable() {
   }).join('');
   document.getElementById('wartable').innerHTML =
     `<thead><tr>${head.map(([k, label]) =>
-      `<th data-k="${k}"${wide(k)}${warSort.key === k ? ' aria-sort="' +
-        (warSort.dir < 0 ? 'descending' : 'ascending') + '"' : ''}>${label}</th>`)
+      `<th data-k="${k}"${wide(k)}${ariaSort(warSort, k) ? ` aria-sort="${ariaSort(warSort, k)}"` : ''}>${label}</th>`)
       .join('')}</tr></thead><tbody>${body}</tbody>`;
   document.querySelectorAll('#wartable th').forEach(th => {
     th.onclick = () => {
       const k = th.dataset.k;
-      if (warSort.key === k) warSort.dir *= -1;
-      else warSort = {key: k, dir: k === 'name' || k === 'start' ? 1 : -1};
+      nextSort(warSort, k, k === 'name' || k === 'start' ? 1 : -1);
       drawWarTable();
     };
   });
@@ -588,10 +582,7 @@ function warBattleTable(list, title, kind) {
     dlost: b => b.d[2],
     total: b => b.a[2] + b.d[2],
   }[warBattleSort.key] || (b => b.date || '9999');
-  const rows = list.slice().sort((x, y) => {
-    const a = get(x), b = get(y);
-    return (a < b ? -1 : a > b ? 1 : 0) * warBattleSort.dir;
-  });
+  const rows = sortRows(list, get, warBattleSort);
   // Defender before Attacker, matching how a reader asks "who held, who came
   // for it" -- the Winner column already carries whichever side actually won.
   const head = [['date', 'Date'], ['name', 'Battle'], ['', 'Winner'],
@@ -610,8 +601,7 @@ function warBattleTable(list, title, kind) {
     + head.map(([k, label], i) => {
         const cls = numCol[i] ? ' class="num"' : '';
         return k
-          ? `<th data-bk="${k}"${cls}${warBattleSort.key === k ? ' aria-sort="' +
-              (warBattleSort.dir < 0 ? 'descending' : 'ascending') + '"' : ''}>${label}</th>`
+          ? `<th data-bk="${k}"${cls}${ariaSort(warBattleSort, k) ? ` aria-sort="${ariaSort(warBattleSort, k)}"` : ''}>${label}</th>`
           : `<th${cls}>${label}</th>`;
       }).join('')
     + `</tr></thead><tbody>`

@@ -323,6 +323,26 @@ function plot(svg, cfg) {
 }
 
 /* =============== generic sortable table =============== */
+/* =============== sorting, shared by every sortable table ===============
+   A table's sort is {key, dir}: dir 1 ascending, -1 descending. */
+// Rows in the order `state` asks for. A blank -- null or undefined -- sorts
+// last whichever way the column runs; text sorts as a reader would.
+function sortRows(rows, get, state) {
+  return [...rows].sort((a, b) => {
+    const x = get(a), y = get(b);
+    if (x == null || y == null) return x == null ? (y == null ? 0 : 1) : -1;
+    return state.dir * (typeof x === 'string' ? x.localeCompare(y) : x - y);
+  });
+}
+// A header clicked: the same column turns round; another starts at `first`.
+function nextSort(state, key, first = -1) {
+  if (state.key === key) state.dir *= -1; else { state.key = key; state.dir = first; }
+}
+// The aria-sort a column's header carries, or null when it is not the key.
+function ariaSort(state, key) {
+  return state.key === key ? (state.dir < 0 ? 'descending' : 'ascending') : null;
+}
+
 function renderTable(table, cols, rows, state, onRow) {
   const head = table.querySelector('thead tr');
   head.textContent = '';
@@ -330,11 +350,8 @@ function renderTable(table, cols, rows, state, onRow) {
     const th = document.createElement('th');
     th.textContent = col.label; th.tabIndex = 0;
     if (col.title) th.title = col.title;
-    if (col.key === state.key) th.setAttribute('aria-sort', state.dir < 0 ? 'descending' : 'ascending');
-    const go = () => {
-      if (state.key === col.key) state.dir *= -1; else { state.key = col.key; state.dir = -1; }
-      renderTable(table, cols, rows, state, onRow);
-    };
+    if (ariaSort(state, col.key)) th.setAttribute('aria-sort', ariaSort(state, col.key));
+    const go = () => { nextSort(state, col.key); renderTable(table, cols, rows, state, onRow); };
     th.onclick = go;
     th.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
     head.appendChild(th);
@@ -345,12 +362,7 @@ function renderTable(table, cols, rows, state, onRow) {
   // unless it says otherwise, which would put Livestock under C for cattle.
   const sortCol = cols.find(c => c.key === state.key);
   const readSort = sortCol && sortCol.sortBy ? sortCol.sortBy : r => r[state.key];
-  [...rows].sort((a, b) => {
-    const x = readSort(a), y = readSort(b);
-    if (x === undefined) return 1;
-    if (y === undefined) return -1;
-    return state.dir * (typeof x === 'string' ? x.localeCompare(y) : x - y);
-  }).forEach(row => {
+  sortRows(rows, readSort, state).forEach(row => {
     const tr = document.createElement('tr');
     cols.forEach(col => {
       const td = document.createElement('td');

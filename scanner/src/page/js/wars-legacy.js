@@ -50,10 +50,7 @@ function legacyBattles(w) {
     attacker: b => b.a[0], defender: b => b.d[0], type: b => b.sea ? 1 : 0,
     result: b => b.won ? 1 : 0, total,
   }[legacyBattleSort.key] || total;
-  const rows = w.battles.slice().sort((x, y) => {
-    const a = get(x), b = get(y);
-    return (a < b ? -1 : a > b ? 1 : 0) * legacyBattleSort.dir;
-  });
+  const rows = sortRows(w.battles, get, legacyBattleSort);
   const head = [['name', 'Battle'], ['date', 'Date'], ['attacker', 'Attacker'],
                 ['defender', 'Defender'], ['type', 'Type'], ['result', 'Result'],
                 ['total', 'Total losses']];
@@ -61,8 +58,8 @@ function legacyBattles(w) {
   return `<div class="tablewrap fit"><table class="mini lgbattles"><thead><tr>`
     + head.map(([k, label]) => `<th data-lk="${k}"${num(k)}`
         + (k === 'result' ? ' title="Whether the attacker won"' : '')
-        + (legacyBattleSort.key === k ? ` aria-sort="${legacyBattleSort.dir < 0
-            ? 'descending' : 'ascending'}"` : '') + `>${label}</th>`).join('')
+        + (ariaSort(legacyBattleSort, k) ? ` aria-sort="${ariaSort(legacyBattleSort, k)}"` : '')
+        + `>${label}</th>`).join('')
     + `</tr></thead><tbody>`
     + rows.map(b => `<tr><td>${b.name}</td>`
         + `<td class="num">${b.date || '<span class="rk">unknown</span>'}</td>`
@@ -121,8 +118,7 @@ function drawWarDetail() {
     box.querySelectorAll('th[data-lk]').forEach(th => {
       th.onclick = () => {
         const k = th.dataset.lk;
-        if (legacyBattleSort.key === k) legacyBattleSort.dir *= -1;
-        else legacyBattleSort = {key: k, dir: k === 'total' ? -1 : 1};
+        nextSort(legacyBattleSort, k, k === 'total' ? -1 : 1);
         drawWarDetail();
       };
     });
@@ -163,8 +159,7 @@ function drawWarDetail() {
   box.querySelectorAll('th[data-bk]').forEach(th => {
     th.onclick = () => {
       const k = th.dataset.bk;
-      if (warBattleSort.key === k) warBattleSort.dir *= -1;
-      else warBattleSort = {key: k, dir: k === 'date' || k === 'name' ? 1 : -1};
+      nextSort(warBattleSort, k, k === 'date' || k === 'name' ? 1 : -1);
       drawWarDetail();
     };
   });

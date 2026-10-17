@@ -265,23 +265,17 @@ function renderStrengthLedger(id, cols, rows, state, sections, note) {
   cols.forEach((col, index) => {
     const th = document.createElement('th');
     th.scope = 'col';
-    th.setAttribute('aria-sort', state.key === col.key
-      ? (state.dir < 0 ? 'descending' : 'ascending') : 'none');
+    th.setAttribute('aria-sort', ariaSort(state, col.key) || 'none');
     const button = document.createElement('button');
     button.textContent = col.label;
     button.onclick = () => {
-      state.dir = state.key === col.key ? -state.dir : -1;
-      state.key = col.key;
+      nextSort(state, col.key);
       renderStrengthLedger(id, cols, rows, state, sections, note);
       head.children[index].querySelector('button').focus();
     };
     th.appendChild(button); head.appendChild(th);
   });
-  const ordered = [...rows].sort((a, b) => {
-    const x = a[state.key], y = b[state.key];
-    if (x == null || y == null) return x == null ? (y == null ? 0 : 1) : -1;
-    return state.dir * (typeof x === 'string' ? x.localeCompare(y) : x - y);
-  });
+  const ordered = sortRows(rows, r => r[state.key], state);
   ordered.forEach(row => {
     const tr = document.createElement('tr');
     tr.className = 'strength-row'; tr.dataset.tag = row.tag;
