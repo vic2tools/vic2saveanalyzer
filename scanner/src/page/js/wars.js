@@ -250,29 +250,18 @@ function ibBelligerents(label, parties) {
 }
 // Province centres from the same raster as the deployment map. Army anchors
 // cover only garrisoned provinces, so historical battles cannot rely on them.
-let warCentres = null;
 const warTheatreCache = new Map();
 function warBattleSites(w) {
   if (!MAP) return [];
   mapDecoded();
-  if (!warCentres) {
-    warCentres = new Map();
-    for (let y = 0; y < MAP.h; y++) for (let x = 0; x < MAP.w; x++) {
-      const p = mapProv[y * MAP.w + x];
-      if (!p) continue;
-      let c = warCentres.get(p);
-      if (!c) { c = [0, 0, 0]; warCentres.set(p, c); }
-      c[0] += x; c[1] += y; c[2]++;
-    }
-    for (const c of warCentres.values()) { c[0] /= c[2]; c[1] /= c[2]; }
-  }
+  const geometry = provinceGeometry();
   const sites = new Map();
   for (const b of w.battles) {
-    const c = warCentres.get(+b.province);
+    const c = geometry.get(+b.province);
     if (!c) continue;
     let site = sites.get(+b.province);
     if (!site) {
-      site = {x:c[0], y:c[1], name:b.name, losses:0, count:0, date:''};
+      site = {x:c.cx, y:c.cy, name:b.name, losses:0, count:0, date:''};
       sites.set(+b.province, site);
     }
     site.losses += Math.max(0, b.a[2]) + Math.max(0, b.d[2]);
@@ -319,12 +308,12 @@ function warTheatre(w) {
   const isBoundary = (p,q) => mapSea.has(p) !== mapSea.has(q) || owner(p) !== owner(q);
   for (let y=0; y<360; y++) for (let x=0; x<720; x++) {
     const mx=x0+x*width/720, my=y0+y*height/360, p=province(mx,my);
-    let rgb = mapSea.has(p) ? [30,47,61] : [112,108,88];
+    let rgb = mapSea.has(p) ? MAP_WATER : MAP_WILD;
     if (!mapSea.has(p) && fighters.has(MAP.tags[owner(p)])) {
       const colour=palette[p]; rgb=[(colour>>16)&255,(colour>>8)&255,colour&255];
       // mapPalette already applies the shared softer land colours.
     }
-    if (isBoundary(p,province(mx+width/720,my)) || isBoundary(p,province(mx,my+height/360))) rgb=[35,32,28];
+    if (isBoundary(p,province(mx+width/720,my)) || isBoundary(p,province(mx,my+height/360))) rgb=MAP_EDGE;
     const i=(y*720+x)*4; img.data.set([...rgb,255],i);
   }
   ctx.putImageData(img,0,0);
@@ -702,11 +691,8 @@ function attachWarExport(box, war) {
     button.disabled = true; status.textContent = 'Preparing image…';
     try {
       const blob = await warSummaryPNG(box.querySelector('.ib'));
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a'); link.href = url;
-      link.download = (war.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'war') + '-summary.png';
-      document.body.appendChild(link); link.click(); link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      downloadBlob(blob, (war.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'war')
+        + '-summary.png');
       status.textContent = 'PNG ready.';
     } catch (error) { status.textContent = 'Export failed: ' + error.message; }
     finally { button.disabled = false; }

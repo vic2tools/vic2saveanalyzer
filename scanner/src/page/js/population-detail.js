@@ -10,20 +10,10 @@ const populationRegionName = r => (MAP.stateNames || {})[r] || r.replace('provin
 let populationProvinces = null;
 function populationGeometry(date) {
   mapDecoded();
-  if (!populationProvinces) {
-    populationProvinces = new Map();
-    for (let y=0;y<MAP.h;y++) for(let x=0;x<MAP.w;x++) {
-      const p=mapProv[y*MAP.w+x];
-      if(mapSea.has(p))continue;
-      let box=populationProvinces.get(p);
-      if(!box){box={x0:x,x1:x,y0:y,y1:y,area:0,neighbours:new Set()};populationProvinces.set(p,box);}
-      box.x0=Math.min(box.x0,x);box.x1=Math.max(box.x1,x);box.y1=y;box.area++;
-      for(const q of [x?mapProv[y*MAP.w+x-1]:p,y?mapProv[(y-1)*MAP.w+x]:p]) {
-        if(q===p || mapSea.has(q))continue;
-        box.neighbours.add(q);populationProvinces.get(q)?.neighbours.add(p);
-      }
-    }
-  }
+  // The land provinces' boxes, areas and land neighbours, in the order the
+  // map first meets them.
+  if (!populationProvinces)
+    populationProvinces = new Map([...provinceGeometry()].filter(([p]) => !mapSea.has(p)));
   if (populationBoundsDate === date) return;
   populationBoundsDate = date; populationBounds = new Map();
   const owners = mapOwners[date].own;
@@ -94,13 +84,13 @@ function drawPopulationAtlas(canvas, tag) {
   const sea=p=>p===-1||mapSea.has(p);
   for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++){
     const mx=x0+x*width/canvas.width,my=y0+y*height/canvas.height,p=get(mx,my),o=owners.get(p);
-    let rgb=sea(p)?[30,47,61]:[112,108,88];
+    let rgb=sea(p)?MAP_WATER:MAP_WILD;
     if(!sea(p) && o!==undefined && (!tag || o===index)){
       const v=pal[p];rgb=[(v>>16)&255,(v>>8)&255,v&255];
       if(tag && populationRegion && populationRegionOf(p)===populationRegion)rgb=[224,191,103];
     }
     const edge=q=>sea(p)!==sea(q)||owners.get(q)!==o||(tag&&o===index&&group.get(p)!==group.get(q));
-    if(edge(get(mx+width/canvas.width,my))||edge(get(mx,my+height/canvas.height)))rgb=[35,32,28];
+    if(edge(get(mx+width/canvas.width,my))||edge(get(mx,my+height/canvas.height)))rgb=MAP_EDGE;
     img.data.set([...rgb,255],(y*canvas.width+x)*4);
   }
   ctx.putImageData(img,0,0);
@@ -183,9 +173,7 @@ function renderPopulationPie(id, entries, total, culture=false){
   const sum=rows.reduce((n,r)=>n+r[1],0);let angle=-Math.PI/2;
   for(const [i,[key,size,accepted]] of rows.entries()){
     const end=angle+size/sum*Math.PI*2,colour=populationSliceColour(key,culture);
-    const point=a=>[120+108*Math.cos(a),120+108*Math.sin(a)];
-    const start=point(angle),finish=point(end);
-    const shape=rows.length===1?el('circle',{cx:120,cy:120,r:108}):el('path',{d:`M120,120 L${start} A108,108 0 ${end-angle>Math.PI?1:0},1 ${finish} Z`});
+    const shape=rows.length===1?el('circle',{cx:120,cy:120,r:108}):el('path',{d:arcPath(120,120,0,108,angle,end)});
     shape.setAttribute('fill',colour);shape.setAttribute('stroke','#211b20');shape.setAttribute('stroke-width','1');
     const label=key==='__unreported'?'Unreported':culture?cultureName(key):gameName(key);
     const detail=label+' · '+size.toLocaleString()+' · '+(total?100*size/total:0).toFixed(1)+'%'+(culture&&accepted?' · Accepted':'');

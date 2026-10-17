@@ -339,6 +339,14 @@ function toggleButton(button, flip, redraw, labels) {
   return button;
 }
 
+// Hand the reader a file: a link to `blob`, clicked, and let go a minute later.
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a'); link.href = url; link.download = name;
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
 // A <select>'s options, one per value, each shown as `label` says.
 function fillSelect(select, values, label = v => v) {
   values.forEach(v => {

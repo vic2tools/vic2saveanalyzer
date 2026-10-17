@@ -15,6 +15,35 @@ let mapZoom = 1;             // 1 fits the whole world to the panel width
 let mapOX = 0, mapOY = 0;    // map coordinate sitting at the panel's top left
 let mapPinned = null;        // a marker clicked, so the readout stays put
 
+/* Every province's place on the map, measured in one pass over the bitmap
+   and kept: its box, its area in pixels, its centre (the mean of its
+   pixels), and for land the land provinces it touches. In the order the map
+   first meets each province. */
+let mapGeometry = null;
+function provinceGeometry() {
+  mapDecoded();
+  if (mapGeometry) return mapGeometry;
+  const geometry = new Map();
+  for (let y = 0; y < MAP.h; y++) for (let x = 0; x < MAP.w; x++) {
+    const p = mapProv[y * MAP.w + x];
+    if (!p) continue;
+    let g = geometry.get(p);
+    if (!g) {
+      g = {x0: x, x1: x, y0: y, y1: y, area: 0, sx: 0, sy: 0, neighbours: new Set()};
+      geometry.set(p, g);
+    }
+    g.x0 = Math.min(g.x0, x); g.x1 = Math.max(g.x1, x); g.y1 = y;
+    g.area++; g.sx += x; g.sy += y;
+    if (mapSea.has(p)) continue;
+    for (const q of [x ? mapProv[y * MAP.w + x - 1] : p, y ? mapProv[(y - 1) * MAP.w + x] : p]) {
+      if (q === p || mapSea.has(q)) continue;
+      g.neighbours.add(q); geometry.get(q)?.neighbours.add(p);
+    }
+  }
+  for (const g of geometry.values()) { g.cx = g.sx / g.area; g.cy = g.sy / g.area; }
+  return mapGeometry = geometry;
+}
+
 function mapDecoded() {
   if (!mapProv) { mapProv = mapDecode(); mapOwners = mapOwnerTables(); }
 }

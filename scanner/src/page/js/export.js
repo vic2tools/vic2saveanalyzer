@@ -101,11 +101,8 @@ for (const source of document.querySelectorAll('figure > svg, #mapcanvas')) {
         + ' · Occupation ' + (document.getElementById('mapocc').getAttribute('aria-pressed') === 'true' ? 'on' : 'off')
         + ' · Province borders ' + (document.getElementById('mapborders').getAttribute('aria-pressed') === 'true' ? 'on' : 'off');
       const blob = await graphPNG(source, title, subtitle, legend);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a'); link.href = url;
-      link.download = (title + (source.id === 'milpies' ? '-' + milMode + '-' + milView : '')).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 120) + '.png';
-      document.body.appendChild(link); link.click(); link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      downloadBlob(blob, (title + (source.id === 'milpies' ? '-' + milMode + '-' + milView : ''))
+        .replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 120) + '.png');
       status.textContent = 'PNG ready.';
     } catch (error) { status.textContent = 'Export failed: ' + error.message; }
     finally { button.disabled = false; }
