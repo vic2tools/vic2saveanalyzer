@@ -78,6 +78,39 @@ def an_edge_world(holding):
     return mod, folder
 
 
+FURNISHED_RUNS = [
+    ("furnished", []),
+    ("furnished, verbose", ["VERBOSE"]),
+    ("furnished, campaigns compared", ["CROSS"]),
+]
+
+
+def a_furnished_world(holding):
+    """
+    (a mod, a folder of saves): `savefmt.furnished` -- armies and a navy,
+    a national value, a national modifier, a reform, accepted cultures,
+    states -- at two dates, read under a mod given the rules the baseline
+    adds to a real one (triggered, issue and static modifiers that grant
+    mobilisation).
+    """
+    import baseline
+    import fixtures
+    import savefmt
+    mod = fixtures.a_mod_in_a_game(os.path.join(holding, "made"), "Rich", tags=["SWE", "DEN"],
+                                   pops=fixtures.POPS, pop_per_regiment=1000, mob_size=0.5)
+    raw = os.path.join(holding, "raw")
+    os.makedirs(raw)
+    later = os.path.join(raw, "b.v2")
+    savefmt.furnished(later)
+    with open(later, "rb") as fh:
+        text = fh.read()
+    with open(os.path.join(raw, "a.v2"), "wb") as fh:
+        fh.write(text.replace(b'date="1881.3.24"', b'date="1880.3.24"', 1))
+    _world, world_mod, saves = baseline.a_world(os.path.join(holding, "world"), mod, raw,
+                                                "national_confusion")
+    return world_mod, saves
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])
     ap.add_argument("--update", action="store_true",
@@ -89,11 +122,14 @@ def main():
         # A folder of its own: the helpers that build a small game write
         # into `<holding>/game`.
         mod, folder = an_edge_world(os.path.join(holding, "edges"))
+        rich_mod, rich = a_furnished_world(os.path.join(holding, "furnished"))
         out = os.path.join(holding, "out")
         bad = expected.hold_cases(
             expected.REPO, "enginecheck",
             [(name, lambda f=flags: run(folder, mod, f, out, holding))
-             for name, flags in SYNTHETIC_RUNS], args.update)
+             for name, flags in SYNTHETIC_RUNS]
+            + [(name, lambda f=flags: run(rich, rich_mod, f, out, holding))
+               for name, flags in FURNISHED_RUNS], args.update)
     finally:
         shutil.rmtree(holding, ignore_errors=True)
     if not bad and not args.update:
