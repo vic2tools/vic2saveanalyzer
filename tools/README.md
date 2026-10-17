@@ -29,3 +29,10 @@ VIC2_MOD="/path/to/Victoria 2/mod/SomeMod"  # its mod
 VIC2_BASELINE="$HOME/vic2-baseline"         # testkit/baseline.py's record of it
 VIC2_PRIVATE='\bsomename\b|\bothername\b'   # what must never be pushed (a regex)
 ```
+
+To have it run before every push, and stop the push unless it says
+`clean`, point this clone's hooks at `tools/hooks/`:
+
+```
+git config core.hooksPath tools/hooks
+```

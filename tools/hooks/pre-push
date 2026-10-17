@@ -1,0 +1,4 @@
+#!/bin/sh
+# Run the privacy guard before every push; a push goes ahead only if it says clean.
+# Installed with: git config core.hooksPath tools/hooks
+exec bash "$(git rev-parse --show-toplevel)/tools/prepush.sh"
