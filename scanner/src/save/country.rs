@@ -537,17 +537,20 @@ pub struct Tables<'a> {
     pub reform_keys: &'a [String],
 }
 
-const STATE_SKIP: &[&[u8]] = &[b"employment", b"stockpile", b"id"];
-const UNIT_SKIP: &[&[u8]] = &[b"id", b"leader"];
+/// What both country readers -- the scan here and `walk`'s -- skip in a
+/// state and a unit, and read of a country as text and as numbers (save key,
+/// the record's name).
+pub(crate) const STATE_SKIP: &[&[u8]] = &[b"employment", b"stockpile", b"id"];
+pub(crate) const UNIT_SKIP: &[&[u8]] = &[b"id", b"leader"];
 
-const SCALARS: &[(&[u8], &str)] = &[
+pub(crate) const SCALARS: &[(&[u8], &str)] = &[
     (b"nationalvalue", "nationalvalue"),
     (b"primary_culture", "primary_culture"),
     (b"civilized", "civilized"),
     (b"government", "government"),
     (b"capital", "capital"),
 ];
-const NUMERICS: &[(&[u8], &str)] = &[
+pub(crate) const NUMERICS: &[(&[u8], &str)] = &[
     (b"prestige", "prestige"),
     (b"badboy", "infamy"),
     (b"money", "treasury"),

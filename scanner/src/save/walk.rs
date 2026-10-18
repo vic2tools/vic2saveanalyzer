@@ -26,6 +26,7 @@ use crate::py::num::float_latin1;
 use crate::util::fx::{FxMap, FxSet};
 use crate::save::province::{accumulate, pop_known, Parts, Pop, PopulationRules, Scan};
 use crate::save::names;
+use crate::save::country::{NUMERICS, SCALARS, STATE_SKIP, UNIT_SKIP};
 use crate::save::tokens::Tokens;
 
 /// One entry `walk_entries` yields: a key, and its value or where its block
@@ -306,27 +307,6 @@ fn count_units(node: &V, out: &mut Units, where_: Option<i64>) -> Result<(), Str
 }
 
 // ------------------------------------------------------------ a country
-
-const SCALARS: &[(&[u8], &str)] = &[
-    (b"nationalvalue", "nationalvalue"),
-    (b"primary_culture", "primary_culture"),
-    (b"civilized", "civilized"),
-    (b"government", "government"),
-    (b"capital", "capital"),
-];
-const NUMERICS: &[(&[u8], &str)] = &[
-    (b"prestige", "prestige"),
-    (b"badboy", "infamy"),
-    (b"money", "treasury"),
-    (b"tax_base", "tax_base"),
-    (b"war_exhaustion", "war_exhaustion"),
-    (b"revanchism", "revanchism"),
-    (b"plurality", "plurality"),
-    (b"research_points", "research_points"),
-    (b"ruling_party", "ruling_party"),
-];
-const STATE_SKIP: &[&[u8]] = &[b"employment", b"stockpile", b"id"];
-const UNIT_SKIP: &[&[u8]] = &[b"id", b"leader"];
 
 /// `read_country(..., flat=False)`: one country block, walked.
 fn read_country(text_: &[u8], at: usize, tag: &str, tables: &Tables) -> Result<Country, String> {
