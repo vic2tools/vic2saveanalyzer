@@ -1,0 +1,28 @@
+# The report page, in the order scanner/build.rs joins it. Every file in
+# this folder but this one is named here exactly once.
+head.html
+css/base.css
+css/map.css
+css/tech.css
+css/plots-and-tables.css
+css/wars.css
+css/military.css
+body.html
+js/boot.js
+js/core.js
+js/widgets.js
+js/shared.js
+js/compare.js
+js/military.js
+js/stacked-bars.js
+js/market.js
+js/map.js
+js/map-armies.js
+js/map-controls.js
+js/world.js
+js/population.js
+js/tech.js
+js/wars.js
+js/wars-legacy.js
+js/tabs.js
+js/export.js

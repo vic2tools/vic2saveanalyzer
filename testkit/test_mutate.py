@@ -132,5 +132,14 @@ class Checks(unittest.TestCase):
         self.assertNotEqual(seen[0]["TMPDIR"], seen[1]["TMPDIR"])
 
 
+class Patches(unittest.TestCase):
+    def test_a_file_that_is_not_there_does_not_apply(self):
+        import tempfile
+        from mutate import Unapplied, patch
+        with tempfile.TemporaryDirectory() as tree:
+            with self.assertRaises(Unapplied):
+                patch(tree, "scanner/src/page/js/gone.js", "a", "b")
+
+
 if __name__ == "__main__":
     unittest.main()

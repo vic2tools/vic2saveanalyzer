@@ -1,0 +1,202 @@
+/* Wars are read, not scrubbed: a war and a battle have to be legible without
+   dragging sideways, so these tables give up `min-width:max-content` and let
+   their cells wrap instead. Numbers still refuse to break mid-figure. */
+.tablewrap.fit{overflow-x:hidden}
+.tablewrap.fit table{min-width:0;width:100%}
+.tablewrap.fit th,.tablewrap.fit td{white-space:normal;overflow-wrap:anywhere}
+.tablewrap.fit td.num,.tablewrap.fit th.num{white-space:nowrap;text-align:right}
+/* Each side of a battle is a column of its own: nation, then who led it, then
+   what it was made of, one line each. Laid out across, the unit list alone was
+   wider than the screen. Used in the expanded battle detail, not the row. */
+.side{display:flex;flex-direction:column;gap:2px;align-items:flex-start;
+  text-align:left}
+.side .unit{color:var(--ink-dim);font-size:11px;line-height:1.35}
+.side .who{color:var(--ink-dim);font-size:11px;font-style:italic}
+/* Battle rows stay one line so many fit on screen; clicking one opens a detail
+   row beneath it with the composition either side brought and lost. */
+.battlerow{cursor:pointer}
+.battlerow.on{background:rgba(231,196,100,.14)}
+.battledetail td{padding:12px 14px 16px;background:rgba(42,15,23,.4);
+  border-bottom:1px solid var(--rule)}
+.battlesides{display:flex;flex-wrap:wrap;gap:10px 36px}
+.battleside{min-width:190px}
+.battleside .side{gap:4px}
+.battleside .sidehead{display:flex;align-items:baseline;gap:6px;
+  font-size:11px;text-transform:uppercase;letter-spacing:.1em;
+  color:var(--ink-dim);margin-bottom:3px}
+.sidetotal{margin-top:6px;font-size:11px;color:var(--ink-dim)}
+.sidetotal b{color:var(--ink);font-weight:500}
+/* table-layout:fixed pins every column to its declared share of the width
+   from the colgroup, regardless of content -- a long battle name or a wide
+   number wraps inside its own cell instead of stretching the table (and the
+   page) wider than the screen. auto layout can't guarantee that; it only
+   wraps once a cell has nowhere left to grow, which can still be past the
+   viewport edge. */
+.battletable{table-layout:fixed}
+.battletable td,.battletable th{overflow-wrap:anywhere}
+/* A picked war opens the way an encyclopedia sets one out: an infobox with
+   the name in a box at the top, the flags of the principal belligerents
+   under it where the picture would go, the facts a reader looks for first in
+   labelled rows, and then each side in a column of its own -- who fought, who
+   led them, what they had and what they lost. The goals and the battles sit
+   beside it, where the article would be.
+
+   Defenders on the left and attackers on the right, the same way round as
+   the battle tables beside it, so a reader never has to swap sides between
+   the two.
+
+   Side by side only where the battle table beside the box still has room for
+   its eight columns -- about 800px. On a narrower screen the box stands on its
+   own and the tables run the full width beneath it. */
+.warlayout{display:grid;grid-template-columns:minmax(0,1fr);gap:24px 30px;
+  align-items:start}
+.ib{max-width:680px}
+@media(min-width:1600px){
+  .warlayout{grid-template-columns:minmax(0,620px) minmax(0,1fr)}
+  .ib{max-width:none}
+}
+.warmain{min-width:0}
+.ib{border:1px solid var(--rule);background:rgba(42,15,23,.62);
+  box-shadow:0 0 0 1px rgba(124,94,34,.35) inset;font-size:13px;line-height:1.4}
+.ib .rk{color:var(--ink-dim)}
+#popcountrydetail .controls[hidden],.popatlas[hidden]{display:none}
+.popatlas{display:block;width:100%;height:auto;cursor:pointer}
+.popcountrylayout{align-items:start;display:grid;grid-template-columns:minmax(260px,1fr) minmax(0,2fr);gap:24px;margin-bottom:28px}
+.popcountrylayout .ib{max-width:none}
+#popcountryfacts section{padding:0 16px 16px;margin:0}
+.popscope{text-align:center;padding:10px;color:var(--gold);font-size:18px}
+.poppie{display:grid;grid-template-columns:minmax(130px,1fr) minmax(110px,1fr);gap:8px;align-items:center}
+.poppie svg{width:100%;max-height:240px}
+.poppielegend{max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:3px}
+.poppiekey{display:flex;align-items:center;text-align:left;border:0;padding:3px;background:transparent;font-size:11px}
+.poppiekey i{width:10px;height:10px;flex-shrink:0;margin-right:7px}
+.poppiehint{grid-column:1/-1;min-height:36px;font-size:12px;color:#e8d3ae}
+#popfind{max-width:210px}
+@media(max-width:760px){.popcountrylayout{grid-template-columns:1fr}}
+.wartheatre{margin:0;border:0;border-bottom:1px solid var(--rule)}
+.wartheatre canvas{display:block;width:100%;height:auto}
+.wartheatre figcaption{padding:8px 12px;font-size:11px;line-height:1.5;color:var(--ink-dim)}
+.war-export{display:inline-flex;vertical-align:middle;margin-left:10px;padding:5px;border:0;background:none;color:var(--brass)}
+.war-export svg{width:18px;height:18px}
+.war-export-status{display:block;font:11px sans-serif;letter-spacing:0;margin-top:5px}
+.war-export-status:empty{display:none}
+.ibtitle{background:rgba(8,25,44,.86);border-bottom:1px solid var(--rule);
+  padding:13px 16px 12px;text-align:center;
+  font-family:'Playfair Display',Georgia,serif;font-size:21px;font-weight:600;
+  line-height:1.2;color:var(--brass);text-shadow:0 1px 0 rgba(0,0,0,.5);
+  overflow-wrap:anywhere}
+.ibflag{flex:none;display:block;width:21px;height:14px;object-fit:fill;
+  border:1px solid rgba(0,0,0,.6);box-shadow:0 1px 2px rgba(0,0,0,.35)}
+.ibflag.big{width:36px;height:24px}
+/* Four great powers on one side shrink to fit their half rather than wrap and
+   leave the war leader alone on a second row. */
+.ibflag.hero{flex:0 1 60px;width:60px;min-width:0;height:auto;aspect-ratio:3/2}
+/* No flag to fly -- a mod with no game beneath it has almost none -- so the
+   nation's own colour stands in for the cloth, with its tag on the larger
+   ones so it still says whose. */
+.ibflag.blank{display:flex;align-items:center;justify-content:center;
+  background-image:linear-gradient(180deg,rgba(255,255,255,.18),rgba(0,0,0,.16));
+  font:600 9.5px/1 'IBM Plex Mono',ui-monospace,monospace;letter-spacing:.03em;
+  color:#2A0F17}
+.ibflag.hero.blank{font-size:13px}
+.ibfacts{display:grid;grid-template-columns:max-content minmax(0,1fr);
+  gap:8px 16px;margin:0;padding:13px 16px 14px}
+.ibfacts dt{font-family:'Barlow Condensed','Arial Narrow',sans-serif;
+  font-size:12.5px;text-transform:uppercase;letter-spacing:.12em;
+  color:var(--ink-dim);padding-top:1px}
+.ibfacts dd{margin:0;min-width:0}
+.ibfacts ul{margin:0;padding-left:16px}
+.ibfacts li{margin:2px 0}
+.ibfacts .tagflag{vertical-align:-2px}
+.ibband{background:rgba(8,25,44,.86);border-top:1px solid var(--rule);
+  border-bottom:1px solid var(--rule);padding:5px 10px;text-align:center;
+  font-family:'Playfair Display',Georgia,serif;font-size:12px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.16em;color:var(--brass)}
+.ibcaption{padding:8px 14px 0;font-size:11.5px;color:var(--ink-dim);
+  text-align:center}
+.ibcols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.ibcol{padding:10px 14px 12px;min-width:0}
+.ibcol+.ibcol{border-left:1px solid var(--grid)}
+.ibside,.ibgroup{font-family:'Barlow Condensed','Arial Narrow',sans-serif;
+  text-transform:uppercase;color:var(--ink-dim)}
+.ibside{font-size:12px;letter-spacing:.16em;margin-bottom:6px}
+/* Which side a column is, said again under every band once the columns are
+   stacked and left and right no longer say it. */
+.ibside.stacked{display:none}
+.ibgroup{font-size:11px;letter-spacing:.14em;margin:9px 0 4px;padding-top:7px;
+  border-top:1px dotted rgba(231,196,100,.25)}
+.ibnat{display:flex;align-items:center;gap:8px;padding:3px 0;min-width:0}
+.ibnat.major{padding:5px 0 6px}
+.ibnat b{font-weight:500}
+.ibnat.major b{font-family:'Playfair Display',Georgia,serif;font-size:15.5px;
+  font-weight:600;line-height:1.2}
+/* A name gives way down to its longest word and no further; below that it is
+   the date beside it that wraps. Breaking a name anywhere stood "Algeria" one
+   letter to a line on a phone. */
+.ibwho{flex:1 1 auto;min-width:min-content;overflow-wrap:break-word}
+.ibmeta{display:block;font-size:11.5px;color:var(--ink-dim);line-height:1.3;
+  margin-top:1px}
+.ibaside{flex:0 1 auto;font-size:11.5px;color:var(--ink-dim);text-align:right}
+.ibnum{flex:none;margin-left:auto;padding-left:8px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;
+  white-space:nowrap;font-variant-numeric:tabular-nums}
+.ibnum small{font-size:11px;color:var(--ink-dim)}
+.ibhead{display:flex;justify-content:flex-end;gap:0;font-size:10.5px;
+  font-family:'Barlow Condensed','Arial Narrow',sans-serif;
+  text-transform:uppercase;letter-spacing:.12em;color:var(--ink-dim)}
+.ibhead span,.ibnum.pair span{display:inline-block;min-width:52px;text-align:right}
+.ibtotal{display:flex;gap:8px;margin-top:6px;padding-top:6px;
+  border-top:1px solid var(--grid);font-weight:500}
+.ibtotal .ibnum{font-weight:500;color:var(--brass)}
+.ib details>summary{cursor:pointer;list-style:none;color:var(--ink-dim);
+  font-size:12px;padding:4px 0 1px}
+.ib details>summary::-webkit-details-marker{display:none}
+.ib details>summary:hover{color:var(--ink)}
+.ib details[open]>summary{display:none}
+.ibnote{border-top:1px solid var(--grid);padding:9px 16px 11px;
+  font-size:11.5px;line-height:1.45;color:var(--ink-dim)}
+.ibnote p{margin:0}
+.ibnote p+p{margin-top:4px}
+.warbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin-bottom:14px}
+.warbar[hidden]{display:none}
+/* The legacy layout: the old War Analyzer window, a panel for each side with
+   the war and its battles between them. Three across only where the centre
+   still has room for its seven columns; stacked, attacker first, below that. */
+.lgwar{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;align-items:stretch}
+@media(min-width:1100px){
+  .lgwar{grid-template-columns:minmax(0,1fr) minmax(0,2fr) minmax(0,1fr)}
+}
+.lgcentre{display:grid;gap:14px;align-content:start;min-width:0}
+.lgpanel{border:1px solid var(--rule);background:rgba(42,15,23,.62);
+  box-shadow:0 0 0 1px rgba(124,94,34,.35) inset;padding:14px 16px;min-width:0;
+  font-size:13px;line-height:1.5}
+.lgpanel .rk{color:var(--ink-dim)}
+.lgside{text-align:center}
+.lgside .ibflag.hero{width:84px;height:56px;margin:4px auto 14px;flex:none}
+.lgside dl,.lggrid{display:grid;grid-template-columns:max-content max-content;
+  gap:3px 8px;justify-content:center;margin:0 0 14px}
+.lgside dt,.lggrid dt{color:var(--ink-dim);text-align:right}
+.lgside dd,.lggrid dd{margin:0;font-weight:600;text-align:left}
+.lgside table{text-align:left}
+.lgtitle{font-family:'Playfair Display',Georgia,serif;font-size:26px;font-weight:400;
+  text-align:center;color:var(--ink);margin:0 0 12px}
+.lgcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px 20px}
+.lgcap{text-align:center;color:var(--ink-dim);font-weight:600;margin-bottom:6px}
+.lgcols .lggrid{margin:0}
+.lgwar th,.lgwar td{white-space:nowrap}
+@media(max-width:560px){
+  .ibcols{grid-template-columns:minmax(0,1fr)}
+  .ibcol+.ibcol{border-left:0;border-top:1px solid var(--grid)}
+  .ibside.stacked{display:block}
+  .ibfacts{grid-template-columns:minmax(0,1fr);gap:2px 0}
+  .ibfacts dd{margin-bottom:8px}
+}
+/* The belligerent list keeps its "A v B" reading order and wraps within the
+   column rather than stretching it. */
+.sides{white-space:normal;line-height:1.7}
+/* The war-goal and land tables sit outside a .tablewrap, so they need the
+   same release from max-content on their own. */
+table.mini.fitmini{width:100%;min-width:0;table-layout:auto}
+table.mini.fitmini th,table.mini.fitmini td{white-space:normal;
+  overflow-wrap:anywhere}
+.up{color:#9BD65E}.down{color:var(--minium)}

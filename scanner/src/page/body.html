@@ -1,0 +1,290 @@
+</head>
+<body>
+<main class="sheet">
+
+  <div class="titleblock">
+    <div><div class="tb-label">Sheet</div><h1 class="tb-value">Campaign returns</h1></div>
+    <div><div class="tb-label">Span</div><div class="tb-value mono">__SPAN__</div></div>
+    <div><div class="tb-label">Saves</div><div class="tb-value mono">__SAVECOUNT__</div></div>
+    <div><div class="tb-label">Nations</div><div class="tb-value mono">__NATIONCOUNT__</div></div>
+  </div>
+
+  <div class="tabs" role="tablist" aria-label="Views">
+    <button class="tab" role="tab" id="tab-nations" aria-controls="panel-nations" aria-selected="true">World</button>
+    <button class="tab" role="tab" id="tab-compare" aria-controls="panel-compare" aria-selected="false">Compare</button>
+    <button class="tab" role="tab" id="tab-pops" aria-controls="panel-pops" aria-selected="false">Population</button>
+    <button class="tab" role="tab" id="tab-military" aria-controls="panel-military" aria-selected="false">Military</button>
+    <button class="tab" role="tab" id="tab-wars" aria-controls="panel-wars" aria-selected="false">Wars</button>
+    <button class="tab" role="tab" id="tab-tech" aria-controls="panel-tech" aria-selected="false">Technology</button>
+    <button class="tab" role="tab" id="tab-market" aria-controls="panel-market" aria-selected="false">Market</button>
+  </div>
+
+  <!-- ============ NATIONS ============ -->
+  <div role="tabpanel" id="panel-nations" aria-labelledby="tab-nations">
+    <section>
+      <figure class="world-atlas">
+        <div class="mapwrap"><canvas id="mapcanvas" role="img"
+             aria-label="Political map with army positions"></canvas></div>
+        <div class="map-caption map-overlay">
+          <h2>World at <span id="mapdate"></span><span id="mapworld" class="rk"></span></h2>
+        </div>
+        <details class="map-inspection">
+          <summary>Map readout</summary>
+          <div class="readout" id="mapreadout"></div>
+        </details>
+        <details class="gpstrip map-overlay" id="gpstrip" open hidden>
+          <summary>Great Powers</summary>
+          <div class="gpbody">
+            <div class="gplabel">In-game rank · colours match the map</div>
+            <div class="gpgrid" id="gpgrid" role="list" aria-label="Great powers in rank order"></div>
+          </div>
+        </details>
+        <details class="map-console map-overlay" open>
+          <summary>Playback &amp; map controls</summary>
+          <div class="chart-toolbar map-toolbar" role="group" aria-label="World date and playback">
+            <select id="mapsave" aria-label="Save" title="Save"></select>
+            <button id="mapplay" aria-pressed="false" title="Play through the campaign saves">Play</button>
+            <input type="range" id="mapstep" class="timeline" min="0" step="1" value="0"
+                   aria-label="Move through the campaign save by save">
+          </div>
+          <details class="map-options">
+            <summary>Map options</summary>
+            <div class="chart-toolbar" role="group" aria-label="Map display and playback settings">
+              <span class="toolbar-group"><label for="mapspeed">Speed</label>
+                <input type="range" id="mapspeed" class="timeline narrow" min="0" max="8" step="1" value="3" title="Playback speed">
+                <span class="rk" id="mapspeedout"></span></span>
+              <button id="mapocc" aria-pressed="true" title="Hatch occupied land in the occupier's colour">Occupation</button>
+              <button id="mapborders" aria-pressed="false">Province borders</button>
+              <button id="mapreset" title="Back to the whole world">Reset</button>
+              <span class="rk" id="mapzoom">1.0&times;</span>
+              <span id="pick-map"></span>
+            </div>
+            <p class="note">Scroll to zoom; drag to pan. Open Map readout for land and army details; click an army to pin them.</p>
+          </details>
+        </details>
+      </figure>
+    </section>
+  </div>
+
+  <!-- ============ COMPARE ============ -->
+  <div role="tabpanel" id="panel-compare" aria-labelledby="tab-compare" hidden>
+    <div class="controls segments" role="group" aria-label="Comparison view">
+      <button id="compare-trends-button" aria-pressed="true" aria-controls="compare-trends">Trends</button>
+      <button id="compare-head-button" aria-pressed="false" aria-controls="compare-head">Head-to-head</button>
+    </div>
+    <div id="compare-trends">
+    <section>
+      <h2 id="chart-title">Population over time</h2>
+      <figure>
+        <div class="chart-toolbar" role="group" aria-label="Graph controls">
+          <div class="metric-browser">
+            <select id="metric-category" aria-label="Category" title="Category"></select>
+            <select id="metric-family" aria-label="Measure" aria-describedby="metric-description" title="Measure"></select>
+            <span id="metric-variant"><select id="metric" aria-label="View" title="View"></select></span>
+            <span id="ship-variant" hidden><select id="shiptype" aria-label="Hull" title="Hull"></select></span>
+          </div>
+          <span id="pick-nations"></span>
+          <button id="scale" aria-pressed="false" title="Switch between linear and logarithmic vertical scale">Linear</button>
+          <button id="worldline" aria-pressed="false" title="Add the world population as a separate line">World</button>
+          <span id="metric-description" hidden></span>
+        </div>
+        <svg id="chart" viewBox="0 0 1000 460" role="img" aria-label="Metric plotted over time by nation"></svg>
+        <div class="readout" id="readout"></div>
+      </figure>
+      <p class="note" id="fleetspan" hidden></p>
+      <p class="note" id="ratenote" hidden></p>
+      <p class="note" id="succnote"></p>
+    </section>
+
+
+    </div>
+    <div id="compare-head" hidden>
+      <h2>Head to head at <span id="mildate"></span></h2>
+      <figure>
+      <div class="chart-toolbar head-toolbar" role="group" aria-label="Head-to-head controls">
+        <select id="milsave" aria-label="Save" title="Save"></select>
+        <div class="segments" role="group" aria-label="Head-to-head branch"><button id="head-army" aria-pressed="true">Army</button><button id="head-navy" aria-pressed="false">Navy</button></div>
+        <button id="milmob" aria-pressed="false" title="Show each side's full potential -- everything its soldier pops could raise, plus everything its mobilization ceiling could add on top -- instead of just its brigades right now. Army only.">Current</button>
+
+        <span class="toolbar-group" role="group" aria-label="Left side"><label>Left</label><span id="pick-milA"></span></span>
+        <span class="toolbar-group" role="group" aria-label="Right side"><label>Right</label><span id="pick-milB"></span></span>
+        <button id="milswap" title="Swap the two sides">Swap</button>
+        <button id="milview" aria-pressed="false" title="Totals compares the two sides as one pie; composition breaks each side down by unit type">Totals</button>
+      </div>
+        <svg id="milpies" viewBox="0 0 1000 400" role="img" aria-label="Force composition compared between two nations"></svg>
+        <div class="readout" id="milreadout"></div>
+        <div class="stackwrap" id="millegend"></div>
+      </figure>
+      <p class="note">Pick nations for each side. Switch Army/Navy and Totals/Composition; hover a slice to compare counts. Potential includes unbuilt and mobilizable brigades.</p>
+      <p class="note">Fleet power shows full-strength and current-strength estimates.</p>
+    </div>
+
+  </div>
+
+  <!-- ============ MILITARY ============ -->
+  <div role="tabpanel" id="panel-military" aria-labelledby="tab-military" hidden>
+    <section id="miloverview">
+      <div class="ledger-heading"><div><p class="tb-label">War Office · strength return</p>
+      <h2>Military establishment</h2></div><button id="mil-compare">Head-to-head →</button></div>
+      <p class="note">Forces fielded at the selected save. Click a row to open its military dossier, composition, and potential rivals.</p>
+      <div class="controls ledger-toolbar">
+        <div class="segments" role="group" aria-label="Military branch">
+          <button id="overview-army" aria-pressed="true" aria-controls="overview-army-view">Army</button>
+          <button id="overview-navy" aria-pressed="false" aria-controls="overview-navy-view">Navy</button>
+        </div>
+        <label for="fleetsave">Save</label><select id="fleetsave"></select>
+        <span id="pick-military"></span>
+      </div>
+      <div id="military-browse">
+      <div id="overview-army-view">
+        <div class="tablewrap military-ledger-wrap"><table id="miltable" class="strength-ledger"><thead><tr></tr></thead><tbody></tbody></table></div>
+        <p class="note">Counts are brigades, not troop headcounts. Fielded = professional + mobilized. Unbuilt capacity is additional professional recruitment capacity.</p>
+      </div>
+      <div id="overview-navy-view" hidden>
+        <div class="tablewrap military-ledger-wrap"><table id="fleettable" class="strength-ledger"><thead><tr></tr></thead><tbody></tbody></table></div>
+        <p class="note">Counts are ships. Heavy hull classification and power estimates require naval unit data. Other hulls include light ships and transports.</p>
+      </div>
+      </div>
+      <div id="military-country" hidden></div>
+    </section>
+  </div>
+
+
+
+  <!-- ============ TECHNOLOGY ============ -->
+  <div role="tabpanel" id="panel-tech" aria-labelledby="tab-tech" hidden>
+    <section>
+      <h2>Technology &middot; <span id="techwho"></span></h2>
+      <div class="controls">
+        <label class="tb-label" for="techtag" style="margin:0">Nation</label>
+        <select id="techtag"></select>
+        <label class="tb-label" for="techsave" style="margin:0">Save</label>
+        <select id="techsave"></select>
+        <input type="search" id="techfind" class="selsearch" style="width:230px"
+               placeholder="search modifiers or inventions" aria-label="search modifiers or inventions">
+      </div>
+      <div class="controls" id="techcats"></div>
+      <div class="techgrid" id="techgrid"></div>
+      <div class="readout" id="techdetail"></div>
+      <p class="note">Choose a nation and save. Click a technology for effects and inventions; search to highlight matching technologies across categories.</p>
+    </section>
+  </div>
+
+
+  <!-- ============ WARS ============ -->
+  <div role="tabpanel" id="panel-wars" aria-labelledby="tab-wars" hidden>
+    <section id="warlist">
+      <h2>Wars &middot; <span id="warcount"></span></h2>
+      <div class="controls">
+        <input type="search" id="warfind" class="selsearch" style="width:230px"
+               placeholder="search wars or nations" aria-label="search wars or nations">
+      </div>
+      <div class="tablewrap fit"><table id="wartable"></table></div>
+      <p class="note">Click a heading to sort, a row for the detail. Casualties
+        are the sum of both sides' losses across every recorded battle.</p>
+    </section>
+    <section>
+      <div class="warbar" id="warbar" hidden>
+        <button id="warback" hidden>&larr; Back to wars</button>
+        <div class="segments" id="warview" role="group" aria-label="War layout">
+          <button id="warview-infobox" aria-pressed="true" title="The war as an infobox, with its goals and battle tables beside it">Infobox</button><button id="warview-legacy" aria-pressed="false" title="The old War Analyzer window: each side in a panel, the war and its battles between them">Legacy</button>
+        </div>
+      </div>
+      <div id="wardetail"></div>
+    </section>
+  </div>
+
+  <!-- ============ POPULATION ============ -->
+  <div role="tabpanel" id="panel-pops" aria-labelledby="tab-pops" hidden>
+    <section>
+      <h2>Population at <span id="popdate"></span></h2>
+      <div class="table-frame">
+        <div class="chart-toolbar" role="group" aria-label="Population table controls">
+          <select id="popsave" aria-label="Save" title="Save"></select>
+          <input id="popfind" type="search" aria-label="Find country" placeholder="Find country or tag" autocomplete="off">
+          <select id="popcountry" aria-label="Country" title="Country"><option value="">Choose a country</option></select>
+          <button id="popshare" aria-pressed="false" title="Switch between population counts and shares">Counts</button>
+          <button id="popback" hidden>&larr; All countries</button>
+        </div>
+        <div id="popbrowse">
+          <div id="poptableview"><div class="tablewrap"><table id="poptable"><thead><tr></tr></thead><tbody></tbody></table></div>
+            <p class="note">Click a heading to sort; choose a country for details.</p></div>
+        </div>
+      </div>
+    </section>
+    <div id="popcountrydetail" hidden>
+      <div class="popcountrylayout">
+        <div>
+          <div id="popcountryfacts" class="ib"></div>
+        </div>
+        <div>
+          <figure>
+            <div class="chart-toolbar" role="group" aria-label="Population map controls"><select id="popregion" aria-label="State" title="State"><option value="">Choose a state</option></select>
+              <button id="popallland" aria-pressed="false">All possessions</button></div>
+            <canvas id="popcountrymap" class="popatlas" role="img" aria-label="Selected country; click a state for population and literacy"></canvas>
+            <div id="popstatefacts" class="readout">Click a state or choose one above.</div></figure>
+          <p class="note">Highlighted land belongs to this country at the selected save. State figures cover its owned portion.</p>
+        </div>
+      </div>
+    <section>
+      <h2>Population evolution · <span id="popscope"></span></h2>
+      <figure>
+        <div class="chart-toolbar" role="group" aria-label="Population evolution controls"></div>
+        <svg id="popchart" viewBox="0 0 1000 360" role="img" aria-label="Pop sizes by type over time"></svg>
+      </figure>
+      <div class="stackwrap" id="poplegend"></div>
+      <p class="note">Click a colored section of a bar to show only that pop type; click a bar again to restore all types. Hover a bar for its population and share of the selected country or state. State history follows the country’s owned portion at each save. Each bar shows the last save of that year.</p>
+    </section>
+    </div>
+  </div>
+
+  <!-- ============ MARKET ============ -->
+  <div role="tabpanel" id="panel-market" aria-labelledby="tab-market" hidden>
+    <section>
+      <h2>World prices &middot; <span>__PRICESPAN__</span></h2>
+      <figure>
+      <div class="chart-toolbar" role="group" aria-label="Price chart controls">
+        <span id="pick-goods"></span>
+        <button id="topmovers">Top movers</button>
+        <button id="pscale" aria-pressed="false">Linear</button>
+        <button id="pindex" aria-pressed="false" title="Rebase every good to 100 at its first reading so goods at different price levels can be compared">Absolute</button>
+      </div>
+        <svg id="pricechart" viewBox="0 0 1000 460" role="img" aria-label="Goods prices over time"></svg>
+        <div class="readout" id="pricereadout"></div>
+      </figure>
+      <p class="note" id="pricenote"></p>
+    </section>
+
+    <section>
+      <h2>Market at <span id="snapdate"></span></h2>
+      <div class="controls">
+        <label class="tb-label" for="snapsel" style="margin:0">Save</label>
+        <select id="snapsel"></select>
+      </div>
+      <div class="tablewrap"><table id="market"><thead><tr></tr></thead><tbody></tbody></table></div>
+      <p class="note">Choose a save; click a good to plot its price and see its producers below. Click a heading to sort. Unsold shows the share of supply that found no buyer.</p>
+    </section>
+
+    <section>
+      <h2>Who produces it at <span id="proddate"></span></h2>
+      <figure>
+      <div class="chart-toolbar" role="group" aria-label="Producer chart controls">
+        <select id="prodsave" aria-label="Save" title="Save"></select>
+        <select id="prodgood" aria-label="Good" title="Good"></select>
+      </div>
+        <svg id="prodchart" viewBox="0 0 1000 430" role="img"
+             aria-label="Supply of one good by nation"></svg>
+        <div class="readout" id="prodreadout"></div>
+      </figure>
+      <p class="note" id="prodnote"></p>
+    </section>
+  </div>
+
+  <footer>
+    Generated from Victoria&nbsp;II save files. Population counts are the sum of
+    pop sizes in owned provinces; literacy, consciousness and militancy are
+    weighted by pop size. Prices come from the rolling monthly buffer each save
+    carries, stitched together across saves.
+  </footer>
+</main>
+

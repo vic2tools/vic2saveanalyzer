@@ -66,6 +66,7 @@ CHECKS = [
     _c("raster.py", "the map's province bitmap", ["scanner"]),
     _c("caching.py", "what the engine keeps between runs", ["scanner"]),
     _c("staleness.py", "what can make a report stale", ["scanner"]),
+    _c("pagebuild.py", "the page built from its files, in order", ["rustc"]),
     _c("mobrate.py", "the mobilisation rate rule", ["scanner"]),
     _c("crossrows.py", "the cross block against the report", ["scanner"], records=True),
     # The real campaign.
@@ -98,8 +99,11 @@ CHECKS = [
     _c("baselinecheck.py", "recording and comparing a baseline", ["scanner"]),
     _c("prepushcheck.py", "the privacy guard run before a push", ["bash"]),
     # The maintainer's verified campaign, where $VIC2_BASELINE names one.
+    # The page works out each war side's losses itself since workstream 3, so the
+    # payload no longer carries them; a baseline recorded before that holds the
+    # key, and it is left out until the baseline is recorded again.
     _c("baseline.py", "the campaign against its baseline", ["scanner", "saves", "mod", "baseline"],
-       lead=("compare",)),
+       lead=("compare",), extra=("--ignore", "payload.wars[].side_losses")),
 ]
 
 

@@ -13,3 +13,6 @@ LICENSE -text
 # The answers the checks are held to are kept byte for byte as the program
 # wrote them: the tables end their lines in CRLF, and that is part of the answer.
 testkit/expected/** -text
+
+# The report page is joined byte for byte (scanner/build.rs): keep it LF.
+scanner/src/page/** text eol=lf
