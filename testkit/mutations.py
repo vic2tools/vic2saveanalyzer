@@ -294,7 +294,7 @@ MUTATIONS = [
         'a save that stops part-way through is read as if it were whole',
         'mangled.py', (),
         [
-            ('scanner/src/engine/mod.rs', "    if end.map(|i| tail[i]) != Some(b'}') {", '    if false {'),
+            ('scanner/src/engine/readsave.rs', "    if end.map(|i| tail[i]) != Some(b'}') {", '    if false {'),
         ]),
     Mutation(
         'naval-base-int-becomes-float',
