@@ -249,7 +249,7 @@ MUTATIONS = [
         'a table open in Excel is not refused in a sentence',
         'frontcheck.py', (),
         [
-            ('scanner/src/engine/report.rs', '            Err(e) if held_elsewhere(&e) => refused.push(shown),', '            Err(e) if false && held_elsewhere(&e) => refused.push(shown),'),
+            ('scanner/src/engine/report/csv.rs', '            Err(e) if held_elsewhere(&e) => refused.push(shown),', '            Err(e) if false && held_elsewhere(&e) => refused.push(shown),'),
         ]),
     Mutation(
         'stamp-ignores-a-setting',
@@ -264,7 +264,7 @@ MUTATIONS = [
         "run's copy stays in the folder",
         'staleness.py', (),
         [
-            ('scanner/src/engine/report.rs', '    for (k, name, cols) in order {\n', '    for (k, name, cols) in order {\n        if k > 0 && k < 100 && c.text[k].iter().all(|s| s.is_empty()) { continue; }\n'),
+            ('scanner/src/engine/report/csv.rs', '    for (k, name, cols) in order {\n', '    for (k, name, cols) in order {\n        if k > 0 && k < 100 && c.text[k].iter().all(|s| s.is_empty()) { continue; }\n'),
         ]),
     Mutation(
         'goal-judged-before-first-save',
@@ -638,7 +638,7 @@ MUTATIONS = [
         "the page's armies, as if the province's kinds were read last first",
         'enginecheck.py', (),
         [
-            ('scanner/src/engine/report.rs', '                let mut ranked: Vec<&Stack> = types.iter().collect();', '                let mut ranked: Vec<&Stack> = types.iter().rev().collect();'),
+            ('scanner/src/engine/report/map.rs', '                let mut ranked: Vec<&Stack> = types.iter().collect();', '                let mut ranked: Vec<&Stack> = types.iter().rev().collect();'),
         ]),
     Mutation(
         'army-provinces-reversed',
