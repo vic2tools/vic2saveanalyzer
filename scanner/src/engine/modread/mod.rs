@@ -21,7 +21,7 @@
 // declines, and the analyzer reads the mod in Python, which raises as it
 // always did.
 
-use crate::save::clause::{parse, tokens, unquote, V};
+use crate::save::clause::{parse, to_float, tokens, unquote, V};
 use crate::engine::rules::{Decline, D};
 use crate::py::json::J;
 use crate::util::omap::OMap;
@@ -90,7 +90,7 @@ impl Reader {
         let mut asked = HashSet::new();
         for (_n, _s, _i, t) in &triggers {
             if let Some((top, i)) = t {
-                if let Some(tr) = get(&top[*i].1, b"trigger") {
+                if let Some(tr) = top[*i].1.get(b"trigger") {
                     trigger_conditions(tr, &mut asked);
                 }
             }

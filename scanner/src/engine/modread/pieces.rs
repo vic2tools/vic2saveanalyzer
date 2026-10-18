@@ -88,7 +88,7 @@ impl Reader {
                 continue;
             }
             for (key, block) in self.clausewitz(&target)?.iter() {
-                if let Some(v) = get(block, b"mobilization_impact") {
+                if let Some(v) = block.get(b"mobilization_impact") {
                     out.set(key.clone(), to_float(Some(v), 0.0));
                 }
             }
@@ -132,16 +132,16 @@ impl Reader {
             return Ok((sizes, groups));
         }
         for (category, block) in self.clausewitz(&target)?.iter() {
-            if category == b"party_issues" || !is_dict(block) {
+            if category == b"party_issues" || !block.is_dict() {
                 continue;
             }
-            for (reform, body) in pairs(block) {
-                if reform.first() == Some(&b'_') || !is_dict(body) {
+            for (reform, body) in block.pairs() {
+                if reform.first() == Some(&b'_') || !body.is_dict() {
                     continue;
                 }
                 groups.push(reform.clone());
-                for (option, spec) in pairs(body) {
-                    if option.first() == Some(&b'_') || !is_dict(spec) {
+                for (option, spec) in body.pairs() {
+                    if option.first() == Some(&b'_') || !spec.is_dict() {
                         continue;
                     }
                     let size = find_mob_size(spec);
@@ -178,15 +178,15 @@ impl Reader {
         }
         let top = self.clausewitz(&target)?;
         for (i, (name, block)) in top.iter().enumerate() {
-            if !is_dict(block) {
+            if !block.is_dict() {
                 continue;
             }
             let size = find_mob_size(block);
-            let impact = to_float(get(block, b"mobilization_impact"), 0.0);
+            let impact = to_float(block.get(b"mobilization_impact"), 0.0);
             if size == 0.0 && impact == 0.0 {
                 continue;
             }
-            let has = matches!(get(block, b"trigger"), Some(V::Dict(_)));
+            let has = matches!(block.get(b"trigger"), Some(V::Dict(_)));
             out.push((name.clone(), size, impact, if has { Some((top.clone(), i)) } else { None }));
         }
         Ok(out)
@@ -199,16 +199,16 @@ impl Reader {
                 continue;
             }
             for (group, block) in self.clausewitz(&target)?.iter() {
-                if !is_dict(block) {
+                if !block.is_dict() {
                     continue;
                 }
-                for (name, body) in pairs(block) {
+                for (name, body) in block.pairs() {
                     if name.first() == Some(&b'_') || NOT_A_CULTURE.contains(&name.as_slice()) {
                         continue;
                     }
                     let culture = match body {
                         V::Dict(_) => true,
-                        V::List(x) | V::Multi(x) => x.first().map_or(false, is_dict),
+                        V::List(x) | V::Multi(x) => x.first().is_some_and(V::is_dict),
                         _ => false,
                     };
                     if culture {
@@ -227,10 +227,10 @@ impl Reader {
             return Ok(Vec::new());
         }
         for (name, block) in self.clausewitz(&target)?.iter() {
-            if !is_dict(block) {
+            if !block.is_dict() {
                 continue;
             }
-            for pid in crate::save::clause::as_list(get(block, b"provinces")) {
+            for pid in crate::save::clause::as_list(block.get(b"provinces")) {
                 if let V::Str(_) = pid {
                     out.set(to_int(Some(pid), -1)?, name.clone());
                 }
@@ -246,14 +246,14 @@ impl Reader {
             return Ok(out);
         }
         for (_c, block) in self.clausewitz(&target)?.iter() {
-            if !is_dict(block) {
+            if !block.is_dict() {
                 continue;
             }
-            for (good, spec) in pairs(block) {
-                if good.first() == Some(&b'_') || !is_dict(spec) {
+            for (good, spec) in block.pairs() {
+                if good.first() == Some(&b'_') || !spec.is_dict() {
                     continue;
                 }
-                if let Some(c) = get(spec, b"cost") {
+                if let Some(c) = spec.get(b"cost") {
                     out.set(good.clone(), to_float(Some(c), 0.0));
                 }
             }
@@ -454,13 +454,13 @@ impl Reader {
         }
         let mut out: OMap<i64, (f64, f64)> = OMap::new();
         for (key, block) in self.clausewitz(&target)?.iter() {
-            if !is_dict(block) {
+            if !block.is_dict() {
                 continue;
             }
             let mut spot = None;
             for anchor in [&b"unit"[..], b"text_position", b"building_construction",
                            b"military_construction", b"factory", b"city", b"town"] {
-                if let Some(c @ V::Dict(d)) = get(block, anchor) {
+                if let Some(c @ V::Dict(d)) = block.get(anchor) {
                     if d.get(b"x").is_some() {
                         spot = Some(c);
                         break;
@@ -471,7 +471,7 @@ impl Reader {
                 Some(s) => s,
                 None => continue,
             };
-            let at = (to_float(get(spot, b"x"), 0.0), to_float(get(spot, b"y"), 0.0));
+            let at = (to_float(spot.get(b"x"), 0.0), to_float(spot.get(b"y"), 0.0));
             if let Some(p) = int_latin1(key)? {
                 out.set(p, at);
             }
@@ -512,14 +512,14 @@ impl Reader {
             return Ok(J::Obj(out));
         }
         for (name, block) in self.clausewitz(&target)?.iter() {
-            if !is_dict(block) {
+            if !block.is_dict() {
                 continue;
             }
-            let variant = match get(block, b"flagType") {
+            let variant = match block.get(b"flagType") {
                 Some(v) => unquote(unquote(&str_of(v))).to_vec(),
                 None => Vec::new(),
             };
-            let elects = match get(block, b"election") {
+            let elects = match block.get(b"election") {
                 Some(V::Str(s)) => s.eq_ignore_ascii_case(b"yes"),
                 Some(_) => false,
                 None => false,
@@ -575,8 +575,8 @@ impl Reader {
             let target = joins(root, &["common", "goods.txt"]);
             if is_file(&target) {
                 for (_c, block) in self.clausewitz(&target)?.iter() {
-                    if is_dict(block) {
-                        for (g, _) in pairs(block) {
+                    if block.is_dict() {
+                        for (g, _) in block.pairs() {
                             if g.first() != Some(&b'_') {
                                 keys.insert(l1(g));
                             }
@@ -593,7 +593,7 @@ impl Reader {
             let target = joins(root, &["common", "cb_types.txt"]);
             if is_file(&target) {
                 for (name, block) in self.clausewitz(&target)?.iter() {
-                    if is_dict(block) {
+                    if block.is_dict() {
                         keys.insert(l1(name));
                     }
                 }
@@ -660,16 +660,16 @@ impl Reader {
             let category = cut4(fname).replace("_tech", "");
             let mut areas: Vec<Column> = Vec::new();
             for (key, block) in self.clausewitz(target)?.iter() {
-                if !is_dict(block) {
+                if !block.is_dict() {
                     continue;
                 }
-                let area = match get(block, b"area") {
+                let area = match block.get(b"area") {
                     Some(v) => unquote(&str_of(v)).to_vec(),
                     None => b"other".to_vec(),
                 };
                 let effects = {
                     let mut e = Vec::new();
-                    flatten_effects(pairs(block).iter(), &TECH_SKIP, b"", &mut e);
+                    flatten_effects(block.pairs().iter(), &TECH_SKIP, b"", &mut e);
                     e
                 };
                 let mut invs = gated.get(key).cloned().unwrap_or_default();
@@ -689,8 +689,8 @@ impl Reader {
                 }
                 let tech = Tech {
                     key: key.clone(),
-                    year: to_int(get(block, b"year"), 0)?,
-                    cost: to_int(get(block, b"cost"), 0)?,
+                    year: to_int(block.get(b"year"), 0)?,
+                    cost: to_int(block.get(b"cost"), 0)?,
                     effects,
                     inventions: invs,
                 };

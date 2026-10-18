@@ -19,7 +19,7 @@
 // a repeated key kept at its first place with its values gathered -- and
 // what they find goes into the same record the scan fills.
 
-use crate::save::clause::{unquote, V};
+use crate::save::clause::{as_list, to_float, unquote, V};
 use crate::save::country::{Country, Tables, Units};
 use crate::engine::modread::{block_end, str_of};
 use crate::py::num::float_latin1;
@@ -186,14 +186,6 @@ fn read_pop<'a>(tok: &mut Tokens<'a>) -> Vec<(&'a [u8], &'a [u8])> {
 
 // ------------------------------------------------------ Python's numbers
 
-/// `to_float(value, default)`.
-fn to_float(v: Option<&V>, default: f64) -> f64 {
-    match v {
-        Some(V::Str(s)) => float_latin1(s).unwrap_or(default),
-        _ => default,
-    }
-}
-
 /// `to_int(value, default)`: `int(float(value))`; Err for the infinity
 /// Python lets out as an OverflowError.
 fn to_int(v: Option<&V>, default: i64) -> Result<i64, String> {
@@ -213,20 +205,6 @@ fn to_int_text(s: &[u8], default: i64) -> Result<i64, String> {
     }
 }
 
-fn get<'v>(v: &'v V, key: &[u8]) -> Option<&'v V> {
-    match v {
-        V::Dict(d) => d.get(key),
-        _ => None,
-    }
-}
-
-fn pairs(v: &V) -> &[(Vec<u8>, V)] {
-    match v {
-        V::Dict(d) => &d.pairs,
-        _ => &[],
-    }
-}
-
 fn text(b: &[u8]) -> String {
     crate::engine::modread::l1(b)
 }
@@ -240,16 +218,11 @@ fn sub_blocks(v: &V) -> Vec<&V> {
     }
 }
 
-/// `as_list(value)`.
-fn as_list(v: Option<&V>) -> Vec<&V> {
-    crate::save::clause::as_list(v)
-}
-
 /// The `_items` of a block, or the block when it is a bare list.
 fn items_of(v: &V) -> Vec<&V> {
     match v {
         V::List(x) => x.iter().collect(),
-        V::Dict(_) => match get(v, b"_items") {
+        V::Dict(_) => match v.get(b"_items") {
             Some(V::List(x)) | Some(V::Multi(x)) => x.iter().collect(),
             Some(one) => vec![one],
             None => Vec::new(),
@@ -262,32 +235,32 @@ fn items_of(v: &V) -> Vec<&V> {
 
 /// `readsave.count_units`.
 fn count_units(node: &V, out: &mut Units, where_: Option<i64>) -> Result<(), String> {
-    for (key, value) in pairs(node) {
+    for (key, value) in node.pairs() {
         if key.first() == Some(&b'_') {
             continue;
         }
         if key == b"regiment" {
             for reg in sub_blocks(value) {
                 out.brigades += 1;
-                out.regiment_pops.push(match get(reg, b"pop") {
-                    Some(src @ V::Dict(_)) => to_int(get(src, b"id"), -1)?,
+                out.regiment_pops.push(match reg.get(b"pop") {
+                    Some(src @ V::Dict(_)) => to_int(src.get(b"id"), -1)?,
                     _ => -1,
                 });
-                let raw = text(&get(reg, b"type").map(str_of).unwrap_or_default());
+                let raw = text(&reg.get(b"type").map(str_of).unwrap_or_default());
                 let rtype = if float_latin1(raw.as_bytes()).is_some() { String::new() } else { raw };
                 let rtype = if rtype.is_empty() { "unknown".to_string() } else { rtype };
-                let men = (to_float(get(reg, b"strength"), 0.0) * 1000.0).round_ties_even();
+                let men = (to_float(reg.get(b"strength"), 0.0) * 1000.0).round_ties_even();
                 out.regiment(names::intern_str(&rtype), where_, men);
             }
         } else if key == b"ship" {
             for ship in sub_blocks(value) {
                 out.ships += 1;
-                let kind = match get(ship, b"type") {
+                let kind = match ship.get(b"type") {
                     Some(v) => text(&str_of(v)),
                     None => "unknown".to_string(),
                 };
-                let strength = to_float(get(ship, b"strength"), 100.0) / 100.0;
-                let experience = (to_float(get(ship, b"experience"), 0.0) / 100.0).clamp(0.0, 0.95);
+                let strength = to_float(ship.get(b"strength"), 100.0) / 100.0;
+                let experience = (to_float(ship.get(b"experience"), 0.0) / 100.0).clamp(0.0, 0.95);
                 out.ship(names::intern_str(&kind), strength.max(0.0) / (1.0 - experience));
             }
         } else if key == b"army" || key == b"navy" {
@@ -298,7 +271,7 @@ fn count_units(node: &V, out: &mut Units, where_: Option<i64>) -> Result<(), Str
                 out.navies += blocks.len() as i64;
             }
             for block in blocks {
-                let here = to_int(get(block, b"location"), -1)?;
+                let here = to_int(block.get(b"location"), -1)?;
                 count_units(block, out, if here > 0 { Some(here) } else { where_ })?;
             }
         }
@@ -334,7 +307,7 @@ fn read_country(text_: &[u8], at: usize, tag: &str, tables: &Tables) -> Result<C
                     b"flags" => {
                         let block = parse_block(&mut sub, &[]);
                         if let V::Dict(_) = block {
-                            out.country_flags = pairs(&block).iter()
+                            out.country_flags = block.pairs().iter()
                                 .filter(|(k, v)| k.first() != Some(&b'_')
                                         && str_of(v).eq_ignore_ascii_case(b"yes"))
                                 .map(|(k, _)| text(k)).collect();
@@ -342,14 +315,14 @@ fn read_country(text_: &[u8], at: usize, tag: &str, tables: &Tables) -> Result<C
                     }
                     b"modifier" => {
                         let block = parse_block(&mut sub, &[]);
-                        if let Some(m) = get(&block, b"modifier") {
+                        if let Some(m) = block.get(b"modifier") {
                             out.modifiers.push(crate::save::names::intern_str(&text(unquote(&str_of(m)))));
                         }
                     }
                     b"saved_country_supply" => {
                         let block = parse_block(&mut sub, &[]);
                         if let V::Dict(_) = block {
-                            out.goods_supply = pairs(&block).iter()
+                            out.goods_supply = block.pairs().iter()
                                 .filter(|(g, v)| g.first() != Some(&b'_') && to_float(Some(v), 0.0) > 0.0)
                                 .map(|(g, v)| (text(g), to_float(Some(v), 0.0))).collect();
                         }
@@ -367,7 +340,7 @@ fn read_country(text_: &[u8], at: usize, tag: &str, tables: &Tables) -> Result<C
                         if !matches!(block, V::Dict(_)) {
                             return Err("a mobilization order that is a list".into());
                         }
-                        let spawned = get(&block, b"spawned").map(str_of).unwrap_or(b"no".to_vec());
+                        let spawned = block.get(b"spawned").map(str_of).unwrap_or(b"no".to_vec());
                         if !spawned.eq_ignore_ascii_case(b"yes") {
                             out.mobilizing += 1;
                         }
@@ -378,12 +351,12 @@ fn read_country(text_: &[u8], at: usize, tag: &str, tables: &Tables) -> Result<C
                             return Err("a state that is a list".into());
                         }
                         out.states += 1;
-                        let ids = match get(&block, b"provinces") {
+                        let ids = match block.get(b"provinces") {
                             Some(p @ V::List(_)) | Some(p @ V::Multi(_)) | Some(p @ V::Dict(_)) => items_of_or_list(p),
                             _ => Vec::new(),
                         };
-                        let colonial = get(&block, b"is_colonial").is_some();
-                        let level = if colonial { to_int(get(&block, b"is_colonial"), 0)? } else { 0 };
+                        let colonial = block.get(b"is_colonial").is_some();
+                        let level = if colonial { to_int(block.get(b"is_colonial"), 0)? } else { 0 };
                         for pid in ids {
                             let pid = to_int(Some(pid), -1)?;
                             if colonial {
@@ -391,16 +364,16 @@ fn read_country(text_: &[u8], at: usize, tag: &str, tables: &Tables) -> Result<C
                                 out.colonial_level.push((pid, level));
                             }
                         }
-                        for bld in as_list(get(&block, b"state_buildings")) {
+                        for bld in as_list(block.get(b"state_buildings")) {
                             if let V::Dict(_) = bld {
                                 out.factory_count += 1;
-                                out.factory_levels += to_int(get(bld, b"level"), 1)?;
+                                out.factory_levels += to_int(bld.get(b"level"), 1)?;
                             }
                         }
                     }
                     b"technology" => {
                         let block = parse_block(&mut sub, &[]);
-                        for (tech, tval) in pairs(&block) {
+                        for (tech, tval) in block.pairs() {
                             if tech.first() == Some(&b'_') {
                                 continue;
                             }
@@ -466,11 +439,11 @@ fn building_level(v: Option<&V>) -> f64 {
         V::List(x) | V::Multi(x) if !x.is_empty() => to_float(Some(&x[0]), 0.0),
         V::Dict(_) => {
             for key in [&b"level"[..], b"building_level"] {
-                if let Some(l) = get(v, key) {
+                if let Some(l) = v.get(key) {
                     return to_float(Some(l), 0.0);
                 }
             }
-            match get(v, b"_items") {
+            match v.get(b"_items") {
                 Some(V::List(x)) | Some(V::Multi(x)) if !x.is_empty() => to_float(Some(&x[0]), 0.0),
                 _ => 0.0,
             }

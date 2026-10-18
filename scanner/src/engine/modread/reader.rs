@@ -654,7 +654,7 @@ pub(super) fn cut4(name: &str) -> &str {
 /// its `effect`.
 pub(super) fn find_mob_size(block: &V) -> f64 {
     let mut total = 0.0;
-    for (key, val) in pairs(block) {
+    for (key, val) in block.pairs() {
         if key == b"mobilisation_size" {
             match val {
                 V::List(x) | V::Multi(x) => {
@@ -664,7 +664,7 @@ pub(super) fn find_mob_size(block: &V) -> f64 {
                 }
                 one => total += to_float(Some(one), 0.0),
             }
-        } else if key == b"effect" && is_dict(val) {
+        } else if key == b"effect" && val.is_dict() {
             total += find_mob_size(val);
         }
     }
@@ -673,15 +673,15 @@ pub(super) fn find_mob_size(block: &V) -> f64 {
 
 /// `_trigger_conditions`: every condition a trigger names.
 pub(super) fn trigger_conditions(trigger: &V, out: &mut HashSet<Vec<u8>>) {
-    if !is_dict(trigger) {
+    if !trigger.is_dict() {
         return;
     }
-    for (key, value) in pairs(trigger) {
+    for (key, value) in trigger.pairs() {
         if key == b"AND" || key == b"OR" || key == b"NOT" {
             for part in crate::save::clause::as_list(Some(value)) {
                 trigger_conditions(part, out);
             }
-        } else if is_dict(value) {
+        } else if value.is_dict() {
             out.insert(key.clone());
             trigger_conditions(value, out);
         } else {
@@ -724,12 +724,12 @@ pub(super) const INVENTION_SKIP: [&[u8]; 3] = [b"icon", b"limit", b"chance"];
 /// `_invention_effects`: its own fields, then those of its `effect`.
 pub(super) fn invention_effects(block: &V) -> Vec<(Vec<u8>, Vec<u8>)> {
     let mut out = Vec::new();
-    if !is_dict(block) {
+    if !block.is_dict() {
         return out;
     }
-    flatten_effects(pairs(block).iter().filter(|(k, _)| k != b"effect"), &INVENTION_SKIP, b"", &mut out);
-    if let Some(nested @ V::Dict(_)) = get(block, b"effect") {
-        flatten_effects(pairs(nested).iter(), &INVENTION_SKIP, b"", &mut out);
+    flatten_effects(block.pairs().iter().filter(|(k, _)| k != b"effect"), &INVENTION_SKIP, b"", &mut out);
+    if let Some(nested @ V::Dict(_)) = block.get(b"effect") {
+        flatten_effects(nested.pairs().iter(), &INVENTION_SKIP, b"", &mut out);
     }
     out
 }

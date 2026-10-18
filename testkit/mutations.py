@@ -492,7 +492,7 @@ MUTATIONS = [
         'a save laid out another way reads no state as colonial',
         'frontcheck.py', (),
         [
-            ('scanner/src/save/walk.rs', '                        let colonial = get(&block, b"is_colonial").is_some();', '                        let colonial = false;'),
+            ('scanner/src/save/walk.rs', '                        let colonial = block.get(b"is_colonial").is_some();', '                        let colonial = false;'),
         ]),
     Mutation(
         'cross-last-fit-wins',

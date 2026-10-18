@@ -21,14 +21,6 @@ pub(super) fn must_float(s: &[u8]) -> D<f64> {
     }
 }
 
-/// `to_float(value, default)`.
-pub(super) fn to_float(v: Option<&V>, default: f64) -> f64 {
-    match v {
-        Some(V::Str(s)) => float_latin1(s).unwrap_or(default),
-        _ => default,
-    }
-}
-
 /// `to_int(value, default)`: `int(float(value))`, whose OverflowError on
 /// an infinity nothing catches.
 pub(super) fn to_int(v: Option<&V>, default: i64) -> D<i64> {
@@ -94,24 +86,6 @@ pub(crate) fn str_of(v: &V) -> Vec<u8> {
             // A repr of latin-1 text is latin-1 again.
             s.chars().map(|c| c as u32 as u8).collect()
         }
-    }
-}
-
-pub(super) fn is_dict(v: &V) -> bool {
-    matches!(v, V::Dict(_))
-}
-
-pub(super) fn pairs(v: &V) -> &[(Vec<u8>, V)] {
-    match v {
-        V::Dict(d) => &d.pairs,
-        _ => &[],
-    }
-}
-
-pub(super) fn get<'v>(v: &'v V, key: &[u8]) -> Option<&'v V> {
-    match v {
-        V::Dict(d) => d.get(key),
-        _ => None,
     }
 }
 

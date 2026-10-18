@@ -434,7 +434,7 @@ fn numeric(block: &Tree, key: &[u8]) -> R<OMap<Sym, f64>> {
                 continue;
             }
             if let V::Str(_) = v {
-                out.set(names::intern(k2), clause::to_float(Some(v), 0.0)?);
+                out.set(names::intern(k2), clause::to_float(Some(v), 0.0));
             }
         }
     }
@@ -469,7 +469,7 @@ pub fn read_worldmarket(block: &Tree) -> R<Market> {
                 continue;
             }
             if let V::Str(_) = price {
-                history.push((stamp, names::intern(good), clause::to_float(Some(price), 0.0)?));
+                history.push((stamp, names::intern(good), clause::to_float(Some(price), 0.0)));
             }
         }
     }

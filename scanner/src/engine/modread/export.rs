@@ -141,7 +141,7 @@ pub fn export(path: &str) -> D<J> {
     put("static_mob", fmap(&r.static_mob()?));
     put("triggered_mob", J::List(triggers.iter().map(|(n, s, i, t)| {
         let trig = match t {
-            Some((top, k)) => tree_json(get(&top[*k].1, b"trigger").unwrap()),
+            Some((top, k)) => tree_json(top[*k].1.get(b"trigger").unwrap()),
             None => J::Obj(Vec::new()),
         };
         J::List(vec![js(n), J::Float(*s), J::Float(*i), trig])

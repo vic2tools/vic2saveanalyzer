@@ -69,6 +69,28 @@ impl Tree {
     }
 }
 
+impl V {
+    /// A block's value for `key`; nothing for anything but a block.
+    pub fn get(&self, key: &[u8]) -> Option<&V> {
+        match self {
+            V::Dict(d) => d.get(key),
+            _ => None,
+        }
+    }
+
+    /// A block's keys and values, in order; none for anything else.
+    pub fn pairs(&self) -> &[(Vec<u8>, V)] {
+        match self {
+            V::Dict(d) => &d.pairs,
+            _ => &[],
+        }
+    }
+
+    pub fn is_dict(&self) -> bool {
+        matches!(self, V::Dict(_))
+    }
+}
+
 /// `_parse_listed`: (the value, where it ended).
 pub fn parse(toks: &[&[u8]], mut i: usize) -> (V, usize) {
     let mut out = Tree::default();
@@ -149,10 +171,10 @@ pub fn parse_span(b: &[u8]) -> V {
 // ------------------------------------------------------------- conversions
 
 /// `to_float(value, default)`.
-pub fn to_float(v: Option<&V>, default: f64) -> R<f64> {
+pub fn to_float(v: Option<&V>, default: f64) -> f64 {
     match v {
-        Some(V::Str(s)) => Ok(float_latin1(s).unwrap_or(default)),
-        _ => Ok(default),
+        Some(V::Str(s)) => float_latin1(s).unwrap_or(default),
+        _ => default,
     }
 }
 
@@ -276,12 +298,25 @@ mod tests {
     #[test]
     fn the_tree_and_the_walk_cut_text_into_the_same_tokens() {
         let text: &[u8] = b"a=\"b c\" {x=1}\x1c\x85y\xa0=\t\"open {z}\r\n}";
-        let mut walk = crate::save::walk::Tokens::new(text, 0);
+        let mut walk = crate::save::tokens::Tokens::new(text, 0);
         let mut spans = Vec::new();
         while let Some((a, z)) = walk.next() {
             spans.push(&text[a..z]);
         }
         assert_eq!(super::tokens(text), spans);
         assert!(spans.contains(&&b"\"open"[..]));
+    }
+
+    #[test]
+    fn a_block_answers_for_its_keys_and_anything_else_has_none() {
+        let block = super::parse_span(b"a=1 b={c=2}");
+        assert!(block.is_dict());
+        assert!(matches!(block.get(b"a"), Some(super::V::Str(s)) if s == b"1"));
+        assert_eq!(block.pairs().len(), 2);
+        let word = super::V::Str(b"x".to_vec());
+        assert!(!word.is_dict());
+        assert!(word.get(b"a").is_none());
+        assert!(word.pairs().is_empty());
+        assert_eq!(super::to_float(block.get(b"a"), 0.0), 1.0);
     }
 }
