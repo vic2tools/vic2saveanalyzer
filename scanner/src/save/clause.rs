@@ -24,47 +24,12 @@ pub type R<T> = Result<T, ()>;
 
 use crate::py::num::{float_latin1, int_latin1};
 
-/// Python's `str.isspace()` for a character that is one latin-1 byte, which
-/// is what `\s` in `TOKEN_RE` matches.
-pub fn py_space(c: u8) -> bool {
-    matches!(c, 0x09..=0x0d | 0x1c..=0x1f | 0x20 | 0x85 | 0xa0)
-}
-
 /// `TOKEN_RE.findall(text)`: `"[^"]*"|[{}=]|[^\s{}=]+`.
 pub fn tokens(b: &[u8]) -> Vec<&[u8]> {
+    let mut cursor = crate::save::tokens::Tokens::new(b, 0);
     let mut out = Vec::with_capacity(b.len() / 6);
-    let mut i = 0;
-    let n = b.len();
-    while i < n {
-        let c = b[i];
-        if py_space(c) {
-            i += 1;
-            continue;
-        }
-        if c == b'"' {
-            // A quote that closes anywhere later is one token; one that never
-            // closes is the start of a bare word like any other character.
-            if let Some(off) = b[i + 1..].iter().position(|&x| x == b'"') {
-                let end = i + 1 + off + 1;
-                out.push(&b[i..end]);
-                i = end;
-                continue;
-            }
-        }
-        if c == b'{' || c == b'}' || c == b'=' {
-            out.push(&b[i..i + 1]);
-            i += 1;
-            continue;
-        }
-        let start = i;
-        while i < n {
-            let x = b[i];
-            if py_space(x) || x == b'{' || x == b'}' || x == b'=' {
-                break;
-            }
-            i += 1;
-        }
-        out.push(&b[start..i]);
+    while let Some((start, end)) = cursor.next() {
+        out.push(&b[start..end]);
     }
     out
 }
@@ -304,4 +269,19 @@ pub fn great_nations(v: &V) -> R<Vec<i64>> {
         out.push(to_int(Some(i), -1)?);
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_tree_and_the_walk_cut_text_into_the_same_tokens() {
+        let text: &[u8] = b"a=\"b c\" {x=1}\x1c\x85y\xa0=\t\"open {z}\r\n}";
+        let mut walk = crate::save::walk::Tokens::new(text, 0);
+        let mut spans = Vec::new();
+        while let Some((a, z)) = walk.next() {
+            spans.push(&text[a..z]);
+        }
+        assert_eq!(super::tokens(text), spans);
+        assert!(spans.contains(&&b"\"open"[..]));
+    }
 }
