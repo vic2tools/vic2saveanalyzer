@@ -333,7 +333,7 @@ impl Val<'_> {
     /// `float(val)`.
     pub fn float(&self) -> Option<f64> {
         match self {
-            Val::S(s) => crate::py::fmt::py_float(s),
+            Val::S(s) => crate::py::num::float(s),
             Val::I(i) => Some(*i as f64),
             Val::F(f) => Some(*f),
             Val::N(n) => Some(n.as_f64()),

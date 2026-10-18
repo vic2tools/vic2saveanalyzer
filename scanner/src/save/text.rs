@@ -43,7 +43,7 @@ pub(crate) fn to_float_b(s: &[u8]) -> f64 {
     // Anything but a plain decimal is what Python's `float()` makes of it:
     // `1_000`, `inf`, the spaces it trims; a ValueError is the 0.0 the
     // readers default to.
-    crate::engine::modread::py_float(s).unwrap_or(0.0)
+    crate::py::num::float_latin1(s).unwrap_or(0.0)
 }
 
 const TENS: [f64; 16] = [1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12,
@@ -124,7 +124,7 @@ pub(crate) fn is_number_b(s: &[u8]) -> bool {
     match s.first() {
         Some(c) if c.is_ascii_alphabetic() && !matches!(c, b'i' | b'I' | b'n' | b'N') => false,
         // Python's `float()` otherwise: its trimming, its underscores.
-        _ => crate::engine::modread::py_float(s).is_some(),
+        _ => crate::py::num::float_latin1(s).is_some(),
     }
 }
 

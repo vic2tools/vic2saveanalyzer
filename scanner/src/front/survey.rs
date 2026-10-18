@@ -282,7 +282,7 @@ fn sniff(path: &str) -> Result<Sniffed, String> {
     for h in sniff_ids(&text) {
         for n in g(&h).split(|&c| crate::py::re::space(c)).filter(|w| !w.is_empty()) {
             if n.iter().all(|c| c.is_ascii_digit()) {
-                let v = modread::py_int(n).map_err(|e| e.text().to_string())?.unwrap_or(0);
+                let v = crate::py::num::int_latin1(n).map_err(|e| e.to_string())?.unwrap_or(0);
                 top = if any { top.max(v) } else { v };
                 any = true;
             } else if n.iter().all(|&c| c.is_ascii_digit() || matches!(c, 0xb2 | 0xb3 | 0xb9)) {
@@ -299,7 +299,7 @@ fn sniff(path: &str) -> Result<Sniffed, String> {
     }
     let mut provinces = BTreeSet::new();
     for h in sniff_provinces(&text) {
-        provinces.insert(modread::py_int(g(&h)).map_err(|e| e.text().to_string())?.unwrap_or(0));
+        provinces.insert(crate::py::num::int_latin1(g(&h)).map_err(|e| e.to_string())?.unwrap_or(0));
     }
     Ok(Sniffed {
         tags,
@@ -516,7 +516,7 @@ fn head_key(head: &[u8]) -> Result<Vec<i64>, String> {
     }
     let mut out = Vec::new();
     for p in parts {
-        match modread::py_int(p).map_err(|e| e.text().to_string())? {
+        match crate::py::num::int_latin1(p).map_err(|e| e.to_string())? {
             Some(v) => out.push(v),
             None => return Ok(vec![0]),
         }

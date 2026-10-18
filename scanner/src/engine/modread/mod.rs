@@ -40,12 +40,12 @@ mod values;
 pub use export::export;
 pub use paths::join;
 pub use reader::{base_game_path, block_end, is_install, Reader};
-pub use values::{py_float, py_int};
 pub(crate) use values::str_of;
 use paths::*;
 use pieces::set_pair;
 use reader::*;
 use values::*;
+use crate::py::num::int_latin1;
 
 type Set = BTreeSet<Vec<u8>>;
 
@@ -155,7 +155,7 @@ pub fn facts(root: &str) -> D<Facts> {
             let first = line.split(|&c| c == b';').next().unwrap_or(b"");
             let head = strip(first);
             if digit_word(head)? {
-                out.push(py_int(head)?.unwrap_or(0));
+                out.push(int_latin1(head)?.unwrap_or(0));
             }
         }
         Ok(out)

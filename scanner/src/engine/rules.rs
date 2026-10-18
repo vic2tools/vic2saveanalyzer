@@ -22,7 +22,8 @@ use crate::engine::model::{Meta, Nation};
 use crate::save::names::{self, Sym};
 use crate::util::omap::OMap;
 use crate::util::fx::{FxMap, FxSet};
-use crate::py::fmt::{py_float, py_sum, trunc_int};
+use crate::py::fmt::{py_sum, trunc_int};
+use crate::py::num;
 
 /// Why a mod or a save could not be read.
 #[derive(Debug)]
@@ -33,6 +34,12 @@ pub enum Decline {
     /// Something no mod or save the game loads should hold: the run stops
     /// over it (`engine::decline`).
     Unreadable(String),
+}
+
+impl From<crate::py::num::TooLarge> for Decline {
+    fn from(e: crate::py::num::TooLarge) -> Decline {
+        Decline::Unreadable(e.to_string())
+    }
 }
 
 impl Decline {
@@ -379,7 +386,7 @@ fn unquote(s: &str) -> &str {
 /// `to_int(text, default)`: `int(float(text))`, its ValueError the default
 /// (`int(nan)` is one). Infinity is an OverflowError, which Python let out.
 fn to_int(text: &str, default: i64) -> D<i64> {
-    match py_float(text) {
+    match num::float(text) {
         None => Ok(default),
         Some(f) if f.is_nan() => Ok(default),
         Some(f) => trunc_int(f).ok_or_else(|| Decline::Unreadable("int() of infinity in a trigger".into())),
@@ -475,7 +482,7 @@ impl<'a> Asker<'a> {
                     "money" => nat.treasury,
                     _ => nat.total_pop as f64,
                 };
-                return Ok(Some(have >= py_float(text).unwrap_or(0.0)));
+                return Ok(Some(have >= num::float(text).unwrap_or(0.0)));
             }
             _ => {}
         }

@@ -424,7 +424,7 @@ MUTATIONS = [
         "the Rust's float() refuses 1_000, which Python reads as a thousand",
         'modread.py', ('--rounds', '40'),
         [
-            ('scanner/src/engine/modread/values.rs', '    let t = no_underscores(num_trim(s))?;', '    let t = num_trim(s).to_vec();'),
+            ('scanner/src/py/num.rs', '    float_of(&no_underscores(latin1_trim(s))?)', '    float_of(latin1_trim(s))'),
         ]),
     Mutation(
         'modread-block-name-empty',

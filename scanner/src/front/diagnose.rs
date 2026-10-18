@@ -16,7 +16,7 @@
 // before anything is printed, so the Python says what it says.
 
 use crate::save::clause::{unquote, V};
-use crate::engine::modread::py_float;
+use crate::py::num::float_latin1;
 use crate::save::walk::{looks_like_country_tag, parse_block, Tokens};
 use crate::engine::{Reading, readsave::basename, readsave::read_save, readsave::Refused};
 use crate::util::fx::FxMap;
@@ -83,7 +83,7 @@ fn pop_culture(pop: &V) -> (String, String) {
                 continue;
             }
             if let V::Str(v) = val {
-                if py_float(v).is_none() {
+                if float_latin1(v).is_none() {
                     return (l1(key), l1(v));
                 }
             }
@@ -234,7 +234,7 @@ fn head_line(line: &[u8], word_char: fn(u8) -> bool) -> bool {
 
 /// `to_int(text)`: `int(float(text))`, 0 for what it will not take.
 fn to_int(s: &[u8]) -> i64 {
-    match py_float(s) {
+    match float_latin1(s) {
         Some(f) if f.is_finite() => f.trunc() as i64,
         _ => 0,
     }

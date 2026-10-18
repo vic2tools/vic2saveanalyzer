@@ -9,6 +9,7 @@
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 
 use super::*;
+use crate::py::num::int_latin1;
 
 impl Reader {
     pub(super) fn read_defines(&self) -> D<OMap<Vec<u8>, f64>> {
@@ -271,7 +272,7 @@ impl Reader {
             let mut ids = Vec::new();
             for n in split_ws(hit.group(&text, 2)) {
                 if digit_word(n)? {
-                    ids.push(py_int(n)?.unwrap());
+                    ids.push(int_latin1(n)?.unwrap());
                 }
             }
             if !ids.is_empty() {
@@ -420,7 +421,7 @@ impl Reader {
             if let Some(hit) = self.re.color.search(&text, 0) {
                 let mut s = String::from("#");
                 for g in 1..=3 {
-                    let v = py_int(hit.group(&text, g))?.unwrap();
+                    let v = int_latin1(hit.group(&text, g))?.unwrap();
                     s.push_str(&format!("{:02x}", v));
                 }
                 out.push((l1(tag), J::Str(s)));
@@ -439,7 +440,7 @@ impl Reader {
         if let Some(hit) = self.re.sea.search(&text, 0) {
             for n in split_ws(hit.group(&text, 1)) {
                 if digit_word(n)? {
-                    out.insert(py_int(n)?.unwrap());
+                    out.insert(int_latin1(n)?.unwrap());
                 }
             }
         }
@@ -471,7 +472,7 @@ impl Reader {
                 None => continue,
             };
             let at = (to_float(get(spot, b"x"), 0.0), to_float(get(spot, b"y"), 0.0));
-            if let Some(p) = py_int(key)? {
+            if let Some(p) = int_latin1(key)? {
                 out.set(p, at);
             }
         }
@@ -492,7 +493,7 @@ impl Reader {
             if bits.len() < 5 {
                 continue;
             }
-            let pid = match py_int(bits[0])? {
+            let pid = match int_latin1(bits[0])? {
                 Some(p) => p,
                 None => continue,
             };

@@ -22,6 +22,8 @@
 
 pub type R<T> = Result<T, ()>;
 
+use crate::py::num::{float_latin1, int_latin1};
+
 /// Python's `str.isspace()` for a character that is one latin-1 byte, which
 /// is what `\s` in `TOKEN_RE` matches.
 pub fn py_space(c: u8) -> bool {
@@ -181,17 +183,10 @@ pub fn parse_span(b: &[u8]) -> V {
 
 // ------------------------------------------------------------- conversions
 
-/// Python's `float(s)` for a string: Ok(None) is the ValueError the callers
-/// catch. Underscores between digits, spaces Python trims, `inf` and `nan`
-/// are all Python's (`modread::py_float`).
-pub fn py_float(s: &[u8]) -> R<Option<f64>> {
-    Ok(crate::engine::modread::py_float(s))
-}
-
 /// `to_float(value, default)`.
 pub fn to_float(v: Option<&V>, default: f64) -> R<f64> {
     match v {
-        Some(V::Str(s)) => Ok(py_float(s)?.unwrap_or(default)),
+        Some(V::Str(s)) => Ok(float_latin1(s).unwrap_or(default)),
         _ => Ok(default),
     }
 }
@@ -201,7 +196,7 @@ pub fn to_float(v: Option<&V>, default: f64) -> R<f64> {
 /// not caught and ended the read in Python, so it is refused here.
 pub fn to_int(v: Option<&V>, default: i64) -> R<i64> {
     match v {
-        Some(V::Str(s)) => match py_float(s)? {
+        Some(V::Str(s)) => match float_latin1(s) {
             None => Ok(default),
             Some(f) if f.is_nan() => Ok(default),
             Some(f) if f.is_infinite() => Err(()),
@@ -274,12 +269,6 @@ pub(crate) fn date_key(d: &[u8]) -> (i64, i64, i64) {
 
 // ------------------------------------------------------------------- market
 
-/// `int(p)` for one part of a `YYYY.M.D` date: Ok(None) is the ValueError
-/// `shift_months` catches; a number past an i64 is refused.
-pub(crate) fn py_int(p: &[u8]) -> R<Option<i64>> {
-    crate::engine::modread::py_int(p).map_err(|_| ())
-}
-
 /// `readsave.shift_months(date, back)`.
 pub(crate) fn shift_months(date: &[u8], back: i64) -> R<Vec<u8>> {
     let parts: Vec<&[u8]> = date.split(|&c| c == b'.').collect();
@@ -288,7 +277,7 @@ pub(crate) fn shift_months(date: &[u8], back: i64) -> R<Vec<u8>> {
     }
     let mut n = [0i64; 3];
     for (i, p) in parts.iter().enumerate() {
-        match py_int(p)? {
+        match int_latin1(p).map_err(|_| ())? {
             Some(v) => n[i] = v,
             None => return Ok(Vec::new()),
         }

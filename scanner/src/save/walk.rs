@@ -21,7 +21,8 @@
 
 use crate::save::clause::{unquote, V};
 use crate::save::country::{Country, Tables, Units};
-use crate::engine::modread::{block_end, py_float, str_of};
+use crate::engine::modread::{block_end, str_of};
+use crate::py::num::float_latin1;
 use crate::util::fx::{FxMap, FxSet};
 use crate::save::province::{accumulate, pop_known, Parts, Pop, PopulationRules, Scan};
 use crate::save::names;
@@ -261,7 +262,7 @@ fn read_pop<'a>(tok: &mut Tokens<'a>) -> Vec<(&'a [u8], &'a [u8])> {
 /// `to_float(value, default)`.
 fn to_float(v: Option<&V>, default: f64) -> f64 {
     match v {
-        Some(V::Str(s)) => py_float(s).unwrap_or(default),
+        Some(V::Str(s)) => float_latin1(s).unwrap_or(default),
         _ => default,
     }
 }
@@ -276,7 +277,7 @@ fn to_int(v: Option<&V>, default: i64) -> Result<i64, String> {
 }
 
 fn to_int_text(s: &[u8], default: i64) -> Result<i64, String> {
-    match py_float(s) {
+    match float_latin1(s) {
         None => Ok(default),
         Some(f) if f.is_nan() => Ok(default),
         Some(f) if f.is_infinite() => Err("int() of an infinity".into()),
@@ -346,7 +347,7 @@ fn count_units(node: &V, out: &mut Units, where_: Option<i64>) -> Result<(), Str
                     _ => -1,
                 });
                 let raw = text(&get(reg, b"type").map(str_of).unwrap_or_default());
-                let rtype = if py_float(raw.as_bytes()).is_some() { String::new() } else { raw };
+                let rtype = if float_latin1(raw.as_bytes()).is_some() { String::new() } else { raw };
                 let rtype = if rtype.is_empty() { "unknown".to_string() } else { rtype };
                 let men = (to_float(get(reg, b"strength"), 0.0) * 1000.0).round_ties_even();
                 out.regiment(names::intern_str(&rtype), where_, men);
@@ -526,7 +527,7 @@ fn read_country(text_: &[u8], at: usize, tag: &str, tables: &Tables) -> Result<C
                 } else if let Some((_, name)) = SCALARS.iter().find(|(k, _)| *k == key) {
                     out.scalars.push((name.to_string(), text(clean)));
                 } else if let Some((_, name)) = NUMERICS.iter().find(|(k, _)| *k == key) {
-                    out.numerics.push((name.to_string(), py_float(clean).unwrap_or(0.0)));
+                    out.numerics.push((name.to_string(), float_latin1(clean).unwrap_or(0.0)));
                 }
             }
         }
@@ -578,7 +579,7 @@ fn pop_culture<'a>(pop: &[(&'a [u8], &'a [u8])]) -> Option<&'a [u8]> {
         if pop_known(key) || key.first() == Some(&b'_') {
             continue;
         }
-        if py_float(val).is_none() {
+        if float_latin1(val).is_none() {
             return Some(key);
         }
     }
@@ -721,7 +722,7 @@ pub fn read<'a>(text_: &'a [u8], pop_types: &[Vec<u8>], mob_types: &[Vec<u8>], t
     }
     for (key, at, _stop) in &blocks {
         if !key.is_empty() && key.iter().all(|c| c.is_ascii_digit()) {
-            let pid = match crate::engine::modread::py_int(key) {
+            let pid = match crate::py::num::int_latin1(key) {
                 Ok(Some(p)) => p,
                 _ => return Err("a province number past 64 bits".into()),
             };

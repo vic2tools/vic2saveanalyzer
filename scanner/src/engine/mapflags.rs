@@ -15,7 +15,7 @@
 // second. Here it is a few tens of milliseconds, so it is decoded where it
 // is wanted and not kept.
 
-use crate::engine::dates::py_int;
+use crate::py::num::int;
 use crate::util::deflate;
 use crate::util::omap::OMap;
 use crate::util::fx::{FxMap, FxSet};
@@ -44,7 +44,7 @@ pub fn province_raster(bmp: &str, csv: &str, scale: i64) -> (i64, i64, Vec<(i64,
             continue;
         }
         if let (Some(r), Some(g), Some(b), Some(pid)) =
-            (py_int(bits[1]), py_int(bits[2]), py_int(bits[3]), py_int(bits[0])) {
+            (int(bits[1]), int(bits[2]), int(bits[3]), int(bits[0])) {
             let key = (b | g << 8 | r << 16) as u32;
             colour.insert(key, pid);
         }

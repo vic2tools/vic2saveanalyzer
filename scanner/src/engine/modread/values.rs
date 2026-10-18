@@ -10,113 +10,11 @@
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 
 use super::*;
-
-/// What `float()` and `int()` trim from a str: C's whitespace and the
-/// non-ASCII spaces, which leaves `\x1c`-`\x1f` in.
-pub(super) fn num_space(c: u8) -> bool {
-    matches!(c, 0x09..=0x0d | 0x20 | 0x85 | 0xa0)
-}
-
-pub(super) fn num_trim(s: &[u8]) -> &[u8] {
-    let mut a = 0;
-    let mut z = s.len();
-    while a < z && num_space(s[a]) {
-        a += 1;
-    }
-    while z > a && num_space(s[z - 1]) {
-        z -= 1;
-    }
-    &s[a..z]
-}
-
-/// Underscores out, if each sits between two digits, as Python allows.
-pub(super) fn no_underscores(t: &[u8]) -> Option<Vec<u8>> {
-    let mut out = Vec::with_capacity(t.len());
-    for (i, &c) in t.iter().enumerate() {
-        if c == b'_' {
-            if i == 0 || i + 1 == t.len() || !t[i - 1].is_ascii_digit() || !t[i + 1].is_ascii_digit() {
-                return None;
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    Some(out)
-}
-
-/// Python's `float(s)` for latin-1 text: None is the ValueError.
-pub fn py_float(s: &[u8]) -> Option<f64> {
-    let t = no_underscores(num_trim(s))?;
-    if t.is_empty() {
-        return None;
-    }
-    let body = if t[0] == b'+' || t[0] == b'-' { &t[1..] } else { &t[..] };
-    let lowered: Vec<u8> = body.iter().map(|c| c.to_ascii_lowercase()).collect();
-    if lowered == b"inf" || lowered == b"infinity" || lowered == b"nan" {
-        let v = if lowered == b"nan" { f64::NAN } else { f64::INFINITY };
-        return Some(if t[0] == b'-' { -v } else { v });
-    }
-    let mut j = 0;
-    let digits = |j: &mut usize| {
-        let s = *j;
-        while *j < body.len() && body[*j].is_ascii_digit() {
-            *j += 1;
-        }
-        *j - s
-    };
-    let whole = digits(&mut j);
-    let mut frac = 0;
-    if j < body.len() && body[j] == b'.' {
-        j += 1;
-        frac = digits(&mut j);
-    }
-    if whole == 0 && frac == 0 {
-        return None;
-    }
-    if j < body.len() && (body[j] == b'e' || body[j] == b'E') {
-        j += 1;
-        if j < body.len() && (body[j] == b'+' || body[j] == b'-') {
-            j += 1;
-        }
-        if digits(&mut j) == 0 {
-            return None;
-        }
-    }
-    if j != body.len() {
-        return None;
-    }
-    std::str::from_utf8(&t).ok()?.parse::<f64>().ok()
-}
-
-/// Python's `int(s)`: Ok(None) is the ValueError; a number past what an
-/// i64 holds is declined, since Python would carry it on as a big int.
-pub fn py_int(s: &[u8]) -> D<Option<i64>> {
-    let t = match no_underscores(num_trim(s)) {
-        Some(t) => t,
-        None => return Ok(None),
-    };
-    let (neg, digits) = match t.first() {
-        Some(b'-') => (true, &t[1..]),
-        Some(b'+') => (false, &t[1..]),
-        _ => (false, &t[..]),
-    };
-    if digits.is_empty() || !digits.iter().all(|c| c.is_ascii_digit()) {
-        return Ok(None);
-    }
-    let digits = {
-        let z = digits.iter().position(|&c| c != b'0').unwrap_or(digits.len() - 1);
-        &digits[z..]
-    };
-    if digits.len() > 18 {
-        return no("a number too large to follow");
-    }
-    let v = digits.iter().fold(0i64, |a, &c| a * 10 + (c - b'0') as i64);
-    Ok(Some(if neg { -v } else { v }))
-}
+use crate::py::num::float_latin1;
 
 /// `float(text)` where Python lets the ValueError out.
 pub(super) fn must_float(s: &[u8]) -> D<f64> {
-    match py_float(s) {
+    match float_latin1(s) {
         Some(v) => Ok(v),
         None => raised(format!("could not convert string to float: {}", py_repr(&l1(s)))),
     }
@@ -125,7 +23,7 @@ pub(super) fn must_float(s: &[u8]) -> D<f64> {
 /// `to_float(value, default)`.
 pub(super) fn to_float(v: Option<&V>, default: f64) -> f64 {
     match v {
-        Some(V::Str(s)) => py_float(s).unwrap_or(default),
+        Some(V::Str(s)) => float_latin1(s).unwrap_or(default),
         _ => default,
     }
 }
@@ -134,7 +32,7 @@ pub(super) fn to_float(v: Option<&V>, default: f64) -> f64 {
 /// an infinity nothing catches.
 pub(super) fn to_int(v: Option<&V>, default: i64) -> D<i64> {
     match v {
-        Some(V::Str(s)) => match py_float(s) {
+        Some(V::Str(s)) => match float_latin1(s) {
             None => Ok(default),
             Some(f) if f.is_nan() => Ok(default),
             Some(f) if f.is_infinite() => no("int() of an infinity"),
