@@ -203,21 +203,8 @@ class Tools:
         name = os.path.basename(os.path.dirname(os.path.abspath(report)))
         self.share_button.state(["disabled"])
         self.analyzer.say("\nUploading the report%s\n" % "\u2026")
-        threading.Thread(target=self._upload, daemon=True,
-                         args=(report, endpoint, name)).start()
-
-    def _upload(self, report, endpoint, name):
-        """Off the UI thread, reporting through the queue like the rest."""
-        tell = self.analyzer.log_queue.put
-        try:
-            url = share.upload(report, endpoint, name=name,
-                               say=lambda line: tell("  " + line + "\n"))
-        except Exception as err:                     # noqa: BLE001
-            tell("Could not upload it: %s\n" % err)
-            self.root.after(0, self.publish_failed, str(err))
-            return
-        tell("\nUploaded: %s\n" % url)
-        self.root.after(0, self.published, url)
+        threading.Thread(target=self._share, daemon=True, args=(
+            "upload", lambda say: share.upload(report, endpoint, name=name, say=say))).start()
 
     def token(self):
         """The GitHub token, asked for once and remembered after that."""
@@ -259,12 +246,27 @@ class Tools:
         name = os.path.basename(os.path.dirname(os.path.abspath(report)))
         self.share_button.state(["disabled"])
         self.analyzer.say("\nPublishing the report…\n")
-        threading.Thread(target=self._publish, daemon=True,
-                         args=(report, token, name, extra)).start()
+        threading.Thread(target=self._share, daemon=True, args=(
+            "publish", lambda say: share.publish(report, token, name=name, extra=extra,
+                                                 say=say)),
+            kwargs={"forget": self.forget_token}).start()
 
-    def _publish(self, report, token, name, extra):
+    def forget_token(self, refused):
         """
-        Off the UI thread: uploading 20 MB is not instant.
+        A token GitHub will not take is no use held. Kept, it was handed
+        straight back on every press, and the only way to a new one was
+        editing the settings file by hand -- which every fine-grained token,
+        expiring by default, comes to. Returns what to tell the person.
+        """
+        settings.remember(github_token=None)
+        return ("%s It has been forgotten here, so the next publish asks for a "
+                "new one." % refused)
+
+    def _share(self, verb, send, forget=None):
+        """
+        Off the UI thread: uploading 20 MB is not instant. `send(say)` does
+        the upload or the publish and returns the link; `forget`, when given,
+        is handed a refused token and says what became of it.
 
         Nothing here touches a widget. `say` writes into the log box directly
         and belongs to the UI thread alone, so everything this thread has to
@@ -272,28 +274,14 @@ class Tools:
         """
         tell = self.analyzer.log_queue.put
         try:
-            url = share.publish(report, token, name=name, extra=extra,
-                                say=lambda line: tell("  " + line + "\n"))
-        except share.TokenRefused as err:
-            # A token GitHub will not take is no use held. Kept, it was
-            # handed straight back on every press, and the only way to a
-            # new one was editing the settings file by hand -- which every
-            # fine-grained token, expiring by default, comes to.
-            settings.remember(github_token=None)
-            said = "%s It has been forgotten here, so the next publish " \
-                   "asks for a new one." % err
-            tell("Could not publish it: %s\n" % said)
+            url = send(lambda line: tell("  " + line + "\n"))
+        except Exception as err:                     # noqa: BLE001
+            said = (forget(err) if forget is not None and isinstance(err, share.TokenRefused)
+                    else str(err))
+            tell("Could not %s it: %s\n" % (verb, said))
             self.root.after(0, self.publish_failed, said)
             return
-        except share.PublishError as err:
-            tell("Could not publish it: %s\n" % err)
-            self.root.after(0, self.publish_failed, str(err))
-            return
-        except Exception as err:                     # noqa: BLE001
-            tell("Could not publish it: %s\n" % err)
-            self.root.after(0, self.publish_failed, str(err))
-            return
-        tell("\nPublished: %s\n" % url)
+        tell("\n%sed: %s\n" % (verb.capitalize(), url))
         self.root.after(0, self.published, url)
 
     def publish_failed(self, message):

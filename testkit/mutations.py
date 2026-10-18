@@ -65,7 +65,7 @@ MUTATIONS = [
         'press',
         'sharing.py', (),
         [
-            ('vic2tools/__main__.py', '            settings.remember(github_token=None)\n', ''),
+            ('vic2tools/__main__.py', '        settings.remember(github_token=None)\n', ''),
         ]),
     Mutation(
         'scanner-opens-console-window',

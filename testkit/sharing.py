@@ -148,7 +148,11 @@ def a_refused_token(holding, report):
                 analyzer=types.SimpleNamespace(log_queue=queue.Queue()),
                 root=types.SimpleNamespace(after=lambda _ms, fn, *a: told.append(a)),
                 publish_failed=None, published=None)
-            app.Tools._publish(window, report, "ghp_expired", "a campaign", [])
+            # The publish button's worker, with what `Tools.share` hands it.
+            app.Tools._share(window, "publish",
+                             lambda say: share.publish(report, "ghp_expired", name="a campaign",
+                                                       extra=[], say=say),
+                             forget=lambda refused: app.Tools.forget_token(window, refused))
             after = settings.load()
         finally:
             share.publish = real_publish
