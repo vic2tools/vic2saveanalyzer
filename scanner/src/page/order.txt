@@ -17,6 +17,8 @@ js/military.js
 js/stacked-bars.js
 js/market.js
 js/map.js
+js/map-armies.js
+js/map-controls.js
 js/world.js
 js/population.js
 js/tech.js
