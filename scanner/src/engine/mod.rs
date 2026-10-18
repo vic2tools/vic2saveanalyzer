@@ -38,7 +38,7 @@ pub mod tables;
 pub mod wars;
 
 use finish::{Pre, Spec, Spent};
-use crate::py::json::{self, J};
+use crate::py::json::J;
 use model::Save;
 use crate::util::fx::{FxMap, FxSet};
 use rules::{Decline, Mod, D};
@@ -73,6 +73,8 @@ pub struct Reading {
     pub population_groups: FxMap<i64, i64>,
 }
 
+/// A run, as the front end settles it: the saves in report order, how each
+/// is read and finished, and where the report goes.
 pub struct Run {
     pub files: Vec<String>,
     pub out: String,
@@ -83,20 +85,13 @@ pub struct Run {
     pub map_scale: i64,
     pub quiet: bool,
     pub jobs: Option<i64>,
+    /// The `--cross` comparison, as the page carries it.
     pub cross: Option<String>,
     /// The mod folder, read here (`modread`).
     pub mod_path: Option<String>,
-    /// `mod_reader.mod_signature` of it, which keys the read kept for the
-    /// next run; None when Python did not work it out.
+    /// The mod's signature, which keys the read kept for the next run;
+    /// None when the front did not work it out (a `--cross` run).
     pub mod_signature: Option<String>,
-    /// Whether a host reads `@progress` and the rest: Python, which starts
-    /// the engine with a spec (`engine.spec`), does.
-    pub protocol: bool,
-    /// Whether a save the scanner refuses is skipped here in Python's words
-    /// (`analyze`, which prints what the run says itself) rather than the
-    /// run handed back (Python hosting the engine, which reads only its
-    /// stdout).
-    pub own_refusals: bool,
     /// One of the four diagnostics, answered instead of the report.
     pub ask: Option<explain::Ask>,
     /// One campaign of a `--cross` run: read once, quietly, for its rows.
@@ -107,112 +102,39 @@ pub struct Run {
     /// What besides the file decides what pass one makes of it, for the
     /// cache's key: the reading and the settings `prepare` takes.
     pub context: String,
-    /// The reading alone, which is what Python keys a read save by.
+    /// The reading alone, which keys the "read before" markers.
     pub reading_context: String,
 }
 
-fn bytes_list(v: &J) -> Vec<Vec<u8>> {
-    v.list().iter().map(|x| x.str().chars().map(|c| c as u32 as u8).collect()).collect()
-}
-
-fn string_list(v: &J) -> Vec<String> {
-    v.list().iter().map(|x| x.str().to_string()).collect()
-}
-
-/// The parts of the spec that decide what pass one makes of a save, as one
-/// short digest: the reading, and what `prepare` is told.
-fn reading_context_of(j: &J) -> String {
-    let mut text = String::new();
-    j.at("reading").write(&mut text);
-    let mut h = crate::util::hash::TwoLane::new();
-    h.update(text.as_bytes());
-    h.hex()
-}
-
-fn context_of(j: &J) -> String {
-    let mut text = String::new();
-    j.at("reading").write(&mut text);
-    text.push('|');
-    let f = j.at("finish");
-    for key in ["pop_per_regiment", "mob_types", "include_occupied", "player_nations", "wanted",
-                "min_pop"] {
-        f.at(key).write(&mut text);
-        text.push('|');
-    }
-    j.at("head").write(&mut text);
-    text.push('|');
-    j.at("tables").at("strata").write(&mut text);
-    let mut h = crate::util::hash::TwoLane::new();
-    h.update(text.as_bytes());
-    h.hex()
-}
-
-fn parse_run(j: &J) -> Run {
-    let pop_columns = string_list(j.at("pop_columns"));
-    let tables = tables::Tables::from_spec(j, &pop_columns);
-    let r = j.at("reading");
-    let f = j.at("finish");
-    let h = j.at("head");
-    let mut tech_group = FxMap::default();
-    for branch in ["army", "navy"] {
-        for line in j.at("tech_lines").at(branch).list() {
-            let name = line.list()[0].str();
-            for tech in line.list()[1].list() {
-                tech_group.insert(tech.str().to_string(), (branch.to_string(), name.to_string()));
-            }
-        }
-    }
-    Run {
-        files: string_list(j.at("files")),
-        out: j.at("out").str().to_string(),
-        reading: Reading {
-            pop_types: bytes_list(r.at("pop_types")),
-            mob_types: bytes_list(r.at("mob_types")),
-            reform_keys: string_list(r.at("reform_keys")),
-            army_techs: string_list(r.at("army_techs")),
-            navy_techs: string_list(r.at("navy_techs")),
-            population_groups: r.at("population_groups").list().iter()
-                .map(|p| (p.list()[0].int(), p.list()[1].int())).collect(),
-        },
-        spec: Spec {
-
-            pop_per_regiment: f.at("pop_per_regiment").int(),
-            mob_types: string_list(f.at("mob_types")).iter().map(|s| crate::save::names::intern_str(s)).collect(),
-            include_occupied: f.at("include_occupied").truthy(),
-            player_nations: if f.at("player_nations").is_null() { None }
-                            else { Some(string_list(f.at("player_nations"))) },
-            wanted: if f.at("wanted").is_null() { None }
-                    else { Some(string_list(f.at("wanted")).into_iter().collect()) },
-            min_pop: f.at("min_pop").int(),
-            columns: tables.per_save[0].1.clone(),
-            strata: tables.strata.clone(),
-            regions: h.at("province_regions").list().iter()
-                .map(|p| (p.list()[0].int(), p.list()[1].str().to_string())).collect(),
-            defines: h.at("defines").pairs().iter().map(|(k, v)| (k.clone(), v.float())).collect(),
-            tech_group,
-        },
-        no_html: j.at("no_html").truthy(),
-        split: j.at("split").truthy(),
-        map_scale: j.at("map_scale").int().max(1),
-        quiet: j.at("quiet").truthy(),
-        jobs: if j.at("jobs").is_null() { None } else { Some(j.at("jobs").int()) },
-        cross: j.at("cross").as_str().map(|s| s.to_string()),
-        mod_path: j.at("mod_path").as_str().map(|s| s.to_string()),
-        mod_signature: j.at("mod_signature").as_str().map(|s| s.to_string()),
-        protocol: j.at("protocol").truthy(),
-        own_refusals: j.at("own_refusals").truthy(),
-        ask: explain::Ask::from_json(j.at("diagnose")),
-        cross_part: j.at("cross_part").truthy(),
-        tech_lines: j.at("tech_lines").clone(),
-        tables,
-        store: cache::Store {
-            dir: j.at("cache").at("dir").str().to_string(),
-            version: j.at("cache").at("version").str().to_string(),
-            on: j.at("cache").at("on").truthy(),
-        },
-        context: context_of(j),
-        reading_context: reading_context_of(j),
-    }
+/// The cache's names for what decides what pass one makes of a save:
+/// (the reading and what `prepare` is told, the reading alone). Maps and
+/// sets are written in sorted order, so the same settings give the same
+/// names on every run.
+pub fn contexts(reading: &Reading, spec: &Spec) -> (String, String) {
+    let mut groups: Vec<(i64, i64)> = reading.population_groups.iter().map(|(a, b)| (*a, *b)).collect();
+    groups.sort();
+    let read = format!("{:?}|{:?}|{:?}|{:?}|{:?}|{:?}", reading.pop_types, reading.mob_types,
+                       reading.reform_keys, groups, reading.army_techs, reading.navy_techs);
+    let mut mob: Vec<&str> = spec.mob_types.iter().map(|s| crate::save::names::text(*s)).collect();
+    mob.sort();
+    let wanted = spec.wanted.as_ref().map(|w| {
+        let mut w: Vec<&String> = w.iter().collect();
+        w.sort();
+        w
+    });
+    let mut defines: Vec<(&String, u64)> = spec.defines.iter().map(|(k, v)| (k, v.to_bits())).collect();
+    defines.sort();
+    let mut regions: Vec<(&i64, &String)> = spec.regions.iter().collect();
+    regions.sort();
+    let whole = format!("{}|{}|{:?}|{}|{:?}|{:?}|{}|{:?}|{:?}", read, spec.pop_per_regiment, mob,
+                        spec.include_occupied, spec.player_nations, wanted, spec.min_pop,
+                        defines, regions);
+    let name = |text: &str| {
+        let mut h = crate::util::hash::TwoLane::new();
+        h.update(text.as_bytes());
+        h.hex()
+    };
+    (name(&whole), name(&read))
 }
 
 /// A line for the host to read: progress, and the like.
@@ -268,12 +190,9 @@ fn read_mod(path: &str) -> D<J> {
     }
 }
 
-/// `vic2scan bench-engine SPEC N`: the first N saves read one at a time, by
-/// the run's own readers, timing the read and the preparing.
-pub fn bench(args: &[String]) {
-    let text = std::fs::read_to_string(&args[2]).unwrap();
-    let run = parse_run(&json::parse(&text).unwrap());
-    let n: usize = args.get(3).and_then(|a| a.parse().ok()).unwrap_or(10);
+/// `vic2scan bench-engine RUN.json N`: the first N saves read one at a time,
+/// by the run's own readers, timing the read and the preparing.
+pub fn bench(run: &Run, n: usize) {
     let mut raw = Vec::new();
     let (mut t_read, mut t_prep) = (0.0, 0.0);
     for f in run.files.iter().take(n) {
@@ -290,11 +209,9 @@ pub fn bench(args: &[String]) {
     eprintln!("per save: read+scan+build {:.1} ms, prepare {:.1} ms", t_read / k, t_prep / k);
 }
 
-/// A run as the front end declares it. A run handed back never returns.
-pub fn run_spec(spec_j: &J) -> report::Outcome {
+/// A run as the front end settles it. A run handed back never returns.
+pub fn run(run: Run) -> report::Outcome {
     phase("start");
-    let run = parse_run(spec_j);
-    out::set_protocol(run.protocol);
     let n = run.files.len();
     let biggest = run.files.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len())
         .max().unwrap_or(0);
@@ -356,10 +273,7 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
             if raw.capacity() > 96 << 20 {
                 *raw = Vec::new();
             }
-            got.map_err(|refused| match refused {
-                Refused::Skip(why) if run.own_refusals => Refused::Skip(why),
-                Refused::Skip(why) | Refused::Back(why) => Refused::Back(why),
-            }).map(|save| {
+            got.map(|save| {
                 let tags = keys_of(&save);
                 let pre = finish::prepare(save.meta, save.nations, tags, &run.spec);
                 if let Some(slot) = &slots[i] {
@@ -436,7 +350,7 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
         // A mod Python raises over is refused when Python asks for it,
         // which is now, with every save read once.
         Err(d) => match modread::raised_sentence(&d) {
-            Some(sentence) if run.own_refusals => {
+            Some(sentence) => {
                 return report::Outcome { html: None, refused: Vec::new(),
                                          run_error: Some(sentence.to_string()),
                                          cross_part: None };
@@ -470,7 +384,7 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
     // A diagnostic is answered off the campaign as it stands, and ends the
     // run: no report, no tables.
     if let Some(ask) = &run.ask {
-        let said = explain::answer(ask, &m, &live, &pres, &files, &run.reading);
+        let said = explain::answer(ask, &run.spec, &m, &live, &pres, &files, &run.reading);
         return report::Outcome { html: None, refused: Vec::new(), run_error: said.err(),
                                  cross_part: None };
     }

@@ -14,7 +14,7 @@
 // From it this does what `_main` does for an ordinary report: finds the
 // saves, settles the game and the mod, takes the stamp and answers "nothing
 // has changed" when it can, reads the mod's head, puts the saves in date
-// order, and runs the engine (`engine::run_spec`) -- printing what Python
+// order, and runs the engine (`engine::run`) -- printing what Python
 // printed, in its words, and refusing what it refused.
 //
 // What it does not do yet -- the diagnostics, `--cross`, `--peek`,
@@ -27,6 +27,9 @@ pub mod compare;
 pub mod survey;
 pub mod diagnose;
 
+use crate::engine::{self, cache};
+use crate::util::fx::FxMap;
+use crate::engine::explain::Ask;
 use crate::engine::modread;
 use crate::engine::out;
 use crate::py::json::J;
@@ -572,16 +575,6 @@ fn lines_json(lines: &[(&str, [&str; 5]); 5]) -> J {
     }).collect())
 }
 
-fn techs_json(lines: &[(&str, [&str; 5]); 5]) -> J {
-    let mut all: Vec<&str> = lines.iter().flat_map(|(_, t)| t.iter().copied()).collect();
-    all.sort();
-    J::List(all.into_iter().map(|t| J::Str(t.to_string())).collect())
-}
-
-fn strs(v: &[String]) -> J {
-    J::List(v.iter().map(|s| J::Str(s.clone())).collect())
-}
-
 // ------------------------------------------------------------- the run
 
 /// `vic2scan analyze --run RUN.json`.
@@ -603,7 +596,7 @@ pub fn main(argv: &[String]) -> ! {
     // which raises it as the `RunError` it always raised) gets the sentence
     // in that file and status 4; otherwise it is said, and the status is 1.
     let refused_to = argv.iter().position(|a| a == "--refused").and_then(|i| argv.get(i + 1));
-    let code = match run(args, protocol) {
+    let code = match run(args) {
         Ok(code) => code,
         Err(RunError(why)) => match refused_to {
             Some(file) => match std::fs::write(file, why.as_bytes()) {
@@ -622,7 +615,35 @@ pub fn main(argv: &[String]) -> ! {
     std::process::exit(code);
 }
 
-fn run(mut args: Args, protocol: bool) -> R<i32> {
+/// `vic2scan bench-engine RUN.json [N]`: the run the launcher wrote, settled
+/// as `analyze` settles it, and its first N saves timed (`engine::bench`).
+pub fn bench_main(argv: &[String]) -> ! {
+    let file = argv.get(2).unwrap_or_else(|| hand_back("usage: vic2scan bench-engine RUN.json [N]"));
+    let text = std::fs::read_to_string(file)
+        .unwrap_or_else(|e| hand_back(&format!("cannot read {}: {}", file, e)));
+    let j = crate::py::json::parse(&text).unwrap_or_else(|e| hand_back(&format!("{}: {}", file, e)));
+    let args = Args::from_json(&j);
+    let n: usize = argv.get(3).and_then(|a| a.parse().ok()).unwrap_or(10);
+    let settled = || -> R<engine::Run> {
+        let (_, files) = saves_in(&args)?;
+        let (mod_path, _) = settle_game(args.mod_path.as_deref(), args.game_root.as_deref())?;
+        let set = match setup(&args, &mod_path) {
+            Ok(set) => set,
+            Err(Settle::Refused(why)) | Err(Settle::Back(why)) => return refuse(why),
+        };
+        let dates = dates_of(&files);
+        Ok(run_for(&args, &set, &in_date_order(files, dates)))
+    };
+    match settled() {
+        Ok(run) => {
+            engine::bench(&run, n);
+            std::process::exit(0);
+        }
+        Err(RunError(why)) => hand_back(&why),
+    }
+}
+
+fn run(mut args: Args) -> R<i32> {
     let verbose = !args.quiet;
     let (saves_path, mut files) = saves_in(&args)?;
     // `--peek` comes before anything else is settled, and looks at the
@@ -649,7 +670,7 @@ fn run(mut args: Args, protocol: bool) -> R<i32> {
             return Ok(0);
         }
         let (payload, primary_files, primary_mod) =
-            compare::run_cross(&saves_path, &found, &args, verbose, protocol)?;
+            compare::run_cross(&saves_path, &found, &args, verbose)?;
         args.mod_path = primary_mod;
         files = primary_files;
         if files.is_empty() {
@@ -735,38 +756,23 @@ fn run(mut args: Args, protocol: bool) -> R<i32> {
     let files = in_date_order(files, dates);
     // `explain`: which of the four, in the order Python asks.
     let ask = if let Some(t) = &args.explain_mob_pool {
-        Some(("explain_mob_pool", t.clone()))
+        Some(Ask::MobPool(t.clone()))
     } else if args.check_inventions {
-        Some(("check_inventions", String::new()))
+        Some(Ask::CheckInventions)
     } else if let Some(t) = &args.inventions {
-        Some(("inventions", t.clone()))
+        Some(Ask::Inventions(t.clone()))
     } else {
-        args.explain_mob.as_ref().map(|t| ("explain_mob", t.clone()))
+        args.explain_mob.as_ref().map(|t| Ask::Mob(t.clone()))
     };
     // A diagnostic rewrites nothing, so the stamp stays where it is.
     if ask.is_none() {
         forget_stamp(&args.out);
     }
-    let mut spec = spec_for(&args, &set, &files, protocol);
-    if let J::Obj(pairs) = &mut spec {
-        let mut put = |k: &str, v: J| match pairs.iter_mut().find(|(n, _)| n == k) {
-            Some(slot) => slot.1 = v,
-            None => pairs.push((k.to_string(), v)),
-        };
-        put("mod_signature", signature.as_ref().map_or(J::Null, |s| J::Str(s.clone())));
-        put("cross", cross_payload.map_or(J::Null, J::Str));
-        put("diagnose", match &ask {
-            None => J::Null,
-            Some((kind, tag)) => J::Obj(vec![
-                ("kind".into(), J::Str(kind.to_string())),
-                ("tag".into(), J::Str(tag.clone())),
-                ("pop_per_regiment".into(), J::Int(set.pop_per_regiment)),
-                ("mob_types".into(), strs(&set.mob_types)),
-                ("include_occupied".into(), J::Bool(args.mob_include_occupied)),
-            ]),
-        });
-    }
-    let done = crate::engine::run_spec(&spec);
+    let mut engine_run = run_for(&args, &set, &files);
+    engine_run.mod_signature = signature;
+    engine_run.cross = cross_payload;
+    engine_run.ask = ask;
+    let done = crate::engine::run(engine_run);
     if let Some(sentence) = done.run_error {
         return refuse(sentence);
     }
@@ -838,9 +844,23 @@ pub(crate) fn setup(args: &Args, mod_path: &str) -> Result<Setup, Settle> {
     Ok(Setup { root, head, pop_per_regiment, mob_types })
 }
 
-/// The engine's spec for reading `files` under `set` (`engine.spec`).
-pub(crate) fn spec_for(args: &Args, set: &Setup, files: &[String], protocol: bool) -> J {
+/// The engine's run for reading `files` under `set`.
+pub(crate) fn run_for(args: &Args, set: &Setup, files: &[String]) -> engine::Run {
     let head = &set.head;
+    // A name as the engine's readers match it: a latin-1 byte a character.
+    let bytes = |names: &[String]| -> Vec<Vec<u8>> {
+        names.iter().map(|s| s.chars().map(|c| c as u32 as u8).collect()).collect()
+    };
+    let sorted = |v: &[String]| {
+        let mut v = v.to_vec();
+        v.sort();
+        v
+    };
+    let deduped = |v: &[String]| {
+        let mut v = sorted(v);
+        v.dedup();
+        v
+    };
     // `reading_for`.
     let mut pop_types: Vec<String> = VANILLA_POP_TYPES.iter().map(|s| s.to_string()).collect();
     for name in head.strata.keys() {
@@ -849,14 +869,11 @@ pub(crate) fn spec_for(args: &Args, set: &Setup, files: &[String], protocol: boo
         }
     }
     pop_types.sort();
-    let mut reading_mob = set.mob_types.clone();
-    reading_mob.sort();
-    let reform_keys: Vec<String> = head.reform_names.iter().map(|r| modread::l1(r)).collect();
     let mut regions: Vec<(i64, String)> = head.province_regions.iter()
         .map(|(p, r)| (*p, modread::l1(r))).collect();
     regions.sort();
     let mut representatives: Vec<(String, i64)> = Vec::new();
-    let mut groups = Vec::new();
+    let mut population_groups = FxMap::default();
     for (pid, region) in &regions {
         if region.is_empty() {
             continue;
@@ -868,69 +885,68 @@ pub(crate) fn spec_for(args: &Args, set: &Setup, files: &[String], protocol: boo
                 *pid
             }
         };
-        groups.push(J::List(vec![J::Int(*pid), J::Int(rep)]));
+        population_groups.insert(*pid, rep);
     }
-    let wanted = args.tags.as_ref().filter(|t| !t.is_empty()).map(|t| {
-        let mut w = t.clone();
-        w.sort();
-        w.dedup();
-        w
-    });
-    let mut finish_mob = set.mob_types.clone();
-    finish_mob.sort();
-    finish_mob.dedup();
-    J::Obj(vec![
-        ("files".into(), strs(files)),
-        ("out".into(), J::Str(args.out.clone())),
-        ("reading".into(), J::Obj(vec![
-            ("pop_types".into(), strs(&pop_types)),
-            ("mob_types".into(), strs(&reading_mob)),
-            ("reform_keys".into(), strs(&reform_keys)),
-            ("population_groups".into(), J::List(groups)),
-            ("army_techs".into(), techs_json(&ARMY_LINES)),
-            ("navy_techs".into(), techs_json(&NAVY_LINES)),
-        ])),
-        ("finish".into(), J::Obj(vec![
-            ("rate".into(), J::Float(args.mob_rate)),
-            ("pop_per_regiment".into(), J::Int(set.pop_per_regiment)),
-            ("mob_types".into(), strs(&finish_mob)),
-            ("include_occupied".into(), J::Bool(args.mob_include_occupied)),
-            ("player_nations".into(), match &args.player_nations {
-                None => J::Null,
-                Some(p) => {
-                    let mut p = p.clone();
-                    p.sort();
-                    p.dedup();
-                    strs(&p)
-                }
-            }),
-            ("wanted".into(), wanted.as_ref().map_or(J::Null, |w| strs(w))),
-            ("min_pop".into(), J::Int(args.min_pop)),
-        ])),
-        ("head".into(), J::Obj(vec![
-            ("defines".into(), J::Obj(head.defines.iter()
-                .map(|(k, v)| (modread::l1(k), J::Float(*v))).collect())),
-            ("province_regions".into(), J::List(head.province_regions.iter()
-                .map(|(p, r)| J::List(vec![J::Int(*p), J::Str(modread::l1(r))])).collect())),
-        ])),
-        ("tech_lines".into(), J::Obj(vec![("army".into(), lines_json(&ARMY_LINES)),
-                                          ("navy".into(), lines_json(&NAVY_LINES))])),
-        ("pop_columns".into(), strs(&pop_types)),
-        ("no_html".into(), J::Bool(args.no_html)),
-        ("split".into(), J::Bool(args.split)),
-        ("map_scale".into(), J::Int(args.map_scale)),
-        ("quiet".into(), J::Bool(args.quiet)),
-        ("jobs".into(), args.jobs.map_or(J::Null, J::Int)),
-        ("cross".into(), J::Null),
-        ("cache".into(), J::Obj(vec![
-            ("dir".into(), J::Str(args.cache_dir.clone())),
-            ("version".into(), J::Str(env!("VIC2_BUILD_ID").to_string())),
-            ("on".into(), J::Bool(!args.no_cache)),
-        ])),
-        ("mod_path".into(), J::Str(set.root.clone())),
-        ("mod_signature".into(), J::Null),
-        ("protocol".into(), J::Bool(protocol)),
-        ("own_refusals".into(), J::Bool(true)),
-        ("diagnose".into(), J::Null),
-    ])
+    let techs = |lines: &[(&str, [&str; 5]); 5]| {
+        let mut all: Vec<String> = lines.iter().flat_map(|(_, t)| t.iter().map(|s| s.to_string())).collect();
+        all.sort();
+        all
+    };
+    let reading = engine::Reading {
+        pop_types: bytes(&pop_types),
+        mob_types: bytes(&sorted(&set.mob_types)),
+        reform_keys: head.reform_names.iter().map(|r| modread::l1(r)).collect(),
+        army_techs: techs(&ARMY_LINES),
+        navy_techs: techs(&NAVY_LINES),
+        population_groups,
+    };
+    let tables = engine::tables::Tables::new(&pop_types);
+    let mut tech_group = FxMap::default();
+    for (branch, lines) in [("army", &ARMY_LINES), ("navy", &NAVY_LINES)] {
+        for (name, line) in lines.iter() {
+            for tech in line {
+                tech_group.insert(tech.to_string(), (branch.to_string(), name.to_string()));
+            }
+        }
+    }
+    let spec = engine::finish::Spec {
+        pop_per_regiment: set.pop_per_regiment,
+        mob_types: deduped(&set.mob_types).iter().map(|s| crate::save::names::intern_str(s)).collect(),
+        include_occupied: args.mob_include_occupied,
+        player_nations: args.player_nations.as_deref().map(deduped),
+        wanted: args.tags.as_deref().filter(|t| !t.is_empty()).map(|t| deduped(t).into_iter().collect()),
+        min_pop: args.min_pop,
+        columns: tables.per_save[0].1.clone(),
+        strata: tables.strata.clone(),
+        regions: head.province_regions.iter().map(|(p, r)| (*p, modread::l1(r))).collect(),
+        defines: head.defines.iter().map(|(k, v)| (modread::l1(k), *v)).collect(),
+        tech_group,
+    };
+    let (context, reading_context) = engine::contexts(&reading, &spec);
+    engine::Run {
+        files: files.to_vec(),
+        out: args.out.clone(),
+        reading,
+        spec,
+        no_html: args.no_html,
+        split: args.split,
+        map_scale: args.map_scale.max(1),
+        quiet: args.quiet,
+        jobs: args.jobs,
+        cross: None,
+        mod_path: Some(set.root.clone()),
+        mod_signature: None,
+        ask: None,
+        cross_part: false,
+        tech_lines: J::Obj(vec![("army".into(), lines_json(&ARMY_LINES)),
+                                ("navy".into(), lines_json(&NAVY_LINES))]),
+        tables,
+        store: cache::Store {
+            dir: args.cache_dir.clone(),
+            version: env!("VIC2_BUILD_ID").to_string(),
+            on: !args.no_cache,
+        },
+        context,
+        reading_context,
+    }
 }

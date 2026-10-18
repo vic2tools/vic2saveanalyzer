@@ -1,5 +1,5 @@
-// The report's declarations -- its columns, its measures, its colours, the
-// page itself -- as the analyzer's Python declares them.
+// The report's declarations: its columns, its measures, its colours, and the
+// page itself.
 // Copyright (C) 2026 vic2tools
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -8,13 +8,7 @@
 // option) any later version. It is distributed WITHOUT ANY WARRANTY; without
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
-//
-// They arrive in the run's spec (`engine.spec`), so an edit to `report.py`'s
-// measures, `spending.py`'s columns or `template.py`'s page reaches the
-// engine as it reaches the Python, with no rebuild and no second copy to
-// forget. What is written here is only what a spec without them gets.
 
-use crate::py::json::J;
 use crate::util::fx::FxMap;
 
 pub struct Tables {
@@ -96,58 +90,13 @@ const BASE_COLUMNS: [&str; 60] = [
     "life_unmet", "life_unmet_pct", "starving", "starving_pct",
 ];
 
-fn strs(v: &J) -> Vec<String> {
-    v.list().iter().map(|x| x.str().to_string()).collect()
-}
-
-fn triples(v: &J) -> Vec<(String, String, String)> {
-    v.list().iter().map(|t| {
-        let t = t.list();
-        (t[0].str().to_string(), t[1].str().to_string(), t[2].str().to_string())
-    }).collect()
-}
-
 fn owned(v: &[(&str, &str, &str)]) -> Vec<(String, String, String)> {
     v.iter().map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string())).collect()
 }
 
 impl Tables {
-    /// The spec's tables, or the built-in ones where it has none.
-    pub fn from_spec(spec: &J, pop_columns: &[String]) -> Tables {
-        let t = spec.at("tables");
-        let template = match spec.at("template").as_str() {
-            Some(s) => s.to_string(),
-            None => include_str!(concat!(env!("OUT_DIR"), "/template.html")).to_string(),
-        };
-        if t.is_null() {
-            return Tables::builtin(pop_columns, template);
-        }
-        let mut good_category = FxMap::default();
-        for (cat, goods) in t.at("good_categories").pairs() {
-            for g in goods.list() {
-                good_category.insert(g.str().to_string(), cat.clone());
-            }
-        }
-        Tables {
-            metrics: triples(t.at("metrics")),
-            growth: triples(t.at("growth")),
-            gain: triples(t.at("gain")),
-            colours: strs(t.at("colours")),
-            category_labels: t.at("category_labels").pairs().iter()
-                .map(|(k, v)| (k.clone(), v.str().to_string())).collect(),
-            growth_span: t.at("growth_span").float(),
-            supply_named: t.at("supply_named").int().max(0) as usize,
-            good_category,
-            price_columns: strs(t.at("price_columns")),
-            snapshot_columns: strs(t.at("snapshot_columns")),
-            per_save: t.at("per_save").list().iter()
-                .map(|p| (p.list()[0].str().to_string(), strs(&p.list()[1]))).collect(),
-            strata: t.at("strata").pairs().iter().map(|(k, v)| (k.clone(), strs(v))).collect(),
-            template,
-        }
-    }
-
-    pub fn builtin(pop_columns: &[String], template: String) -> Tables {
+    /// The report's tables, for a run whose pop types are `pop_columns`.
+    pub fn new(pop_columns: &[String]) -> Tables {
         let main: Vec<String> = BASE_COLUMNS.iter().map(|s| s.to_string())
             .chain(pop_columns.iter().map(|t| format!("pop_{}", t)))
             .chain(std::iter::once("accepted_cultures".to_string())).collect();
@@ -207,7 +156,7 @@ impl Tables {
                                          "officers"])),
                 ("rich".into(), cols(&["aristocrats", "capitalists"])),
             ],
-            template,
+            template: include_str!(concat!(env!("OUT_DIR"), "/template.html")).to_string(),
         }
     }
 

@@ -32,7 +32,7 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("analyze") => front::main(&args),
         Some("mod-export") if args.len() == 3 => engine::modread::main(&args),
-        Some("bench-engine") => engine::bench(&args),
+        Some("bench-engine") => front::bench_main(&args),
         Some("selftest-fmt") => py::fmt::selftest(),
         Some("selftest-signature") => front::signature_main(&args),
         Some("selftest-sniff") => front::survey::selftest(&args[2..]),

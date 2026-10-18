@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 
 /// `run_cross`: (the comparison as the page carries it, the primary
 /// campaign's saves, its mod).
-pub fn run_cross(parent: &str, found: &[Surveyed], args: &Args, verbose: bool, protocol: bool)
+pub fn run_cross(parent: &str, found: &[Surveyed], args: &Args, verbose: bool)
                  -> R<(Option<String>, Vec<String>, Option<String>)> {
     let mut results: Vec<(String, String, Vec<(String, String, Vec<Option<f64>>)>)> = Vec::new();
     let mut names: Vec<(String, String)> = Vec::new();
@@ -45,16 +45,10 @@ pub fn run_cross(parent: &str, found: &[Surveyed], args: &Args, verbose: bool, p
         if verbose {
             crate::outln!("Reading {} ({} saves) under {}", e.name, files.len(), e.mod_label.as_deref().unwrap_or(""));
         }
-        let mut spec = super::spec_for(args, &set, &files, protocol);
-        if let J::Obj(pairs) = &mut spec {
-            for (k, v) in pairs.iter_mut() {
-                if k == "quiet" {
-                    *v = J::Bool(true);
-                }
-            }
-            pairs.push(("cross_part".into(), J::Bool(true)));
-        }
-        let done = crate::engine::run_spec(&spec);
+        let mut part = super::run_for(args, &set, &files);
+        part.quiet = true;
+        part.cross_part = true;
+        let done = crate::engine::run(part);
         if let Some(why) = done.run_error {
             return refuse(format!("{}: {}", e.name, why));
         }
@@ -108,7 +102,7 @@ fn series_payload(results: &[(String, String, Vec<(String, String, Vec<Option<f6
                   names: &[(String, String)]) -> (J, usize, usize) {
     use crate::engine::dates::year_fraction;
     use crate::py::fmt::round;
-    let tables = crate::engine::tables::Tables::builtin(&[], String::new());
+    let tables = crate::engine::tables::Tables::new(&[]);
     let metrics = &tables.metrics;
     let mut seen: Vec<(String, BTreeSet<&str>)> = Vec::new();
     for (name, _m, rows) in results {

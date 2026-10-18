@@ -17,36 +17,23 @@
 // these, the last save read again whole where one nation is asked about.
 // Err is the `RunError` Python raises, in its words.
 
-use crate::engine::finish::Pre;
+use crate::engine::finish::{Pre, Spec};
 use crate::engine::model::Nation;
 use crate::engine::rules::{self, Mod};
 use crate::engine::{Reading, readsave::read_save, readsave::Refused};
-use crate::py::json::J;
 use crate::util::fx::FxSet;
 use crate::save::names::{self, Sym};
 
-/// What was asked, and the settings the answers read.
-pub struct Ask {
-    pub kind: String,
-    pub tag: String,
-    pub pop_per_regiment: i64,
-    pub mob_types: Vec<String>,
-    pub include_occupied: bool,
-}
-
-impl Ask {
-    pub fn from_json(j: &J) -> Option<Ask> {
-        if j.is_null() {
-            return None;
-        }
-        Some(Ask {
-            kind: j.at("kind").str().to_string(),
-            tag: j.at("tag").str().to_string(),
-            pop_per_regiment: j.at("pop_per_regiment").int(),
-            mob_types: j.at("mob_types").list().iter().map(|t| t.str().to_string()).collect(),
-            include_occupied: j.at("include_occupied").truthy(),
-        })
-    }
+/// What was asked, each about the nation its tag names where it names one.
+pub enum Ask {
+    /// `--explain-mob-pool TAG`
+    MobPool(String),
+    /// `--check-inventions`
+    CheckInventions,
+    /// `--inventions TAG`
+    Inventions(String),
+    /// `--explain-mob TAG`
+    Mob(String),
 }
 
 fn right(text: &str, width: usize) -> String {
@@ -101,14 +88,13 @@ fn last_nation(pres: &[Pre], files: &[String], reading: &Reading, tag: &str)
 
 /// `explain(args, mod, live, parsed)`, for the one that was asked.
 #[allow(clippy::too_many_arguments)]
-pub fn answer(ask: &Ask, m: &Mod, live: &FxSet<String>, pres: &[Pre], files: &[String],
-              reading: &Reading) -> Result<(), String> {
-    let tag = ask.tag.to_uppercase();
-    match ask.kind.as_str() {
-        "explain_mob_pool" => explain_mob_pool(ask, &tag, m, live, pres, files, reading),
-        "check_inventions" => check_inventions(m, pres),
-        "inventions" => inventions(&tag, m, pres, files, reading),
-        _ => explain_mob(&tag, m, live, pres, files, reading),
+pub fn answer(ask: &Ask, spec: &Spec, m: &Mod, live: &FxSet<String>, pres: &[Pre],
+              files: &[String], reading: &Reading) -> Result<(), String> {
+    match ask {
+        Ask::MobPool(tag) => explain_mob_pool(spec, &tag.to_uppercase(), m, live, pres, files, reading),
+        Ask::CheckInventions => check_inventions(m, pres),
+        Ask::Inventions(tag) => inventions(&tag.to_uppercase(), m, pres, files, reading),
+        Ask::Mob(tag) => explain_mob(&tag.to_uppercase(), m, live, pres, files, reading),
     }
 }
 
@@ -175,15 +161,15 @@ fn brigades(sizes: &[i64], rate: f64, ppr: i64) -> i64 {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn explain_mob_pool(ask: &Ask, tag: &str, m: &Mod, live: &FxSet<String>, pres: &[Pre],
+fn explain_mob_pool(spec: &Spec, tag: &str, m: &Mod, live: &FxSet<String>, pres: &[Pre],
                     files: &[String], reading: &Reading) -> Result<(), String> {
     let (nat, player) = last_nation(pres, files, reading, tag)?;
     let meta = &pres.last().unwrap().meta;
     let world = rules::save_world(meta, m);
     let rate = rules::rate_for(&nat, m, Some(live), Some(&world), player)
         .unwrap_or_else(|d| crate::engine::decline(&d.0));
-    let mob_types: FxSet<&str> = ask.mob_types.iter().map(|s| s.as_str()).collect();
-    let occ = ask.include_occupied;
+    let mob_types: FxSet<&str> = spec.mob_types.iter().map(|s| names::text(*s)).collect();
+    let occ = spec.include_occupied;
     // `mobilization_clusters`, and the same buckets per province and type.
     let mut per_pop: Vec<(i64, i64)> = Vec::new();
     let mut pool = 0i64;
@@ -234,7 +220,7 @@ fn explain_mob_pool(ask: &Ask, tag: &str, m: &Mod, live: &FxSet<String>, pres: &
             drop("colonial province", *size);
         }
     }
-    let ppr = ask.pop_per_regiment;
+    let ppr = spec.pop_per_regiment;
     crate::outln!("\nMobilization pool for {} at {} ({})", tag, meta.date,
                   crate::engine::readsave::basename(&meta.file));
     crate::outln!("  primary culture   {}", names::text(nat.primary_culture));
