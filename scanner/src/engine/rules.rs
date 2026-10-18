@@ -24,10 +24,32 @@ use crate::util::omap::OMap;
 use crate::util::fx::{FxMap, FxSet};
 use crate::py::fmt::{py_float, py_sum, trunc_int};
 
-/// Something Python would have raised over, which the engine does not copy:
-/// the run is handed back to Python, which does what it always did.
+/// Why a mod or a save could not be read.
 #[derive(Debug)]
-pub struct Decline(pub String);
+pub enum Decline {
+    /// A refusal in words: the sentence a run is refused with, as Python's
+    /// analyzer raised it (a mod with no rules, a file it cannot open).
+    Raised(String),
+    /// Something no mod or save the game loads should hold: the run stops
+    /// over it (`engine::decline`).
+    Unreadable(String),
+}
+
+impl Decline {
+    /// The sentence, when this is a refusal in words.
+    pub fn raised(&self) -> Option<&str> {
+        match self {
+            Decline::Raised(s) => Some(s),
+            Decline::Unreadable(_) => None,
+        }
+    }
+
+    pub fn text(&self) -> &str {
+        match self {
+            Decline::Raised(s) | Decline::Unreadable(s) => s,
+        }
+    }
+}
 
 pub type D<T> = Result<T, Decline>;
 
@@ -360,7 +382,7 @@ fn to_int(text: &str, default: i64) -> D<i64> {
     match py_float(text) {
         None => Ok(default),
         Some(f) if f.is_nan() => Ok(default),
-        Some(f) => trunc_int(f).ok_or_else(|| Decline("int() of infinity in a trigger".into())),
+        Some(f) => trunc_int(f).ok_or_else(|| Decline::Unreadable("int() of infinity in a trigger".into())),
     }
 }
 
@@ -857,4 +879,23 @@ pub fn settle_campaign(m: &mut Mod, saves: &[&[PreNation]]) -> FxSet<String> {
     let live = attainable_inventions(m, &all_techs);
     m.index_base = index_base_for(m, &every);
     live
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Decline;
+
+    #[test]
+    fn a_raised_decline_is_said_as_its_sentence() {
+        let d = Decline::Raised("No mod was named.".into());
+        assert_eq!(d.raised(), Some("No mod was named."));
+        assert_eq!(d.text(), "No mod was named.");
+    }
+
+    #[test]
+    fn an_unreadable_decline_is_never_said_as_a_refusal() {
+        let d = Decline::Unreadable("int() of infinity in a trigger".into());
+        assert_eq!(d.raised(), None);
+        assert_eq!(d.text(), "int() of infinity in a trigger");
+    }
 }

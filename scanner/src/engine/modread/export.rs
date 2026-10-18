@@ -159,7 +159,8 @@ pub fn export(path: &str) -> D<J> {
     put("tech_count", J::Int(tech_count));
     // Read by Python only when the page is drawn, where what it raises is
     // not turned into a sentence: handed back, not refused.
-    let later = |d: Decline| Decline(format!("the map or the flags: {}", d.0.trim_start_matches(RAISED)));
+    // Past the rules, even a refusal in words is something the run stops over.
+    let later = |d: Decline| Decline::Unreadable(format!("the map or the flags: {}", d.text()));
     put("colours", if has_map { r.country_colours().map_err(later)? } else { J::Obj(Vec::new()) });
     put("sea", J::List(if has_map {
         r.sea_provinces().map_err(later)?.into_iter().map(J::Int).collect()
@@ -194,7 +195,7 @@ pub(super) fn changes(v: &J) -> Changes {
 
 impl Mod {
     pub fn from_json(j: &J) -> D<Mod> {
-        let bad = |what: &str| Decline(format!("the mod export has no {}", what));
+        let bad = |what: &str| Decline::Unreadable(format!("the mod export has no {}", what));
         if !matches!(j, J::Obj(_)) {
             return Err(bad("object"));
         }

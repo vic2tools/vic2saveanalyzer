@@ -16,18 +16,11 @@
 // Python's rules and words throughout, its regular expressions run by
 // `py::re` -- `savehead`'s as bytes patterns, whose classes are ASCII.
 
-use super::{abspath, basename, join, pypath, refuse, Args, RunError, R};
+use super::{abspath, basename, join, pypath, refuse, stop, Args, RunError, R};
+use crate::engine::modread::l1;
 use crate::engine::modread;
 use crate::py::re::Re;
 use std::collections::{BTreeSet, HashMap};
-
-pub(super) fn hand_back(why: &str) -> ! {
-    crate::engine::decline(why)
-}
-
-fn l1(b: &[u8]) -> String {
-    modread::l1(b)
-}
 
 // --------------------------------------------------------- the folders
 
@@ -57,7 +50,7 @@ fn walk(parent: &str, root: &str, found: &mut Vec<(String, String, String, Vec<S
     for e in rd.flatten() {
         let name = match e.file_name().into_string() {
             Ok(n) => n,
-            Err(_) => hand_back("a folder name under --cross is not text"),
+            Err(_) => stop("a folder name under --cross is not text"),
         };
         let link = e.file_type().map(|t| t.is_symlink()).unwrap_or(false);
         let is_dir = if link { std::fs::metadata(e.path()).map(|m| m.is_dir()).unwrap_or(false) }
@@ -289,7 +282,7 @@ fn sniff(path: &str) -> Result<Sniffed, String> {
     for h in sniff_ids(&text) {
         for n in g(&h).split(|&c| crate::py::re::space(c)).filter(|w| !w.is_empty()) {
             if n.iter().all(|c| c.is_ascii_digit()) {
-                let v = modread::py_int(n).map_err(|e| e.0)?.unwrap_or(0);
+                let v = modread::py_int(n).map_err(|e| e.text().to_string())?.unwrap_or(0);
                 top = if any { top.max(v) } else { v };
                 any = true;
             } else if n.iter().all(|&c| c.is_ascii_digit() || matches!(c, 0xb2 | 0xb3 | 0xb9)) {
@@ -306,7 +299,7 @@ fn sniff(path: &str) -> Result<Sniffed, String> {
     }
     let mut provinces = BTreeSet::new();
     for h in sniff_provinces(&text) {
-        provinces.insert(modread::py_int(g(&h)).map_err(|e| e.0)?.unwrap_or(0));
+        provinces.insert(modread::py_int(g(&h)).map_err(|e| e.text().to_string())?.unwrap_or(0));
     }
     Ok(Sniffed {
         tags,
@@ -379,7 +372,7 @@ struct Facts {
 }
 
 fn mod_facts(root: &str) -> Result<Facts, String> {
-    let back = |d: crate::engine::rules::Decline| d.0;
+    let back = |d: crate::engine::rules::Decline| d.text().to_string();
     let f = modread::facts(root).map_err(back)?;
     Ok(Facts {
         tags: f.tags.into_iter().collect(),
@@ -390,10 +383,21 @@ fn mod_facts(root: &str) -> Result<Facts, String> {
     })
 }
 
+/// What a candidate mod made of a campaign's last saves.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Verdict {
+    /// Every tag, pop type, technology, province and invention is the mod's.
+    Fits,
+    /// Something in the saves is not.
+    No,
+    /// Nothing fits, and this one is the closest.
+    Nearest,
+}
+
 /// `match_mod(files, candidates)`: (label, path, [(label, verdict, detail)]).
 #[allow(clippy::type_complexity)]
 fn match_mod(files: &[String], candidates: &[(String, String)], facts: &mut HashMap<String, Facts>)
-             -> Result<(Option<String>, Option<String>, Vec<(String, String, String)>), String> {
+             -> Result<(Option<String>, Option<String>, Vec<(String, Verdict, String)>), String> {
     let take = files.len().saturating_sub(2);
     let mut sniffed = Vec::new();
     for f in &files[take..] {
@@ -444,13 +448,13 @@ fn match_mod(files: &[String], candidates: &[(String, String)], facts: &mut Hash
             let distance = unknown.len() as i64 + missing.len() as i64 + stray.len() as i64 + gap
                 + (top - f.inventions).max(0);
             near.push((distance, label.clone(), root.clone(), why.join("; ")));
-            rows.push((label.clone(), "no".to_string(), why.join("; ")));
+            rows.push((label.clone(), Verdict::No, why.join("; ")));
             continue;
         }
         let unused = f.tags.difference(&tags).count();
         let rank = (unused as f64 / f.tags.len().max(1) as f64, f.inventions - top);
         fits.push((rank, label.clone(), root.clone()));
-        rows.push((label.clone(), "fits".to_string(),
+        rows.push((label.clone(), Verdict::Fits,
                    format!("{} of its {} countries never mentioned, {} spare invention slots",
                            unused, f.tags.len(), f.inventions - top)));
     }
@@ -460,7 +464,7 @@ fn match_mod(files: &[String], candidates: &[(String, String)], facts: &mut Hash
         }
         near.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let (_d, label, root, why) = near.remove(0);
-        rows.push((label.clone(), "nearest".to_string(), why));
+        rows.push((label.clone(), Verdict::Nearest, why));
         return Ok((Some(label), Some(root), rows));
     }
     fits.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -512,7 +516,7 @@ fn head_key(head: &[u8]) -> Result<Vec<i64>, String> {
     }
     let mut out = Vec::new();
     for p in parts {
-        match modread::py_int(p).map_err(|e| e.0)? {
+        match modread::py_int(p).map_err(|e| e.text().to_string())? {
             Some(v) => out.push(v),
             None => return Ok(vec![0]),
         }
@@ -568,7 +572,7 @@ pub struct Surveyed {
     pub(super) files: Vec<String>,
     pub(super) mod_label: Option<String>,
     pub(super) mod_path: Option<String>,
-    pub(super) candidates: Vec<(String, String, String)>,
+    pub(super) candidates: Vec<(String, Verdict, String)>,
     pub(super) told: bool,
 }
 
@@ -588,7 +592,7 @@ fn right(text: &str, width: usize) -> String {
 /// campaign they are in. Python said them all after the survey, so the
 /// note read as if it were about whichever campaign was listed last.
 fn say_strays(e: &Surveyed) {
-    for (stray, worst, of) in history_breaks(&e.files).unwrap_or_else(|why| hand_back(&why)) {
+    for (stray, worst, of) in history_breaks(&e.files).unwrap_or_else(|why| stop(&why)) {
         crate::outln!("      note: {} disagrees with all {} later saves by at least {} event flags; \
                        it may be from another game", stray, of, worst);
     }
@@ -666,7 +670,7 @@ pub fn survey_cross(parent: &str, args: &Args, verbose: bool) -> R<Vec<Surveyed>
             let mut facts = HashMap::new();
             for (name, _path, files) in folders {
                 let (label, root, rows) = match_mod(&files, &mods, &mut facts)
-                    .unwrap_or_else(|why| hand_back(&why));
+                    .unwrap_or_else(|why| stop(&why));
                 list.push(Surveyed { name, files, mod_label: label, mod_path: root, candidates: rows,
                                      told: false });
             }
@@ -688,7 +692,7 @@ pub fn survey_cross(parent: &str, args: &Args, verbose: bool) -> R<Vec<Surveyed>
         if verbose {
             crate::outln!("Campaigns found under {}:", parent);
             for e in &found {
-                let fits = e.candidates.iter().filter(|r| r.1 == "fits").count();
+                let fits = e.candidates.iter().filter(|r| r.1 == Verdict::Fits).count();
                 crate::outln!("  {} {} saves  ->  {}{}", left(&e.name, 22), right(&e.files.len().to_string(), 3),
                               e.mod_label.clone().unwrap_or_else(|| "no mod in that folder fits".into()),
                               if e.told { "   (as told)" } else { "" });
@@ -696,7 +700,7 @@ pub fn survey_cross(parent: &str, args: &Args, verbose: bool) -> R<Vec<Surveyed>
                     say_strays(e);
                     continue;
                 }
-                let nearest: Vec<&(String, String, String)> = e.candidates.iter().filter(|r| r.1 == "nearest").collect();
+                let nearest: Vec<&(String, Verdict, String)> = e.candidates.iter().filter(|r| r.1 == Verdict::Nearest).collect();
                 if let Some(n) = nearest.first() {
                     crate::outln!("      WARNING: nothing in {} explains these saves. The closest is {}, and it \
                                    does not match: {}. The numbers below are computed against a mod this \

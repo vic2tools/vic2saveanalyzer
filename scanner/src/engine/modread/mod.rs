@@ -50,21 +50,12 @@ use values::*;
 type Set = BTreeSet<Vec<u8>>;
 
 fn no<T>(why: impl Into<String>) -> D<T> {
-    Err(Decline(why.into()))
+    Err(Decline::Unreadable(why.into()))
 }
 
-/// What marks a decline as an exception Python raises and the analyzer
-/// turns into a sentence (`RunError(str(exc))`): the rest of the message is
-/// that sentence, word for word.
-const RAISED: &str = "\u{1}raised: ";
-
+/// A refusal in words: the sentence the run is refused with.
 fn raised<T>(sentence: impl Into<String>) -> D<T> {
-    Err(Decline(format!("{}{}", RAISED, sentence.into())))
-}
-
-/// The sentence Python refuses the run with, when this is one.
-pub fn raised_sentence(d: &Decline) -> Option<&str> {
-    d.0.strip_prefix(RAISED)
+    Err(Decline::Raised(sentence.into()))
 }
 
 /// latin-1 bytes as the str Python decoded them to.
@@ -216,8 +207,8 @@ pub fn main(args: &[String]) {
             println!("{}", s);
             eprintln!("read in {:.3} s", t.elapsed().as_secs_f64());
         }
-        Err(Decline(why)) => {
-            eprintln!("declined: {}", why);
+        Err(d) => {
+            eprintln!("declined: {}", d.text());
             std::process::exit(3);
         }
     }

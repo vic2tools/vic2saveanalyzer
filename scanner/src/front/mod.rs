@@ -47,7 +47,7 @@ fn refuse<T>(why: impl Into<String>) -> R<T> {
 }
 
 /// Stop the run over input it cannot read at all (`engine::decline`).
-fn hand_back(why: &str) -> ! {
+fn stop(why: &str) -> ! {
     crate::engine::decline(why)
 }
 
@@ -160,13 +160,13 @@ fn saves_in(args: &Args) -> R<(String, Vec<String>)> {
     }
     let names = match std::fs::read_dir(&saves_path) {
         Ok(rd) => rd,
-        Err(e) => hand_back(&format!("cannot list {}: {}", saves_path, e)),
+        Err(e) => stop(&format!("cannot list {}: {}", saves_path, e)),
     };
     let mut files = Vec::new();
     for e in names {
         let name = match e.ok().and_then(|e| e.file_name().into_string().ok()) {
             Some(n) => n,
-            None => hand_back("a file name among the saves is not text"),
+            None => stop("a file name among the saves is not text"),
         };
         if name.to_lowercase().ends_with(".v2") {
             files.push(join(&saves_path, &name));
@@ -586,11 +586,11 @@ pub fn main(argv: &[String]) -> ! {
     let args = match (argv.get(2).map(|s| s.as_str()), argv.get(3)) {
         (Some("--run"), Some(file)) => {
             let text = std::fs::read_to_string(file)
-                .unwrap_or_else(|e| hand_back(&format!("cannot read {}: {}", file, e)));
-            let j = crate::py::json::parse(&text).unwrap_or_else(|e| hand_back(&format!("{}: {}", file, e)));
+                .unwrap_or_else(|e| stop(&format!("cannot read {}: {}", file, e)));
+            let j = crate::py::json::parse(&text).unwrap_or_else(|e| stop(&format!("{}: {}", file, e)));
             Args::from_json(&j)
         }
-        _ => hand_back("usage: vic2scan analyze --run RUN.json"),
+        _ => stop("usage: vic2scan analyze --run RUN.json"),
     };
     // A host that wants a refusal as its own (`--refused FILE`: Python,
     // which raises it as the `RunError` it always raised) gets the sentence
@@ -618,10 +618,10 @@ pub fn main(argv: &[String]) -> ! {
 /// `vic2scan bench-engine RUN.json [N]`: the run the launcher wrote, settled
 /// as `analyze` settles it, and its first N saves timed (`engine::bench`).
 pub fn bench_main(argv: &[String]) -> ! {
-    let file = argv.get(2).unwrap_or_else(|| hand_back("usage: vic2scan bench-engine RUN.json [N]"));
+    let file = argv.get(2).unwrap_or_else(|| stop("usage: vic2scan bench-engine RUN.json [N]"));
     let text = std::fs::read_to_string(file)
-        .unwrap_or_else(|e| hand_back(&format!("cannot read {}: {}", file, e)));
-    let j = crate::py::json::parse(&text).unwrap_or_else(|e| hand_back(&format!("{}: {}", file, e)));
+        .unwrap_or_else(|e| stop(&format!("cannot read {}: {}", file, e)));
+    let j = crate::py::json::parse(&text).unwrap_or_else(|e| stop(&format!("{}: {}", file, e)));
     let args = Args::from_json(&j);
     let n: usize = argv.get(3).and_then(|a| a.parse().ok()).unwrap_or(10);
     let settled = || -> R<engine::Run> {
@@ -629,7 +629,7 @@ pub fn bench_main(argv: &[String]) -> ! {
         let (mod_path, _) = settle_game(args.mod_path.as_deref(), args.game_root.as_deref())?;
         let set = match setup(&args, &mod_path) {
             Ok(set) => set,
-            Err(Settle::Refused(why)) | Err(Settle::Back(why)) => return refuse(why),
+            Err(Settle::Refuse(why)) | Err(Settle::Stop(why)) => return refuse(why),
         };
         let dates = dates_of(&files);
         Ok(run_for(&args, &set, &in_date_order(files, dates)))
@@ -639,7 +639,7 @@ pub fn bench_main(argv: &[String]) -> ! {
             engine::bench(&run, n);
             std::process::exit(0);
         }
-        Err(RunError(why)) => hand_back(&why),
+        Err(RunError(why)) => stop(&why),
     }
 }
 
@@ -690,7 +690,7 @@ fn run(mut args: Args) -> R<i32> {
         }
         return match diagnose::verify_all(&files, args.jobs) {
             Ok(()) => Ok(0),
-            Err(why) => hand_back(&why),
+            Err(why) => stop(&why),
         };
     }
 
@@ -737,8 +737,8 @@ fn run(mut args: Args) -> R<i32> {
 
     let set = match setup(&args, args.mod_path.as_deref().unwrap()) {
         Ok(set) => set,
-        Err(Settle::Refused(why)) => return refuse(why),
-        Err(Settle::Back(why)) => hand_back(&why),
+        Err(Settle::Refuse(why)) => return refuse(why),
+        Err(Settle::Stop(why)) => stop(&why),
     };
     if verbose {
         let mut extra: Vec<&String> = set.head.strata.keys()
@@ -799,22 +799,23 @@ pub(crate) struct Setup {
     pub mob_types: Vec<String>,
 }
 
+/// Why a campaign could not be set up, and so what the run does about it.
 pub(crate) enum Settle {
-    /// A sentence Python refuses the run with.
-    Refused(String),
-    /// Something Python would raise out of.
-    Back(String),
+    /// A sentence the run is refused with (`refuse`).
+    Refuse(String),
+    /// Something the run stops over (`stop`).
+    Stop(String),
 }
 
 /// `_mod_head` and `mod_defaults`, for the mod at `mod_path`.
 pub(crate) fn setup(args: &Args, mod_path: &str) -> Result<Setup, Settle> {
     let root = mod_root(mod_path);
-    let said = |e: crate::engine::rules::Decline| match modread::raised_sentence(&e) {
-        Some(sentence) => Settle::Refused(sentence.to_string()),
-        None => Settle::Back(e.0),
+    let said = |e: crate::engine::rules::Decline| match e {
+        crate::engine::rules::Decline::Raised(sentence) => Settle::Refuse(sentence),
+        crate::engine::rules::Decline::Unreadable(why) => Settle::Stop(why),
     };
     if !modread::has_rules(&root).map_err(said)? {
-        return Err(Settle::Refused(format!(
+        return Err(Settle::Refuse(format!(
             "{} has no technologies/ or inventions/ folder. Point --mod-path at the folder that \
              contains them (the mod root, or the Victoria 2 install folder for vanilla).", root)));
     }
@@ -823,7 +824,7 @@ pub(crate) fn setup(args: &Args, mod_path: &str) -> Result<Setup, Settle> {
         Some(n) => n,
         None => match head.defines.get(&b"POP_SIZE_PER_REGIMENT".to_vec()) {
             Some(v) if v.is_finite() && v.abs() < 9.0e18 => v.trunc() as i64,
-            Some(_) => return Err(Settle::Back("POP_SIZE_PER_REGIMENT is not a number an int can hold".into())),
+            Some(_) => return Err(Settle::Stop("POP_SIZE_PER_REGIMENT is not a number an int can hold".into())),
             None => POP_SIZE_PER_REGIMENT,
         },
     };

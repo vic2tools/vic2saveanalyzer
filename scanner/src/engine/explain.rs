@@ -104,7 +104,7 @@ fn explain_mob(tag: &str, m: &Mod, live: &FxSet<String>, pres: &[Pre], files: &[
     let meta = &pres.last().unwrap().meta;
     let world = rules::save_world(meta, m);
     let mut parts = rules::breakdown(&nat, m, Some(live), Some(&world), player)
-        .unwrap_or_else(|d| crate::engine::decline(&d.0));
+        .unwrap_or_else(|d| crate::engine::decline(d.text()));
     parts.sort_by(|a, b| a.0.cmp(b.0).then(b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal)));
     crate::outln!("\nMobilisation size for {} at {}:", tag, meta.date);
     let mut total = 0.0;
@@ -167,7 +167,7 @@ fn explain_mob_pool(spec: &Spec, tag: &str, m: &Mod, live: &FxSet<String>, pres:
     let meta = &pres.last().unwrap().meta;
     let world = rules::save_world(meta, m);
     let rate = rules::rate_for(&nat, m, Some(live), Some(&world), player)
-        .unwrap_or_else(|d| crate::engine::decline(&d.0));
+        .unwrap_or_else(|d| crate::engine::decline(d.text()));
     let mob_types: FxSet<&str> = spec.mob_types.iter().map(|s| names::text(*s)).collect();
     let occ = spec.include_occupied;
     // `mobilization_clusters`, and the same buckets per province and type.
@@ -430,7 +430,7 @@ fn inventions(tag: &str, m: &Mod, pres: &[Pre], files: &[String], reading: &Read
     let meta = &pres.last().unwrap().meta;
     let seq = &m.invention_sequence;
     let where_ = crate::engine::modread::invention_files(&m.path)
-        .unwrap_or_else(|d| crate::engine::decline(&d.0));
+        .unwrap_or_else(|d| crate::engine::decline(d.text()));
     let mut held = nat.invention_ids.clone();
     held.sort();
     crate::outln!("\n{} at {} in {}", tag, meta.date, meta.file);

@@ -11,7 +11,8 @@
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 
 use super::{refuse, Args, R};
-use super::survey::{hand_back, Surveyed};
+use super::stop;
+use super::survey::Surveyed;
 use crate::engine::modread;
 use crate::py::json::J;
 use std::collections::BTreeSet;
@@ -38,7 +39,7 @@ pub fn run_cross(parent: &str, found: &[Surveyed], args: &Args, verbose: bool)
         // much is Python's to say.
         let set = match super::setup(args, mod_path) {
             Ok(s) => s,
-            Err(super::Settle::Refused(why)) | Err(super::Settle::Back(why)) => hand_back(&why),
+            Err(super::Settle::Refuse(why)) | Err(super::Settle::Stop(why)) => stop(&why),
         };
         let dates = super::dates_of(&e.files);
         let files = super::in_date_order(e.files.clone(), dates);

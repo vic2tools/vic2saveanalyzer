@@ -251,7 +251,7 @@ pub fn run(run: Run) -> report::Outcome {
             if want_map {
                 m.raster = Some(crate::engine::mapflags::province_raster(&m.map_bmp, &m.map_csv, scale));
             }
-            Ok(m)
+            Ok::<Mod, Decline>(m)
         })
     };
     let mut pres: Vec<Option<Pre>> = (0..n).map(|_| None).collect();
@@ -349,13 +349,13 @@ pub fn run(run: Run) -> report::Outcome {
         Ok(m) => m,
         // A mod Python raises over is refused when Python asks for it,
         // which is now, with every save read once.
-        Err(d) => match modread::raised_sentence(&d) {
+        Err(d) => match d.raised() {
             Some(sentence) => {
                 return report::Outcome { html: None, refused: Vec::new(),
                                          run_error: Some(sentence.to_string()),
                                          cross_part: None };
             }
-            _ => decline(&format!("the mod: {}", d.0.trim_start_matches('\u{1}'))),
+            None => decline(&format!("the mod: {}", d.text())),
         },
     };
     let held: Vec<&[finish::PreNation]> = pres.iter().map(|p| p.nations.as_slice()).collect();
@@ -406,9 +406,9 @@ pub fn run(run: Run) -> report::Outcome {
         finish::finish(pre, &run.spec, &m, Some(&live))
     }, |i, got| match got {
         Ok(s) => spent[i] = Some(s),
-        Err(Decline(why)) => {
+        Err(d) => {
             if declined.is_none() {
-                declined = Some(why);
+                declined = Some(d.text().to_string());
             }
         }
     });
