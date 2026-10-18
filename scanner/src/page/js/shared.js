@@ -186,8 +186,6 @@ const fmtPower = v => !v ? '0'
   : v >= 100 ? Math.round(v).toLocaleString()
   : v >= 10 ? v.toFixed(1) : v.toFixed(2);
 
-
-// Use the report's embedded flags; a nation-colour swatch is the honest fallback.
 // A nation's flag as the payload carries it: the one `key` names (the great
 // powers' cards name the flag of their government), else its usual one,
 // else ''.
@@ -195,6 +193,7 @@ function flagSrc(tag, key) {
   return (key && DATA.flags[key]) || DATA.flags[tag + '|'] || '';
 }
 
+// The flag as an image, or a nation-colour swatch when the report has none.
 function nationFlag(tag, key) {
   const src = flagSrc(tag, key);
   const flag = document.createElement(src ? 'img' : 'span');

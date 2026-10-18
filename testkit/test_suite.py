@@ -48,6 +48,12 @@ class Arguments(unittest.TestCase):
         self.assertEqual(argv[1:5], ["compare", "S", "--mod", "M"])
         self.assertEqual(argv[5:7], ["--from", "B"])
 
+    def test_the_baseline_leaves_out_the_war_side_losses_it_still_holds(self):
+        # Goes, with the ignore in suite.py, once the baseline is recorded again.
+        argv = suite.argv_for(named("baseline.py"), saves="S", mod="M", baseline="B",
+                              have=EVERYTHING)
+        self.assertEqual(argv[-2:], ["--ignore", "payload.wars[].side_losses"])
+
     def test_no_baseline_means_the_comparison_is_skipped(self):
         self.assertEqual(suite.unmet(named("baseline.py"), saves="S", mod="M",
                                      have=EVERYTHING), ["baseline"])

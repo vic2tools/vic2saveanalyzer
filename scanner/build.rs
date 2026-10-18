@@ -68,8 +68,16 @@ fn page(dir: &Path) -> String {
     for name in &named {
         let path = dir.join(name);
         println!("cargo:rerun-if-changed={}", path.display());
-        text += &std::fs::read_to_string(&path)
+        let body = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("cannot read src/page/{}: {}", name, e));
+        // Joined as they are: a missing last newline would run this file's
+        // last line into the next file's first, and a BOM or a CR would land
+        // in the middle of the page.
+        if !body.ends_with('\n') || body.starts_with('\u{feff}') || body.contains('\r') {
+            panic!("src/page/{} must be UTF-8 without a BOM, with LF line ends, \
+                    ending in a newline", name);
+        }
+        text += &body;
     }
     text
 }

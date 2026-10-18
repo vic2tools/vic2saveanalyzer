@@ -68,7 +68,7 @@ def template():
     names, joined in its order, as `scanner/build.rs` joins them."""
     page = os.path.join(HERE, "scanner", "src", "page")
     with open(os.path.join(page, "order.txt"), encoding="utf-8") as fh:
-        names = [l.strip() for l in fh if l.strip() and not l.startswith("#")]
+        names = [l.strip() for l in fh if l.strip() and not l.strip().startswith("#")]
     text = []
     for name in names:
         with open(os.path.join(page, name), encoding="utf-8", newline="") as fh:

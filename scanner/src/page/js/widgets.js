@@ -316,9 +316,8 @@ function plot(svg, cfg) {
   };
 }
 
-/* =============== generic sortable table =============== */
-// A sentence in the middle of an empty chart, in the page's dim ink
-// (--ink-dim; an SVG fill attribute cannot read a CSS variable).
+/* =============== small shared pieces =============== */
+// A sentence in the middle of an empty chart, in the page's dim ink (--ink-dim).
 function svgMessage(svg, x, y, text) {
   const t = el('text', {x, y, 'text-anchor': 'middle', fill: '#C9AC80',
     'font-family': 'IBM Plex Mono, monospace', 'font-size': 14});

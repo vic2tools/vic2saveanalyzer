@@ -382,7 +382,6 @@ function warSideLosses(w, sides) {
   return lost;
 }
 
-// Each side's casualties, as one total: the war table's figure, split in two.
 /* Brigades and ships at the first save taken during the war. Only the nations
    the report charts have figures; the rest are counted, not guessed at. */
 function ibStrength(parties, date) {

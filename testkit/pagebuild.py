@@ -10,7 +10,9 @@ that build script on a copy of `scanner/` and holds it to three things:
   recorded answers' page differences are taken against;
 - a file in `src/page/` that `order.txt` does not name stops the build, by
   name: a page file nothing includes is a change that silently is not there;
-- a file `order.txt` names twice stops the build, by name.
+- a file `order.txt` names twice stops the build, by name;
+- a file without a last newline, or with a byte-order mark or a carriage
+  return, stops the build, by name.
 
     python3 testkit/pagebuild.py
 """
@@ -61,12 +63,31 @@ def main():
         order = os.path.join(page, "order.txt")
         with open(order, encoding="utf-8") as fh:
             kept = fh.read()
-        first = next(l for l in kept.splitlines() if l.strip() and not l.startswith("#"))
+        first = next(l for l in kept.splitlines() if l.strip() and not l.strip().startswith("#"))
         with open(order, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(kept + first + "\n")
         status, said, _out = run()
         if status == 0 or first not in said:
             wrong.append("a page file named twice was built past: %s" % said[-300:])
+        with open(order, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(kept)
+
+        # Files are joined as they are, so a missing last newline would run one
+        # file's last line into the next file's first, and a BOM or a CR would
+        # land in the middle of the page.
+        boot = os.path.join(page, "js", "boot.js")
+        with open(boot, "rb") as fh:
+            body = fh.read()
+        for what, bad in (("no last newline", body.rstrip(b"\n")),
+                          ("a byte-order mark", b"\xef\xbb\xbf" + body),
+                          ("a carriage return", body.replace(b"\n", b"\r\n"))):
+            with open(boot, "wb") as fh:
+                fh.write(bad)
+            status, said, _out = run()
+            if status == 0 or "boot.js" not in said:
+                wrong.append("a page file with %s was built past: %s" % (what, said[-300:]))
+        with open(boot, "wb") as fh:
+            fh.write(body)
 
     for w in wrong:
         print("WRONG: " + w)

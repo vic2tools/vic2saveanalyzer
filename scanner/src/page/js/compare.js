@@ -438,10 +438,10 @@ function milSides(date) {
   return {date, noun, raised, standing, mobs, caps, unbuilt, mobilized, totals, ratioText, powers, heavyPowers, nowPowers, powersDiffer, powerRatio};
 }
 
-// The readout's resting text -- totals, ratio, and what is behind them -- and
-// the standing/mobilized line the totals view also shows under its pie.
+// The readout's resting text: totals, ratio, and what is behind them.
 function milSummary(sides) {
-  const {date, noun, raised, standing, mobs, caps, unbuilt, mobilized, totals, ratioText, powers, heavyPowers, nowPowers, powersDiffer, powerRatio} = sides;
+  const {date, noun, standing, mobs, caps, mobilized, totals, ratioText, powers,
+    heavyPowers, nowPowers, powersDiffer, powerRatio} = sides;
   const powerBits = !powers ? ''
     : `<span><span class="rk">fleet power</span> `
       + `<b style="color:${SIDE_COLOUR[0]}">${fmtPower(powers[0])}</b>`
@@ -482,12 +482,13 @@ function milSummary(sides) {
     + powerBits
     + mobBits
     + `<span class="rk">${totals[0] + totals[1] ? '' : 'no ' + noun + ' at this save'}</span>`;
-  return {idle, split};
+  return idle;
 }
 
 // The totals view: one pie, a slice per side.
-function drawMilTotals(sides, view, split) {
-  const {date, noun, raised, standing, mobs, caps, unbuilt, mobilized, totals, ratioText, powers, heavyPowers, nowPowers, powersDiffer, powerRatio} = sides;
+function drawMilTotals(sides, view) {
+  const {date, noun, standing, mobs, unbuilt, mobilized, totals, ratioText, powers,
+    heavyPowers, nowPowers, powersDiffer} = sides;
   const {svg, legend, readout} = view;
   // One pie, one slice per side: the broad "who has more" view.
   const slices = [
@@ -589,8 +590,8 @@ function drawMilTotals(sides, view, split) {
 
 // The composition view: a ring per side, a slice per unit type.
 function drawMilComposition(sides, view) {
-  const {date, noun, raised, standing, mobs, caps, unbuilt, mobilized, totals, ratioText, powers, heavyPowers, nowPowers, powersDiffer, powerRatio} = sides;
-  const {svg, legend, readout, setIdle} = view;
+  const {date, noun, raised, mobs, unbuilt, mobilized, totals, ratioText, powers} = sides;
+  const {svg, legend, readout} = view;
   // Two pies broken down by unit type, shared colour scale. The unit-type
   // counts already include every brigade a side has raised so far,
   // mobilized ones among them -- so the ceiling can only be added on top
@@ -722,10 +723,10 @@ function drawMilPies() {
     return;
   }
   const sides = milSides(date);
-  const {idle, split} = milSummary(sides);
+  const idle = milSummary(sides);
   const setIdle = () => readout.innerHTML = idle;
-  const view = {svg, legend, readout, setIdle};
-  if (milView === 'totals') drawMilTotals(sides, view, split);
+  const view = {svg, legend, readout};
+  if (milView === 'totals') drawMilTotals(sides, view);
   else drawMilComposition(sides, view);
   svg.onpointerleave = setIdle;
   setIdle();
