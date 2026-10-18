@@ -571,12 +571,9 @@ class App:
             elif kind == "home" and not is_install(where):
                 raise ValueError("%s is not the mod folder of a Victoria II "
                                  "install." % mod)
-            elif kind == "home":
-                settle_game(None, where)
-                if os.path.normcase(os.path.realpath(where)) != \
-                        os.path.normcase(os.path.realpath(game)):
-                    raise ValueError("%s is the mod folder of %s, not of the "
-                                     "Victoria 2 folder above." % (mod, where))
+            elif kind == "home" and not _same_folder(where, game):
+                raise ValueError("%s is the mod folder of %s, not of the "
+                                 "Victoria 2 folder above." % (mod, where))
         except ValueError as exc:
             messagebox.showerror(
                 APP, "%s\n\nMods are read where the game loads them from, "

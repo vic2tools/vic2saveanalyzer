@@ -251,6 +251,56 @@ def a_start_keeps_other_settings(app, holding):
     return wrong
 
 
+def mod_folders_it_refuses(app, holding):
+    """
+    [what went wrong] when the mod box names a folder of mods the game box
+    does not run: the mod folder of another install, or one in no install
+    at all. Each is refused before a run, in its own sentence.
+    """
+    from tkinter import messagebox
+    import fixtures
+    saves = os.path.join(holding, "refuse-saves")
+    os.makedirs(saves)
+    open(os.path.join(saves, "a.v2"), "w").write('date="1836.1.1"\n')
+    game = fixtures.a_game(os.path.join(holding, "refuse-game"))
+    other = fixtures.a_game(os.path.join(holding, "refuse-other"))
+    loose = os.path.join(holding, "refuse-loose", "mod")
+    for home in (os.path.join(game, "mod"), os.path.join(other, "mod"), loose):
+        os.makedirs(os.path.join(home, "a mod", "common"), exist_ok=True)
+    cases = [
+        ("the mod folder of another install", os.path.join(other, "mod"),
+         "%s is the mod folder of %s, not of the Victoria 2 folder above."
+         % (os.path.join(other, "mod"), os.path.normpath(other))),
+        ("a folder of mods in no install", loose,
+         "%s is not the mod folder of a Victoria II install." % loose),
+    ]
+    wrong = []
+    shown, real_error = [], messagebox.showerror
+    ran = []
+    work, app.work = app.work, lambda *a, **k: ran.append(a)
+    messagebox.showerror = lambda _title, text, **_k: shown.append(text)
+    try:
+        app.saves.set(saves)
+        app.game.set(game)
+        for what, mod, sentence in cases:
+            del shown[:]
+            app.mod.set(mod)
+            app.start()
+            if ran:
+                wrong.append("%s was not refused: the run started" % what)
+                break
+            if not shown or not shown[0].startswith(sentence + "\n\n"):
+                wrong.append("%s was refused with %r, not %r"
+                             % (what, (shown or ["nothing"])[0][:120], sentence))
+    finally:
+        messagebox.showerror = real_error
+        app.work = work
+        app.running = False
+    print("  a mod folder of another install, or of none, is refused: %s"
+          % ("FAILED" if wrong else "ok"))
+    return wrong
+
+
 def the_keeper_opens_its_folder(root, holding):
     """
     [what went wrong] when the keeper's "Open the folder" is pressed here.
@@ -320,6 +370,7 @@ def main():
         wrong += a_stopped_run(root, app, saves, os.path.join(holding, "two"))
         wrong += a_refused_run(root, app, holding)
         wrong += a_start_keeps_other_settings(app, holding)
+        wrong += mod_folders_it_refuses(app, holding)
         wrong += the_keeper_opens_its_folder(root, holding)
     finally:
         shutil.rmtree(holding, ignore_errors=True)
