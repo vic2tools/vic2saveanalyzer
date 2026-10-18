@@ -770,7 +770,7 @@ pub fn say_mod(m: &Mod, live: &FxSet<String>, held: &[&[crate::engine::finish::P
                     }
                 }
                 if !past.is_empty() {
-                    let name = crate::engine::basename(file).to_string();
+                    let name = crate::engine::readsave::basename(file).to_string();
                     let lo = *past.iter().min().unwrap();
                     let hi = *past.iter().max().unwrap();
                     odd.retain(|o| o.0 != name);
@@ -975,7 +975,7 @@ pub fn run(run: &Run, m: &Mod, spent: Vec<Spent>) -> Outcome {
     }
     let _ = std::io::stdout().flush();
     say(&format!("@done html={} refused={}", html_path.is_some() as i32,
-                 refused.iter().map(|p| crate::engine::basename(p).to_string())
+                 refused.iter().map(|p| crate::engine::readsave::basename(p).to_string())
                      .collect::<Vec<_>>().join("\t")));
     // The process ends with this run, and the system takes its memory back
     // whole: freeing the campaign a string at a time first cost ~0.3 s.

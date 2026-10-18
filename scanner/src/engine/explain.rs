@@ -20,7 +20,7 @@
 use crate::engine::finish::Pre;
 use crate::engine::model::Nation;
 use crate::engine::rules::{self, Mod};
-use crate::engine::{read_save, Reading, Refused};
+use crate::engine::{Reading, readsave::read_save, readsave::Refused};
 use crate::py::json::J;
 use crate::util::fx::FxSet;
 use crate::save::names::{self, Sym};
@@ -236,7 +236,7 @@ fn explain_mob_pool(ask: &Ask, tag: &str, m: &Mod, live: &FxSet<String>, pres: &
     }
     let ppr = ask.pop_per_regiment;
     crate::outln!("\nMobilization pool for {} at {} ({})", tag, meta.date,
-                  crate::engine::basename(&meta.file));
+                  crate::engine::readsave::basename(&meta.file));
     crate::outln!("  primary culture   {}", names::text(nat.primary_culture));
     let mut accepted: Vec<&str> = nat.accepted_cultures.iter().map(|s| names::text(*s)).collect();
     accepted.sort();

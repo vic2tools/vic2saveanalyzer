@@ -619,7 +619,7 @@ impl Reader {
     }
 
     fn read(path: &str) -> D<Vec<u8>> {
-        std::fs::read(path).or_else(|e| raised(crate::engine::os_error_text(&e, path)))
+        std::fs::read(path).or_else(|e| raised(crate::engine::readsave::os_error_text(&e, path)))
     }
 
     /// `_plain`: one file with its comments cut out.

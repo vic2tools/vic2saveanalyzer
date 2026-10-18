@@ -18,7 +18,7 @@
 use crate::save::clause::{unquote, V};
 use crate::engine::modread::py_float;
 use crate::save::walk::{looks_like_country_tag, parse_block, Tokens};
-use crate::engine::{basename, read_save, Reading, Refused};
+use crate::engine::{Reading, readsave::basename, readsave::read_save, readsave::Refused};
 use crate::util::fx::FxMap;
 use crate::py::re::space;
 
@@ -354,12 +354,12 @@ pub fn verify_save(path: &str, reading: &Reading) -> Result<(String, usize), Str
 pub fn verify_all(files: &[String], jobs: Option<i64>) -> Result<(), String> {
     let reading = plain_reading();
     let biggest = files.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len()).max().unwrap_or(0);
-    let workers = crate::engine::worker_count(files.len(), biggest, jobs);
+    let workers = crate::engine::pool::worker_count(files.len(), biggest, jobs);
     if workers > 1 && files.len() > 1 {
         crate::outln!("Checking {} save(s) on {} cores.", files.len(), workers);
     }
     let mut failed = None;
-    crate::engine::in_order(files.len(), workers, |i| verify_save(&files[i], &reading), |_i, got| {
+    crate::engine::pool::in_order(files.len(), workers, |i| verify_save(&files[i], &reading), |_i, got| {
         match got {
             Ok((text, _bad)) if failed.is_none() => crate::outln!("{}", text),
             Ok(_) => {}
