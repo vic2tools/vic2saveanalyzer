@@ -674,4 +674,12 @@ MUTATIONS = [
         [
             ('scanner/src/engine/finish.rs', '            let effective = Num::F(round(ship.crew, 3));', '            let effective = Num::I(ship.count);'),
         ]),
+    Mutation(
+        'settle-game-sentence-drifts',
+        "the window refuses a mod outside any install in words that are no "
+        "longer the scanner's",
+        'pairs.py', (),
+        [
+            ('vic2tools/report_tab.py', "            f\"{mod_path} is not in a Victoria II install's mod folder. Put the \"", "            f\"{mod_path} is not in a Victoria II install's mods folder. Put the \""),
+        ]),
 ]

@@ -59,6 +59,7 @@ CHECKS = [
     _c("engine_runtime.py", "the engine process and test fixtures", ["scanner"]),
     _c("modread.py", "the mod reader", ["scanner"], records=True),
     _c("frontcheck.py", "the run's front end", ["scanner"], records=True),
+    _c("pairs.py", "the window's rules against the scanner's", ["scanner"]),
     _c("enginefmt.py", "the engine's number formatting", ["scanner"],
        extra=("SCANNER", "20000")),
     _c("enginecompress.py", "the engine's compression", ["scanner"], extra=("SCANNER",)),
