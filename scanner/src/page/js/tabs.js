@@ -27,20 +27,11 @@ tabs.forEach((t, i) => {
   };
 });
 
-goodsPicker.set(topMovers(6));
-drawChart();
-drawMilPies(); drawMilTable();
-drawFleetTable();
-drawPopTable(); drawPopChart();
-refreshPopulation();
-drawMarketTable();
-drawSupply();
-searchSelect(document.getElementById('prodgood'), 'search goods');
-if (TECH) drawTechTree();
-if (WARS.length) drawWarTable();
-searchSelect(document.getElementById('techtag'), 'search nations');
-if (MAP) mapRender();
-drawGreatPowers();
+// Each tab draws itself, or leaves the row when it has nothing to show.
+for (const t of TABS) {
+  if (t.available && !t.available()) document.getElementById(t.id).hidden = true;
+  else t.init();
+}
 
 /* A tab with nothing behind it is worse than no tab. Technology and Wars
    already take themselves off the row when the campaign has none; the map

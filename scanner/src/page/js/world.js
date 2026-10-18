@@ -32,5 +32,10 @@ function drawGreatPowers() {
   });
 }
 
-
-
+registerTab('tab-nations', {init() { if (MAP) mapRender(); drawGreatPowers(); }});
+exportNotes.mapcanvas = () => {
+  mapStopPlay();
+  return {subtitle: 'Current map view · ' + document.getElementById('mapzoom').textContent
+    + ' · Occupation ' + (document.getElementById('mapocc').getAttribute('aria-pressed') === 'true' ? 'on' : 'off')
+    + ' · Province borders ' + (document.getElementById('mapborders').getAttribute('aria-pressed') === 'true' ? 'on' : 'off')};
+};

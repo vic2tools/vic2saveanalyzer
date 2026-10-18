@@ -143,8 +143,9 @@ if (TECH) {
   techLimit();
   saveSel.onchange = () => { techPick = null; techLimit(); drawTechTree(); };
   document.getElementById('techfind').oninput = () => drawTechTree();
-} else {
-  const tab = document.getElementById('tab-tech');
-  if (tab) tab.hidden = true;
 }
 
+registerTab('tab-tech', {available: () => !!TECH, init() {
+  drawTechTree();
+  searchSelect(document.getElementById('techtag'), 'search nations');
+}});

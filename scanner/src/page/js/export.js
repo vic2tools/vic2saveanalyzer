@@ -83,26 +83,12 @@ for (const source of document.querySelectorAll('figure > svg, #mapcanvas')) {
   button.onclick = async () => {
     button.disabled = true; status.textContent = 'Preparing PNG…';
     try {
-      if (source.id === 'mapcanvas') mapStopPlay();
       const container = source.closest('section') || source.closest('[id^="compare-"]');
       const title = container?.querySelector('h2')?.textContent.trim() || source.getAttribute('aria-label') || 'Campaign graph';
-      let subtitle = DATA.dates[0] + ' – ' + DATA.dates[DATA.dates.length - 1];
-      let legend = [];
-      if (source.id === 'popchart') subtitle += ' · ' + (focusedPopType ? gameName(focusedPopType) : 'All pop types');
-      if (source.id === 'chart') subtitle += ' · ' + scaleBtn.textContent + (worldLine ? ' · World total included' : '');
-      if (source.id === 'milpies') {
-        subtitle = (milMode === 'army' ? 'Army' : 'Navy') + ' · ' + milView
-          + (milMode === 'army' ? (milPotential ? ' · Potential' : ' · Current') : '')
-          + ' · ' + sideLabel(sideA) + ' versus ' + sideLabel(sideB);
-        legend = [...document.querySelectorAll('#millegend .slegend')].map(item => ({
-          text: item.textContent.trim(), colour: getComputedStyle(item.querySelector('i')).backgroundColor}));
-      }
-      if (source.id === 'mapcanvas') subtitle = 'Current map view · ' + document.getElementById('mapzoom').textContent
-        + ' · Occupation ' + (document.getElementById('mapocc').getAttribute('aria-pressed') === 'true' ? 'on' : 'off')
-        + ' · Province borders ' + (document.getElementById('mapborders').getAttribute('aria-pressed') === 'true' ? 'on' : 'off');
+      const span = DATA.dates[0] + ' – ' + DATA.dates[DATA.dates.length - 1];
+      const {subtitle = span, legend = [], suffix = ''} = exportNotes[source.id]?.(span) || {};
       const blob = await graphPNG(source, title, subtitle, legend);
-      downloadBlob(blob, (title + (source.id === 'milpies' ? '-' + milMode + '-' + milView : ''))
-        .replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 120) + '.png');
+      downloadBlob(blob, (title + suffix).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 120) + '.png');
       status.textContent = 'PNG ready.';
     } catch (error) { status.textContent = 'Export failed: ' + error.message; }
     finally { button.disabled = false; }

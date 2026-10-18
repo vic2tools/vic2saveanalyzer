@@ -294,3 +294,9 @@ function drawSupply() {
   note.textContent = 'Choose a good and save; hover a bar to see a nation’s contribution to world supply.';
 }
 
+registerTab('tab-market', {init() {
+  goodsPicker.set(topMovers(6));
+  drawMarketTable();
+  drawSupply();
+  searchSelect(document.getElementById('prodgood'), 'search goods');
+}});

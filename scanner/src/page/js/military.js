@@ -404,3 +404,4 @@ function drawFleetTable() {
     'Power estimates use hull and gun statistics. Current power incorporates recorded strength and experience where available, otherwise full-strength hull counts. These are comparative estimates, not predicted battle outcomes.');
 }
 
+registerTab('tab-military', {init() { drawMilTable(); drawFleetTable(); }});

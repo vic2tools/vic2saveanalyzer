@@ -289,3 +289,6 @@ populationRegionSelect.onchange=()=>{populationAllLand=false;populationRegion=po
 document.getElementById('popback').onclick=()=>{populationCountry='';populationRegion='';refreshPopulation();populationCountrySelect.focus();};
 document.getElementById('popallland').onclick=()=>{populationAllLand=!populationAllLand;populationRegion='';refreshPopulation();};
 
+registerTab('tab-pops', {init() { drawPopTable(); drawPopChart(); refreshPopulation(); }});
+exportNotes.popchart = base => ({
+  subtitle: base + ' · ' + (focusedPopType ? gameName(focusedPopType) : 'All pop types')});

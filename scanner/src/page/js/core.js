@@ -153,6 +153,16 @@ const formatters = {
   decimal: v => v.toFixed(2),
 };
 
+/* What each tab registers for the boot code at the end (tabs.js): whether it
+   has anything to show (`available`, left out when it always has), and how
+   to draw itself (`init`). Tabs are drawn in the order they register. */
+const TABS = [];
+function registerTab(id, spec) { TABS.push({id, ...spec}); }
+/* How a chart's PNG export describes it, by the chart's element id: given
+   the span of dates as a subtitle, {subtitle, legend, suffix} -- the last
+   added to the file's name. */
+const exportNotes = {};
+
 /* A game date, `1872.9.1`, as years: the axis DATA.years is on, and an order
    that text gets wrong (it puts October before September). A missing month
    or day counts as the first. */

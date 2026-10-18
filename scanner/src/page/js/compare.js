@@ -764,3 +764,14 @@ function drawFleetChart() {
   }
 }
 
+registerTab('tab-compare', {init() { drawChart(); drawMilPies(); }});
+exportNotes.chart = base => ({
+  subtitle: base + ' · ' + scaleBtn.textContent + (worldLine ? ' · World total included' : '')});
+exportNotes.milpies = () => ({
+  subtitle: (milMode === 'army' ? 'Army' : 'Navy') + ' · ' + milView
+    + (milMode === 'army' ? (milPotential ? ' · Potential' : ' · Current') : '')
+    + ' · ' + sideLabel(sideA) + ' versus ' + sideLabel(sideB),
+  legend: [...document.querySelectorAll('#millegend .slegend')].map(item => ({
+    text: item.textContent.trim(), colour: getComputedStyle(item.querySelector('i')).backgroundColor})),
+  suffix: '-' + milMode + '-' + milView,
+});

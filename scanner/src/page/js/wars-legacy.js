@@ -194,8 +194,6 @@ document.getElementById('warback').onclick = () => {
 
 if (WARS.length) {
   document.getElementById('warfind').oninput = () => { warPick = null; drawWarTable(); };
-} else {
-  const tab = document.getElementById('tab-wars');
-  if (tab) tab.hidden = true;
 }
 
+registerTab('tab-wars', {available: () => WARS.length > 0, init: () => drawWarTable()});
