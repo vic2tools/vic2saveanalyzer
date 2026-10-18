@@ -67,7 +67,7 @@ pub fn say_mod(m: &Mod, live: &FxSet<String>, held: &[&[crate::engine::finish::P
              m.tech_mob.len(), rules_.len(), live.len(), m.event_mob.len(),
              m.triggered_mob.iter().filter(|t| t.size != 0.0).count());
     let skipped: Vec<&str> = m.triggered_mob.iter()
-        .filter(|t| t.size != 0.0 && unreadable(&t.trigger, m))
+        .filter(|t| t.size != 0.0 && rules::unreadable(&t.trigger, m))
         .map(|t| t.name.as_str()).collect();
     if !skipped.is_empty() {
         crate::outln!("  triggered modifiers left out, because their trigger asks something this cannot \
@@ -84,52 +84,6 @@ pub fn say_mod(m: &Mod, live: &FxSet<String>, held: &[&[crate::engine::finish::P
         let mark = if live.contains(n.as_str()) { "" } else { "   (unobtainable)" };
         crate::outln!("  invention  {:<44} +{:.3}{}", n, rules_.get(n.as_str()).unwrap().size, mark);
     }
-}
-
-/// `modrules._unreadable`.
-pub(crate) fn unreadable(trigger: &J, m: &Mod) -> bool {
-    if !matches!(trigger, J::Obj(_)) {
-        return false;
-    }
-    let known = |k: &str| matches!(k, "civilized" | "war" | "exists" | "is_greater_power" | "ai"
-        | "tag" | "government" | "primary_culture" | "nationalvalue" | "revanchism" | "badboy"
-        | "prestige" | "war_exhaustion" | "plurality" | "money" | "total_pops" | "year"
-        | "capital" | "owns" | "is_culture_group" | "invention" | "technology"
-        | "has_country_flag" | "has_country_modifier") || m.reform_names.contains(k);
-    for (key, value) in trigger.pairs() {
-        if key.starts_with('_') {
-            continue;
-        }
-        let parts: Vec<&J> = match value {
-            J::List(v) => v.iter().collect(),
-            one => vec![one],
-        };
-        for value in parts {
-            if key == "AND" || key == "OR" || key == "NOT" {
-                if !matches!(value, J::Obj(_)) || unreadable(value, m) {
-                    return true;
-                }
-            } else if key == "capital_scope" {
-                if !matches!(value, J::Obj(_)) {
-                    return true;
-                }
-                for (name, inner) in value.pairs() {
-                    if name.starts_with('_') {
-                        continue;
-                    }
-                    let n = match inner { J::List(v) => v.len(), _ => 1 };
-                    for _ in 0..n {
-                        if !matches!(name.as_str(), "AND" | "OR" | "NOT" | "continent" | "province_id") {
-                            return true;
-                        }
-                    }
-                }
-            } else if !known(key) {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 pub fn thousands(n: i64) -> String {

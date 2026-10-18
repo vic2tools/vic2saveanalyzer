@@ -370,6 +370,56 @@ pub struct Asker<'a> {
     pub is_player: bool,
 }
 
+/// Every condition `Asker::condition_ok` answers, besides a reform's name.
+/// A trigger holding anything else cannot be judged (`unreadable`); a key
+/// added to one belongs in the other.
+const CONDITIONS: [&str; 24] = ["civilized", "war", "exists", "is_greater_power", "ai", "tag",
+    "government", "primary_culture", "nationalvalue", "revanchism", "badboy", "prestige",
+    "war_exhaustion", "plurality", "money", "total_pops", "year", "capital", "owns",
+    "is_culture_group", "invention", "technology", "has_country_flag", "has_country_modifier"];
+
+/// `modrules._unreadable`.
+pub fn unreadable(trigger: &J, m: &Mod) -> bool {
+    if !matches!(trigger, J::Obj(_)) {
+        return false;
+    }
+    let known = |k: &str| CONDITIONS.contains(&k) || m.reform_names.contains(k);
+    for (key, value) in trigger.pairs() {
+        if key.starts_with('_') {
+            continue;
+        }
+        let parts: Vec<&J> = match value {
+            J::List(v) => v.iter().collect(),
+            one => vec![one],
+        };
+        for value in parts {
+            if key == "AND" || key == "OR" || key == "NOT" {
+                if !matches!(value, J::Obj(_)) || unreadable(value, m) {
+                    return true;
+                }
+            } else if key == "capital_scope" {
+                if !matches!(value, J::Obj(_)) {
+                    return true;
+                }
+                for (name, inner) in value.pairs() {
+                    if name.starts_with('_') {
+                        continue;
+                    }
+                    let n = match inner { J::List(v) => v.len(), _ => 1 };
+                    for _ in 0..n {
+                        if !matches!(name.as_str(), "AND" | "OR" | "NOT" | "continent" | "province_id") {
+                            return true;
+                        }
+                    }
+                }
+            } else if !known(key) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 impl<'a> Asker<'a> {
     /// `_trigger_ok`.
     pub fn trigger_ok(&self, trigger: &J, nat: &Nation) -> D<T> {

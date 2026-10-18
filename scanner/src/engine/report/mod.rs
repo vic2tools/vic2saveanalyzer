@@ -19,7 +19,6 @@ use crate::engine::dump::{int_keyed, obj};
 use crate::engine::{say, Run};
 use crate::engine::finish::{escape_angles, Kept, Profile, Row, Spent, Val};
 use crate::engine::tables::Tables;
-use crate::py::json::J;
 use crate::engine::mapflags;
 use crate::engine::market::{self, PriceRow, SnapRow};
 use crate::engine::model::Meta;
@@ -37,7 +36,6 @@ mod say;
 mod sections;
 
 pub use say::{say_mod, thousands};
-pub(crate) use say::unreadable;
 pub use sections::{gain_series, growth_series};
 use csv::*;
 use map::*;

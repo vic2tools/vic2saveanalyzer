@@ -123,7 +123,7 @@ fn explain_mob(tag: &str, m: &Mod, live: &FxSet<String>, pres: &[Pre], files: &[
     crate::outln!("\n{} has {} techs and {} active inventions; {} sources grant it mobilisation size.",
                   tag, nat.tech_list.len(), nat.invention_ids.len(), parts.len());
     let skipped: Vec<&str> = m.triggered_mob.iter()
-        .filter(|t| t.size != 0.0 && crate::engine::report::unreadable(&t.trigger, m))
+        .filter(|t| t.size != 0.0 && rules::unreadable(&t.trigger, m))
         .map(|t| t.name.as_str()).collect();
     if !skipped.is_empty() {
         crate::outln!("Left out, because their trigger asks something this cannot answer: {}.",
