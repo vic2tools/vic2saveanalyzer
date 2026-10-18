@@ -1,4 +1,10 @@
-// A faster province scanner for the Victoria 2 campaign analyzer.
+// Reading bytes as Python read text: the numbers, the quotes,
+// the country tags, the latin-1 decode, and finding a needle. `find` and the
+// quotes are used by both readers and written once here. The country reader
+// keeps its own number parsing: it trims latin-1's whitespace -- NEL and the
+// no-break space besides the ASCII -- which is wider than the ASCII these
+// byte versions trim, and the two agree only because the game writes ASCII
+// numbers.
 // Copyright (C) 2026 vic2tools
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -7,14 +13,6 @@
 // option) any later version. It is distributed WITHOUT ANY WARRANTY; without
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
-//
-// Reading bytes as the analyzer's Python reads text: the numbers, the quotes,
-// the country tags, the latin-1 decode, and finding a needle. `find` and the
-// quotes are used by both readers and written once here. The country reader
-// keeps its own number parsing: it trims latin-1's whitespace -- NEL and the
-// no-break space besides the ASCII -- which is wider than the ASCII these
-// byte versions trim, and the two agree only because the game writes ASCII
-// numbers.
 
 // Byte versions of the three conversions. A save's numbers are ASCII, so
 // nothing here needs the file decoded first -- which is the whole point:

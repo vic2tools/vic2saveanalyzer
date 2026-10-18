@@ -157,9 +157,9 @@ pub fn export(path: &str) -> D<J> {
     put("tech_mob", fmap(&tech_mob));
     put("nv_mob", fmap(&nv_mob));
     put("tech_count", J::Int(tech_count));
-    // Read by Python only when the page is drawn, where what it raises is
-    // not turned into a sentence: handed back, not refused.
-    // Past the rules, even a refusal in words is something the run stops over.
+    // The map and the flags matter only to the page, where Python turned no
+    // error into a sentence: past the rules, even a refusal in words is
+    // something the run stops over.
     let later = |d: Decline| Decline::Unreadable(format!("the map or the flags: {}", d.text()));
     put("colours", if has_map { r.country_colours().map_err(later)? } else { J::Obj(Vec::new()) });
     put("sea", J::List(if has_map {

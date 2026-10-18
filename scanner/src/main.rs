@@ -12,7 +12,7 @@
 //     vic2scan analyze --run RUN.json ...   a run, as the launcher hands it
 //                                           over (`front`)
 //     vic2scan mod-export MOD               the mod folder as JSON
-//     vic2scan bench-engine RUN.json [N]    pass one's parts, timed
+//     vic2scan bench-engine RUN.json [N]    the first N saves read, timed
 //     vic2scan selftest-...                 what the checks hold the parts to
 //
 // The rules the readers follow are not this program's own. They are the

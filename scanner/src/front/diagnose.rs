@@ -1,5 +1,4 @@
-// The analyzer's questions about saves rather than its report: `--peek` and
-// `--verify`, as `explain.py` asks and answers them.
+// The questions about saves rather than the report: `--peek` and `--verify`.
 // Copyright (C) 2026 vic2tools
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -9,11 +8,10 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 //
-// Both read a save as text Python's way (`v2parse.Tokens`, `parse_block`,
-// `pop_culture`), and print what `peek_save` and `verify_save` print, line
-// for line. A save Python would refuse on the way in raises out of either
-// and ends the Python run with a traceback; those are handed back to it
-// before anything is printed, so the Python says what it says.
+// Both read a save token by token (`save::tokens`, `parse_block`,
+// `pop_culture`), as Python's `peek_save` and `verify_save` did, and print
+// what those printed, line for line. A save that cannot be read at all is
+// refused in a sentence before anything is printed (`whole`).
 
 use crate::save::clause::{unquote, V};
 use crate::py::num::float_latin1;

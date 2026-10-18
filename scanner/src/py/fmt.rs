@@ -1,4 +1,4 @@
-// Numbers and text as the analyzer's Python writes them.
+// Numbers and text as Python wrote them.
 // Copyright (C) 2026 vic2tools
 //
 // This program is free software: you can redistribute it and/or modify it

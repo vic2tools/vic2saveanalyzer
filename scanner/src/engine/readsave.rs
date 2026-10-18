@@ -245,8 +245,8 @@ fn load<'a>(path: &str, raw: &'a mut Vec<u8>) -> std::io::Result<Bytes<'a>> {
     Ok(Bytes::Buffer(&raw[..]))
 }
 
-/// A save not read: skipped with Python's sentence, the way the Python
-/// skips a file it refuses, or the run handed back.
+/// A save not read: skipped, in the sentence the run says of it, or
+/// something the run stops over.
 pub enum Refused {
     Skip(String),
     Back(String),
@@ -372,7 +372,8 @@ fn read_bytes(path: &str, reading: &Reading, raw: &[u8],
         .map_err(|_| Refused::Back(format!("{}: the record could not be built", path)))?;
     // Again after the scan, not only after the read: a mapped file is read
     // as it is scanned, and one the game rewrote meanwhile would be half of
-    // each. Python reads it again, and says so if it changes a second time.
+    // each. It is read again (`read_save`), and stops the run if it changes
+    // a second time.
     if stamp(path) != before {
         return Err(Refused::Back(CHANGED.into()));
     }

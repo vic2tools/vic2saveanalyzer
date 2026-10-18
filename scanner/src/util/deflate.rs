@@ -30,7 +30,7 @@ const SYMBOLS_PER_BLOCK: usize = 16383;
 
 /// One of zlib's configuration rows for the lazy matcher: how hard it looks
 /// for a match (levels 4-9 of `deflate_slow`; 1-3 are `deflate_fast`, which
-/// this does not do, and which did not pay: see INTERNALS.md).
+/// this does not do: measured, it did not pay).
 #[derive(Clone, Copy)]
 pub struct Level {
     pub good: usize,

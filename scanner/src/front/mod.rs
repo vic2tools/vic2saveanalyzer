@@ -1,4 +1,4 @@
-// A run of the analyzer, as `vic2_analyzer.main` makes it, in Rust.
+// A run, before the engine: what was asked, and of which saves and mod.
 // Copyright (C) 2026 vic2tools
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -10,18 +10,15 @@
 //
 //     vic2scan analyze --run RUN.json [--refused FILE] [--protocol]
 //
-// RUN is the `run.Run` Python's command line made (`dataclasses.asdict`).
-// From it this does what `_main` does for an ordinary report: finds the
-// saves, settles the game and the mod, takes the stamp and answers "nothing
-// has changed" when it can, reads the mod's head, puts the saves in date
-// order, and runs the engine (`engine::run`) -- printing what Python
-// printed, in its words, and refusing what it refused.
+// RUN is the launcher's settings (`run.Run`, written by `vic2_analyzer.py`).
+// From them this finds the saves, settles the game and the mod, takes the
+// stamp and answers "nothing has changed" when it can, reads the mod's head,
+// puts the saves in date order, and runs the engine (`engine::run`); or it
+// answers `--peek`, `--verify` or a `--cross` survey instead.
 //
-// What it does not do yet -- the diagnostics, `--cross`, `--peek`,
-// `--verify` -- it hands back (status 3) before saying anything. What the
-// engine still hands back later is what would crash the Python itself (an
-// `int()` of an infinity, a number past 64 bits), and there the Python,
-// doing the run again, says again what had been said.
+// A run is refused in a sentence (`refuse`: status 1, or 4 with the sentence
+// in the `--refused` file the launcher reads), or stopped over input it
+// cannot read at all (`stop`, `engine::decline`).
 
 pub mod compare;
 pub mod survey;

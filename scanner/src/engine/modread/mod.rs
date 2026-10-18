@@ -8,18 +8,18 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 //
-// What comes out is what `export_mod` (`testkit/modexport.py`) makes of the
-// `Mod` Python reads -- every field the engine uses, in JSON's terms -- so
-// the two are held to each other as text (`testkit/modread.py`), and the
-// engine reads either one the same way.
+// What comes out is every field the engine uses, in JSON's terms
+// (`export`), which is what the engine keeps of a mod between runs and reads
+// back (`Mod::from_json`); `testkit/modread.py` holds it to its recorded
+// answers.
 //
 // Each function below is its namesake in `mod_reader.py`, rule for rule,
 // and the regular expressions are Python's own, run by `py::re`. The texts
 // are latin-1, a byte to a character, except the localisation, which the
-// game writes in Windows-1252 and Python decodes that way. Where Python
-// would raise -- a number `float()` refuses, a file it cannot open -- this
-// declines, and the analyzer reads the mod in Python, which raises as it
-// always did.
+// game writes in Windows-1252 and Python decoded that way. Where Python
+// raised -- a number `float()` refuses, a file it cannot open -- this
+// declines: in Python's words where it turned the error into a sentence
+// (`Decline::Raised`), and otherwise as something the run stops over.
 
 use crate::save::clause::{parse, to_float, tokens, unquote, V};
 use crate::engine::rules::{Decline, D};

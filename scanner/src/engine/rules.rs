@@ -9,9 +9,9 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 //
-// The mod itself is read by the analyzer's Python (`mod_reader`) and handed
-// over as JSON (`engine.export_mod`); this holds it and answers the same
-// questions `modrules` answers, in the same order, with the same arithmetic.
+// The mod as `modread` read it (`Mod`), settled against a campaign
+// (`Rules`), answers the questions Python's `modrules` answered, in the same
+// order, with the same arithmetic.
 // A sum here is added in the order Python's `sum` adds it, because float
 // addition is not associative and the mobilisation size is printed to five
 // places.

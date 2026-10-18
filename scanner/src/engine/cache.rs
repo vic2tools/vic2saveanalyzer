@@ -561,9 +561,9 @@ impl Store {
 
 const MOD_MAGIC: &[u8] = b"V2ENGM01";
 
-/// Where the mod read from `path` is kept, when Python has signed its files
-/// (`mod_reader.mod_signature`, which it takes for the stamp anyway): keyed
-/// by the folder, every file's size and time, and this program's version.
+/// Where the mod read from `path` is kept, when the front has signed its
+/// files (`mod_signature`, which it takes for the stamp anyway): keyed by the
+/// folder, every file's size and time, and this program's version.
 /// Kept whatever `--no-cache` says, as Python keeps its own read of a mod.
 pub fn mod_slot(store: &Store, path: &str, signature: Option<&str>) -> Option<(String, String)> {
     let signature = signature?;

@@ -8,9 +8,9 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 //
-// The spec is what the front end (`front`) makes of a run: the saves in
-// report order, how each is read, how each nation is finished, and where the
-// report goes. The mod folder is named there too (`mod_path`), and read here
+// The run is what the front end (`front`) settles: the saves in report
+// order, how each is read, how each nation is finished, and where the report
+// goes. The mod folder is named there too (`mod_path`), and read here
 // (`modread`) on a thread of its own while the saves are.
 //
 // Every save is read on every core (`prepare`, pass one), the campaign's
@@ -210,7 +210,7 @@ pub fn bench(run: &Run, n: usize) {
     eprintln!("per save: read+scan+build {:.1} ms, prepare {:.1} ms", t_read / k, t_prep / k);
 }
 
-/// A run as the front end settles it. A run handed back never returns.
+/// A run as the front end settles it. A run stopped (`decline`) never returns.
 pub fn run(run: Run) -> report::Outcome {
     phase("start");
     let n = run.files.len();

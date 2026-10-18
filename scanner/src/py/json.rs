@@ -8,12 +8,12 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 //
-// What the analyzer hands the report engine -- the run's settings and the
-// mod it has read -- comes as JSON written by Python, and some of it goes
-// into the report as it came (the technology tree, the culture names). An
-// object keeps its keys in order, an int stays apart from a float, and
-// writing a value back out gives the text `json.dumps(value,
-// separators=(",", ":"))` gave.
+// The launcher's RUN file and the mod as the engine keeps it (`modread`'s
+// export, cached between runs) are JSON, and some of the mod goes into the
+// report as it came (the technology tree, the culture names). An object
+// keeps its keys in order, an int stays apart from a float, and writing a
+// value back out gives the text `json.dumps(value, separators=(",", ":"))`
+// gave.
 
 use crate::py::fmt::{push_int, push_json_float, push_json_str};
 

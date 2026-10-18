@@ -1,4 +1,7 @@
-// A faster province scanner for the Victoria 2 campaign analyzer.
+// The province blocks: most of the file, and every pop in the game. What one
+// province adds to its owner, read by the rules `readsave.read_province`
+// reads it by, and the save-wide bookkeeping -- who owns what, each pop's
+// type by its id, the world's people -- that no one nation's record holds.
 // Copyright (C) 2026 vic2tools
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -7,11 +10,6 @@
 // option) any later version. It is distributed WITHOUT ANY WARRANTY; without
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
-//
-// The province blocks: most of the file, and every pop in the game. What one
-// province adds to its owner, read by the rules `readsave.read_province`
-// reads it by, and the save-wide bookkeeping -- who owns what, each pop's
-// type by its id, the world's people -- that no one nation's record holds.
 
 use crate::save::text::{find, find_pair, is_number_b, to_float_b, to_int_b, trim_b, trim_end_b,
                   unquote_b};

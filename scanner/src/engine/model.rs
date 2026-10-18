@@ -8,9 +8,9 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 //
-// A save's `(meta, nations)` as the analyzer's Python reader built them,
-// as Rust structs, fold for fold: the same fields, filled by the same rules,
-// in the same order. Where Python's
+// A save's `(meta, nations)` as Python's reader built them, as Rust
+// structs, fold for fold: the same fields, filled by the same rules, in the
+// same order. Where Python's
 // record holds an int in one save and a float in another -- a nation with no
 // naval base keeps the blank record's `0`, one with a base gets `47.0` --
 // the field is a `Num`, because the tables print the two differently.

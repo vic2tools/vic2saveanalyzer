@@ -11,7 +11,7 @@
 // The scan (`province.rs`, `country.rs`) finds a save's entries by where
 // the game puts them: a top-level key at the left margin with its `{` on
 // the next line, a province's fields one tab in, a pop's two. A save
-// reflowed by a text editor is none of that, and Python reads it the slow
+// reflowed by a text editor is none of that, and Python read it the slow
 // way instead (`readsave._Whole` with `flat=False`): `v2parse.Tokens`,
 // `walk_entries`, `parse_block` and `read_pop`, the country and province
 // readers fed by them. These are those, rule for rule -- the token pattern
@@ -556,8 +556,8 @@ pub struct Walked<'a> {
 }
 
 /// A whole save, walked: `_walk_top` and the two passes `analyze_save`
-/// makes over its blocks. Err is what Python would raise out of, which is
-/// handed back.
+/// makes over its blocks. Err is what Python raised over, which stops the
+/// run.
 #[allow(clippy::too_many_arguments)]
 pub fn read<'a>(text_: &'a [u8], pop_types: &[Vec<u8>], mob_types: &[Vec<u8>], tables: &Tables,
                 scan: &mut Scan, population_groups: &FxMap<i64, i64>)

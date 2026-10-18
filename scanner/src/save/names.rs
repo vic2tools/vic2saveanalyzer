@@ -100,7 +100,7 @@ fn shared(name: &str) -> Sym {
 struct Local {
     /// A save's bytes to the name they decode to.
     by_bytes: FxMap<Vec<u8>, Sym>,
-    /// Text to name, for the mod, the spec and the cache.
+    /// Text to name, for the mod, the run's settings and the cache.
     by_text: FxMap<&'static str, Sym>,
     /// The table's texts so far, by id.
     mirror: Vec<&'static str>,
