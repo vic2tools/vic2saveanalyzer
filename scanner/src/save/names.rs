@@ -27,7 +27,7 @@
 // Names are leaked: the run ends by forgetting its memory anyway, and a
 // `--cross` run is a few campaigns, a few thousand names each.
 
-use crate::fx::FxMap;
+use crate::util::fx::FxMap;
 #[cfg(not(windows))]
 use std::cell::Cell;
 use std::sync::{Mutex, OnceLock};
@@ -100,7 +100,7 @@ fn shared(name: &str) -> Sym {
 struct Local {
     /// A save's bytes to the name they decode to.
     by_bytes: FxMap<Vec<u8>, Sym>,
-    /// Text to name, for the mod, the spec and the cache.
+    /// Text to name, for the mod, the run's settings and the cache.
     by_text: FxMap<&'static str, Sym>,
     /// The table's texts so far, by id.
     mirror: Vec<&'static str>,
@@ -161,7 +161,7 @@ pub fn intern(bytes: &[u8]) -> Sym {
         if let Some(&s) = l.by_bytes.get(bytes) {
             return s;
         }
-        let s = shared(&crate::text::latin1(bytes));
+        let s = shared(&crate::save::text::latin1(bytes));
         l.by_bytes.insert(bytes.to_vec(), s);
         s
     })

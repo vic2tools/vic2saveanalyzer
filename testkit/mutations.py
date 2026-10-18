@@ -233,7 +233,7 @@ MUTATIONS = [
         'in another is answered with the old report',
         'staleness.py', (),
         [
-            ('scanner/src/front/cross.rs', '    let read: Vec<&Surveyed> = found.iter().filter(|e| e.mod_path.is_some()).collect();', '    let read: Vec<&Surveyed> = found.iter().max_by_key(|e| e.files.len()).into_iter().collect();'),
+            ('scanner/src/front/survey.rs', '    let read: Vec<&Surveyed> = found.iter().filter(|e| e.mod_path.is_some()).collect();', '    let read: Vec<&Surveyed> = found.iter().max_by_key(|e| e.files.len()).into_iter().collect();'),
         ]),
     Mutation(
         'stamp-outlives-unfinished-run',
@@ -249,7 +249,7 @@ MUTATIONS = [
         'a table open in Excel is not refused in a sentence',
         'frontcheck.py', (),
         [
-            ('scanner/src/engine/report.rs', '            Err(e) if held_elsewhere(&e) => refused.push(shown),', '            Err(e) if false && held_elsewhere(&e) => refused.push(shown),'),
+            ('scanner/src/engine/report/csv.rs', '            Err(e) if held_elsewhere(&e) => refused.push(shown),', '            Err(e) if false && held_elsewhere(&e) => refused.push(shown),'),
         ]),
     Mutation(
         'stamp-ignores-a-setting',
@@ -264,7 +264,7 @@ MUTATIONS = [
         "run's copy stays in the folder",
         'staleness.py', (),
         [
-            ('scanner/src/engine/report.rs', '    for (k, name, cols) in order {\n', '    for (k, name, cols) in order {\n        if k > 0 && k < 100 && c.text[k].iter().all(|s| s.is_empty()) { continue; }\n'),
+            ('scanner/src/engine/report/csv.rs', '    for (k, name, cols) in order {\n', '    for (k, name, cols) in order {\n        if let Table::PerSave(i) = k { if i > 0 && c.text[i].iter().all(|s| s.is_empty()) { continue; } }\n'),
         ]),
     Mutation(
         'goal-judged-before-first-save',
@@ -294,7 +294,7 @@ MUTATIONS = [
         'a save that stops part-way through is read as if it were whole',
         'mangled.py', (),
         [
-            ('scanner/src/engine/mod.rs', "    if end.map(|i| tail[i]) != Some(b'}') {", '    if false {'),
+            ('scanner/src/engine/readsave.rs', "    if end.map(|i| tail[i]) != Some(b'}') {", '    if false {'),
         ]),
     Mutation(
         'naval-base-int-becomes-float',
@@ -325,7 +325,7 @@ MUTATIONS = [
         'longer decompresses',
         'enginecompress.py', ('scanner\\target\\release\\vic2scan.exe',),
         [
-            ('scanner/src/deflate.rs', '"gz5" => gzip_level(&data, &LEVEL5),', '"gz5" => gzip_level(&data, &LEVEL5)[1..].to_vec(),'),
+            ('scanner/src/util/deflate.rs', '"gz5" => gzip_level(&data, &LEVEL5),', '"gz5" => gzip_level(&data, &LEVEL5)[1..].to_vec(),'),
         ]),
     Mutation(
         'save-key-drops-reading',
@@ -402,14 +402,14 @@ MUTATIONS = [
         'the latin-1 letters too',
         'modread.py', ('--rounds', '40'),
         [
-            ('scanner/src/pyre.rs', '        | 0xb9 | 0xba | 0xbc..=0xbe | 0xc0..=0xd6 | 0xd8..=0xf6 | 0xf8..=0xff)', '        | 0xb9 | 0xba | 0xbc..=0xbe)'),
+            ('scanner/src/py/re.rs', '        | 0xb9 | 0xba | 0xbc..=0xbe | 0xc0..=0xd6 | 0xd8..=0xf6 | 0xf8..=0xff)', '        | 0xb9 | 0xba | 0xbc..=0xbe)'),
         ]),
     Mutation(
         'modread-lazy-is-greedy',
         'a lazy repeat is tried longest first',
         'modread.py', ('--rounds', '40'),
         [
-            ('scanner/src/pyre.rs', '                            for c in *min..=run {', '                            for c in (*min..=run).rev() {'),
+            ('scanner/src/py/re.rs', '                            for c in *min..=run {', '                            for c in (*min..=run).rev() {'),
         ]),
     Mutation(
         'modread-file-case-counted-twice',
@@ -417,14 +417,14 @@ MUTATIONS = [
         'army_tech.txt',
         'modread.py', ('--rounds', '40'),
         [
-            ('scanner/src/engine/modread.rs', '                chosen.set(lower(&name), (name, full));', '                chosen.set(name.clone(), (name, full));'),
+            ('scanner/src/engine/modread/reader.rs', '                chosen.set(lower(&name), (name, full));', '                chosen.set(name.clone(), (name, full));'),
         ]),
     Mutation(
         'modread-no-underscores',
         "the Rust's float() refuses 1_000, which Python reads as a thousand",
         'modread.py', ('--rounds', '40'),
         [
-            ('scanner/src/engine/modread.rs', '    let t = no_underscores(num_trim(s))?;', '    let t = num_trim(s).to_vec();'),
+            ('scanner/src/py/num.rs', '    float_of(&no_underscores(latin1_trim(s))?)', '    float_of(latin1_trim(s))'),
         ]),
     Mutation(
         'modread-block-name-empty',
@@ -432,7 +432,7 @@ MUTATIONS = [
         'keeps its repr',
         'modread.py', ('--rounds', '40'),
         [
-            ('scanner/src/engine/modread.rs', '                Some(v) => unquote(unquote(&str_of(v))).to_vec(),', '                Some(V::Str(v)) => unquote(v).to_vec(),\n                Some(_) => Vec::new(),'),
+            ('scanner/src/engine/modread/pieces.rs', '                Some(v) => unquote(unquote(&str_of(v))).to_vec(),', '                Some(V::Str(v)) => unquote(v).to_vec(),\n                Some(_) => Vec::new(),'),
         ]),
     Mutation(
         'modread-ellipsis-is-space',
@@ -440,14 +440,14 @@ MUTATIONS = [
         'makes it an ellipsis',
         'modread.py', ('--rounds', '40'),
         [
-            ('scanner/src/engine/modread.rs', '    let sp = |c: u8| matches!(c, 0x09..=0x0d | 0x1c..=0x20 | 0xa0);', '    let sp = |c: u8| matches!(c, 0x09..=0x0d | 0x1c..=0x20 | 0x85 | 0xa0);'),
+            ('scanner/src/engine/modread/reader.rs', '    let sp = |c: u8| matches!(c, 0x09..=0x0d | 0x1c..=0x20 | 0xa0);', '    let sp = |c: u8| matches!(c, 0x09..=0x0d | 0x1c..=0x20 | 0x85 | 0xa0);'),
         ]),
     Mutation(
         'modread-last-name-wins',
         'a name defined twice in the localisation takes the later one',
         'modread.py', ('--rounds', '40'),
         [
-            ('scanner/src/engine/modread.rs', '            if wanted.contains(&l.key) && !out.contains_key(&l.key) {', '            if wanted.contains(&l.key) {'),
+            ('scanner/src/engine/modread/reader.rs', '            if wanted.contains(&l.key) && !out.contains_key(&l.key) {', '            if wanted.contains(&l.key) {'),
         ]),
     Mutation(
         'modread-kept-copy-unsigned',
@@ -485,14 +485,14 @@ MUTATIONS = [
         'inside its navies',
         'frontcheck.py', (),
         [
-            ('scanner/src/engine/walk.rs', '        } else if key == b"army" || key == b"navy" {', '        } else if key == b"army" {'),
+            ('scanner/src/save/walk.rs', '        } else if key == b"army" || key == b"navy" {', '        } else if key == b"army" {'),
         ]),
     Mutation(
         'walk-colonies-ignored',
         'a save laid out another way reads no state as colonial',
         'frontcheck.py', (),
         [
-            ('scanner/src/engine/walk.rs', '                        let colonial = get(&block, b"is_colonial").is_some();', '                        let colonial = false;'),
+            ('scanner/src/save/walk.rs', '                        let colonial = block.get(b"is_colonial").is_some();', '                        let colonial = false;'),
         ]),
     Mutation(
         'cross-last-fit-wins',
@@ -500,7 +500,7 @@ MUTATIONS = [
         'wins',
         'frontcheck.py', (),
         [
-            ('scanner/src/front/cross.rs', '    fits.sort_by(|a, b| a.partial_cmp(b).unwrap());\n    let (_r, label, root) = fits.remove(0);', '    fits.sort_by(|a, b| a.partial_cmp(b).unwrap());\n    let (_r, label, root) = fits.pop().unwrap();'),
+            ('scanner/src/front/survey.rs', '    fits.sort_by(|a, b| a.partial_cmp(b).unwrap());\n    let (_r, label, root) = fits.remove(0);', '    fits.sort_by(|a, b| a.partial_cmp(b).unwrap());\n    let (_r, label, root) = fits.pop().unwrap();'),
         ]),
     Mutation(
         'cross-flags-never-break',
@@ -508,7 +508,7 @@ MUTATIONS = [
         'it lacks',
         'frontcheck.py', (),
         [
-            ('scanner/src/front/cross.rs', '        if worst >= 6 {', '        if worst >= 600 {'),
+            ('scanner/src/front/survey.rs', '        if worst >= 6 {', '        if worst >= 600 {'),
         ]),
     Mutation(
         'market-snapshot-goods-by-id',
@@ -516,7 +516,7 @@ MUTATIONS = [
         'their names, not by name',
         'enginecheck.py', (),
         [
-            ('scanner/src/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
+            ('scanner/src/save/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
             ('scanner/src/engine/market.rs', '        goods.sort_by(|a, b| names::cmp(*a, *b));\n        let get', '        goods.sort_by_key(|g| names::id(*g));\n        let get'),
         ]),
     Mutation(
@@ -525,7 +525,7 @@ MUTATIONS = [
         'not by name',
         'enginecheck.py', (),
         [
-            ('scanner/src/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
+            ('scanner/src/save/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
             ('scanner/src/engine/market.rs', '        goods.sort_by(|a, b| names::cmp(*a, *b));\n        for good in goods {', '        goods.sort_by_key(|g| names::id(*g));\n        for good in goods {'),
         ]),
     Mutation(
@@ -638,7 +638,7 @@ MUTATIONS = [
         "the page's armies, as if the province's kinds were read last first",
         'enginecheck.py', (),
         [
-            ('scanner/src/engine/report.rs', '                let mut ranked: Vec<&Stack> = types.iter().collect();', '                let mut ranked: Vec<&Stack> = types.iter().rev().collect();'),
+            ('scanner/src/engine/report/map.rs', '                let mut ranked: Vec<&Stack> = types.iter().collect();', '                let mut ranked: Vec<&Stack> = types.iter().rev().collect();'),
         ]),
     Mutation(
         'army-provinces-reversed',
@@ -646,7 +646,7 @@ MUTATIONS = [
         'order last met first',
         'enginecheck.py', (),
         [
-            ('scanner/src/country.rs', '        None => {\n            stacks.push(stack);\n            return;\n        }', '        None => {\n            stacks.insert(0, stack);\n            return;\n        }'),
+            ('scanner/src/save/country.rs', '        None => {\n            stacks.push(stack);\n            return;\n        }', '        None => {\n            stacks.insert(0, stack);\n            return;\n        }'),
         ]),
     Mutation(
         'ship-types-by-id',
@@ -654,7 +654,7 @@ MUTATIONS = [
         'the names, not by name',
         'enginecheck.py', (),
         [
-            ('scanner/src/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
+            ('scanner/src/save/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
             ('scanner/src/engine/finish.rs', '        ship_types.sort_by(|a, b| names::cmp(a.kind, b.kind));', '        ship_types.sort_by_key(|s| names::id(s.kind));'),
         ]),
     Mutation(
@@ -663,7 +663,7 @@ MUTATIONS = [
         'run met the names, not by name',
         'enginecheck.py', (),
         [
-            ('scanner/src/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
+            ('scanner/src/save/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
             ('scanner/src/engine/finish.rs', '        regiments.sort_by(|a, b| names::cmp(a.0, b.0));', '        regiments.sort_by_key(|r| names::id(r.0));'),
         ]),
     Mutation(

@@ -17,36 +17,23 @@
 // these, the last save read again whole where one nation is asked about.
 // Err is the `RunError` Python raises, in its words.
 
-use crate::engine::finish::Pre;
+use crate::engine::finish::{in_pool, Pre, Spec};
 use crate::engine::model::Nation;
-use crate::engine::rules::{self, Mod};
-use crate::engine::{read_save, Reading, Refused};
-use crate::jsonr::J;
-use crate::fx::FxSet;
-use crate::names::{self, Sym};
+use crate::engine::rules::{self, Mod, Rules};
+use crate::engine::{Reading, readsave::read_save, readsave::Refused};
+use crate::util::fx::FxSet;
+use crate::save::names::{self, Sym};
 
-/// What was asked, and the settings the answers read.
-pub struct Ask {
-    pub kind: String,
-    pub tag: String,
-    pub pop_per_regiment: i64,
-    pub mob_types: Vec<String>,
-    pub include_occupied: bool,
-}
-
-impl Ask {
-    pub fn from_json(j: &J) -> Option<Ask> {
-        if j.is_null() {
-            return None;
-        }
-        Some(Ask {
-            kind: j.at("kind").str().to_string(),
-            tag: j.at("tag").str().to_string(),
-            pop_per_regiment: j.at("pop_per_regiment").int(),
-            mob_types: j.at("mob_types").list().iter().map(|t| t.str().to_string()).collect(),
-            include_occupied: j.at("include_occupied").truthy(),
-        })
-    }
+/// What was asked, each about the nation its tag names where it names one.
+pub enum Ask {
+    /// `--explain-mob-pool TAG`
+    MobPool(String),
+    /// `--check-inventions`
+    CheckInventions,
+    /// `--inventions TAG`
+    Inventions(String),
+    /// `--explain-mob TAG`
+    Mob(String),
 }
 
 fn right(text: &str, width: usize) -> String {
@@ -101,24 +88,23 @@ fn last_nation(pres: &[Pre], files: &[String], reading: &Reading, tag: &str)
 
 /// `explain(args, mod, live, parsed)`, for the one that was asked.
 #[allow(clippy::too_many_arguments)]
-pub fn answer(ask: &Ask, m: &Mod, live: &FxSet<String>, pres: &[Pre], files: &[String],
-              reading: &Reading) -> Result<(), String> {
-    let tag = ask.tag.to_uppercase();
-    match ask.kind.as_str() {
-        "explain_mob_pool" => explain_mob_pool(ask, &tag, m, live, pres, files, reading),
-        "check_inventions" => check_inventions(m, pres),
-        "inventions" => inventions(&tag, m, pres, files, reading),
-        _ => explain_mob(&tag, m, live, pres, files, reading),
+pub fn answer(ask: &Ask, spec: &Spec, m: &Rules, live: &FxSet<String>, pres: &[Pre],
+              files: &[String], reading: &Reading) -> Result<(), String> {
+    match ask {
+        Ask::MobPool(tag) => explain_mob_pool(spec, &tag.to_uppercase(), m, live, pres, files, reading),
+        Ask::CheckInventions => check_inventions(m, pres),
+        Ask::Inventions(tag) => inventions(&tag.to_uppercase(), m, pres, files, reading),
+        Ask::Mob(tag) => explain_mob(&tag.to_uppercase(), m, live, pres, files, reading),
     }
 }
 
-fn explain_mob(tag: &str, m: &Mod, live: &FxSet<String>, pres: &[Pre], files: &[String],
+fn explain_mob(tag: &str, m: &Rules, live: &FxSet<String>, pres: &[Pre], files: &[String],
                reading: &Reading) -> Result<(), String> {
     let (nat, player) = last_nation(pres, files, reading, tag)?;
     let meta = &pres.last().unwrap().meta;
     let world = rules::save_world(meta, m);
     let mut parts = rules::breakdown(&nat, m, Some(live), Some(&world), player)
-        .unwrap_or_else(|d| crate::engine::decline(&d.0));
+        .unwrap_or_else(|d| crate::engine::decline(d.text()));
     parts.sort_by(|a, b| a.0.cmp(b.0).then(b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal)));
     crate::outln!("\nMobilisation size for {} at {}:", tag, meta.date);
     let mut total = 0.0;
@@ -137,7 +123,7 @@ fn explain_mob(tag: &str, m: &Mod, live: &FxSet<String>, pres: &[Pre], files: &[
     crate::outln!("\n{} has {} techs and {} active inventions; {} sources grant it mobilisation size.",
                   tag, nat.tech_list.len(), nat.invention_ids.len(), parts.len());
     let skipped: Vec<&str> = m.triggered_mob.iter()
-        .filter(|t| t.size != 0.0 && crate::engine::report::unreadable(&t.trigger, m))
+        .filter(|t| t.size != 0.0 && rules::unreadable(&t.trigger, m))
         .map(|t| t.name.as_str()).collect();
     if !skipped.is_empty() {
         crate::outln!("Left out, because their trigger asks something this cannot answer: {}.",
@@ -151,47 +137,21 @@ fn explain_mob(tag: &str, m: &Mod, live: &FxSet<String>, pres: &[Pre], files: &[
     Ok(())
 }
 
-/// `brigades_from_clusters`, over sizes in save order.
-fn brigades(sizes: &[i64], rate: f64, ppr: i64) -> i64 {
-    let (mut total, mut pool) = (0i64, 0.0f64);
-    let ppr = ppr as f64;
-    for &size in sizes {
-        let manpower = size as f64 * rate;
-        if manpower <= 0.0 {
-            continue;
-        }
-        if manpower >= ppr {
-            total += crate::pyfmt::floordiv(manpower, ppr) as i64;
-            pool = 0.0;
-        } else {
-            pool += manpower;
-            if pool >= ppr {
-                total += 1;
-                pool = 0.0;
-            }
-        }
-    }
-    total
-}
-
 #[allow(clippy::too_many_arguments)]
-fn explain_mob_pool(ask: &Ask, tag: &str, m: &Mod, live: &FxSet<String>, pres: &[Pre],
+fn explain_mob_pool(spec: &Spec, tag: &str, m: &Rules, live: &FxSet<String>, pres: &[Pre],
                     files: &[String], reading: &Reading) -> Result<(), String> {
     let (nat, player) = last_nation(pres, files, reading, tag)?;
     let meta = &pres.last().unwrap().meta;
     let world = rules::save_world(meta, m);
     let rate = rules::rate_for(&nat, m, Some(live), Some(&world), player)
-        .unwrap_or_else(|d| crate::engine::decline(&d.0));
-    let mob_types: FxSet<&str> = ask.mob_types.iter().map(|s| s.as_str()).collect();
-    let occ = ask.include_occupied;
+        .unwrap_or_else(|d| crate::engine::decline(d.text()));
+    let mob_types: FxSet<&str> = spec.mob_types.iter().map(|s| names::text(*s)).collect();
+    let occ = spec.include_occupied;
     // `mobilization_clusters`, and the same buckets per province and type.
     let mut per_pop: Vec<(i64, i64)> = Vec::new();
     let mut pool = 0i64;
     for (poptype, culture, size, pid) in &nat.mobilizable_pops {
-        if !mob_types.contains(names::text(*poptype)) || !nat.accepts(*culture) {
-            continue;
-        }
-        if nat.colonial_provinces.contains(pid) || (!occ && nat.occupied_provinces.contains(pid)) {
+        if !in_pool(&nat, spec, *poptype, *culture, *pid) {
             continue;
         }
         pool += size;
@@ -201,10 +161,7 @@ fn explain_mob_pool(ask: &Ask, tag: &str, m: &Mod, live: &FxSet<String>, pres: &
     let mut per_pt: Vec<(i64, Sym, i64)> = Vec::new();
     {
         for (poptype, culture, size, pid) in &nat.mobilizable_pops {
-            if !mob_types.contains(names::text(*poptype)) || !nat.accepts(*culture) {
-                continue;
-            }
-            if nat.colonial_provinces.contains(pid) || (!occ && nat.occupied_provinces.contains(pid)) {
+            if !in_pool(&nat, spec, *poptype, *culture, *pid) {
                 continue;
             }
             match per_pt.iter_mut().find(|(p, t, _)| p == pid && t == poptype) {
@@ -234,9 +191,9 @@ fn explain_mob_pool(ask: &Ask, tag: &str, m: &Mod, live: &FxSet<String>, pres: &
             drop("colonial province", *size);
         }
     }
-    let ppr = ask.pop_per_regiment;
+    let ppr = spec.pop_per_regiment;
     crate::outln!("\nMobilization pool for {} at {} ({})", tag, meta.date,
-                  crate::engine::basename(&meta.file));
+                  crate::py::path::basename(&meta.file));
     crate::outln!("  primary culture   {}", names::text(nat.primary_culture));
     let mut accepted: Vec<&str> = nat.accepted_cultures.iter().map(|s| names::text(*s)).collect();
     accepted.sort();
@@ -257,8 +214,8 @@ fn explain_mob_pool(ask: &Ask, tag: &str, m: &Mod, live: &FxSet<String>, pres: &
     for (reason, size) in order {
         crate::outln!("  excluded: {} {}", left(reason, 20), right(&commas(*size), 12));
     }
-    let per_pop_n = brigades(&per_pop.iter().map(|p| p.1).collect::<Vec<_>>(), rate, ppr);
-    let per_pt_n = brigades(&per_pt.iter().map(|p| p.2).collect::<Vec<_>>(), rate, ppr);
+    let per_pop_n = crate::engine::finish::brigades_from_clusters(&per_pop.iter().map(|p| p.1).collect::<Vec<_>>(), rate, ppr);
+    let per_pt_n = crate::engine::finish::brigades_from_clusters(&per_pt.iter().map(|p| p.2).collect::<Vec<_>>(), rate, ppr);
     let untruncated = pool as f64 * rate / ppr as f64;
     crate::outln!("\n  ceiling, grouped per pop               {}", right(&per_pop_n.to_string(), 6));
     crate::outln!("  ceiling, grouped per province and type {}   ({}{})", right(&per_pt_n.to_string(), 6),
@@ -276,7 +233,7 @@ fn explain_mob_pool(ask: &Ask, tag: &str, m: &Mod, live: &FxSet<String>, pres: &
         for (pid, _t, size) in biggest {
             let manpower = *size as f64 * rate;
             crate::outln!("    {} {} {}", right(&pid.to_string(), 6), right(&commas_f0(manpower), 10),
-                          right(&(crate::pyfmt::floordiv(manpower, ppr as f64) as i64).to_string(), 8));
+                          right(&(crate::py::fmt::floordiv(manpower, ppr as f64) as i64).to_string(), 8));
         }
     }
     Ok(())
@@ -286,7 +243,7 @@ fn explain_mob_pool(ask: &Ask, tag: &str, m: &Mod, live: &FxSet<String>, pres: &
 /// index held at least eight times.
 fn index_holdings(pres: &[Pre]) -> Vec<(i64, Vec<FxSet<&str>>)> {
     let mut out: Vec<(i64, Vec<FxSet<&str>>)> = Vec::new();
-    let mut at: crate::fx::FxMap<i64, usize> = crate::fx::FxMap::default();
+    let mut at: crate::util::fx::FxMap<i64, usize> = crate::util::fx::FxMap::default();
     for pre in pres {
         for pn in &pre.nations {
             let h = &pn.nat;
@@ -341,7 +298,7 @@ fn alignment_score(m: &Mod, holdings: &[(i64, Vec<FxSet<&str>>)], base: i64)
     (counts, detail)
 }
 
-fn check_inventions(m: &Mod, pres: &[Pre]) -> Result<(), String> {
+fn check_inventions(m: &Rules, pres: &[Pre]) -> Result<(), String> {
     let holdings = index_holdings(pres);
     let seq = &m.invention_sequence;
     crate::outln!("\nChecking {} inventions against {} saves.", seq.len(), pres.len());
@@ -438,13 +395,13 @@ fn check_inventions(m: &Mod, pres: &[Pre]) -> Result<(), String> {
     Ok(())
 }
 
-fn inventions(tag: &str, m: &Mod, pres: &[Pre], files: &[String], reading: &Reading)
+fn inventions(tag: &str, m: &Rules, pres: &[Pre], files: &[String], reading: &Reading)
               -> Result<(), String> {
     let (nat, _player) = last_nation(pres, files, reading, tag)?;
     let meta = &pres.last().unwrap().meta;
     let seq = &m.invention_sequence;
     let where_ = crate::engine::modread::invention_files(&m.path)
-        .unwrap_or_else(|d| crate::engine::decline(&d.0));
+        .unwrap_or_else(|d| crate::engine::decline(d.text()));
     let mut held = nat.invention_ids.clone();
     held.sort();
     crate::outln!("\n{} at {} in {}", tag, meta.date, meta.file);

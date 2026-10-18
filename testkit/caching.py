@@ -13,6 +13,9 @@ the page carries must be the same.
 - every entry in the cache damaged, and then cut in half;
 - the mobilizable pop types changed between two cached runs, which changes
   what a save is read for;
+- each other setting a read save is prepared under (the nations kept, the
+  players, the smallest nation, occupied provinces) changed after a cached
+  run, which must miss the cache rather than answer with the old setting;
 - a save's file replaced by another of the same name;
 - one save read at a time against several at once.
 
@@ -114,6 +117,12 @@ def main():
                       w.run("--mob-types", "craftsmen", cached=False))
         if crafts == w.run("--mob-types", "farmers"):
             wrong.append("farmers and craftsmen gave the same tables: the case tests nothing")
+
+        for setting in (["--tags", "ENG"], ["--player-nations", "FRA"], ["--min-pop", "2000"],
+                        ["--mob-include-occupied"]):
+            w.run()
+            wrong += same("changed after a cached run: %s" % " ".join(setting), w.run(*setting),
+                          w.run(*setting, cached=False))
 
         moved = os.path.join(holding, "elsewhere.v2")
         write_save(moved, "1880.2.1", 2, craftsmen=4321)

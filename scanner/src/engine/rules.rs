@@ -9,25 +9,54 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 //
-// The mod itself is read by the analyzer's Python (`mod_reader`) and handed
-// over as JSON (`engine.export_mod`); this holds it and answers the same
-// questions `modrules` answers, in the same order, with the same arithmetic.
+// The mod as `modread` read it (`Mod`), settled against a campaign
+// (`Rules`), answers the questions Python's `modrules` answered, in the same
+// order, with the same arithmetic.
 // A sum here is added in the order Python's `sum` adds it, because float
 // addition is not associative and the mobilisation size is printed to five
 // places.
 
-use crate::jsonr::J;
+use crate::py::json::J;
 use crate::engine::finish::PreNation;
 use crate::engine::model::{Meta, Nation};
-use crate::names::{self, Sym};
-use crate::omap::OMap;
-use crate::fx::{FxMap, FxSet};
-use crate::pyfmt::{py_float, py_sum, trunc_int};
+use crate::save::names::{self, Sym};
+use crate::util::omap::OMap;
+use crate::util::fx::{FxMap, FxSet};
+use crate::py::fmt::{py_sum, trunc_int};
+use crate::py::num;
 
-/// Something Python would have raised over, which the engine does not copy:
-/// the run is handed back to Python, which does what it always did.
+/// Why a mod or a save could not be read.
 #[derive(Debug)]
-pub struct Decline(pub String);
+pub enum Decline {
+    /// A refusal in words: the sentence a run is refused with, as Python's
+    /// analyzer raised it (a mod with no rules, a file it cannot open).
+    Raised(String),
+    /// Something no mod or save the game loads should hold: the run stops
+    /// over it (`engine::decline`).
+    Unreadable(String),
+}
+
+impl From<crate::py::num::TooLarge> for Decline {
+    fn from(e: crate::py::num::TooLarge) -> Decline {
+        Decline::Unreadable(e.to_string())
+    }
+}
+
+impl Decline {
+    /// The sentence, when this is a refusal in words.
+    pub fn raised(&self) -> Option<&str> {
+        match self {
+            Decline::Raised(s) => Some(s),
+            Decline::Unreadable(_) => None,
+        }
+    }
+
+    pub fn text(&self) -> &str {
+        match self {
+            Decline::Raised(s) | Decline::Unreadable(s) => s,
+        }
+    }
+}
 
 pub type D<T> = Result<T, Decline>;
 
@@ -118,19 +147,27 @@ pub struct Mod {
     pub flag_roots: Vec<String>,
     pub map_bmp: String,
     pub map_csv: String,
-    /// Settled against the campaign (`decode_indices`); None is "cannot".
-    pub index_base: Option<i64>,
-    /// The map's bitmap as (width, height, runs), when it was decoded ahead.
-    pub raster: Option<(i64, i64, Vec<(i64, i64)>)>,
-    /// The rates' lookups as tables indexed by name, made once the campaign
-    /// is settled (`Dense::build`); None until then.
-    pub dense: Option<Dense>,
 }
 
-impl Mod {
-    /// The dense tables. A run makes them before anything asks for a rate.
-    pub fn dense(&self) -> &Dense {
-        self.dense.as_ref().expect("the mod's dense tables are made after the campaign is settled")
+/// A mod settled against one campaign: the mod as read, and what the
+/// campaign decides of it. It reads as the mod (`Deref`) wherever only the
+/// mod is wanted.
+pub struct Rules {
+    pub m: Mod,
+    /// How the saves number the mod's inventions (`decode_indices`); None
+    /// is "cannot".
+    pub index_base: Option<i64>,
+    /// The rates' lookups, as tables indexed by name.
+    pub dense: Dense,
+    /// The map's bitmap as (width, height, runs), for a run that makes a page.
+    pub raster: Option<(i64, i64, Vec<(i64, i64)>)>,
+}
+
+impl std::ops::Deref for Rules {
+    type Target = Mod;
+
+    fn deref(&self) -> &Mod {
+        &self.m
     }
 }
 
@@ -222,135 +259,7 @@ impl Dense {
     }
 }
 
-fn strings(v: &J) -> Vec<String> {
-    v.list().iter().map(|x| x.str().to_string()).collect()
-}
-
-fn floats(v: &J) -> FxMap<String, f64> {
-    v.pairs().iter().map(|(k, x)| (k.clone(), x.float())).collect()
-}
-
-fn texts(v: &J) -> FxMap<String, String> {
-    v.pairs().iter().map(|(k, x)| (k.clone(), x.str().to_string())).collect()
-}
-
-fn changes(v: &J) -> Changes {
-    v.pairs().iter().map(|(who, deltas)| {
-        (who.clone(), deltas.pairs().iter().map(|(k, x)| (k.clone(), x.float())).collect())
-    }).collect()
-}
-
 impl Mod {
-    pub fn from_json(j: &J) -> D<Mod> {
-        let bad = |what: &str| Decline(format!("the mod export has no {}", what));
-        if !matches!(j, J::Obj(_)) {
-            return Err(bad("object"));
-        }
-        let invention_sequence = j.at("invention_sequence").list().iter().map(|e| {
-            let e = e.list();
-            Invention { name: e[0].str().to_string(), size: e[1].float(),
-                        techs: strings(&e[2]), tags: strings(&e[3]) }
-        }).collect();
-        let mut formations: FxMap<String, FxSet<String>> = FxMap::default();
-        for (tag, v) in j.at("formations").pairs() {
-            formations.insert(tag.clone(), strings(v).into_iter().collect());
-        }
-        let pid_pairs = |key: &str| -> OMap<i64, String> {
-            j.at(key).list().iter().map(|p| {
-                let p = p.list();
-                (p[0].int(), p[1].str().to_string())
-            }).collect()
-        };
-        let naval_units = j.at("naval_units").pairs().iter().map(|(name, st)| {
-            let mut stats = [0.0; 5];
-            for (i, k) in SHIP_KEYS.iter().enumerate() {
-                stats[i] = st.at(k).float();
-            }
-            Ship { name: name.clone(), stats, heavy: st.at("heavy").int() }
-        }).collect();
-        let naval_effects = j.at("naval_effects").pairs().iter().map(|(name, e)| {
-            (name.clone(), NavalEffect { effects: changes(e.at("effects")),
-                                         techs: strings(e.at("techs")),
-                                         tags: strings(e.at("tags")) })
-        }).collect();
-        let naval_tech_effects = j.at("naval_tech_effects").pairs().iter()
-            .map(|(name, e)| (name.clone(), changes(e))).collect();
-        let reform_mob = j.at("reform_mob").list().iter().map(|r| {
-            let r = r.list();
-            ((r[0].str().to_string(), r[1].str().to_string()), r[2].float())
-        }).collect();
-        let triggered_mob = j.at("triggered_mob").list().iter().map(|t| {
-            let t = t.list();
-            Triggered { name: t[0].str().to_string(), size: t[1].float(), impact: t[2].float(),
-                        trigger: t[3].clone() }
-        }).collect();
-        let invention_rules = j.at("invention_rules").pairs().iter().map(|(name, r)| {
-            (name.clone(), Rule {
-                size: r.at("size").float(),
-                techs: strings(r.at("techs")),
-                tags: strings(r.at("tags")),
-                requires: strings(r.at("requires")),
-                base: if r.at("base").is_null() { None } else { Some(r.at("base").float()) },
-                blockers: r.at("blockers").list().iter()
-                    .map(|b| (b.list()[0].float(), b.list()[1].str().to_string())).collect(),
-            })
-        }).collect();
-        let flag_styles = j.at("flag_styles").pairs().iter().map(|(g, v)| {
-            (g.clone(), (v.list()[0].str().to_string(), v.list()[1].truthy()))
-        }).collect();
-        let m = Mod {
-            path: j.at("path").str().to_string(),
-            invention_sequence,
-            party_policies: strings(j.at("party_policies")),
-            localisation: texts(j.at("localisation")),
-            base_prices: j.at("base_prices").clone(),
-            country_order: strings(j.at("country_order")),
-            formations,
-            culture_names: j.at("culture_names").clone(),
-            display_names: j.at("display_names").clone(),
-            province_names: pid_pairs("province_names"),
-            province_regions: pid_pairs("province_regions"),
-            state_names: j.at("state_names").pairs().iter()
-                .map(|(k, v)| (k.clone(), v.str().to_string())).collect(),
-            state_names_j: j.at("state_names").clone(),
-            unit_kinds: texts(j.at("unit_kinds")),
-            naval_units,
-            naval_effects,
-            naval_tech_effects,
-            technology: j.at("technology").clone(),
-            mob_impacts: floats(j.at("mob_impacts")),
-            modifier_impacts: floats(j.at("modifier_impacts")),
-            reform_mob,
-            reform_names: strings(j.at("reform_names")).into_iter().collect(),
-            static_mob: floats(j.at("static_mob")),
-            triggered_mob,
-            culture_groups: texts(j.at("culture_groups")),
-            continents: pid_pairs("continents").into_iter_pairs().collect(),
-            defines: floats(j.at("defines")),
-            strata: texts(j.at("strata")),
-            invention_rules,
-            event_mob: floats(j.at("event_mob")),
-            tech_mob: floats(j.at("tech_mob")),
-            nv_mob: floats(j.at("nv_mob")),
-            tech_count: j.at("tech_count").int(),
-            technologies: strings(j.at("technologies")).into_iter().collect(),
-            colours: texts(j.at("colours")),
-            sea: j.at("sea").list().iter().map(|x| x.int()).collect(),
-            positions: j.at("positions").list().iter().map(|p| {
-                let p = p.list();
-                (p[0].int(), p[1].float(), p[2].float())
-            }).collect(),
-            flag_styles,
-            flag_roots: strings(j.at("flag_roots")),
-            map_bmp: j.at("map_bmp").str().to_string(),
-            map_csv: j.at("map_csv").str().to_string(),
-            index_base: None,
-            raster: None,
-            dense: None,
-        };
-        Ok(m)
-    }
-
     pub fn define(&self, key: &str) -> Option<f64> {
         self.defines.get(key).copied()
     }
@@ -360,45 +269,9 @@ impl Mod {
 /// repr of a list or a block (`['a', 'b']`), which is what a condition
 /// holding a list where one value belongs is judged by.
 fn str_j(v: &J) -> String {
-    fn repr(v: &J, out: &mut String) {
-        match v {
-            J::Str(s) => out.push_str(&crate::engine::modread::py_repr(s)),
-            J::List(x) => {
-                out.push('[');
-                for (i, e) in x.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
-                    }
-                    repr(e, out);
-                }
-                out.push(']');
-            }
-            J::Obj(pairs) => {
-                out.push('{');
-                for (i, (k, e)) in pairs.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
-                    }
-                    out.push_str(&crate::engine::modread::py_repr(k));
-                    out.push_str(": ");
-                    repr(e, out);
-                }
-                out.push('}');
-            }
-            other => {
-                let mut t = String::new();
-                other.write(&mut t);
-                out.push_str(&t);
-            }
-        }
-    }
     match v {
         J::Str(s) => s.clone(),
-        other => {
-            let mut out = String::new();
-            repr(other, &mut out);
-            out
-        }
+        other => crate::py::repr::Repr::repr(other),
     }
 }
 
@@ -479,16 +352,16 @@ fn conditions(block: &J) -> Vec<(&str, &J)> {
 }
 
 fn unquote(s: &str) -> &str {
-    crate::text::unquote(s)
+    crate::save::text::unquote(s)
 }
 
 /// `to_int(text, default)`: `int(float(text))`, its ValueError the default
 /// (`int(nan)` is one). Infinity is an OverflowError, which Python let out.
 fn to_int(text: &str, default: i64) -> D<i64> {
-    match py_float(text) {
+    match num::float(text) {
         None => Ok(default),
         Some(f) if f.is_nan() => Ok(default),
-        Some(f) => trunc_int(f).ok_or_else(|| Decline("int() of infinity in a trigger".into())),
+        Some(f) => trunc_int(f).ok_or_else(|| Decline::Unreadable("int() of infinity in a trigger".into())),
     }
 }
 
@@ -498,11 +371,61 @@ fn capital(nat: &Nation) -> D<i64> {
 }
 
 pub struct Asker<'a> {
-    pub m: &'a Mod,
+    pub m: &'a Rules,
     pub world: Option<&'a World>,
     /// The inventions a nation holds, by name; made the first time a trigger asks.
     pub inventions: std::cell::OnceCell<Option<FxSet<&'a str>>>,
     pub is_player: bool,
+}
+
+/// Every condition `Asker::condition_ok` answers, besides a reform's name.
+/// A trigger holding anything else cannot be judged (`unreadable`); a key
+/// added to one belongs in the other.
+const CONDITIONS: [&str; 24] = ["civilized", "war", "exists", "is_greater_power", "ai", "tag",
+    "government", "primary_culture", "nationalvalue", "revanchism", "badboy", "prestige",
+    "war_exhaustion", "plurality", "money", "total_pops", "year", "capital", "owns",
+    "is_culture_group", "invention", "technology", "has_country_flag", "has_country_modifier"];
+
+/// `modrules._unreadable`.
+pub fn unreadable(trigger: &J, m: &Mod) -> bool {
+    if !matches!(trigger, J::Obj(_)) {
+        return false;
+    }
+    let known = |k: &str| CONDITIONS.contains(&k) || m.reform_names.contains(k);
+    for (key, value) in trigger.pairs() {
+        if key.starts_with('_') {
+            continue;
+        }
+        let parts: Vec<&J> = match value {
+            J::List(v) => v.iter().collect(),
+            one => vec![one],
+        };
+        for value in parts {
+            if key == "AND" || key == "OR" || key == "NOT" {
+                if !matches!(value, J::Obj(_)) || unreadable(value, m) {
+                    return true;
+                }
+            } else if key == "capital_scope" {
+                if !matches!(value, J::Obj(_)) {
+                    return true;
+                }
+                for (name, inner) in value.pairs() {
+                    if name.starts_with('_') {
+                        continue;
+                    }
+                    let n = match inner { J::List(v) => v.len(), _ => 1 };
+                    for _ in 0..n {
+                        if !matches!(name.as_str(), "AND" | "OR" | "NOT" | "continent" | "province_id") {
+                            return true;
+                        }
+                    }
+                }
+            } else if !known(key) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 impl<'a> Asker<'a> {
@@ -581,7 +504,7 @@ impl<'a> Asker<'a> {
                     "money" => nat.treasury,
                     _ => nat.total_pop as f64,
                 };
-                return Ok(Some(have >= py_float(text).unwrap_or(0.0)));
+                return Ok(Some(have >= num::float(text).unwrap_or(0.0)));
             }
             _ => {}
         }
@@ -682,7 +605,7 @@ impl<'a> Asker<'a> {
 // ------------------------------------------------------------ the rates
 
 /// `held_inventions`: the names a nation's indices decode to, or None.
-pub fn held_inventions<'a>(nat: &Nation, m: &'a Mod) -> Option<FxSet<&'a str>> {
+pub fn held_inventions<'a>(nat: &Nation, m: &'a Rules) -> Option<FxSet<&'a str>> {
     let base = m.index_base?;
     let seq = &m.invention_sequence;
     let mut out = FxSet::default();
@@ -700,10 +623,10 @@ fn subset(need: &[String], have: &FxSet<String>) -> bool {
 }
 
 /// `breakdown(...)`: every contribution, as (kind, name, value).
-pub fn breakdown(nat: &Nation, m: &Mod, live: Option<&FxSet<String>>, world: Option<&World>,
+pub fn breakdown(nat: &Nation, m: &Rules, live: Option<&FxSet<String>>, world: Option<&World>,
                  is_player: bool) -> D<Vec<(&'static str, String, f64)>> {
     let mut parts = Vec::new();
-    let d = m.dense();
+    let d = &m.dense;
     for tech in &nat.tech_list {
         let v = d.tech_mob(*tech);
         if v != 0.0 {
@@ -776,7 +699,7 @@ pub fn breakdown(nat: &Nation, m: &Mod, live: Option<&FxSet<String>>, world: Opt
 
 /// `rate_for`: the sum, floored at zero -- `max(0.0, sum(...))`, where an
 /// empty sum is the int 0 and `max` keeps the first of equals: 0.0.
-pub fn rate_for(nat: &Nation, m: &Mod, live: Option<&FxSet<String>>, world: Option<&World>,
+pub fn rate_for(nat: &Nation, m: &Rules, live: Option<&FxSet<String>>, world: Option<&World>,
                 is_player: bool) -> D<f64> {
     let parts = breakdown(nat, m, live, world, is_player)?;
     let total = py_sum(parts.iter().map(|p| p.2)).unwrap_or(0.0);
@@ -784,10 +707,10 @@ pub fn rate_for(nat: &Nation, m: &Mod, live: Option<&FxSet<String>>, world: Opti
 }
 
 /// `impact_for`.
-pub fn impact_for(nat: &Nation, m: &Mod, world: Option<&World>, is_player: bool) -> D<f64> {
+pub fn impact_for(nat: &Nation, m: &Rules, world: Option<&World>, is_player: bool) -> D<f64> {
     let inventions = std::cell::OnceCell::new();
     let mut total = 0.0;
-    let d = m.dense();
+    let d = &m.dense;
     for name in &nat.modifiers {
         total += d.modifier_impact(*name);
     }
@@ -807,7 +730,7 @@ pub fn impact_for(nat: &Nation, m: &Mod, world: Option<&World>, is_player: bool)
 
 /// `naval_profile`: {ship: [hull, gun_power, evasion, torpedo_attack,
 /// score], heavy}, in the mod's order.
-pub fn naval_profile(nat: &Nation, m: &Mod) -> Vec<(String, [f64; 5], i64)> {
+pub fn naval_profile(nat: &Nation, m: &Rules) -> Vec<(String, [f64; 5], i64)> {
     let mut out: Vec<(String, [f64; 5], i64)> =
         m.naval_units.iter().map(|s| (s.name.clone(), s.stats, s.heavy)).collect();
     if out.is_empty() {
@@ -831,7 +754,7 @@ pub fn naval_profile(nat: &Nation, m: &Mod) -> Vec<(String, [f64; 5], i64)> {
         }
     };
     for tech in &nat.tech_list {
-        if let Some(ch) = m.dense().naval_tech(*tech) {
+        if let Some(ch) = &m.dense.naval_tech(*tech) {
             apply(&mut out, ch);
         }
     }
@@ -971,8 +894,11 @@ pub fn index_base_for(m: &Mod, every: &[&PreNation]) -> Option<i64> {
     if best_rate <= 0.05 { best } else { None }
 }
 
-/// `settle_campaign`: the live inventions; the base is written onto `m`.
-pub fn settle_campaign(m: &mut Mod, saves: &[&[PreNation]]) -> FxSet<String> {
+/// `settle_campaign`: the mod settled against the campaign's saves, and the
+/// inventions the campaign can reach. `tech_group` is the run's tech ->
+/// (branch, line); `raster` the map, when the run decoded it.
+pub fn settle_campaign(m: Mod, saves: &[&[PreNation]], tech_group: &FxMap<String, (String, String)>,
+                       raster: Option<(i64, i64, Vec<(i64, i64)>)>) -> (Rules, FxSet<String>) {
     let mut all_techs: OMap<&str, FxSet<&str>> = OMap::new();
     let mut every: Vec<&PreNation> = Vec::new();
     for nations in saves {
@@ -982,7 +908,27 @@ pub fn settle_campaign(m: &mut Mod, saves: &[&[PreNation]]) -> FxSet<String> {
                 .extend(pn.nat.tech_list.iter().map(|t| names::text(*t)));
         }
     }
-    let live = attainable_inventions(m, &all_techs);
-    m.index_base = index_base_for(m, &every);
-    live
+    let live = attainable_inventions(&m, &all_techs);
+    let index_base = index_base_for(&m, &every);
+    let dense = Dense::build(&m, tech_group);
+    (Rules { m, index_base, dense, raster }, live)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Decline;
+
+    #[test]
+    fn a_raised_decline_is_said_as_its_sentence() {
+        let d = Decline::Raised("No mod was named.".into());
+        assert_eq!(d.raised(), Some("No mod was named."));
+        assert_eq!(d.text(), "No mod was named.");
+    }
+
+    #[test]
+    fn an_unreadable_decline_is_never_said_as_a_refusal() {
+        let d = Decline::Unreadable("int() of infinity in a trigger".into());
+        assert_eq!(d.raised(), None);
+        assert_eq!(d.text(), "int() of infinity in a trigger");
+    }
 }

@@ -1,4 +1,4 @@
-# A faster province scanner for the Victoria 2 campaign analyzer.
+# The Victoria 2 campaign analyzer's scanner: every run, from the saves to the report.
 #
 # No dependencies, deliberately: `cargo build --release` then works on a
 # machine that has never seen crates.io, and the analyzer's build does not

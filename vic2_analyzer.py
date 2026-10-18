@@ -36,7 +36,7 @@ import threading
 import fastscan
 # The window's Stop button and progress bar, which `analyze` hands on, and
 # `Cancelled`, which the window catches here.
-from readfolder import (Cancelled, set_cancel_check, set_progress,  # noqa: F401
+from readfolder import (Cancelled, cache_dir, set_cancel_check, set_progress,  # noqa: F401
                         stop_if_asked, tell_progress)
 from run import Run, RunError, command_line                         # noqa: F401
 
@@ -134,7 +134,9 @@ def _front(run, hosted=False):
     refused = path[:-len(".json")] + ".refused"
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps(dataclasses.asdict(run)))
+            # The cache folder is named here, once, so the scanner keeps its
+            # entries where the window's "empty the cache" looks.
+            fh.write(json.dumps(dict(dataclasses.asdict(run), cache_dir=cache_dir())))
         # A windowed build started with arguments and no console to attach
         # to (a folder dropped on it) has no streams at all.
         silent = sys.stdout is None or sys.stderr is None

@@ -12,8 +12,8 @@
 // Key order, and an int against a float, count: the payload is held to what
 // the Python wrote, as text.
 
-use crate::omap::OMap;
-use crate::pyfmt::{push_int, push_json_str};
+use crate::util::omap::OMap;
+use crate::py::fmt::{push_int, push_json_str};
 
 pub fn obj<'a, V: 'a>(out: &mut String, pairs: impl Iterator<Item = (&'a str, V)>,
                       mut value: impl FnMut(&mut String, V)) {

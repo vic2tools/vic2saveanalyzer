@@ -14,21 +14,13 @@
 // invention array, by elimination); and the nations two or more of them
 // share are compared, measure by measure, in the block the report carries.
 // Python's rules and words throughout, its regular expressions run by
-// `pyre` -- `savehead`'s as bytes patterns, whose classes are ASCII.
+// `py::re` -- `savehead`'s as bytes patterns, whose classes are ASCII.
 
-use super::{abspath, basename, join, pypath, refuse, Args, RunError, R};
+use super::{abspath, basename, join, pypath, refuse, stop, Args, RunError, R};
+use crate::engine::modread::l1;
 use crate::engine::modread;
-use crate::jsonr::J;
-use crate::pyre::Re;
+use crate::py::re::Re;
 use std::collections::{BTreeSet, HashMap};
-
-fn hand_back(why: &str) -> ! {
-    crate::engine::decline(why)
-}
-
-fn l1(b: &[u8]) -> String {
-    modread::l1(b)
-}
 
 // --------------------------------------------------------- the folders
 
@@ -58,7 +50,7 @@ fn walk(parent: &str, root: &str, found: &mut Vec<(String, String, String, Vec<S
     for e in rd.flatten() {
         let name = match e.file_name().into_string() {
             Ok(n) => n,
-            Err(_) => hand_back("a folder name under --cross is not text"),
+            Err(_) => stop("a folder name under --cross is not text"),
         };
         let link = e.file_type().map(|t| t.is_symlink()).unwrap_or(false);
         let is_dir = if link { std::fs::metadata(e.path()).map(|m| m.is_dir()).unwrap_or(false) }
@@ -229,7 +221,7 @@ pub fn sniff_pops(t: &[u8]) -> Vec<Hit> {
 /// `active_inventions=\s*\{([^}]*)\}`
 pub fn sniff_ids(t: &[u8]) -> Vec<Hit> {
     scan(t, b"active_inventions=", |i| {
-        let j = run(t, i + 18, crate::pyre::space);
+        let j = run(t, i + 18, crate::py::re::space);
         if t.get(j) != Some(&b'{') {
             return None;
         }
@@ -251,11 +243,11 @@ pub fn sniff_tech_blocks(t: &[u8]) -> Vec<Hit> {
 pub fn sniff_tech_names(t: &[u8]) -> Vec<Hit> {
     scan(t, b"\n\t\t", |i| {
         let s = i + 3;
-        let e = run(t, s, crate::pyre::word);
+        let e = run(t, s, crate::py::re::word);
         if e == s || t.get(e) != Some(&b'=') {
             return None;
         }
-        let j = run(t, e + 1, crate::pyre::space);
+        let j = run(t, e + 1, crate::py::re::space);
         if t.get(j) != Some(&b'{') {
             return None;
         }
@@ -288,9 +280,9 @@ fn sniff(path: &str) -> Result<Sniffed, String> {
     let mut top = 0i64;
     let mut any = false;
     for h in sniff_ids(&text) {
-        for n in g(&h).split(|&c| crate::pyre::space(c)).filter(|w| !w.is_empty()) {
+        for n in g(&h).split(|&c| crate::py::re::space(c)).filter(|w| !w.is_empty()) {
             if n.iter().all(|c| c.is_ascii_digit()) {
-                let v = modread::py_int(n).map_err(|e| e.0)?.unwrap_or(0);
+                let v = crate::py::num::int_latin1(n).map_err(|e| e.to_string())?.unwrap_or(0);
                 top = if any { top.max(v) } else { v };
                 any = true;
             } else if n.iter().all(|&c| c.is_ascii_digit() || matches!(c, 0xb2 | 0xb3 | 0xb9)) {
@@ -307,7 +299,7 @@ fn sniff(path: &str) -> Result<Sniffed, String> {
     }
     let mut provinces = BTreeSet::new();
     for h in sniff_provinces(&text) {
-        provinces.insert(modread::py_int(g(&h)).map_err(|e| e.0)?.unwrap_or(0));
+        provinces.insert(crate::py::num::int_latin1(g(&h)).map_err(|e| e.to_string())?.unwrap_or(0));
     }
     Ok(Sniffed {
         tags,
@@ -319,7 +311,7 @@ fn sniff(path: &str) -> Result<Sniffed, String> {
 }
 
 /// `vic2scan selftest-sniff [FILE...]`: the scanners against the patterns
-/// they stand for (`pyre`, itself held to Python's `re`), on the files given
+/// they stand for (`py::re`, itself held to Python's `re`), on the files given
 /// and on random text built from the pieces a save is made of.
 pub fn selftest(files: &[String]) {
     let p = pats();
@@ -380,7 +372,7 @@ struct Facts {
 }
 
 fn mod_facts(root: &str) -> Result<Facts, String> {
-    let back = |d: crate::engine::rules::Decline| d.0;
+    let back = |d: crate::engine::rules::Decline| d.text().to_string();
     let f = modread::facts(root).map_err(back)?;
     Ok(Facts {
         tags: f.tags.into_iter().collect(),
@@ -391,10 +383,21 @@ fn mod_facts(root: &str) -> Result<Facts, String> {
     })
 }
 
+/// What a candidate mod made of a campaign's last saves.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Verdict {
+    /// Every tag, pop type, technology, province and invention is the mod's.
+    Fits,
+    /// Something in the saves is not.
+    No,
+    /// Nothing fits, and this one is the closest.
+    Nearest,
+}
+
 /// `match_mod(files, candidates)`: (label, path, [(label, verdict, detail)]).
 #[allow(clippy::type_complexity)]
 fn match_mod(files: &[String], candidates: &[(String, String)], facts: &mut HashMap<String, Facts>)
-             -> Result<(Option<String>, Option<String>, Vec<(String, String, String)>), String> {
+             -> Result<(Option<String>, Option<String>, Vec<(String, Verdict, String)>), String> {
     let take = files.len().saturating_sub(2);
     let mut sniffed = Vec::new();
     for f in &files[take..] {
@@ -445,13 +448,13 @@ fn match_mod(files: &[String], candidates: &[(String, String)], facts: &mut Hash
             let distance = unknown.len() as i64 + missing.len() as i64 + stray.len() as i64 + gap
                 + (top - f.inventions).max(0);
             near.push((distance, label.clone(), root.clone(), why.join("; ")));
-            rows.push((label.clone(), "no".to_string(), why.join("; ")));
+            rows.push((label.clone(), Verdict::No, why.join("; ")));
             continue;
         }
         let unused = f.tags.difference(&tags).count();
         let rank = (unused as f64 / f.tags.len().max(1) as f64, f.inventions - top);
         fits.push((rank, label.clone(), root.clone()));
-        rows.push((label.clone(), "fits".to_string(),
+        rows.push((label.clone(), Verdict::Fits,
                    format!("{} of its {} countries never mentioned, {} spare invention slots",
                            unused, f.tags.len(), f.inventions - top)));
     }
@@ -461,7 +464,7 @@ fn match_mod(files: &[String], candidates: &[(String, String)], facts: &mut Hash
         }
         near.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let (_d, label, root, why) = near.remove(0);
-        rows.push((label.clone(), "nearest".to_string(), why));
+        rows.push((label.clone(), Verdict::Nearest, why));
         return Ok((Some(label), Some(root), rows));
     }
     fits.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -513,7 +516,7 @@ fn head_key(head: &[u8]) -> Result<Vec<i64>, String> {
     }
     let mut out = Vec::new();
     for p in parts {
-        match modread::py_int(p).map_err(|e| e.0)? {
+        match crate::py::num::int_latin1(p).map_err(|e| e.to_string())? {
             Some(v) => out.push(v),
             None => return Ok(vec![0]),
         }
@@ -565,12 +568,12 @@ fn history_breaks(files: &[String]) -> Result<Vec<(String, usize, usize)>, Strin
 
 /// One campaign folder, and the mod it will be read under (`Surveyed`).
 pub struct Surveyed {
-    name: String,
-    files: Vec<String>,
-    mod_label: Option<String>,
-    mod_path: Option<String>,
-    candidates: Vec<(String, String, String)>,
-    told: bool,
+    pub(super) name: String,
+    pub(super) files: Vec<String>,
+    pub(super) mod_label: Option<String>,
+    pub(super) mod_path: Option<String>,
+    pub(super) candidates: Vec<(String, Verdict, String)>,
+    pub(super) told: bool,
 }
 
 /// `%-22s`.
@@ -589,7 +592,7 @@ fn right(text: &str, width: usize) -> String {
 /// campaign they are in. Python said them all after the survey, so the
 /// note read as if it were about whichever campaign was listed last.
 fn say_strays(e: &Surveyed) {
-    for (stray, worst, of) in history_breaks(&e.files).unwrap_or_else(|why| hand_back(&why)) {
+    for (stray, worst, of) in history_breaks(&e.files).unwrap_or_else(|why| stop(&why)) {
         crate::outln!("      note: {} disagrees with all {} later saves by at least {} event flags; \
                        it may be from another game", stray, of, worst);
     }
@@ -667,7 +670,7 @@ pub fn survey_cross(parent: &str, args: &Args, verbose: bool) -> R<Vec<Surveyed>
             let mut facts = HashMap::new();
             for (name, _path, files) in folders {
                 let (label, root, rows) = match_mod(&files, &mods, &mut facts)
-                    .unwrap_or_else(|why| hand_back(&why));
+                    .unwrap_or_else(|why| stop(&why));
                 list.push(Surveyed { name, files, mod_label: label, mod_path: root, candidates: rows,
                                      told: false });
             }
@@ -689,7 +692,7 @@ pub fn survey_cross(parent: &str, args: &Args, verbose: bool) -> R<Vec<Surveyed>
         if verbose {
             crate::outln!("Campaigns found under {}:", parent);
             for e in &found {
-                let fits = e.candidates.iter().filter(|r| r.1 == "fits").count();
+                let fits = e.candidates.iter().filter(|r| r.1 == Verdict::Fits).count();
                 crate::outln!("  {} {} saves  ->  {}{}", left(&e.name, 22), right(&e.files.len().to_string(), 3),
                               e.mod_label.clone().unwrap_or_else(|| "no mod in that folder fits".into()),
                               if e.told { "   (as told)" } else { "" });
@@ -697,7 +700,7 @@ pub fn survey_cross(parent: &str, args: &Args, verbose: bool) -> R<Vec<Surveyed>
                     say_strays(e);
                     continue;
                 }
-                let nearest: Vec<&(String, String, String)> = e.candidates.iter().filter(|r| r.1 == "nearest").collect();
+                let nearest: Vec<&(String, Verdict, String)> = e.candidates.iter().filter(|r| r.1 == Verdict::Nearest).collect();
                 if let Some(n) = nearest.first() {
                     crate::outln!("      WARNING: nothing in {} explains these saves. The closest is {}, and it \
                                    does not match: {}. The numbers below are computed against a mod this \
@@ -728,267 +731,4 @@ pub fn cross_stamp(found: &[Surveyed], args: &Args) -> String {
     }).collect();
     let files: Vec<String> = read.iter().flat_map(|e| e.files.iter().cloned()).collect();
     super::report_stamp(&files, args, &world.join("\n"))
-}
-
-// ---------------------------------------------------------- the reading
-
-/// `run_cross`: (the comparison as the page carries it, the primary
-/// campaign's saves, its mod).
-pub fn run_cross(parent: &str, found: &[Surveyed], args: &Args, verbose: bool, protocol: bool)
-                 -> R<(Option<String>, Vec<String>, Option<String>)> {
-    let mut results: Vec<(String, String, Vec<(String, String, Vec<Option<f64>>)>)> = Vec::new();
-    let mut names: Vec<(String, String)> = Vec::new();
-    let mut primary: Option<(&Surveyed, Vec<String>)> = None;
-    for e in found {
-        let mod_path = match &e.mod_path {
-            Some(m) => m,
-            None => {
-                if verbose {
-                    crate::outln!("  skipping {}: no mod in {} explains its saves", e.name,
-                                  args.game_root.as_deref().unwrap_or("None"));
-                }
-                continue;
-            }
-        };
-        // `load_mod` raises out of `run_cross` rather than refusing: that
-        // much is Python's to say.
-        let set = match super::setup(args, mod_path) {
-            Ok(s) => s,
-            Err(super::Settle::Refused(why)) | Err(super::Settle::Back(why)) => hand_back(&why),
-        };
-        let dates = super::dates_of(&e.files);
-        let files = super::in_date_order(e.files.clone(), dates);
-        if verbose {
-            crate::outln!("Reading {} ({} saves) under {}", e.name, files.len(), e.mod_label.as_deref().unwrap_or(""));
-        }
-        let mut spec = super::spec_for(args, &set, &files, protocol);
-        if let J::Obj(pairs) = &mut spec {
-            for (k, v) in pairs.iter_mut() {
-                if k == "quiet" {
-                    *v = J::Bool(true);
-                }
-            }
-            pairs.push(("cross_part".into(), J::Bool(true)));
-        }
-        let done = crate::engine::run_spec(&spec);
-        if let Some(why) = done.run_error {
-            return refuse(format!("{}: {}", e.name, why));
-        }
-        let part = match done.cross_part {
-            Some(p) => p,
-            None => continue,
-        };
-        results.push((e.name.clone(), e.mod_label.clone().unwrap_or_default(), part.rows));
-        for (tag, label) in part.names {
-            if !names.iter().any(|(t, _)| *t == tag) {
-                names.push((tag, label));
-            }
-        }
-        match &args.primary {
-            Some(p) => {
-                if e.name.to_lowercase() == p.to_lowercase() {
-                    primary = Some((e, files));
-                }
-            }
-            None => {
-                if primary.as_ref().is_none_or(|(_, f)| files.len() > f.len()) {
-                    primary = Some((e, files));
-                }
-            }
-        }
-    }
-    if let (Some(p), None, false) = (&args.primary, &primary, results.is_empty()) {
-        let known: Vec<&str> = results.iter().map(|r| r.0.as_str()).collect();
-        return refuse(format!("No campaign called {} under {}. There is: {}",
-                              modread::py_repr(p), parent, known.join(", ")));
-    }
-    let (entry, files) = match primary {
-        Some(p) if !results.is_empty() => p,
-        _ => return Ok((None, Vec::new(), args.mod_path.clone())),
-    };
-    let (payload, campaigns, tags) = series_payload(&results, &names);
-    if verbose {
-        crate::outln!("Cross-campaign: {} campaigns, {} nations in two or more of them.", campaigns, tags);
-        crate::outln!("The rest of the report is {}{}.", entry.name,
-                      if args.primary.is_some() { "" } else { " (the most saves; --primary picks another)" });
-    }
-    let mut text = String::new();
-    payload.write(&mut text);
-    Ok((Some(text), files, entry.mod_path.clone()))
-}
-
-/// `series_payload(results, names)`: the block the report carries, and how
-/// many campaigns and shared nations it holds.
-#[allow(clippy::type_complexity)]
-fn series_payload(results: &[(String, String, Vec<(String, String, Vec<Option<f64>>)>)],
-                  names: &[(String, String)]) -> (J, usize, usize) {
-    use crate::engine::dates::year_fraction;
-    use crate::pyfmt::round;
-    let tables = crate::engine::tables::Tables::builtin(&[], String::new());
-    let metrics = &tables.metrics;
-    let mut seen: Vec<(String, BTreeSet<&str>)> = Vec::new();
-    for (name, _m, rows) in results {
-        for (_d, tag, _v) in rows {
-            match seen.iter_mut().find(|(t, _)| t == tag) {
-                Some(slot) => {
-                    slot.1.insert(name);
-                }
-                None => {
-                    let mut s = BTreeSet::new();
-                    s.insert(name.as_str());
-                    seen.push((tag.clone(), s));
-                }
-            }
-        }
-    }
-    let mut shared: Vec<String> = seen.iter().filter(|(_, w)| w.len() >= 2).map(|(t, _)| t.clone()).collect();
-    shared.sort();
-    let keep: BTreeSet<&str> = shared.iter().map(|s| s.as_str()).collect();
-    let mut used: BTreeSet<String> = BTreeSet::new();
-    let mut campaigns = Vec::new();
-    let mut series = Vec::new();
-    for (name, label, rows) in results {
-        // `sorted({dates}, key=year_fraction)`: a set, so its order before
-        // the sort is Python's hash order; dates that tie on the key keep it.
-        // No two real dates tie, and every save of a campaign has its own.
-        let mut dates: Vec<&str> = Vec::new();
-        for (d, _, _) in rows {
-            if !dates.contains(&d.as_str()) {
-                dates.push(d);
-            }
-        }
-        dates.sort_by(|a, b| year_fraction(a).partial_cmp(&year_fraction(b)).unwrap());
-        let start = dates.first().map(|d| year_fraction(d)).unwrap_or(0.0);
-        // {tag: {key: {date: value}}}
-        let mut by_tag: Vec<(String, Vec<(String, crate::omap::OMap<String, f64>)>)> = Vec::new();
-        for (date, tag, values) in rows {
-            if !keep.contains(tag.as_str()) {
-                continue;
-            }
-            let i = match by_tag.iter().position(|(t, _)| t == tag) {
-                Some(i) => i,
-                None => {
-                    by_tag.push((tag.clone(), Vec::new()));
-                    by_tag.len() - 1
-                }
-            };
-            for (k, (key, _l, _f)) in metrics.iter().enumerate() {
-                if let Some(v) = values[k] {
-                    let slot = &mut by_tag[i].1;
-                    let j = match slot.iter().position(|(n, _)| n == key) {
-                        Some(j) => j,
-                        None => {
-                            slot.push((key.clone(), crate::omap::OMap::new()));
-                            slot.len() - 1
-                        }
-                    };
-                    slot[j].1.set(date.clone(), v);
-                }
-            }
-        }
-        for (_tag, slot) in by_tag.iter_mut() {
-            for (key, source, _l) in tables.growth.iter() {
-                if let Some(src) = slot.iter().find(|(n, _)| n == source).map(|(_, m)| m) {
-                    let readings: Vec<(&str, Option<f64>)> = dates.iter().map(|d| (*d, src.get(*d).copied())).collect();
-                    let got = crate::engine::report::growth_series(&readings, tables.growth_span);
-                    set_slot(slot, key, got);
-                }
-            }
-            for (key, source, _l) in tables.gain.iter() {
-                if let Some(src) = slot.iter().find(|(n, _)| n == source).map(|(_, m)| m) {
-                    let readings: Vec<(&str, Option<f64>)> = dates.iter().map(|d| (*d, src.get(*d).copied())).collect();
-                    let got = crate::engine::report::gain_series(&readings);
-                    set_slot(slot, key, got);
-                }
-            }
-        }
-        let mut block = Vec::new();
-        for (tag, slot) in &by_tag {
-            let mut inner = Vec::new();
-            for (key, dated) in slot {
-                if dated.is_empty() {
-                    continue;
-                }
-                used.insert(key.clone());
-                let mut ds: Vec<(&String, &f64)> = dated.iter().collect();
-                ds.sort_by(|a, b| year_fraction(a.0).partial_cmp(&year_fraction(b.0)).unwrap());
-                inner.push((key.clone(), J::List(ds.iter().map(|(d, v)| {
-                    let y = year_fraction(d);
-                    J::List(vec![J::Float(round(y, 3)), J::Float(round(y - start, 3)), J::Float(round(**v, 4))])
-                }).collect())));
-            }
-            if !inner.is_empty() {
-                block.push((tag.clone(), J::Obj(inner)));
-            }
-        }
-        campaigns.push(J::Obj(vec![
-            ("name".into(), J::Str(name.clone())),
-            ("mod".into(), J::Str(if label.is_empty() { "unmatched".into() } else { label.clone() })),
-            ("saves".into(), J::Int(dates.len() as i64)),
-            ("from".into(), J::Float(round(start, 3))),
-            ("to".into(), match dates.last() {
-                Some(d) => J::Float(round(year_fraction(d), 3)),
-                None => J::Null,
-            }),
-            ("dates".into(), J::List(dates.iter().map(|d| {
-                J::List(vec![J::Float(round(year_fraction(d), 3)), J::Str(d.to_string())])
-            }).collect())),
-        ]));
-        series.push(J::Obj(block));
-    }
-    const RULEBOUND: [&str; 3] = ["mobilization_pool", "mobilization_brigades", "mobilisation_size"];
-    let mut out_metrics = Vec::new();
-    for (key, label, fmt) in metrics {
-        if used.contains(key) {
-            out_metrics.push(J::Obj(vec![
-                ("key".into(), J::Str(key.clone())),
-                ("label".into(), J::Str(label.clone())),
-                ("fmt".into(), J::Str(fmt.clone())),
-                ("rulebound".into(), J::Bool(RULEBOUND.contains(&key.as_str()))),
-            ]));
-        }
-    }
-    for (key, _s, label) in &tables.growth {
-        if used.contains(key) {
-            out_metrics.push(J::Obj(vec![
-                ("key".into(), J::Str(key.clone())),
-                ("label".into(), J::Str(label.clone())),
-                ("fmt".into(), J::Str("percent".into())),
-                ("rate".into(), J::Int(1)),
-                ("rulebound".into(), J::Bool(false)),
-            ]));
-        }
-    }
-    for (key, _s, label) in &tables.gain {
-        if used.contains(key) {
-            out_metrics.push(J::Obj(vec![
-                ("key".into(), J::Str(key.clone())),
-                ("label".into(), J::Str(label.clone())),
-                ("fmt".into(), J::Str("count".into())),
-                ("delta".into(), J::Int(1)),
-                ("rulebound".into(), J::Bool(false)),
-            ]));
-        }
-    }
-    let n_campaigns = campaigns.len();
-    let n_tags = shared.len();
-    let tag_names = J::Obj(shared.iter().map(|t| {
-        let label = names.iter().find(|(n, _)| n == t).map(|(_, l)| l.clone()).unwrap_or_else(|| t.clone());
-        (t.clone(), J::Str(label))
-    }).collect());
-    (J::Obj(vec![
-        ("campaigns".into(), J::List(campaigns)),
-        ("tags".into(), J::List(shared.iter().map(|t| J::Str(t.clone())).collect())),
-        ("tagNames".into(), tag_names),
-        ("metrics".into(), J::List(out_metrics)),
-        ("series".into(), J::List(series)),
-    ]), n_campaigns, n_tags)
-}
-
-fn set_slot(slot: &mut Vec<(String, crate::omap::OMap<String, f64>)>, key: &str,
-            value: crate::omap::OMap<String, f64>) {
-    match slot.iter_mut().find(|(n, _)| n == key) {
-        Some(s) => s.1 = value,
-        None => slot.push((key.to_string(), value)),
-    }
 }

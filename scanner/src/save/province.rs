@@ -1,4 +1,7 @@
-// A faster province scanner for the Victoria 2 campaign analyzer.
+// The province blocks: most of the file, and every pop in the game. What one
+// province adds to its owner, read by the rules `readsave.read_province`
+// reads it by, and the save-wide bookkeeping -- who owns what, each pop's
+// type by its id, the world's people -- that no one nation's record holds.
 // Copyright (C) 2026 vic2tools
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -7,16 +10,11 @@
 // option) any later version. It is distributed WITHOUT ANY WARRANTY; without
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
-//
-// The province blocks: most of the file, and every pop in the game. What one
-// province adds to its owner, read by the rules `readsave.read_province`
-// reads it by, and the save-wide bookkeeping -- who owns what, each pop's
-// type by its id, the world's people -- that no one nation's record holds.
 
-use crate::text::{find, find_pair, is_number_b, to_float_b, to_int_b, trim_b, trim_end_b,
+use crate::save::text::{find, find_pair, is_number_b, to_float_b, to_int_b, trim_b, trim_end_b,
                   unquote_b};
-use crate::fx::{FxMap, FxSet};
-use crate::names::{self, Sym};
+use crate::util::fx::{FxMap, FxSet};
+use crate::save::names::{self, Sym};
 
 
 
@@ -81,7 +79,6 @@ pub(crate) struct Nation {
     pub(crate) literacy_weighted: f64,
     pub(crate) con_weighted: f64,
     pub(crate) mil_weighted: f64,
-    pub(crate) money_total: f64,
     // Insertion-ordered, not sorted: the report sorts cultures by size with
     // a stable sort, so two cultures of equal size come out in the order the
     // file first mentioned them. A HashMap emitted alphabetically silently
@@ -124,7 +121,6 @@ pub(crate) struct Pop<'a> {
     pub(crate) id: Option<&'a [u8]>,
     pub(crate) size: Option<&'a [u8]>,
     pub(crate) culture: Option<&'a [u8]>,
-    pub(crate) money: Option<&'a [u8]>,
     pub(crate) con: Option<&'a [u8]>,
     pub(crate) mil: Option<&'a [u8]>,
     pub(crate) literacy: Option<&'a [u8]>,
@@ -252,7 +248,7 @@ pub(crate) fn read_province(
             depth += 1;
             p += 1;
         }
-        let end = crate::text::find_newline(bytes, p, stop).unwrap_or(stop);
+        let end = crate::save::text::find_newline(bytes, p, stop).unwrap_or(stop);
         let line = &bytes[p..end];
         i = end;
         // Python's province pattern reaches exactly two levels -- one tab for
@@ -282,7 +278,7 @@ pub(crate) fn read_province(
         if depth == 2 {
             if let Some(idx) = current {
                 let slot = &mut pops[idx];
-                let own = matches!(key, b"id" | b"size" | b"money" | b"con" | b"mil" | b"literacy"
+                let own = matches!(key, b"id" | b"size" | b"con" | b"mil" | b"literacy"
                                         | b"life_needs");
                 // `\t(id|size|...)=([^\r\n]+)` wants a value: with none the
                 // line matches nothing, and the field keeps what it had.
@@ -294,8 +290,6 @@ pub(crate) fn read_province(
                     slot.id = Some(trim_end_b(value));
                 } else if key == b"size" {
                     slot.size = Some(trim_end_b(value));
-                } else if key == b"money" {
-                    slot.money = Some(trim_end_b(value));
                 } else if key == b"con" {
                     slot.con = Some(trim_end_b(value));
                 } else if key == b"mil" {
@@ -498,7 +492,6 @@ pub(crate) fn accumulate(
         province_literate += literate;
         nat.con_weighted += pop.con.map_or(0.0, to_float_b) * size as f64;
         nat.mil_weighted += pop.mil.map_or(0.0, to_float_b) * size as f64;
-        nat.money_total += pop.money.map_or(0.0, to_float_b);
     }
     let nat = scan.nations.get_mut(owner).unwrap();
     if province_pop > 0 {

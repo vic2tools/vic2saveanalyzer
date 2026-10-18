@@ -18,15 +18,15 @@
 // the inventions -- the mobilisation size and everything counted from it,
 // the cap, the ships -- is finished after (`finish`).
 
-use crate::deflate;
-use crate::country::{Ship, Stack};
+use crate::util::deflate;
+use crate::save::country::{Ship, Stack};
 use crate::engine::model::{Meta, Nation};
-use crate::names::{self, Sym};
-use crate::omap::OMap;
-use crate::fx::{FxMap, FxSet};
-use crate::pyfmt::{floordiv, push_csv_field, push_float, push_int, push_json_float,
+use crate::save::names::{self, Sym};
+use crate::util::omap::OMap;
+use crate::util::fx::{FxMap, FxSet};
+use crate::py::fmt::{floordiv, push_csv_field, push_float, push_int, push_json_float,
                    push_json_str, round, trunc_int, Num};
-use crate::engine::rules::{impact_for, naval_profile, rate_for, save_world, Mod, World, D};
+use crate::engine::rules::{impact_for, naval_profile, rate_for, save_world, Rules, World, D};
 
 /// `finishing.Finish`, and the few things of the run the tables need.
 /// Its `rate` is not here: it is the rate a run with no mod uses, and the
@@ -73,6 +73,40 @@ pub struct PreNation {
     pub pool: i64,
     pub entries: i64,
     pub cap_rule: i64,
+}
+
+/// `mobilization_clusters`' test: whether a mobilizable pop counts toward a
+/// nation's pool -- a type the run mobilizes, a culture the nation accepts,
+/// and a province neither colonial nor, unless asked, occupied.
+pub(crate) fn in_pool(nat: &Nation, spec: &Spec, poptype: Sym, culture: Sym, pid: i64) -> bool {
+    spec.mob_types.contains(&poptype) && nat.accepts(culture)
+        && !nat.colonial_provinces.contains(&pid)
+        && (spec.include_occupied || !nat.occupied_provinces.contains(&pid))
+}
+
+/// `brigades_from_clusters`: the brigades the pops of `sizes` (in save order)
+/// raise at `rate`. A pop big enough raises its own; smaller ones pool until
+/// the pool is a regiment's worth.
+pub(crate) fn brigades_from_clusters(sizes: &[i64], rate: f64, ppr: i64) -> i64 {
+    let mut brigades = 0i64;
+    let mut pooled = 0.0f64;
+    for &size in sizes {
+        let manpower = size as f64 * rate;
+        if manpower <= 0.0 {
+            continue;
+        }
+        if manpower >= ppr as f64 {
+            brigades += trunc_int(floordiv(manpower, ppr as f64)).unwrap_or(0);
+            pooled = 0.0;
+        } else {
+            pooled += manpower;
+            if pooled >= ppr as f64 {
+                brigades += 1;
+                pooled = 0.0;
+            }
+        }
+    }
+    brigades
 }
 
 /// One save, read and prepared.
@@ -208,7 +242,7 @@ impl Snapshot {
 
     /// `pack()`: JSON, `<`/`>` turned into look-alikes, gzipped, base64. Level
     /// 5, not the 6 the Python used: 45% quicker for 0.8% more bytes, and the
-    /// chunk is most of what a worker does outside reading (INTERNALS.md).
+    /// chunk is most of what a worker does outside reading.
     pub fn pack(&self) -> String {
         let mut raw = String::from("[[");
         for (i, w) in self.words.keys().enumerate() {
@@ -278,11 +312,7 @@ pub fn prepare(meta: Meta, nations: Vec<Nation>, keys: Vec<String>, spec: &Spec)
             pre.is_player = playing.contains(&tag);
             // `mobilization_clusters`.
             for (poptype, culture, size, pid) in &nat.mobilizable_pops {
-                if !spec.mob_types.contains(poptype) || !nat.accepts(*culture) {
-                    continue;
-                }
-                if nat.colonial_provinces.contains(pid)
-                    || (!spec.include_occupied && nat.occupied_provinces.contains(pid)) {
+                if !in_pool(&nat, spec, *poptype, *culture, *pid) {
                     continue;
                 }
                 pre.pool += size;
@@ -296,7 +326,6 @@ pub fn prepare(meta: Meta, nations: Vec<Nation>, keys: Vec<String>, spec: &Spec)
         nat.mobilizable_pops = Vec::new();
         nat.population_by_state = Vec::new();
         nat.soldier_pops_at = Vec::new();
-        nat.province_state = FxMap::default();
         nat.colonial_level = FxMap::default();
         nat.province_colonial = FxMap::default();
         nat.core_provinces = FxSet::default();
@@ -334,7 +363,7 @@ impl Val<'_> {
     /// `float(val)`.
     pub fn float(&self) -> Option<f64> {
         match self {
-            Val::S(s) => crate::pyfmt::py_float(s),
+            Val::S(s) => crate::py::num::float(s),
             Val::I(i) => Some(*i as f64),
             Val::F(f) => Some(*f),
             Val::N(n) => Some(n.as_f64()),
@@ -615,7 +644,8 @@ fn profile_key(p: &Profile) -> String {
     out
 }
 
-fn csv_line(out: &mut String, vals: &[Val]) {
+/// One CSV row, as the tables are written: comma-separated, CRLF-ended.
+pub(crate) fn csv_line(out: &mut String, vals: &[Val]) {
     for (i, v) in vals.iter().enumerate() {
         if i > 0 {
             out.push(',');
@@ -626,7 +656,7 @@ fn csv_line(out: &mut String, vals: &[Val]) {
 }
 
 /// The rest of finishing, and `save_rows`: one prepared save spent.
-pub fn finish(pre: Pre, spec: &Spec, m: &Mod, live: Option<&FxSet<String>>) -> D<Spent> {
+pub fn finish(pre: Pre, spec: &Spec, m: &Rules, live: Option<&FxSet<String>>) -> D<Spent> {
     let Pre { meta, nations, chunk, .. } = pre;
     let world: World = save_world(&meta, m);
     let date = meta.date.clone();
@@ -647,25 +677,7 @@ pub fn finish(pre: Pre, spec: &Spec, m: &Mod, live: Option<&FxSet<String>>) -> D
         }
         let rate = rate_for(&nat, m, live, Some(&world), is_player)?;
         let ppr = spec.pop_per_regiment;
-        // `brigades_from_clusters`.
-        let mut brigades = 0i64;
-        let mut pooled = 0.0f64;
-        for &size in &buckets {
-            let manpower = size as f64 * rate;
-            if manpower <= 0.0 {
-                continue;
-            }
-            if manpower >= ppr as f64 {
-                brigades += trunc_int(floordiv(manpower, ppr as f64)).unwrap_or(0);
-                pooled = 0.0;
-            } else {
-                pooled += manpower;
-                if pooled >= ppr as f64 {
-                    brigades += 1;
-                    pooled = 0.0;
-                }
-            }
-        }
+        let brigades = brigades_from_clusters(&buckets, rate, ppr);
         let total = nat.total_pop;
         let pct = |part: i64, digits: u32| -> f64 {
             if total != 0 { round(100.0 * part as f64 / total as f64, digits) } else { 0.0 }
@@ -745,7 +757,7 @@ pub fn finish(pre: Pre, spec: &Spec, m: &Mod, live: Option<&FxSet<String>>) -> D
         }
         let mut techs: Vec<Sym> = nat.tech_list.clone();
         techs.sort_by(|a, b| names::cmp(*a, *b));
-        let dense = m.dense();
+        let dense = &m.dense;
         let mut names: Vec<String> = Vec::with_capacity(techs.len());
         for tech in &techs {
             let (branch, line) = dense.tech_group(*tech).unwrap_or(("other", "Other"));
@@ -836,3 +848,15 @@ fn trim(tag: &str, nat: &mut Nation) -> Kept {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn small_pops_pool_into_a_brigade_and_big_ones_count_alone() {
+        // 1,000 waits in the pool, 3,000 is a brigade alone and empties it,
+        // then 2,000 and 1,500 pool into one more.
+        assert_eq!(super::brigades_from_clusters(&[1000, 3000, 2000, 1500], 1.0, 3000), 2);
+        assert_eq!(super::brigades_from_clusters(&[7000], 1.0, 3000), 2);
+        assert_eq!(super::brigades_from_clusters(&[7000], 0.0, 3000), 0);
+    }
+}

@@ -1,5 +1,4 @@
-// The analyzer's questions about saves rather than its report: `--peek` and
-// `--verify`, as `explain.py` asks and answers them.
+// The questions about saves rather than the report: `--peek` and `--verify`.
 // Copyright (C) 2026 vic2tools
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -9,18 +8,19 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 //
-// Both read a save as text Python's way (`v2parse.Tokens`, `parse_block`,
-// `pop_culture`), and print what `peek_save` and `verify_save` print, line
-// for line. A save Python would refuse on the way in raises out of either
-// and ends the Python run with a traceback; those are handed back to it
-// before anything is printed, so the Python says what it says.
+// Both read a save token by token (`save::tokens`, `parse_block`,
+// `pop_culture`), as Python's `peek_save` and `verify_save` did, and print
+// what those printed, line for line. A save that cannot be read at all is
+// refused in a sentence before anything is printed (`whole`).
 
-use crate::clause::{unquote, V};
-use crate::engine::modread::py_float;
-use crate::engine::walk::{looks_like_country_tag, parse_block, Tokens};
-use crate::engine::{basename, read_save, Reading, Refused};
-use crate::fx::FxMap;
-use crate::pyre::space;
+use crate::save::clause::{unquote, V};
+use crate::py::num::float_latin1;
+use crate::save::tokens::Tokens;
+use crate::save::walk::{looks_like_country_tag, parse_block};
+use crate::engine::{Reading, readsave::read_save, readsave::Refused};
+use crate::py::path::basename;
+use crate::util::fx::FxMap;
+use crate::py::re::space;
 
 const VANILLA_POP_TYPES: [&str; 12] = ["aristocrats", "artisans", "bureaucrats", "capitalists",
     "clergymen", "clerks", "craftsmen", "farmers", "labourers", "officers", "slaves", "soldiers"];
@@ -79,11 +79,11 @@ fn isdigit(k: &[u8]) -> bool {
 fn pop_culture(pop: &V) -> (String, String) {
     if let V::Dict(d) = pop {
         for (key, val) in &d.pairs {
-            if crate::province::pop_known(key) || key.first() == Some(&b'_') {
+            if crate::save::province::pop_known(key) || key.first() == Some(&b'_') {
                 continue;
             }
             if let V::Str(v) = val {
-                if py_float(v).is_none() {
+                if float_latin1(v).is_none() {
                     return (l1(key), l1(v));
                 }
             }
@@ -234,7 +234,7 @@ fn head_line(line: &[u8], word_char: fn(u8) -> bool) -> bool {
 
 /// `to_int(text)`: `int(float(text))`, 0 for what it will not take.
 fn to_int(s: &[u8]) -> i64 {
-    match py_float(s) {
+    match float_latin1(s) {
         Some(f) if f.is_finite() => f.trunc() as i64,
         _ => 0,
     }
@@ -285,7 +285,7 @@ pub fn verify_save(path: &str, reading: &Reading) -> Result<(String, usize), Str
             if head_line(line, |c| c.is_ascii_digit()) {
                 in_province = true;
                 owner = None;
-            } else if head_line(line, crate::pyre::word) {
+            } else if head_line(line, crate::py::re::word) {
                 in_province = false;
                 owner = None;
             }
@@ -354,12 +354,12 @@ pub fn verify_save(path: &str, reading: &Reading) -> Result<(String, usize), Str
 pub fn verify_all(files: &[String], jobs: Option<i64>) -> Result<(), String> {
     let reading = plain_reading();
     let biggest = files.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len()).max().unwrap_or(0);
-    let workers = crate::engine::worker_count(files.len(), biggest, jobs);
+    let workers = crate::engine::pool::worker_count(files.len(), biggest, jobs);
     if workers > 1 && files.len() > 1 {
         crate::outln!("Checking {} save(s) on {} cores.", files.len(), workers);
     }
     let mut failed = None;
-    crate::engine::in_order(files.len(), workers, |i| verify_save(&files[i], &reading), |_i, got| {
+    crate::engine::pool::in_order(files.len(), workers, |i| verify_save(&files[i], &reading), |_i, got| {
         match got {
             Ok((text, _bad)) if failed.is_none() => crate::outln!("{}", text),
             Ok(_) => {}

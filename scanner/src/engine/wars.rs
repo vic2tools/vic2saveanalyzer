@@ -10,11 +10,189 @@
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 
 use crate::engine::dates::year_fraction;
+use crate::save::clause::{self, Tree, V, R};
 use crate::engine::model::{Battle, FirstGoal, Goal, Side, War};
-use crate::names::{self, Sym};
-use crate::omap::OMap;
-use crate::fx::FxMap;
-use crate::pyfmt::{push_int, push_json_str};
+use crate::save::names::{self, Sym};
+use crate::util::omap::OMap;
+use crate::util::fx::FxMap;
+use crate::py::fmt::{push_int, push_json_str};
+
+// ------------------------------------------------- one war, off a save
+
+fn s(b: &[u8]) -> Sym {
+    names::intern(b)
+}
+
+fn side(v: Option<&V>) -> R<Option<Side>> {
+    let block = match v {
+        Some(V::Dict(d)) => d,
+        _ => return Ok(None),
+    };
+    let mut units = OMap::new();
+    for (key, val) in &block.pairs {
+        if key == b"country" || key == b"leader" || key == b"losses" || key.first() == Some(&b'_') {
+            continue;
+        }
+        let n = clause::unwrap_overflow(clause::to_int(Some(val), 0)?);
+        if n != 0 {
+            units.set(s(key), n);
+        }
+    }
+    Ok(Some(Side {
+        country: s(&clause::name(block.get(b"country"))?),
+        leader: s(&clause::name(block.get(b"leader"))?),
+        losses: clause::unwrap_overflow(clause::to_int(block.get(b"losses"), 0)?),
+        units,
+    }))
+}
+
+fn battle(raw: &V, when: Option<&[u8]>, out: &mut Vec<Battle>) -> R<()> {
+    let raw = match raw {
+        V::Dict(d) => d,
+        _ => return Ok(()),
+    };
+    out.push(Battle {
+        name: s(&clause::name(raw.get(b"name"))?),
+        location: clause::to_int(raw.get(b"location"), 0)?,
+        date: when.map(s),
+        attacker_won: clause::yes(raw.get(b"result"))?,
+        attacker: side(raw.get(b"attacker"))?,
+        defender: side(raw.get(b"defender"))?,
+    });
+    Ok(())
+}
+
+/// Sorted on the bytes, which orders latin-1 names as their text is ordered.
+fn sorted_names(mut v: Vec<Vec<u8>>) -> Vec<Sym> {
+    v.sort();
+    v.dedup();
+    v.iter().map(|x| s(x)).collect()
+}
+
+/// `readwar.read_war(block, active)`, or None for a block that is not a dict.
+pub fn read_war(v: &V, active: bool) -> R<Option<War>> {
+    let block = match v {
+        V::Dict(d) => d,
+        _ => return Ok(None),
+    };
+    let empty = Tree::default();
+    let history = match block.get(b"history") {
+        Some(V::Dict(d)) => d,
+        _ => &empty,
+    };
+    let mut joined: Vec<(Vec<u8>, Vec<u8>, bool)> = Vec::new();
+    let mut left: Vec<(Vec<u8>, Vec<u8>, bool)> = Vec::new();
+    let mut battles: Vec<Battle> = Vec::new();
+    let mut battle_dates: Vec<Vec<u8>> = Vec::new();
+    for (key, value) in &history.pairs {
+        if key == b"battle" {
+            for raw in clause::as_list(Some(value)) {
+                battle(raw, None, &mut battles)?;
+            }
+            continue;
+        }
+        if !clause::dated(key)? {
+            continue;
+        }
+        for entry in clause::as_list(Some(value)) {
+            let entry = match entry {
+                V::Dict(d) => d,
+                _ => continue,
+            };
+            for (what, who) in &entry.pairs {
+                if what == b"battle" {
+                    for raw in clause::as_list(Some(who)) {
+                        let before = battles.len();
+                        battle(raw, Some(key), &mut battles)?;
+                        if battles.len() > before {
+                            battle_dates.push(key.clone());
+                        }
+                    }
+                } else if what == b"add_attacker" || what == b"add_defender" {
+                    joined.push((key.clone(), clause::name(Some(who))?, what == b"add_attacker"));
+                } else if what == b"rem_attacker" || what == b"rem_defender" {
+                    left.push((key.clone(), clause::name(Some(who))?, what == b"rem_attacker"));
+                }
+            }
+        }
+    }
+    let mut goals = Vec::new();
+    for raw in clause::as_list(block.get(b"war_goal")) {
+        let raw = match raw {
+            V::Dict(d) => d,
+            _ => continue,
+        };
+        let g = Goal {
+            casus_belli: s(&clause::name(raw.get(b"casus_belli"))?),
+            actor: s(&clause::name(raw.get(b"actor"))?),
+            receiver: s(&clause::name(raw.get(b"receiver"))?),
+            province: clause::to_int(raw.get(b"state_province_id"), 0)?,
+            added: s(&clause::name(raw.get(b"date"))?),
+            fulfilled: clause::yes(raw.get(b"is_fulfilled"))?,
+        };
+        if !g.actor.is_empty() || !g.receiver.is_empty() {
+            goals.push(g);
+        }
+    }
+    let empty_goal = Tree::default();
+    let first = match block.get(b"original_wargoal") {
+        Some(V::Dict(d)) => d,
+        _ => &empty_goal,
+    };
+    let dates: Vec<&Vec<u8>> = joined.iter().map(|j| &j.0)
+        .chain(left.iter().map(|l| &l.0))
+        .chain(battle_dates.iter())
+        .collect();
+    let pick = |want_max: bool| -> Vec<u8> {
+        let mut best: Option<&Vec<u8>> = None;
+        for d in &dates {
+            let better = match best {
+                None => true,
+                Some(b) if want_max => clause::date_key(d) > clause::date_key(b),
+                Some(b) => clause::date_key(d) < clause::date_key(b),
+            };
+            if better {
+                best = Some(d);
+            }
+        }
+        best.cloned().unwrap_or_default()
+    };
+    let start = if dates.is_empty() { Vec::new() } else { pick(false) };
+    let end = if !dates.is_empty() && !active { pick(true) } else { Vec::new() };
+    let mut fighting = Vec::new();
+    for side_key in [&b"attacker"[..], &b"defender"[..]] {
+        for tag in clause::as_list(block.get(side_key)) {
+            fighting.push(clause::name(Some(tag))?);
+        }
+    }
+    let event = |list: &Vec<(Vec<u8>, Vec<u8>, bool)>| -> Vec<(Sym, Sym, bool)> {
+        list.iter().map(|(d, w, a)| (s(d), s(w), *a)).collect()
+    };
+    let one_side = |attacking: bool| -> Vec<Vec<u8>> {
+        joined.iter().filter(|j| j.2 == attacking).map(|j| j.1.clone()).collect()
+    };
+    Ok(Some(War {
+        name: s(&clause::name(block.get(b"name"))?),
+        active,
+        start: s(&start),
+        end: s(&end),
+        original_attacker: s(&clause::name(block.get(b"original_attacker"))?),
+        original_defender: s(&clause::name(block.get(b"original_defender"))?),
+        attackers: sorted_names(one_side(true)),
+        defenders: sorted_names(one_side(false)),
+        fighting: sorted_names(fighting),
+        joins: event(&joined),
+        leaves: event(&left),
+        goals,
+        goal: FirstGoal {
+            casus_belli: s(&clause::name(first.get(b"casus_belli"))?),
+            actor: s(&clause::name(first.get(b"actor"))?),
+            receiver: s(&clause::name(first.get(b"receiver"))?),
+            province: clause::to_int(first.get(b"state_province_id"), 0)?,
+        },
+        battles,
+    }))
+}
 
 type Name = (Sym, Sym, Sym);
 pub type Key = (Sym, Sym, Sym, usize);

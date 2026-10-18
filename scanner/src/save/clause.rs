@@ -22,47 +22,14 @@
 
 pub type R<T> = Result<T, ()>;
 
-/// Python's `str.isspace()` for a character that is one latin-1 byte, which
-/// is what `\s` in `TOKEN_RE` matches.
-pub fn py_space(c: u8) -> bool {
-    matches!(c, 0x09..=0x0d | 0x1c..=0x1f | 0x20 | 0x85 | 0xa0)
-}
+use crate::py::num::{float_latin1, int_latin1};
 
 /// `TOKEN_RE.findall(text)`: `"[^"]*"|[{}=]|[^\s{}=]+`.
 pub fn tokens(b: &[u8]) -> Vec<&[u8]> {
+    let mut cursor = crate::save::tokens::Tokens::new(b, 0);
     let mut out = Vec::with_capacity(b.len() / 6);
-    let mut i = 0;
-    let n = b.len();
-    while i < n {
-        let c = b[i];
-        if py_space(c) {
-            i += 1;
-            continue;
-        }
-        if c == b'"' {
-            // A quote that closes anywhere later is one token; one that never
-            // closes is the start of a bare word like any other character.
-            if let Some(off) = b[i + 1..].iter().position(|&x| x == b'"') {
-                let end = i + 1 + off + 1;
-                out.push(&b[i..end]);
-                i = end;
-                continue;
-            }
-        }
-        if c == b'{' || c == b'}' || c == b'=' {
-            out.push(&b[i..i + 1]);
-            i += 1;
-            continue;
-        }
-        let start = i;
-        while i < n {
-            let x = b[i];
-            if py_space(x) || x == b'{' || x == b'}' || x == b'=' {
-                break;
-            }
-            i += 1;
-        }
-        out.push(&b[start..i]);
+    while let Some((start, end)) = cursor.next() {
+        out.push(&b[start..end]);
     }
     out
 }
@@ -99,6 +66,28 @@ impl Tree {
 
     fn position(&self, key: &[u8]) -> Option<usize> {
         self.pairs.iter().position(|(k, _)| k == key)
+    }
+}
+
+impl V {
+    /// A block's value for `key`; nothing for anything but a block.
+    pub fn get(&self, key: &[u8]) -> Option<&V> {
+        match self {
+            V::Dict(d) => d.get(key),
+            _ => None,
+        }
+    }
+
+    /// A block's keys and values, in order; none for anything else.
+    pub fn pairs(&self) -> &[(Vec<u8>, V)] {
+        match self {
+            V::Dict(d) => &d.pairs,
+            _ => &[],
+        }
+    }
+
+    pub fn is_dict(&self) -> bool {
+        matches!(self, V::Dict(_))
     }
 }
 
@@ -181,18 +170,11 @@ pub fn parse_span(b: &[u8]) -> V {
 
 // ------------------------------------------------------------- conversions
 
-/// Python's `float(s)` for a string: Ok(None) is the ValueError the callers
-/// catch. Underscores between digits, spaces Python trims, `inf` and `nan`
-/// are all Python's (`modread::py_float`).
-pub fn py_float(s: &[u8]) -> R<Option<f64>> {
-    Ok(crate::engine::modread::py_float(s))
-}
-
 /// `to_float(value, default)`.
-pub fn to_float(v: Option<&V>, default: f64) -> R<f64> {
+pub fn to_float(v: Option<&V>, default: f64) -> f64 {
     match v {
-        Some(V::Str(s)) => Ok(py_float(s)?.unwrap_or(default)),
-        _ => Ok(default),
+        Some(V::Str(s)) => float_latin1(s).unwrap_or(default),
+        _ => default,
     }
 }
 
@@ -201,7 +183,7 @@ pub fn to_float(v: Option<&V>, default: f64) -> R<f64> {
 /// not caught and ended the read in Python, so it is refused here.
 pub fn to_int(v: Option<&V>, default: i64) -> R<i64> {
     match v {
-        Some(V::Str(s)) => match py_float(s)? {
+        Some(V::Str(s)) => match float_latin1(s) {
             None => Ok(default),
             Some(f) if f.is_nan() => Ok(default),
             Some(f) if f.is_infinite() => Err(()),
@@ -274,12 +256,6 @@ pub(crate) fn date_key(d: &[u8]) -> (i64, i64, i64) {
 
 // ------------------------------------------------------------------- market
 
-/// `int(p)` for one part of a `YYYY.M.D` date: Ok(None) is the ValueError
-/// `shift_months` catches; a number past an i64 is refused.
-pub(crate) fn py_int(p: &[u8]) -> R<Option<i64>> {
-    crate::engine::modread::py_int(p).map_err(|_| ())
-}
-
 /// `readsave.shift_months(date, back)`.
 pub(crate) fn shift_months(date: &[u8], back: i64) -> R<Vec<u8>> {
     let parts: Vec<&[u8]> = date.split(|&c| c == b'.').collect();
@@ -288,7 +264,7 @@ pub(crate) fn shift_months(date: &[u8], back: i64) -> R<Vec<u8>> {
     }
     let mut n = [0i64; 3];
     for (i, p) in parts.iter().enumerate() {
-        match py_int(p)? {
+        match int_latin1(p).map_err(|_| ())? {
             Some(v) => n[i] = v,
             None => return Ok(Vec::new()),
         }
@@ -315,4 +291,32 @@ pub fn great_nations(v: &V) -> R<Vec<i64>> {
         out.push(to_int(Some(i), -1)?);
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_tree_and_the_walk_cut_text_into_the_same_tokens() {
+        let text: &[u8] = b"a=\"b c\" {x=1}\x1c\x85y\xa0=\t\"open {z}\r\n}";
+        let mut walk = crate::save::tokens::Tokens::new(text, 0);
+        let mut spans = Vec::new();
+        while let Some((a, z)) = walk.next() {
+            spans.push(&text[a..z]);
+        }
+        assert_eq!(super::tokens(text), spans);
+        assert!(spans.contains(&&b"\"open"[..]));
+    }
+
+    #[test]
+    fn a_block_answers_for_its_keys_and_anything_else_has_none() {
+        let block = super::parse_span(b"a=1 b={c=2}");
+        assert!(block.is_dict());
+        assert!(matches!(block.get(b"a"), Some(super::V::Str(s)) if s == b"1"));
+        assert_eq!(block.pairs().len(), 2);
+        let word = super::V::Str(b"x".to_vec());
+        assert!(!word.is_dict());
+        assert!(word.get(b"a").is_none());
+        assert!(word.pairs().is_empty());
+        assert_eq!(super::to_float(block.get(b"a"), 0.0), 1.0);
+    }
 }

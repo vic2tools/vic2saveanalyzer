@@ -8,19 +8,14 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 //
-// Everything a run says goes through here. It can be held -- kept in the
-// order it was said and let out at once, or dropped with the run -- which
-// the front end did while it still handed runs back after speaking; nothing
-// holds it now, and the output streams as it is said.
+// Everything a run says goes through here, and out as it is said.
 //
 // The lines the host reads (`@progress`, `@ready`, `@done`) are not these:
 // they go out at once, and only when there is a host to read them.
 
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
 
-static HELD: Mutex<Option<Vec<(bool, String)>>> = Mutex::new(None);
 static PROTOCOL: AtomicBool = AtomicBool::new(true);
 
 fn emit(to_stdout: bool, text: &str) {
@@ -37,24 +32,9 @@ fn emit(to_stdout: bool, text: &str) {
     }
 }
 
-/// Say `text` on stdout (`to_stdout`) or stderr, now or when let out.
+/// Say `text` on stdout (`to_stdout`) or stderr.
 pub fn write(to_stdout: bool, text: String) {
-    let mut held = HELD.lock().unwrap();
-    match held.as_mut() {
-        Some(v) => v.push((to_stdout, text)),
-        None => {
-            drop(held);
-            emit(to_stdout, &text);
-        }
-    }
-}
-
-/// Let out what was kept, in order, and stop keeping.
-pub fn release() {
-    let kept = HELD.lock().unwrap().take();
-    for (to_stdout, text) in kept.unwrap_or_default() {
-        emit(to_stdout, &text);
-    }
+    emit(to_stdout, &text);
 }
 
 /// Whether a host is reading the protocol lines.

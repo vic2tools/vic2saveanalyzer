@@ -30,7 +30,7 @@ const SYMBOLS_PER_BLOCK: usize = 16383;
 
 /// One of zlib's configuration rows for the lazy matcher: how hard it looks
 /// for a match (levels 4-9 of `deflate_slow`; 1-3 are `deflate_fast`, which
-/// this does not do, and which did not pay: see INTERNALS.md).
+/// this does not do: measured, it did not pay).
 #[derive(Clone, Copy)]
 pub struct Level {
     pub good: usize,
@@ -39,7 +39,6 @@ pub struct Level {
     pub chain: usize,
 }
 
-pub const LEVEL4: Level = Level { good: 4, lazy: 4, nice: 16, chain: 16 };
 pub const LEVEL5: Level = Level { good: 8, lazy: 16, nice: 32, chain: 32 };
 pub const LEVEL6: Level = Level { good: 8, lazy: 16, nice: 128, chain: 128 };
 
@@ -783,71 +782,8 @@ pub fn zlib(data: &[u8]) -> Vec<u8> {
 /// to decompress and compare. `selftest-deflate MODE FILE` writes to stdout.
 pub fn selftest(mode: &str, path: &str) {
     use std::io::Write;
-    if mode == "huff" {
-        // Code lengths for many frequency sets, held to Kraft's equality:
-        // every set must come out a complete code within its limit.
-        let mut seed = 0x2545_f491_4f6c_dd1du64;
-        let mut rnd = || {
-            seed ^= seed << 13;
-            seed ^= seed >> 7;
-            seed ^= seed << 17;
-            seed
-        };
-        let mut bad = 0;
-        let tries: usize = path.parse().unwrap_or(100000);
-        for t in 0..tries {
-            let (n, limit) = match t % 3 { 0 => (19usize, 7u32), 1 => (30, 15), _ => (286, 15) };
-            let mut freq = vec![0u32; n];
-            let kind = rnd() % 4;
-            for (i, f) in freq.iter_mut().enumerate() {
-                *f = match kind {
-                    0 => (rnd() % 1000) as u32,
-                    1 => if rnd() % 3 == 0 { 0 } else { 1u32 << (rnd() % 20) },
-                    2 => { let fib = [1u32, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610,
-                                      987, 1597, 2584, 4181, 6765, 10946, 17711, 28657, 46368];
-                           if i < fib.len() { fib[i] } else { 0 } }
-                    _ => if rnd() % 5 == 0 { (rnd() % 100000) as u32 } else { 0 },
-                };
-            }
-            let lens = lengths(&freq, limit);
-            let kraft: u64 = lens.iter().filter(|&&l| l > 0).map(|&l| 1u64 << (limit - l as u32)).sum();
-            let over = lens.iter().any(|&l| l as u32 > limit);
-            let missing = freq.iter().zip(&lens).any(|(f, l)| *f > 0 && *l == 0);
-            if kraft != 1u64 << limit || over || missing {
-                bad += 1;
-                if bad < 5 {
-                    eprintln!("bad code: limit {} kind {} kraft {} of {} lens {:?}", limit, kind,
-                              kraft, 1u64 << limit, lens);
-                }
-            }
-        }
-        println!("{} frequency sets, {} bad", tries, bad);
-        return;
-    }
-    if mode == "levels" {
-        // Every file in a folder, gzipped at each level on this thread: bytes
-        // out and seconds taken, three rounds, the quickest kept.
-        let mut files: Vec<_> = std::fs::read_dir(path).unwrap()
-            .map(|e| e.unwrap().path()).collect();
-        files.sort();
-        let datas: Vec<Vec<u8>> = files.iter().map(|f| std::fs::read(f).unwrap()).collect();
-        let raw: usize = datas.iter().map(|d| d.len()).sum();
-        println!("{} files, {} bytes in", datas.len(), raw);
-        for (k, lv) in [LEVEL4, LEVEL5, LEVEL6].iter().enumerate() {
-            let (mut best, mut bytes) = (f64::MAX, 0usize);
-            for _ in 0..3 {
-                let t = std::time::Instant::now();
-                bytes = datas.iter().map(|d| gzip_level(d, lv).len()).sum();
-                best = best.min(t.elapsed().as_secs_f64());
-            }
-            println!("level {}: {} bytes ({:.1}%), {:.1} ms a file", k + 4, bytes,
-                     100.0 * bytes as f64 / raw as f64, best * 1e3 / datas.len() as f64);
-        }
-        return;
-    }
     let data = std::fs::read(path).unwrap();
     let out = match mode {
-        "gz4" => gzip_level(&data, &LEVEL4),
         "gz5" => gzip_level(&data, &LEVEL5),
         "gzip" => gzip(&data),
         "zlib" => zlib(&data),

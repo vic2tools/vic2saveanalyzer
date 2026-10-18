@@ -22,8 +22,8 @@
 // culture, a flag, a technology's name -- is decoded into a `String`. It used
 // to decode every country block whole before reading a word of it.
 
-use crate::text::{find, latin1, unquote_b};
-use crate::names::{self, Sym};
+use crate::save::text::{find, latin1, unquote_b};
+use crate::save::names::{self, Sym};
 
 /// Whether a byte of the save is whitespace, as Python's `\s` judged the
 /// latin-1 text it decoded -- the ASCII spaces, NEL and the no-break space --
@@ -344,7 +344,6 @@ pub struct Country {
     pub invention_ids: Vec<i64>,
     pub mobilizing: i64,
     pub states: i64,
-    pub province_state: Vec<(i64, i64)>,
     pub colonial_provinces: Vec<i64>,
     pub colonial_level: Vec<(i64, i64)>,
     pub factory_count: i64,
@@ -538,17 +537,20 @@ pub struct Tables<'a> {
     pub reform_keys: &'a [String],
 }
 
-const STATE_SKIP: &[&[u8]] = &[b"employment", b"stockpile", b"id"];
-const UNIT_SKIP: &[&[u8]] = &[b"id", b"leader"];
+/// What both country readers -- the scan here and `walk`'s -- skip in a
+/// state and a unit, and read of a country as text and as numbers (save key,
+/// the record's name).
+pub(crate) const STATE_SKIP: &[&[u8]] = &[b"employment", b"stockpile", b"id"];
+pub(crate) const UNIT_SKIP: &[&[u8]] = &[b"id", b"leader"];
 
-const SCALARS: &[(&[u8], &str)] = &[
+pub(crate) const SCALARS: &[(&[u8], &str)] = &[
     (b"nationalvalue", "nationalvalue"),
     (b"primary_culture", "primary_culture"),
     (b"civilized", "civilized"),
     (b"government", "government"),
     (b"capital", "capital"),
 ];
-const NUMERICS: &[(&[u8], &str)] = &[
+pub(crate) const NUMERICS: &[(&[u8], &str)] = &[
     (b"prestige", "prestige"),
     (b"badboy", "infamy"),
     (b"money", "treasury"),
@@ -706,7 +708,6 @@ pub fn read_country(bytes: &[u8], at: usize, stop: usize, tag: &str,
                 i = tok.pos;
                 if let Value::Dict(d) = block {
                     out.states += 1;
-                    let ordinal = out.states;
                     let ids: Vec<i64> = match d.get(b"provinces") {
                         Some(Value::List(items)) => items.iter().map(|v| match v {
                             Value::Text(s) => to_int_or(Some(s), -1),
@@ -726,7 +727,6 @@ pub fn read_country(bytes: &[u8], at: usize, stop: usize, tag: &str,
                         to_int_or(d.text(b"is_colonial"), 0)
                     } else { 0 };
                     for pid in ids {
-                        out.province_state.push((pid, ordinal));
                         if colonial {
                             out.colonial_provinces.push(pid);
                             out.colonial_level.push((pid, level));

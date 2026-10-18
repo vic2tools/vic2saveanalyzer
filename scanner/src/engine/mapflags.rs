@@ -15,11 +15,11 @@
 // second. Here it is a few tens of milliseconds, so it is decoded where it
 // is wanted and not kept.
 
-use crate::engine::dates::py_int;
-use crate::deflate;
-use crate::omap::OMap;
-use crate::fx::{FxMap, FxSet};
-use crate::pyfmt::{floordiv, round};
+use crate::py::num::int;
+use crate::util::deflate;
+use crate::util::omap::OMap;
+use crate::util::fx::{FxMap, FxSet};
+use crate::py::fmt::{floordiv, round};
 use std::io::{Read, Seek, SeekFrom};
 
 /// (width, height, runs) of the bitmap at 1/`scale`, or (0, 0, []) without one.
@@ -35,7 +35,7 @@ pub fn province_raster(bmp: &str, csv: &str, scale: i64) -> (i64, i64, Vec<(i64,
         Ok(r) => r,
         Err(_) => return none,
     };
-    let text = crate::text::latin1(&raw);
+    let text = crate::save::text::latin1(&raw);
     // `next(fh)` skips the first line; the rest are split on `\n`, each
     // keeping its line ending in its last field.
     for line in text.split_inclusive('\n').skip(1) {
@@ -44,7 +44,7 @@ pub fn province_raster(bmp: &str, csv: &str, scale: i64) -> (i64, i64, Vec<(i64,
             continue;
         }
         if let (Some(r), Some(g), Some(b), Some(pid)) =
-            (py_int(bits[1]), py_int(bits[2]), py_int(bits[3]), py_int(bits[0])) {
+            (int(bits[1]), int(bits[2]), int(bits[3]), int(bits[0])) {
             let key = (b | g << 8 | r << 16) as u32;
             colour.insert(key, pid);
         }

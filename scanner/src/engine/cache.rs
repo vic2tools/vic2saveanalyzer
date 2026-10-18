@@ -24,13 +24,13 @@
 // small -- a campaign's names are a few hundred tags, cultures and goods
 // repeated a hundred thousand times.
 
-use crate::country::{Ship, Stack};
+use crate::save::country::{Ship, Stack};
 use crate::engine::finish::{Pre, PreNation};
 use crate::engine::model::{Battle, FirstGoal, Goal, Market, Meta, Nation, Side, War};
-use crate::names::{self, Sym};
-use crate::omap::OMap;
-use crate::fx::{FxMap, FxSet};
-use crate::pyfmt::Num;
+use crate::save::names::{self, Sym};
+use crate::util::omap::OMap;
+use crate::util::fx::{FxMap, FxSet};
+use crate::py::fmt::Num;
 use std::io::Write;
 
 const MAGIC: &[u8; 8] = b"V2ENGC02";
@@ -345,18 +345,11 @@ impl Keep for Market {
     }
 }
 
-/// The ships, in the bytes the two maps they were (`ships_by_type`, then
-/// `ship_crew`) wrote: an entry made before the ships were one `Vec` reads
-/// the same, and the other way about.
 fn put_fleet(ships: &[Ship], w: &mut W) {
     w.u(ships.len() as u64);
     for s in ships {
         s.kind.put(w);
         s.count.put(w);
-    }
-    w.u(ships.len() as u64);
-    for s in ships {
-        s.kind.put(w);
         s.crew.put(w);
     }
 }
@@ -365,61 +358,26 @@ fn get_fleet(r: &mut R) -> X<Vec<Ship>> {
     let n = r.len()?;
     let mut ships = Vec::with_capacity(n.min(4096));
     for _ in 0..n {
-        ships.push(Ship { kind: Keep::get(r)?, count: Keep::get(r)?, crew: 0.0 });
-    }
-    if r.len()? != n {
-        return Err(());
-    }
-    for s in ships.iter_mut() {
-        if <Sym as Keep>::get(r)? != s.kind {
-            return Err(());
-        }
-        s.crew = Keep::get(r)?;
+        ships.push(Ship { kind: Keep::get(r)?, count: Keep::get(r)?, crew: Keep::get(r)? });
     }
     Ok(ships)
 }
 
-/// The stacks, in the bytes the two maps they were (`units_at`, then
-/// `men_at`: a province, its kinds, each kind's count; the same again with
-/// the men) wrote.
 fn put_stacks(stacks: &[Stack], w: &mut W) {
-    for men in [false, true] {
-        w.u(Stack::provinces(stacks).count() as u64);
-        for group in Stack::provinces(stacks) {
-            group[0].pid.put(w);
-            w.u(group.len() as u64);
-            for s in group {
-                s.kind.put(w);
-                if men { s.men.put(w) } else { s.n.put(w) }
-            }
-        }
+    w.u(stacks.len() as u64);
+    for s in stacks {
+        s.pid.put(w);
+        s.kind.put(w);
+        s.n.put(w);
+        s.men.put(w);
     }
 }
 
 fn get_stacks(r: &mut R) -> X<Vec<Stack>> {
-    let mut stacks: Vec<Stack> = Vec::new();
-    let groups = r.len()?;
-    for _ in 0..groups {
-        let pid = r.i()?;
-        for _ in 0..r.len()? {
-            stacks.push(Stack { pid, kind: Keep::get(r)?, n: Keep::get(r)?, men: 0 });
-        }
-    }
-    let groups = r.len()?;
-    let mut at = 0;
-    for _ in 0..groups {
-        let pid = r.i()?;
-        for _ in 0..r.len()? {
-            let s = stacks.get_mut(at).ok_or(())?;
-            if s.pid != pid || <Sym as Keep>::get(r)? != s.kind {
-                return Err(());
-            }
-            s.men = Keep::get(r)?;
-            at += 1;
-        }
-    }
-    if at != stacks.len() {
-        return Err(());
+    let n = r.len()?;
+    let mut stacks = Vec::with_capacity(n.min(4096));
+    for _ in 0..n {
+        stacks.push(Stack { pid: Keep::get(r)?, kind: Keep::get(r)?, n: Keep::get(r)?, men: Keep::get(r)? });
     }
     Ok(stacks)
 }
@@ -448,7 +406,6 @@ impl Keep for Nation {
         n.soldiers_noncolonial.put(w); n.pop_noncolonial.put(w);
         n.literacy_noncolonial.put(w); n.goods_supply.put(w); n.mob_excluded_culture.put(w);
         n.literacy_weighted.put(w); n.con_weighted.put(w); n.mil_weighted.put(w);
-        n.money_total.put(w);
     }
     fn get(r: &mut R) -> X<Self> {
         let mut n = Nation::default();
@@ -479,7 +436,6 @@ impl Keep for Nation {
         n.literacy_noncolonial = Keep::get(r)?; n.goods_supply = Keep::get(r)?;
         n.mob_excluded_culture = Keep::get(r)?; n.literacy_weighted = Keep::get(r)?;
         n.con_weighted = Keep::get(r)?; n.mil_weighted = Keep::get(r)?;
-        n.money_total = Keep::get(r)?;
         Ok(n)
     }
 }
@@ -605,9 +561,9 @@ impl Store {
 
 const MOD_MAGIC: &[u8] = b"V2ENGM01";
 
-/// Where the mod read from `path` is kept, when Python has signed its files
-/// (`mod_reader.mod_signature`, which it takes for the stamp anyway): keyed
-/// by the folder, every file's size and time, and this program's version.
+/// Where the mod read from `path` is kept, when the front has signed its
+/// files (`mod_signature`, which it takes for the stamp anyway): keyed by the
+/// folder, every file's size and time, and this program's version.
 /// Kept whatever `--no-cache` says, as Python keeps its own read of a mod.
 pub fn mod_slot(store: &Store, path: &str, signature: Option<&str>) -> Option<(String, String)> {
     let signature = signature?;
@@ -620,7 +576,7 @@ pub fn mod_slot(store: &Store, path: &str, signature: Option<&str>) -> Option<(S
 }
 
 /// The mod as it was read, or None: missing, from another key, or damaged.
-pub fn mod_load(slot: &(String, String)) -> Option<crate::jsonr::J> {
+pub fn mod_load(slot: &(String, String)) -> Option<crate::py::json::J> {
     let raw = std::fs::read(&slot.0).ok()?;
     let body = raw.strip_prefix(MOD_MAGIC)?;
     let n = u32::from_le_bytes(body.get(..4)?.try_into().ok()?) as usize;
@@ -629,11 +585,11 @@ pub fn mod_load(slot: &(String, String)) -> Option<crate::jsonr::J> {
         return None;
     }
     let text = std::str::from_utf8(&body[4 + n..]).ok()?;
-    crate::jsonr::parse(text).ok()
+    crate::py::json::parse(text).ok()
 }
 
 /// Keep the mod as it was read. A failure costs the next run the read.
-pub fn mod_store(slot: &(String, String), mod_json: &crate::jsonr::J) {
+pub fn mod_store(slot: &(String, String), mod_json: &crate::py::json::J) {
     let mut text = String::new();
     mod_json.write(&mut text);
     let mut out = MOD_MAGIC.to_vec();

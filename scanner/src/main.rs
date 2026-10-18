@@ -12,8 +12,7 @@
 //     vic2scan analyze --run RUN.json ...   a run, as the launcher hands it
 //                                           over (`front`)
 //     vic2scan mod-export MOD               the mod folder as JSON
-//     vic2scan mod-signature MOD            what keys a mod's read
-//     vic2scan bench-engine RUN.json [N]    pass one's parts, timed
+//     vic2scan bench-engine RUN.json [N]    the first N saves read, timed
 //     vic2scan selftest-...                 what the checks hold the parts to
 //
 // The rules the readers follow are not this program's own. They are the
@@ -22,35 +21,26 @@
 // either a bare pair or a dict. Where they look strange, that is why, and
 // the recorded answers in `testkit/expected/` hold them to it.
 
-mod clause;
-mod country;
-mod deflate;
 mod engine;
 mod front;
-mod fx;
-mod jsonr;
-mod md5;
-mod names;
-mod omap;
-mod province;
-mod pyfmt;
-mod pyre;
-mod text;
+mod py;
+mod save;
+mod util;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("analyze") => front::main(&args),
         Some("mod-export") if args.len() == 3 => engine::modread::main(&args),
-        Some("mod-signature") => front::signature_main(&args),
-        Some("bench-engine") => engine::bench(&args),
-        Some("selftest-fmt") => pyfmt::selftest(),
-        Some("selftest-sniff") => front::cross::selftest(&args[2..]),
-        Some("selftest-re") => pyre::selftest(),
-        Some("selftest-deflate") if args.len() == 4 => deflate::selftest(&args[2], &args[3]),
+        Some("bench-engine") => front::bench_main(&args),
+        Some("selftest-fmt") => py::fmt::selftest(),
+        Some("selftest-signature") => front::signature_main(&args),
+        Some("selftest-sniff") => front::survey::selftest(&args[2..]),
+        Some("selftest-re") => py::re::selftest(),
+        Some("selftest-deflate") if args.len() == 4 => util::deflate::selftest(&args[2], &args[3]),
         _ => {
             eprintln!("usage: vic2scan analyze --run RUN.json [--refused FILE] [--protocol]\n\
-                       \x20      vic2scan mod-export MOD | mod-signature MOD");
+                       \x20      vic2scan mod-export MOD");
             std::process::exit(2);
         }
     }

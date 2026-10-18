@@ -8,9 +8,9 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 //
-// The spec is what the front end (`front`) makes of a run: the saves in
-// report order, how each is read, how each nation is finished, and where the
-// report goes. The mod folder is named there too (`mod_path`), and read here
+// The run is what the front end (`front`) settles: the saves in report
+// order, how each is read, how each nation is finished, and where the report
+// goes. The mod folder is named there too (`mod_path`), and read here
 // (`modread`) on a thread of its own while the saves are.
 //
 // Every save is read on every core (`prepare`, pass one), the campaign's
@@ -30,24 +30,22 @@ pub mod market;
 pub mod model;
 pub mod modread;
 pub mod out;
-pub mod walk;
+pub mod pool;
+pub mod readsave;
 pub mod report;
 pub mod rules;
 pub mod tables;
 pub mod wars;
 
-use crate::country::{read_country, Country, Tables};
 use finish::{Pre, Spec, Spent};
-use crate::jsonr::{self, J};
+use crate::py::json::J;
 use model::Save;
-use crate::fx::{FxMap, FxSet};
-use crate::province::{read_province, top_level_blocks, PopulationRules, Scan};
+use crate::util::fx::{FxMap, FxSet};
 use rules::{Decline, Mod, D};
-use crate::text::{latin1, tag_bytes, to_int_b, trim_b, unquote_b};
-use std::io::{Read, Write};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc;
-
+use std::io::Write;
+use pool::{in_order, worker_count};
+use crate::py::path::basename;
+use readsave::{read_save, Refused};
 
 /// Phase times, when `VIC2_ENGINE_TIMES` is set: appended to the file it
 /// names, or on stderr when it names none (`1`).
@@ -76,6 +74,8 @@ pub struct Reading {
     pub population_groups: FxMap<i64, i64>,
 }
 
+/// A run, as the front end settles it: the saves in report order, how each
+/// is read and finished, and where the report goes.
 pub struct Run {
     pub files: Vec<String>,
     pub out: String,
@@ -86,20 +86,13 @@ pub struct Run {
     pub map_scale: i64,
     pub quiet: bool,
     pub jobs: Option<i64>,
+    /// The `--cross` comparison, as the page carries it.
     pub cross: Option<String>,
     /// The mod folder, read here (`modread`).
     pub mod_path: Option<String>,
-    /// `mod_reader.mod_signature` of it, which keys the read kept for the
-    /// next run; None when Python did not work it out.
+    /// The mod's signature, which keys the read kept for the next run;
+    /// None when the front did not work it out (a `--cross` run).
     pub mod_signature: Option<String>,
-    /// Whether a host reads `@progress` and the rest: Python, which starts
-    /// the engine with a spec (`engine.spec`), does.
-    pub protocol: bool,
-    /// Whether a save the scanner refuses is skipped here in Python's words
-    /// (`analyze`, which prints what the run says itself) rather than the
-    /// run handed back (Python hosting the engine, which reads only its
-    /// stdout).
-    pub own_refusals: bool,
     /// One of the four diagnostics, answered instead of the report.
     pub ask: Option<explain::Ask>,
     /// One campaign of a `--cross` run: read once, quietly, for its rows.
@@ -110,650 +103,39 @@ pub struct Run {
     /// What besides the file decides what pass one makes of it, for the
     /// cache's key: the reading and the settings `prepare` takes.
     pub context: String,
-    /// The reading alone, which is what Python keys a read save by.
+    /// The reading alone, which keys the "read before" markers.
     pub reading_context: String,
 }
 
-fn bytes_list(v: &J) -> Vec<Vec<u8>> {
-    v.list().iter().map(|x| x.str().chars().map(|c| c as u32 as u8).collect()).collect()
-}
-
-fn string_list(v: &J) -> Vec<String> {
-    v.list().iter().map(|x| x.str().to_string()).collect()
-}
-
-/// The parts of the spec that decide what pass one makes of a save, as one
-/// short digest: the reading, and what `prepare` is told.
-fn reading_context_of(j: &J) -> String {
-    let mut text = String::new();
-    j.at("reading").write(&mut text);
-    let (mut a, mut b) = (0xcbf2_9ce4_8422_2325u64, 0x9e37_79b9_7f4a_7c15u64);
-    for &c in text.as_bytes() {
-        a = (a ^ c as u64).wrapping_mul(0x0000_0100_0000_01b3);
-        b = (b.rotate_left(5) ^ c as u64).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
-    }
-    format!("{:016x}{:016x}", a, b)
-}
-
-fn context_of(j: &J) -> String {
-    let mut text = String::new();
-    j.at("reading").write(&mut text);
-    text.push('|');
-    let f = j.at("finish");
-    for key in ["pop_per_regiment", "mob_types", "include_occupied", "player_nations", "wanted",
-                "min_pop"] {
-        f.at(key).write(&mut text);
-        text.push('|');
-    }
-    j.at("head").write(&mut text);
-    text.push('|');
-    j.at("tables").at("strata").write(&mut text);
-    let (mut a, mut b) = (0xcbf2_9ce4_8422_2325u64, 0x9e37_79b9_7f4a_7c15u64);
-    for &c in text.as_bytes() {
-        a = (a ^ c as u64).wrapping_mul(0x0000_0100_0000_01b3);
-        b = (b.rotate_left(5) ^ c as u64).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
-    }
-    format!("{:016x}{:016x}", a, b)
-}
-
-fn parse_run(j: &J) -> Run {
-    let pop_columns = string_list(j.at("pop_columns"));
-    let tables = tables::Tables::from_spec(j, &pop_columns);
-    let r = j.at("reading");
-    let f = j.at("finish");
-    let h = j.at("head");
-    let mut tech_group = FxMap::default();
-    for branch in ["army", "navy"] {
-        for line in j.at("tech_lines").at(branch).list() {
-            let name = line.list()[0].str();
-            for tech in line.list()[1].list() {
-                tech_group.insert(tech.str().to_string(), (branch.to_string(), name.to_string()));
-            }
-        }
-    }
-    Run {
-        files: string_list(j.at("files")),
-        out: j.at("out").str().to_string(),
-        reading: Reading {
-            pop_types: bytes_list(r.at("pop_types")),
-            mob_types: bytes_list(r.at("mob_types")),
-            reform_keys: string_list(r.at("reform_keys")),
-            army_techs: string_list(r.at("army_techs")),
-            navy_techs: string_list(r.at("navy_techs")),
-            population_groups: r.at("population_groups").list().iter()
-                .map(|p| (p.list()[0].int(), p.list()[1].int())).collect(),
-        },
-        spec: Spec {
-
-            pop_per_regiment: f.at("pop_per_regiment").int(),
-            mob_types: string_list(f.at("mob_types")).iter().map(|s| crate::names::intern_str(s)).collect(),
-            include_occupied: f.at("include_occupied").truthy(),
-            player_nations: if f.at("player_nations").is_null() { None }
-                            else { Some(string_list(f.at("player_nations"))) },
-            wanted: if f.at("wanted").is_null() { None }
-                    else { Some(string_list(f.at("wanted")).into_iter().collect()) },
-            min_pop: f.at("min_pop").int(),
-            columns: tables.per_save[0].1.clone(),
-            strata: tables.strata.clone(),
-            regions: h.at("province_regions").list().iter()
-                .map(|p| (p.list()[0].int(), p.list()[1].str().to_string())).collect(),
-            defines: h.at("defines").pairs().iter().map(|(k, v)| (k.clone(), v.float())).collect(),
-            tech_group,
-        },
-        no_html: j.at("no_html").truthy(),
-        split: j.at("split").truthy(),
-        map_scale: j.at("map_scale").int().max(1),
-        quiet: j.at("quiet").truthy(),
-        jobs: if j.at("jobs").is_null() { None } else { Some(j.at("jobs").int()) },
-        cross: j.at("cross").as_str().map(|s| s.to_string()),
-        mod_path: j.at("mod_path").as_str().map(|s| s.to_string()),
-        mod_signature: j.at("mod_signature").as_str().map(|s| s.to_string()),
-        protocol: j.at("protocol").truthy(),
-        own_refusals: j.at("own_refusals").truthy(),
-        ask: explain::Ask::from_json(j.at("diagnose")),
-        cross_part: j.at("cross_part").truthy(),
-        tech_lines: j.at("tech_lines").clone(),
-        tables,
-        store: cache::Store {
-            dir: j.at("cache").at("dir").str().to_string(),
-            version: j.at("cache").at("version").str().to_string(),
-            on: j.at("cache").at("on").truthy(),
-        },
-        context: context_of(j),
-        reading_context: reading_context_of(j),
-    }
-}
-
-// ------------------------------------------------------------ one save
-
-/// `os.path.basename`, as the analyzer names a save.
-pub fn basename(path: &str) -> &str {
-    let cut: &[char] = if cfg!(windows) { &['/', '\\', ':'] } else { &['/'] };
-    match path.rfind(cut) {
-        Some(i) => &path[i + 1..],
-        None => path,
-    }
-}
-
-fn stamp(path: &str) -> Option<(u64, std::time::SystemTime)> {
-    let m = std::fs::metadata(path).ok()?;
-    Some((m.len(), m.modified().ok()?))
-}
-
-/// A save's bytes: mapped where that is known to work here, read into a
-/// buffer the thread keeps otherwise.
-///
-/// Reading copies the whole file out of the page cache, and sixteen threads
-/// copying 34 MB each were what a campaign's reading was bound by (kernel
-/// time grew with every thread added, and the reading stopped getting
-/// faster at eight). A mapping shares the cache's own pages.
-pub enum Bytes<'a> {
-    Buffer(&'a [u8]),
-    #[cfg(target_os = "linux")]
-    Mapped(mapped::Map),
-}
-
-impl Bytes<'_> {
-    /// Whether the file was cut short while it was mapped (`mapped`).
-    fn faulted(&self) -> bool {
-        match self {
-            Bytes::Buffer(_) => false,
-            #[cfg(target_os = "linux")]
-            Bytes::Mapped(m) => m.faulted(),
-        }
-    }
-}
-
-impl std::ops::Deref for Bytes<'_> {
-    type Target = [u8];
-    fn deref(&self) -> &[u8] {
-        match self {
-            Bytes::Buffer(b) => b,
-            #[cfg(target_os = "linux")]
-            Bytes::Mapped(m) => m.bytes(),
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
-pub mod mapped {
-    //! A save mapped rather than read, and kept safe from the one thing a
-    //! mapping cannot survive on its own: the file cut short while it is
-    //! being scanned -- the game rewriting an autosave in the folder being
-    //! read. Touching a page past the new end raises SIGBUS, which kills the
-    //! process. Every live mapping is listed where a SIGBUS handler can see
-    //! it; a fault inside one gets a page of zeros mapped over the page that
-    //! went, the mapping is marked, and the read that owns it is then treated
-    //! as a file changed under a read -- read again, into a buffer. A fault
-    //! anywhere else is left to kill the process as it always would.
-    use std::os::raw::{c_int, c_long, c_void};
-    use std::os::unix::io::AsRawFd;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-    extern "C" {
-        fn mmap(addr: *mut c_void, len: usize, prot: c_int, flags: c_int, fd: c_int,
-                off: c_long) -> *mut c_void;
-        fn munmap(addr: *mut c_void, len: usize) -> c_int;
-        fn madvise(addr: *mut c_void, len: usize, advice: c_int) -> c_int;
-        fn sigaction(sig: c_int, act: *const SigAction, old: *mut SigAction) -> c_int;
-        fn sysconf(name: c_int) -> c_long;
-    }
-    const PROT_READ: c_int = 1;
-    const MAP_PRIVATE: c_int = 2;
-    const MAP_FIXED: c_int = 0x10;
-    const MAP_ANONYMOUS: c_int = 0x20;
-    const MAP_POPULATE: c_int = 0x8000;
-    const MADV_SEQUENTIAL: c_int = 2;
-    const SIGBUS: c_int = 7;
-    const SA_SIGINFO: c_int = 4;
-    const SC_PAGESIZE: c_int = 30;
-    /// Where `si_addr` sits in a `siginfo_t`: after three ints, aligned.
-    const SI_ADDR: usize = if cfg!(target_pointer_width = "64") { 16 } else { 12 };
-
-    /// glibc's `struct sigaction`, on Linux.
-    #[repr(C)]
-    struct SigAction {
-        handler: usize,
-        mask: [u64; 16],
-        flags: c_int,
-        restorer: usize,
-    }
-
-    /// The live mappings, as (start, length) and whether one has faulted.
-    /// A thread reads one save at a time, so a slot a thread is plenty; a
-    /// mapping with no free slot is not made, and the save is read instead.
-    const SLOTS: usize = 256;
-    static START: [AtomicUsize; SLOTS] = [const { AtomicUsize::new(0) }; SLOTS];
-    static LEN: [AtomicUsize; SLOTS] = [const { AtomicUsize::new(0) }; SLOTS];
-    static FAULTED: [AtomicBool; SLOTS] = [const { AtomicBool::new(false) }; SLOTS];
-    static PAGE: AtomicUsize = AtomicUsize::new(4096);
-
-    extern "C" fn on_sigbus(_sig: c_int, info: *mut c_void, _ctx: *mut c_void) {
-        let addr = unsafe { *((info as *const u8).add(SI_ADDR) as *const usize) };
-        for i in 0..SLOTS {
-            let start = START[i].load(Ordering::Acquire);
-            let len = LEN[i].load(Ordering::Acquire);
-            if start != 0 && addr >= start && addr < start + len {
-                let page = PAGE.load(Ordering::Relaxed);
-                let at = addr & !(page - 1);
-                let got = unsafe {
-                    mmap(at as *mut c_void, page, PROT_READ,
-                         MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0)
-                };
-                if got as isize != -1 {
-                    FAULTED[i].store(true, Ordering::Release);
-                    return;
-                }
-            }
-        }
-        // Not one of ours: back to the default, and the fault, met again,
-        // ends the process as it would have.
-        let default = SigAction { handler: 0, mask: [0; 16], flags: 0, restorer: 0 };
-        unsafe { sigaction(SIGBUS, &default, std::ptr::null_mut()) };
-    }
-
-    fn install() {
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| {
-            let page = unsafe { sysconf(SC_PAGESIZE) };
-            if page > 0 {
-                PAGE.store(page as usize, Ordering::Relaxed);
-            }
-            let handler: extern "C" fn(c_int, *mut c_void, *mut c_void) = on_sigbus;
-            let act = SigAction { handler: handler as usize, mask: [0; 16], flags: SA_SIGINFO,
-                                  restorer: 0 };
-            unsafe { sigaction(SIGBUS, &act, std::ptr::null_mut()) };
-        });
-    }
-
-    pub struct Map {
-        ptr: *mut c_void,
-        len: usize,
-        slot: usize,
-    }
-
-    unsafe impl Send for Map {}
-
-    impl Map {
-        pub fn open(file: &std::fs::File, len: usize) -> Option<Map> {
-            if len == 0 {
-                return None;
-            }
-            install();
-            // A slot first: a mapping the handler cannot see is not made.
-            let slot = (0..SLOTS).find(|&i| {
-                LEN[i].compare_exchange(0, usize::MAX, Ordering::AcqRel, Ordering::Relaxed).is_ok()
-            })?;
-            let ptr = unsafe {
-                mmap(std::ptr::null_mut(), len, PROT_READ, MAP_PRIVATE | MAP_POPULATE,
-                     file.as_raw_fd(), 0)
-            };
-            if ptr as isize == -1 {
-                LEN[slot].store(0, Ordering::Release);
-                return None;
-            }
-            FAULTED[slot].store(false, Ordering::Release);
-            START[slot].store(ptr as usize, Ordering::Release);
-            LEN[slot].store(len, Ordering::Release);
-            unsafe { madvise(ptr, len, MADV_SEQUENTIAL) };
-            Some(Map { ptr, len, slot })
-        }
-
-        pub fn bytes(&self) -> &[u8] {
-            unsafe { std::slice::from_raw_parts(self.ptr as *const u8, self.len) }
-        }
-
-        /// Whether the file was cut short under the mapping, so that some of
-        /// what was read is zeros standing in for pages that went.
-        pub fn faulted(&self) -> bool {
-            FAULTED[self.slot].load(Ordering::Acquire)
-        }
-    }
-
-    impl Drop for Map {
-        fn drop(&mut self) {
-            // Out of the list before the pages go, then the slot freed.
-            START[self.slot].store(0, Ordering::Release);
-            unsafe { munmap(self.ptr, self.len) };
-            FAULTED[self.slot].store(false, Ordering::Release);
-            LEN[self.slot].store(0, Ordering::Release);
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-        use std::io::Write;
-
-        #[test]
-        fn a_file_cut_short_under_the_mapping_is_survived_and_said() {
-            let path = std::env::temp_dir().join(format!("vic2map{}", std::process::id()));
-            let mut f = std::fs::File::create(&path).unwrap();
-            f.write_all(&vec![b'x'; 64 * 1024]).unwrap();
-            drop(f);
-            let f = std::fs::File::open(&path).unwrap();
-            let m = Map::open(&f, 64 * 1024).unwrap();
-            assert_eq!(m.bytes()[40000], b'x');
-            assert!(!m.faulted());
-            std::fs::OpenOptions::new().write(true).open(&path).unwrap().set_len(0).unwrap();
-            // Past the new end: SIGBUS without the handler.
-            let tail: u64 = m.bytes()[8192..].iter().map(|&b| b as u64).sum();
-            assert_eq!(tail, 0);
-            assert!(m.faulted());
-            drop(m);
-            std::fs::remove_file(&path).unwrap();
-        }
-    }
-}
-
-fn load<'a>(path: &str, raw: &'a mut Vec<u8>) -> std::io::Result<Bytes<'a>> {
-    let mut f = std::fs::File::open(path)?;
-    #[cfg(target_os = "linux")]
-    {
-        let len = f.metadata()?.len() as usize;
-        if std::env::var_os("VIC2_ENGINE_READ").is_none() {
-            if let Some(m) = mapped::Map::open(&f, len) {
-                return Ok(Bytes::Mapped(m));
-            }
-        }
-    }
-    raw.clear();
-    f.read_to_end(raw)?;
-    Ok(Bytes::Buffer(&raw[..]))
-}
-
-/// A save not read: skipped with Python's sentence, the way the Python
-/// skips a file it refuses, or the run handed back.
-pub enum Refused {
-    Skip(String),
-    Back(String),
-}
-
-/// `str(OSError)`: `[Errno 2] No such file or directory: '/the/path'`.
-pub fn os_error_text(e: &std::io::Error, path: &str) -> String {
-    let text = e.to_string();
-    let strerror = match text.rfind(" (os error ") {
-        Some(i) => text[..i].to_string(),
-        None => text,
-    };
-    #[cfg(windows)]
-    let (errno, strerror) = match e.raw_os_error() {
-        // The C runtime's numbers and words, which are what Python's open()
-        // raises with, for the Windows errors a file open meets.
-        Some(2) | Some(3) => (2, "No such file or directory".to_string()),
-        Some(5) | Some(32) | Some(33) => (13, "Permission denied".to_string()),
-        Some(n) => (n, strerror),
-        None => (0, strerror),
-    };
-    #[cfg(not(windows))]
-    let errno = e.raw_os_error().unwrap_or(0);
-    format!("[Errno {}] {}: {}", errno, strerror, crate::engine::modread::py_repr(path))
-}
-
-/// One save read whole: read again once if it
-/// changed while it was read, as Python does, and refused in Python's words
-/// if it changes again.
-pub fn read_save(path: &str, reading: &Reading, raw: &mut Vec<u8>) -> Result<Save, Refused> {
-    match read_once(path, reading, raw, false) {
-        Err(Refused::Back(why)) if why == CHANGED => match read_once(path, reading, raw, true) {
-            Err(Refused::Back(why)) if why == CHANGED => Err(Refused::Skip(format!(
-                "{} changed while it was being read. It is probably the file the game is writing \
-                 to right now; read the copies the keeper makes instead.", path))),
-            other => other,
-        },
-        other => other,
-    }
-}
-
-const CHANGED: &str = "changed while it was being read";
-
-fn read_once(path: &str, reading: &Reading, raw: &mut Vec<u8>, again: bool) -> Result<Save, Refused> {
-    let before = stamp(path);
-    // A second read is a plain one: the first may have been cut short under
-    // its mapping (`mapped`), and this one is read whole into a buffer.
-    let raw = if again {
-        std::fs::read(path).map(|v| {
-            *raw = v;
-            Bytes::Buffer(&raw[..])
-        })
-    } else {
-        load(path, raw)
-    }.map_err(|e| Refused::Skip(os_error_text(&e, path)))?;
-    let got = read_bytes(path, reading, &raw, before);
-    // A file cut short under its mapping was read partly as zeros, whatever
-    // the read made of them: it is a file changed under a read, and read again.
-    if raw.faulted() {
-        return Err(Refused::Back(CHANGED.into()));
-    }
-    got
-}
-
-/// The rest of `read_once`, on the bytes as loaded.
-fn read_bytes(path: &str, reading: &Reading, raw: &[u8],
-              before: Option<(u64, std::time::SystemTime)>) -> Result<Save, Refused> {
-    if stamp(path) != before {
-        return Err(Refused::Back(CHANGED.into()));
-    }
-    // `_refuse_unless_whole`, in its order and its words.
-    if raw.starts_with(b"PK") {
-        return Err(Refused::Skip(format!(
-            "{} is a zip archive. Extract it, or re-save the game in debug mode to get plaintext.",
-            path)));
-    }
-    let head = &raw[..raw.len().min(4096)];
-    let has = |needle: &[u8]| head.windows(needle.len()).any(|w| w == needle);
-    if !(has(b"date=") || has(b"date =")) {
-        return Err(Refused::Skip(format!(
-            "{} does not look like a plaintext Vic2 save (no `date=` in the header). If it is \
-             binary, launch Victoria 2 in debug mode and re-save.", path)));
-    }
-    let tail = &raw[raw.len().saturating_sub(256)..];
-    let end = tail.iter().rposition(|c| !b" \t\n\r\x0b\x0c".contains(c));
-    if end.map(|i| tail[i]) != Some(b'}') {
-        return Err(Refused::Skip(format!(
-            "{} stops part-way through, so it was cut short: the game crashed while writing it, \
-             or is writing it right now. If this is the game's own save folder, read the copies \
-             the keeper makes instead.", path)));
-    }
-    let text: &[u8] = &raw[..];
-    let mut scan = Scan {
-        world_pop: 0,
-        owners: Vec::new(),
-        nations: FxMap::default(),
-        pop_ids: Vec::new(),
-        pop_kinds: Vec::new(),
-        seen: Vec::new(),
-    };
-    let tables = Tables {
-        army_techs: &reading.army_techs,
-        navy_techs: &reading.navy_techs,
-        reform_keys: &reading.reform_keys,
-    };
-    let (blocks, date, player, countries) = match top_level_blocks(text) {
-        Some(blocks) => {
-            let (date, player, countries) = read_flat(text, &blocks, reading, &tables, &mut scan);
-            (blocks, date, player, countries)
-        }
-        // Not the game's layout: walked a token at a time, as the Python
-        // that this replaced walked it.
-        None => {
-            let w = walk::read(text, &reading.pop_types, &reading.mob_types, &tables, &mut scan,
-                               &reading.population_groups)
-                .map_err(|why| Refused::Back(format!("{}: {}", path, why)))?;
-            (w.blocks, w.date, w.player, w.countries)
-        }
-    };
-    let rest = model::read_rest(text, &blocks)
-        .map_err(|_| Refused::Back(format!("{}: the wars or the market hold something it cannot make out", path)))?;
-    let save = model::build(basename(path).to_string(), date, player, &scan, &countries, rest)
-        .map_err(|_| Refused::Back(format!("{}: the record could not be built", path)))?;
-    // Again after the scan, not only after the read: a mapped file is read
-    // as it is scanned, and one the game rewrote meanwhile would be half of
-    // each. Python reads it again, and says so if it changes a second time.
-    if stamp(path) != before {
-        return Err(Refused::Back(CHANGED.into()));
-    }
-    Ok(save)
-}
-
-/// The date, the player and the countries of a save laid out the game's
-/// way, its provinces folded into `scan`.
-fn read_flat(text: &[u8], blocks: &[(&[u8], usize, usize)], reading: &Reading, tables: &Tables,
-             scan: &mut Scan) -> (String, String, Vec<Country>) {
-    let mut date = String::new();
-    let mut player = String::new();
-    let head_end = blocks.first().map(|b| b.1).unwrap_or(0).min(text.len());
-    for line in text[..head_end].split(|&c| c == b'\n').take(40) {
-        if let Some(eq) = line.iter().position(|&c| c == b'=') {
-            let k = trim_b(&line[..eq]);
-            let v = unquote_b(trim_b(&line[eq + 1..]));
-            if k == b"date" && date.is_empty() {
-                date = latin1(v);
-            } else if k == b"player" && player.is_empty() {
-                player = latin1(v);
-            }
-        }
-    }
-    let mut countries: Vec<Country> = Vec::new();
-    let mut rules: FxMap<Vec<u8>, PopulationRules> = FxMap::default();
-    let mut referenced_pops = FxSet::default();
-    for (key, at, stop) in blocks {
-        if tag_bytes(key) {
-            let chunk = &text[*at..(*stop).min(text.len())];
-            let tag = latin1(key);
-            let country = read_country(chunk, 0, chunk.len(), &tag, tables);
-            let rule = rules.entry(key.to_vec()).or_default();
-            rule.accepted.extend(country.accepted_cultures.iter().copied());
-            for (name, value) in &country.scalars {
-                if name == "primary_culture" && !value.is_empty() {
-                    rule.accepted.insert(crate::names::intern_str(value));
-                }
-            }
-            rule.colonial.extend(&country.colonial_provinces);
-            referenced_pops.extend(&country.regiment_pops);
-            countries.push(country);
-        }
-    }
-    for (key, at, stop) in blocks {
-        if !key.is_empty() && key.iter().all(|c| c.is_ascii_digit()) {
-            read_province(text, *at, *stop, to_int_b(key), &reading.pop_types,
-                          &reading.mob_types, scan, &rules, &referenced_pops,
-                          &reading.population_groups);
-        }
-    }
-    (date, player, countries)
-}
-
-// ------------------------------------------------------------ the pool
-
-/// How many threads read the saves: cores bar one, the saves left, and
-/// memory.
-///
-/// Every logical core helps (the 1880s campaign's empty-cache run: 3.83 s
-/// on 8 threads, 3.50 s on 15, 3.47 s on 16, on 8 cores of two threads
-/// each); one is left for the window. A thread holds the save it reads --
-/// mapped, or in its buffer where saves are not mapped -- and ~0.15 of a
-/// save's size more while it reads it (measured: 43 MB a thread for 42 MB
-/// saves, read into buffers). Threads are allowed half of the memory the
-/// system could hand out, at a save and a quarter each; the rest is for
-/// the campaign the run holds, which is the same whatever the count.
-pub fn worker_count(jobs: usize, biggest: u64, asked: Option<i64>) -> usize {
-    if let Some(a) = asked {
-        return (a.max(1) as usize).min(jobs).max(1);
-    }
-    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
-        .saturating_sub(1).max(1);
-    let mut room = jobs;
-    if let Some(avail) = available_memory() {
-        let per_thread = (biggest + biggest / 4).max(1);
-        room = (avail / 2 / per_thread).max(1) as usize;
-    }
-    cores.min(jobs).min(room).max(1)
-}
-
-#[cfg(target_os = "linux")]
-fn available_memory() -> Option<u64> {
-    // MemAvailable: free pages and what the page cache would give back.
-    // MemFree alone, which the Python read, leaves the page cache out, and
-    // moved with it from run to run (8, 11 or 15 threads here).
-    let text = std::fs::read_to_string("/proc/meminfo").ok()?;
-    for line in text.lines() {
-        if let Some(rest) = line.strip_prefix("MemAvailable:") {
-            let kb: u64 = rest.trim().trim_end_matches("kB").trim().parse().ok()?;
-            return Some(kb * 1024);
-        }
-    }
-    None
-}
-
-#[cfg(windows)]
-fn available_memory() -> Option<u64> {
-    #[repr(C)]
-    struct Status {
-        length: u32,
-        load: u32,
-        total_phys: u64,
-        avail_phys: u64,
-        total_page: u64,
-        avail_page: u64,
-        total_virtual: u64,
-        avail_virtual: u64,
-        avail_extended: u64,
-    }
-    extern "system" {
-        fn GlobalMemoryStatusEx(status: *mut Status) -> i32;
-    }
-    let mut s = Status { length: std::mem::size_of::<Status>() as u32, load: 0, total_phys: 0,
-                         avail_phys: 0, total_page: 0, avail_page: 0, total_virtual: 0,
-                         avail_virtual: 0, avail_extended: 0 };
-    if unsafe { GlobalMemoryStatusEx(&mut s) } != 0 { Some(s.avail_phys) } else { None }
-}
-
-#[cfg(not(any(target_os = "linux", windows)))]
-fn available_memory() -> Option<u64> {
-    None
-}
-
-/// Run `job` over `0..n` on `workers` threads, handing each answer to
-/// `take` in index order as soon as it and everything before it are done.
-pub fn in_order<T: Send, F, G>(n: usize, workers: usize, job: F, mut take: G)
-where
-    F: Fn(usize) -> T + Sync,
-    G: FnMut(usize, T),
-{
-    if workers <= 1 || n <= 1 {
-        for i in 0..n {
-            take(i, job(i));
-        }
-        return;
-    }
-    let next = AtomicUsize::new(0);
-    let (tx, rx) = mpsc::channel::<(usize, T)>();
-    std::thread::scope(|s| {
-        for _ in 0..workers.min(n) {
-            let tx = tx.clone();
-            let (next, job) = (&next, &job);
-            s.spawn(move || loop {
-                let i = next.fetch_add(1, Ordering::Relaxed);
-                if i >= n {
-                    break;
-                }
-                if tx.send((i, job(i))).is_err() {
-                    break;
-                }
-            });
-        }
-        drop(tx);
-        let mut waiting: FxMap<usize, T> = FxMap::default();
-        let mut due = 0;
-        for (i, v) in rx {
-            waiting.insert(i, v);
-            while let Some(v) = waiting.remove(&due) {
-                take(due, v);
-                due += 1;
-            }
-        }
+/// The cache's names for what decides what pass one makes of a save:
+/// (the reading and what `prepare` is told, the reading alone). Maps and
+/// sets are written in sorted order, so the same settings give the same
+/// names on every run.
+pub fn contexts(reading: &Reading, spec: &Spec) -> (String, String) {
+    let mut groups: Vec<(i64, i64)> = reading.population_groups.iter().map(|(a, b)| (*a, *b)).collect();
+    groups.sort();
+    let read = format!("{:?}|{:?}|{:?}|{:?}|{:?}|{:?}", reading.pop_types, reading.mob_types,
+                       reading.reform_keys, groups, reading.army_techs, reading.navy_techs);
+    let mut mob: Vec<&str> = spec.mob_types.iter().map(|s| crate::save::names::text(*s)).collect();
+    mob.sort();
+    let wanted = spec.wanted.as_ref().map(|w| {
+        let mut w: Vec<&String> = w.iter().collect();
+        w.sort();
+        w
     });
+    let mut defines: Vec<(&String, u64)> = spec.defines.iter().map(|(k, v)| (k, v.to_bits())).collect();
+    defines.sort();
+    let mut regions: Vec<(&i64, &String)> = spec.regions.iter().collect();
+    regions.sort();
+    let whole = format!("{}|{}|{:?}|{}|{:?}|{:?}|{}|{:?}|{:?}", read, spec.pop_per_regiment, mob,
+                        spec.include_occupied, spec.player_nations, wanted, spec.min_pop,
+                        defines, regions);
+    let name = |text: &str| {
+        let mut h = crate::util::hash::TwoLane::new();
+        h.update(text.as_bytes());
+        h.hex()
+    };
+    (name(&whole), name(&read))
 }
 
 /// A line for the host to read: progress, and the like.
@@ -766,7 +148,6 @@ pub fn say(line: &str) {
 /// would have crashed on too. Said as a sentence, and the run ends with
 /// status 1, the status of every other run that does not finish.
 pub fn decline(why: &str) -> ! {
-    out::release();
     crate::errln!("Stopped: {}. This is something the analyzer cannot read; if it came from a \
                    save or a mod the game itself loads, please report it with that file.", why);
     std::process::exit(1);
@@ -810,12 +191,9 @@ fn read_mod(path: &str) -> D<J> {
     }
 }
 
-/// `vic2scan bench-engine SPEC N`: the first N saves read one at a time,
-/// timing reading, scanning, building the record and preparing it.
-pub fn bench(args: &[String]) {
-    let text = std::fs::read_to_string(&args[2]).unwrap();
-    let run = parse_run(&jsonr::parse(&text).unwrap());
-    let n: usize = args.get(3).and_then(|a| a.parse().ok()).unwrap_or(10);
+/// `vic2scan bench-engine RUN.json N`: the first N saves read one at a time,
+/// by the run's own readers, timing the read and the preparing.
+pub fn bench(run: &Run, n: usize) {
     let mut raw = Vec::new();
     let (mut t_read, mut t_prep) = (0.0, 0.0);
     for f in run.files.iter().take(n) {
@@ -830,61 +208,11 @@ pub fn bench(args: &[String]) {
     }
     let k = n as f64 / 1000.0;
     eprintln!("per save: read+scan+build {:.1} ms, prepare {:.1} ms", t_read / k, t_prep / k);
-    // And the parts of a read, one at a time.
-    let mut t = [0.0f64; 6];
-    for f in run.files.iter().take(n) {
-        let c = std::time::Instant::now();
-        let raw = std::fs::read(f).unwrap();
-        t[0] += c.elapsed().as_secs_f64();
-        let c = std::time::Instant::now();
-        let blocks = top_level_blocks(&raw).unwrap();
-        t[1] += c.elapsed().as_secs_f64();
-        let c = std::time::Instant::now();
-        let tables = Tables { army_techs: &run.reading.army_techs, navy_techs: &run.reading.navy_techs,
-                              reform_keys: &run.reading.reform_keys };
-        let mut countries = Vec::new();
-        let mut rules: FxMap<Vec<u8>, PopulationRules> = FxMap::default();
-        let mut referenced = FxSet::default();
-        for (key, at, stop) in &blocks {
-            if tag_bytes(key) {
-                let chunk = &raw[*at..(*stop).min(raw.len())];
-                let country = read_country(chunk, 0, chunk.len(), &latin1(key), &tables);
-                let rule = rules.entry(key.to_vec()).or_default();
-                rule.accepted.extend(country.accepted_cultures.iter().copied());
-                rule.colonial.extend(&country.colonial_provinces);
-                referenced.extend(&country.regiment_pops);
-                countries.push(country);
-            }
-        }
-        t[2] += c.elapsed().as_secs_f64();
-        let c = std::time::Instant::now();
-        let mut scan = Scan { world_pop: 0, owners: Vec::new(), nations: FxMap::default(),
-                              pop_ids: Vec::new(), pop_kinds: Vec::new(), seen: Vec::new() };
-        for (key, at, stop) in &blocks {
-            if !key.is_empty() && key.iter().all(|c| c.is_ascii_digit()) {
-                read_province(&raw, *at, *stop, to_int_b(key), &run.reading.pop_types,
-                              &run.reading.mob_types, &mut scan, &rules, &referenced,
-                              &run.reading.population_groups);
-            }
-        }
-        t[3] += c.elapsed().as_secs_f64();
-        let c = std::time::Instant::now();
-        let rest = model::read_rest(&raw, &blocks).unwrap();
-        t[4] += c.elapsed().as_secs_f64();
-        let c = std::time::Instant::now();
-        let save = model::build(String::new(), String::new(), String::new(), &scan, &countries, rest);
-        std::hint::black_box(save.ok());
-        t[5] += c.elapsed().as_secs_f64();
-    }
-    eprintln!("per save: file {:.1}, blocks {:.1}, countries {:.1}, provinces {:.1}, wars+market {:.1}, record {:.1} ms",
-              t[0] / k, t[1] / k, t[2] / k, t[3] / k, t[4] / k, t[5] / k);
 }
 
-/// A run as the front end declares it. A run handed back never returns.
-pub fn run_spec(spec_j: &J) -> report::Outcome {
+/// A run as the front end settles it. A run stopped (`decline`) never returns.
+pub fn run(run: Run) -> report::Outcome {
     phase("start");
-    let run = parse_run(spec_j);
-    out::set_protocol(run.protocol);
     let n = run.files.len();
     let biggest = run.files.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len())
         .max().unwrap_or(0);
@@ -920,11 +248,10 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
         let (signature, store) = (run.mod_signature.clone(), run.store.clone());
         let (scale, want_map) = (run.map_scale, !run.no_html);
         std::thread::spawn(move || {
-            let mut m = load_mod(&mod_path, &signature, &store)?;
-            if want_map {
-                m.raster = Some(crate::engine::mapflags::province_raster(&m.map_bmp, &m.map_csv, scale));
-            }
-            Ok(m)
+            let m = load_mod(&mod_path, &signature, &store)?;
+            let raster = want_map
+                .then(|| crate::engine::mapflags::province_raster(&m.map_bmp, &m.map_csv, scale));
+            Ok::<_, Decline>((m, raster))
         })
     };
     let mut pres: Vec<Option<Pre>> = (0..n).map(|_| None).collect();
@@ -946,10 +273,7 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
             if raw.capacity() > 96 << 20 {
                 *raw = Vec::new();
             }
-            got.map_err(|refused| match refused {
-                Refused::Skip(why) if run.own_refusals => Refused::Skip(why),
-                Refused::Skip(why) | Refused::Back(why) => Refused::Back(why),
-            }).map(|save| {
+            got.map(|save| {
                 let tags = keys_of(&save);
                 let pre = finish::prepare(save.meta, save.nations, tags, &run.spec);
                 if let Some(slot) = &slots[i] {
@@ -968,7 +292,7 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
                     } else if workers > 1 {
                         crate::outln!("  [{}/{}] {} ... {}", done, n, basename(&run.files[i]), pre.meta.date);
                     } else {
-                        let months: FxSet<crate::names::Sym> = pre.meta.market.as_ref()
+                        let months: FxSet<crate::save::names::Sym> = pre.meta.market.as_ref()
                             .map(|m| m.history.iter().map(|h| h.0).collect())
                             .unwrap_or_default();
                         let extra = if months.is_empty() { String::new() }
@@ -1021,24 +345,22 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
     phase("pass one: saves read and prepared");
 
     // The campaign's inventions, settled against the mod.
-    let mut m = match mod_job.join().unwrap_or_else(|_| decline("the mod could not be read")) {
+    let (m, raster) = match mod_job.join().unwrap_or_else(|_| decline("the mod could not be read")) {
         Ok(m) => m,
         // A mod Python raises over is refused when Python asks for it,
         // which is now, with every save read once.
-        Err(d) => match modread::raised_sentence(&d) {
-            Some(sentence) if run.own_refusals => {
-                out::release();
+        Err(d) => match d.raised() {
+            Some(sentence) => {
                 return report::Outcome { html: None, refused: Vec::new(),
                                          run_error: Some(sentence.to_string()),
                                          cross_part: None };
             }
-            _ => decline(&format!("the mod: {}", d.0.trim_start_matches('\u{1}'))),
+            None => decline(&format!("the mod: {}", d.text())),
         },
     };
     let held: Vec<&[finish::PreNation]> = pres.iter().map(|p| p.nations.as_slice()).collect();
     phase("mod loaded");
-    let live = rules::settle_campaign(&mut m, &held);
-    m.dense = Some(rules::Dense::build(&m, &run.spec.tech_group));
+    let (m, live) = rules::settle_campaign(m, &held, &run.spec.tech_group, raster);
     phase("inventions settled");
     if verbose {
         crate::engine::report::say_mod(&m, &live, &held, &files);
@@ -1055,14 +377,13 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
                                  cross_part: None };
     }
     if pres.is_empty() {
-        out::release();
-        return report::Outcome { html: None, refused: Vec::new(),
+            return report::Outcome { html: None, refused: Vec::new(),
                                  run_error: Some("No saves could be read.".into()), cross_part: None };
     }
     // A diagnostic is answered off the campaign as it stands, and ends the
     // run: no report, no tables.
     if let Some(ask) = &run.ask {
-        let said = explain::answer(ask, &m, &live, &pres, &files, &run.reading);
+        let said = explain::answer(ask, &run.spec, &m, &live, &pres, &files, &run.reading);
         return report::Outcome { html: None, refused: Vec::new(), run_error: said.err(),
                                  cross_part: None };
     }
@@ -1084,9 +405,9 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
         finish::finish(pre, &run.spec, &m, Some(&live))
     }, |i, got| match got {
         Ok(s) => spent[i] = Some(s),
-        Err(Decline(why)) => {
+        Err(d) => {
             if declined.is_none() {
-                declined = Some(why);
+                declined = Some(d.text().to_string());
             }
         }
     });
@@ -1095,13 +416,11 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
     }
     let spent: Vec<Spent> = spent.into_iter().map(|s| s.unwrap()).collect();
     phase("pass two: saves finished");
-    // Nothing from here on hands the run back.
-    out::release();
     if run.cross_part {
         return report::Outcome { html: None, refused: Vec::new(), run_error: None,
                                  cross_part: Some(cross_part(&run, &m, &held_names, &spent)) };
     }
-    let done = crate::engine::report::run(&run, &m, &live, spent);
+    let done = crate::engine::report::run(&run, &m, spent);
     // As the campaign in `report::run`: the process ends with this run. A
     // campaign of a `--cross` run, one of several, is freed as it returns.
     std::mem::forget((run, m, live));
@@ -1118,15 +437,10 @@ fn cross_part(run: &Run, m: &Mod, held: &[(String, String)], spent: &[Spent]) ->
             rows.push((r.date.clone(), r.key.clone(), keys.iter().map(|k| r.get(k).float()).collect()));
         }
     }
-    // `name_for(tag, government, localisation)`, where it names the nation
-    // other than by its tag.
+    // The nations the mod names other than by their tags.
     let mut names = Vec::new();
     for (tag, government) in held {
-        let label = if !government.is_empty() {
-            m.localisation.get(&format!("{}_{}", tag, government)).filter(|s| !s.is_empty()).cloned()
-        } else { None };
-        let label = label.or_else(|| m.localisation.get(tag).filter(|s| !s.is_empty()).cloned())
-            .unwrap_or_else(|| tag.clone());
+        let label = report::name_for(tag, government, m);
         if label != *tag {
             names.push((tag.clone(), label));
         }
