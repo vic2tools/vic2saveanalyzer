@@ -89,7 +89,7 @@ MUTATIONS = [
         "it led, which credits an ally's dead to whoever led the army",
         'war_legacy_ui.py', (),
         [
-            ('scanner/src/page/js/wars.js', '  const column = side => `<div class="ibtotal"><div class="ibwho">Total</div>`\n', '  const by = {1: new Map(), \'-1\': new Map()};\n  for (const b of w.battles) sides.battle(b).forEach((m, k) => {\n    const s = k ? b.d : b.a;\n    if (m) by[m].set(s[0], (by[m].get(s[0]) || 0) + s[2]);\n  });\n  const column = side => [...by[side]].map(([t, n]) => `<div class="ibnat">${ibFlag(t)}`\n      + `<div class="ibwho">${nameOf(t)}</div><span class="ibnum">${n}</span></div>`).join(\'\')\n    + `<div class="ibtotal"><div class="ibwho">Total</div>`\n'),
+            ('scanner/src/page/js/wars.js', '    const column = side => `<div class="ibtotal"><div class="ibwho">Total</div>`\n', '    const by = {1: new Map(), \'-1\': new Map()};\n    for (const b of w.battles) sides.battle(b).forEach((m, k) => {\n      const s = k ? b.d : b.a;\n      if (m) by[m].set(s[0], (by[m].get(s[0]) || 0) + s[2]);\n    });\n    const column = side => [...by[side]].map(([t, n]) => `<div class="ibnat">${ibFlag(t)}`\n        + `<div class="ibwho">${nameOf(t)}</div><span class="ibnum">${n}</span></div>`).join(\'\')\n      + `<div class="ibtotal"><div class="ibwho">Total</div>`\n'),
         ]),
     Mutation(
         'legacy-losses-by-country',

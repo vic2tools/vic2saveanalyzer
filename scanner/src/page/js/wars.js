@@ -148,8 +148,8 @@ const ordinal = n => n + (n % 100 >= 11 && n % 100 <= 13 ? 'th'
 /* Which side of the war a nation fought on: 1 attacking, -1 defending, 0 when
    the two lists cannot say -- the same tag on both, as in a civil war. The two
    nations in a battle are on opposite sides, so an unclear one takes the
-   opposite of its opponent. That is wars.py's `_side_losses` rule, which is
-   what makes the casualties here add up to the coalition totals it ships. */
+   opposite of its opponent. The page alone applies this rule: the casualties
+   of each side, here and in the legacy layout, are added up from it. */
 function warSides(w) {
   const att = new Set(w.attackers), dfd = new Set(w.defenders);
   const which = t => {
@@ -383,13 +383,6 @@ function warSideLosses(w, sides) {
 }
 
 // Each side's casualties, as one total: the war table's figure, split in two.
-function ibLosses(w, sides) {
-  const {land, sea} = warSideLosses(w, sides);
-  const column = side => `<div class="ibtotal"><div class="ibwho">Total</div>`
-    + `<span class="ibnum">${(land[side] + sea[side]).toLocaleString()}</span></div>`;
-  return {cols: [column(-1), column(1)], unplaced: land[0] + sea[0]};
-}
-
 /* Brigades and ships at the first save taken during the war. Only the nations
    the report charts have figures; the rest are counted, not guessed at. */
 function ibStrength(parties, date) {
@@ -497,14 +490,18 @@ function warInfobox(w) {
       + cols(ibStrength(dfd, opening.date), ibStrength(att, opening.date));
   }
   if (w.battles.length) {
-    const lost = ibLosses(w, sides);
-    body += band('Casualties and losses') + cols(lost.cols[0], lost.cols[1])
+    // Each side's casualties, as one total: a save keeps one loss figure for a
+    // side of a battle, under whoever led it, so they cannot be split by nation.
+    const {land, sea} = warSideLosses(w, sides);
+    const column = side => `<div class="ibtotal"><div class="ibwho">Total</div>`
+      + `<span class="ibnum">${(land[side] + sea[side]).toLocaleString()}</span></div>`;
+    body += band('Casualties and losses') + cols(column(-1), column(1))
       + `<div class="ibcaption" style="padding:10px 14px;border-top:1px solid var(--grid)">Total casualties: <b>${w.battles.reduce((n, b) => n + b.a[2] + b.d[2], 0).toLocaleString()}</b></div>`;
     notes.push('Casualties are each side&rsquo;s losses in its battles, men and ships '
       + 'together. They are not split by nation: a save records one loss figure for '
       + 'each side of a battle, under the nation leading it, whoever&rsquo;s troops died.');
-    if (lost.unplaced)
-      notes.push(`${lost.unplaced.toLocaleString()} more were lost by armies `
+    if (land[0] + sea[0])
+      notes.push(`${(land[0] + sea[0]).toLocaleString()} more were lost by armies `
         + `neither side&rsquo;s list could place.`);
   }
   if (!w.battles.length) body += band('Casualties and losses') + '<div class="ibcaption" style="padding-bottom:10px">No battle casualties recorded.</div>';

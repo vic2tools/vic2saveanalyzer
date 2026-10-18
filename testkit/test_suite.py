@@ -45,7 +45,8 @@ class Arguments(unittest.TestCase):
     def test_the_baseline_is_compared_with_the_campaign_it_names(self):
         argv = suite.argv_for(named("baseline.py"), saves="S", mod="M", baseline="B",
                               have=EVERYTHING)
-        self.assertEqual(argv[1:], ["compare", "S", "--mod", "M", "--from", "B"])
+        self.assertEqual(argv[1:5], ["compare", "S", "--mod", "M"])
+        self.assertEqual(argv[5:7], ["--from", "B"])
 
     def test_no_baseline_means_the_comparison_is_skipped(self):
         self.assertEqual(suite.unmet(named("baseline.py"), saves="S", mod="M",

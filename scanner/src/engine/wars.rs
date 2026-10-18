@@ -13,7 +13,7 @@ use crate::engine::dates::year_fraction;
 use crate::engine::model::{Battle, FirstGoal, Goal, Side, War};
 use crate::names::{self, Sym};
 use crate::omap::OMap;
-use crate::fx::{FxMap, FxSet};
+use crate::fx::FxMap;
 use crate::pyfmt::{push_int, push_json_str};
 
 type Name = (Sym, Sym, Sym);
@@ -285,33 +285,6 @@ fn ledger_at<'a>(books: &'a [(String, FxMap<i64, Sym>)], when_each: &[f64], date
     }
 }
 
-fn which(tag: Sym, att: &FxSet<Sym>, dfd: &FxSet<Sym>) -> i64 {
-    let (here, there) = (att.contains(&tag), dfd.contains(&tag));
-    if here && !there { 1 } else if there && !here { -1 } else { 0 }
-}
-
-fn side_losses(battles: &[&Battle], attackers: &[Sym], defenders: &[Sym]) -> [i64; 3] {
-    let att: FxSet<Sym> = attackers.iter().copied().collect();
-    let dfd: FxSet<Sym> = defenders.iter().copied().collect();
-    let mut totals = [0i64; 3];
-    for b in battles {
-        let pair = [&b.attacker, &b.defender];
-        let country = |s: &Option<Side>| s.as_ref().map(|x| x.country).unwrap_or_default();
-        let mut marks = [which(country(pair[0]), &att, &dfd), which(country(pair[1]), &att, &dfd)];
-        if marks[0] == 0 && marks[1] != 0 {
-            marks[0] = -marks[1];
-        }
-        if marks[1] == 0 && marks[0] != 0 {
-            marks[1] = -marks[0];
-        }
-        for (side, mark) in pair.iter().zip(marks) {
-            let i = if mark > 0 { 0 } else if mark < 0 { 1 } else { 2 };
-            totals[i] += side.as_ref().map_or(0, |s| s.losses);
-        }
-    }
-    totals
-}
-
 struct Party {
     tag: Sym,
     joined: Sym,
@@ -448,7 +421,6 @@ pub fn build(book: &Book, saves: &[(String, Vec<(i64, Sym)>)], m: &Mapping) -> V
                         else { war.attackers.clone() };
         let defenders = if war.defenders.is_empty() { vec![war.original_defender] }
                         else { war.defenders.clone() };
-        let by_side = side_losses(&battles, &attackers, &defenders);
         let mut listed: Vec<AnyGoal> = war.goalbook.values().map(|g| AnyGoal {
             casus_belli: g.casus_belli, actor: g.actor, receiver: g.receiver,
             province: g.province, added: g.added, fulfilled: Some(g.fulfilled),
@@ -561,12 +533,6 @@ pub fn build(book: &Book, saves: &[(String, Vec<(i64, Sym)>)], m: &Mapping) -> V
         push_int(&mut j, atk);
         j.push(',');
         push_int(&mut j, dfd);
-        j.push_str("],\"side_losses\":[");
-        push_int(&mut j, by_side[0]);
-        j.push(',');
-        push_int(&mut j, by_side[1]);
-        j.push(',');
-        push_int(&mut j, by_side[2]);
         j.push_str("],\"outcome\":");
         push_json_str(&mut j, &outcome);
         j.push_str(",\"goals\":");
