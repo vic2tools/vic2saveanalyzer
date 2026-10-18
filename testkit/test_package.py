@@ -35,6 +35,18 @@ class Package(unittest.TestCase):
         found = {os.path.basename(p) for p in glob.glob(os.path.join(kit.ROOT, "*.py"))}
         self.assertEqual(found, {"vic2_analyzer.py", "build_exe.py"})
 
+    def test_first_folder_skips_what_is_not_there(self):
+        from vic2tools import settings
+        with tempfile.TemporaryDirectory() as tmp:
+            there = os.path.join(tmp, "there")
+            os.makedirs(there)
+            a_file = os.path.join(tmp, "a file")
+            open(a_file, "w").close()
+            self.assertEqual(settings.first_folder(
+                ["", None, os.path.join(tmp, "missing"), a_file, there + "/", tmp]),
+                os.path.normpath(there))
+            self.assertEqual(settings.first_folder([os.path.join(tmp, "missing")]), "")
+
     def test_a_release_without_the_scanner_is_refused_before_bundling(self):
         # Refused before PyInstaller is started, not after a slow build of a
         # release that would refuse every run.

@@ -31,19 +31,14 @@ APP = "Victoria 2 Autosave Keeper"
 
 def default_saves():
     """Where Victoria II writes its saves, if this machine has that folder."""
-    for root in settings.game_folders():
-        where = os.path.join(root, "save games")
-        if os.path.isdir(where):
-            return os.path.normpath(where)
-    return keeper.SAVES
+    return settings.first_folder([os.path.join(root, "save games")
+                                  for root in settings.game_folders()]) or keeper.SAVES
 
 
 def default_out():
     """Where to keep them: beside Documents, never inside the game's folder."""
-    for docs in settings.documents():
-        if os.path.isdir(docs):
-            return os.path.join(docs, "Exportsaves")
-    return keeper.EXPORT
+    docs = settings.first_folder(settings.documents())
+    return os.path.join(docs, "Exportsaves") if docs else keeper.EXPORT
 
 
 class Keeper:

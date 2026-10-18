@@ -109,14 +109,6 @@ def search_root(path):
     return None
 
 
-def _first_folder(candidates):
-    """The first of these that is actually there, or ""."""
-    for path in candidates:
-        if path and os.path.isdir(path):
-            return os.path.normpath(path)
-    return ""
-
-
 def default_saves():
     """Where Victoria II keeps saves, if this machine has them.
 
@@ -126,7 +118,7 @@ def default_saves():
     away, and the dialog opens there.
     """
     roots = settings.game_folders()
-    return _first_folder([os.path.join(r, "save games") for r in roots] + roots)
+    return settings.first_folder([os.path.join(r, "save games") for r in roots] + roots)
 
 
 def default_game_home():
@@ -135,8 +127,8 @@ def default_game_home():
     Like `default_mod_home`, a place to start browsing and not an answer:
     the box stays empty until the install is picked.
     """
-    return _first_folder([os.path.join(lib, "steamapps", "common")
-                          for lib in settings.steam_libraries()])
+    return settings.first_folder([os.path.join(lib, "steamapps", "common")
+                                  for lib in settings.steam_libraries()])
 
 
 def default_mod_home():
@@ -145,7 +137,7 @@ def default_mod_home():
     This is where to *start browsing*, not an answer: `mod/` holds mods, it is
     not one. The entry box stays empty until a mod is picked.
     """
-    return _first_folder([
+    return settings.first_folder([
         os.path.join(lib, "steamapps", "common", "Victoria 2", "mod")
         for lib in settings.steam_libraries()])
 
@@ -157,9 +149,8 @@ def default_out():
     backed up as the game's, and a campaign folder that has quietly grown an
     `analysis` directory inside it is a folder someone has to tidy later.
     """
-    return os.path.join(_first_folder(settings.documents())
-                        or os.path.expanduser("~"),
-                        "Victoria 2 Save Analyzer")
+    return os.path.join(settings.first_folder(settings.documents())
+                        or os.path.expanduser("~"), "Victoria 2 Save Analyzer")
 
 
 class App:
