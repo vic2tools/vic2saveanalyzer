@@ -12,14 +12,14 @@ import unittest
 from unittest.mock import patch
 
 import kit                                                  # noqa: E402
-import vic2_analyzer
+from vic2tools import launch
 from fixtures import a_game
 from fixtures import copies_of
 
 
 class Relay(unittest.TestCase):
     """
-    `vic2_analyzer._relayed`: the scanner's output passed on to whoever is
+    `launch._relayed`: the scanner's output passed on to whoever is
     listening -- the window's log, or a check running the analyzer in its
     own process -- with the protocol lines turned into callbacks.
     """
@@ -32,13 +32,13 @@ class Relay(unittest.TestCase):
     def relay(self, body, hosted=True):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            status = vic2_analyzer._relayed([sys.executable, "-c", body], 0, hosted)
+            status = launch._relayed([sys.executable, "-c", body], 0, hosted)
         return status, out.getvalue(), err.getvalue()
 
     def test_large_pipes_are_drained_and_progress_told(self):
         seen = []
-        vic2_analyzer.set_progress(lambda *a: seen.append(a))
-        self.addCleanup(vic2_analyzer.set_progress, None)
+        launch.set_progress(lambda *a: seen.append(a))
+        self.addCleanup(launch.set_progress, None)
         status, out, err = self.relay(
             "import sys; sys.stdout.reconfigure(newline='\\n'); "
             "sys.stderr.write('x' * 200000); "
@@ -50,8 +50,8 @@ class Relay(unittest.TestCase):
 
     def test_report_ready_is_told_its_path(self):
         ready = []
-        vic2_analyzer.set_report_ready(ready.append)
-        self.addCleanup(vic2_analyzer.set_report_ready, None)
+        launch.set_report_ready(ready.append)
+        self.addCleanup(launch.set_report_ready, None)
         self.relay("print('@ready /some/report.html')")
         self.assertEqual(ready, ["/some/report.html"])
 
@@ -61,18 +61,18 @@ class Relay(unittest.TestCase):
         self.assertEqual(out, "@progress 1 2\n")
 
     def test_stop_kills_the_child(self):
-        vic2_analyzer.set_cancel_check(lambda: True)
-        self.addCleanup(vic2_analyzer.set_cancel_check, None)
+        launch.set_cancel_check(lambda: True)
+        self.addCleanup(launch.set_cancel_check, None)
         started = []
         real = subprocess.Popen
 
-        def launch(*args, **kwargs):
+        def starting(*args, **kwargs):
             child = real(*args, **kwargs)
             started.append(child)
             return child
         began = time.monotonic()
-        with patch.object(subprocess, "Popen", side_effect=launch):
-            with self.assertRaises(vic2_analyzer.Cancelled):
+        with patch.object(subprocess, "Popen", side_effect=starting):
+            with self.assertRaises(launch.Cancelled):
                 self.relay("import time; print('x', flush=True); time.sleep(30)")
         # Stopped, not waited for: a scanner left reading would end on its
         # own in thirty seconds, with status 0, and Stop would have done
@@ -83,10 +83,9 @@ class Relay(unittest.TestCase):
         self.assertNotEqual(started[0].returncode, 0)
 
     def test_a_missing_scanner_is_refused_with_how_to_build_it(self):
-        from run import Run
-        with patch.object(vic2_analyzer.fastscan, "available", return_value=None):
-            with self.assertRaises(vic2_analyzer.RunError) as said:
-                vic2_analyzer._front(Run(saves="."))
+        with patch.object(launch, "available", return_value=None):
+            with self.assertRaises(launch.RunError) as said:
+                launch._front(launch.Run(saves="."))
         self.assertIn("cargo build --release --manifest-path scanner/Cargo.toml",
                       str(said.exception))
 
@@ -259,14 +258,13 @@ class Pipes(unittest.TestCase):
         self.assertNotIn("panicked", err)
 
     def test_a_hosted_run_leaks_no_protocol_lines(self):
-        import run as run_module
         argv = ["vic2_analyzer.py", self.saves, "--out", os.path.join(self.where, "hosted"),
                 "--game-root", self.game, "--rebuild"]
         out, err = io.StringIO(), io.StringIO()
         with patch.object(sys, "argv", argv), patch.dict(os.environ, self.env):
-            run = run_module.Run.from_command_line(vic2_analyzer.command_line())
+            run = launch.Run.from_command_line(launch.command_line())
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                vic2_analyzer.analyze(run)
+                launch.analyze(run)
         leaked = [l for l in (out.getvalue() + err.getvalue()).splitlines() if l.startswith("@")]
         self.assertFalse(leaked, "protocol lines reached the log: %s" % leaked[:3])
         self.assertTrue(out.getvalue().strip(), "the hosted run said nothing at all")

@@ -48,19 +48,18 @@ def build():
         return 1
     # These are imported inside functions rather than at the top of the file, so
     # they are named here in case the bundler's scan ever stops following them.
-    carried = ["vic2_analyzer", "run", "fastscan", "readfolder",
+    carried = ["vic2tools.launch",
                # the window's two halves, what they remember, and the one
-               # thing that leaves the machine, all reached from app.py
-               "gui", "keeper", "keeper_gui", "settings", "publish",
-               # what the keeper reads off a save's head, and what the window
-               # asks before a run: which folder is a game, which holds
-               # campaigns -- reached only from inside functions
-               "savehead", "dates", "mod_reader", "cross"]
+               # thing that leaves the machine, all reached from __main__.py
+               "vic2tools.report_tab", "vic2tools.keeper", "vic2tools.keeper_tab",
+               "vic2tools.settings", "vic2tools.share"]
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
            "--onefile", "--windowed", "--name", NAME, "--icon", ICON,
            "--distpath", os.path.join(HERE, "dist"),
            "--workpath", os.path.join(HERE, "build"),
-           "--specpath", os.path.join(HERE, "build")]
+           "--specpath", os.path.join(HERE, "build"),
+           # the package is found from here, beside this file
+           "--paths", HERE]
     for module in carried:
         cmd += ["--hidden-import", module]
     # `.` puts it beside the unpacked modules, where fastscan looks first:
@@ -70,7 +69,7 @@ def build():
     for junk in ("numpy", "pandas", "matplotlib", "PIL", "scipy", "setuptools",
                  "pip", "pytest", "test"):
         cmd += ["--exclude-module", junk]
-    cmd.append(os.path.join(HERE, "app.py"))
+    cmd.append(os.path.join(HERE, "vic2tools", "__main__.py"))
     print(" ".join(cmd))
     return subprocess.call(cmd, cwd=HERE)
 

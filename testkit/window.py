@@ -45,8 +45,8 @@ def a_window():
     except Exception:                                    # noqa: BLE001
         return None                                      # no display
     root.withdraw()
-    import gui
-    return root, gui.App(root)
+    from vic2tools import report_tab
+    return root, report_tab.App(root)
 
 
 def a_full_run(root, app, saves, out):
@@ -150,7 +150,7 @@ def opens_on_this_machine(app, report):
 
 def a_stopped_run(root, app, saves, out):
     """[what went wrong] when Stop is pressed before it starts."""
-    import vic2_analyzer
+    from vic2tools import launch
 
     app.show_report = lambda path: None
     app.open_after.set(False)
@@ -159,7 +159,7 @@ def a_stopped_run(root, app, saves, out):
         app.work(saves, "", out, game_root=app.game.get())
     finally:
         app.stop.clear()
-        vic2_analyzer.set_cancel_check(None)
+        launch.set_cancel_check(None)
     for _ in range(20):
         root.update()
         time.sleep(0.02)
@@ -212,7 +212,7 @@ def a_start_keeps_other_settings(app, holding):
     analysis erased both. The file is pointed somewhere of this check's own
     first; the real one is never touched.
     """
-    import settings
+    from vic2tools import settings
     real = settings.ANALYZER
     settings.ANALYZER = os.path.join(holding, "settings.json")
     saves = os.path.join(holding, "keep-saves")
@@ -265,11 +265,11 @@ def the_keeper_opens_its_folder(root, holding):
     """
     import subprocess
     from tkinter import messagebox, ttk
-    import keeper_gui
+    from vic2tools import keeper_tab
 
     launched, errors = [], []
     frame = ttk.Frame(root)
-    keeping = keeper_gui.Keeper(root, parent=frame)
+    keeping = keeper_tab.Keeper(root, parent=frame)
     keeping.out.set(os.path.join(holding, "kept"))
     real_popen, real_start = subprocess.Popen, getattr(os, "startfile", None)
     real_error = messagebox.showerror
@@ -317,8 +317,8 @@ def main():
         messagebox.showerror = unexpected_dialog
         out = os.path.join(holding, "out")
         wrong = a_full_run(root, app, saves, out)
-        import gui
-        app.show_report = gui.App.show_report.__get__(app)   # the real one
+        from vic2tools import report_tab
+        app.show_report = report_tab.App.show_report.__get__(app)   # the real one
         wrong += opens_on_this_machine(app, os.path.join(out, "report.html"))
         wrong += a_stopped_run(root, app, saves, os.path.join(holding, "two"))
         wrong += a_refused_run(root, app, holding)

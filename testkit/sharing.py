@@ -2,7 +2,7 @@
 """
 Every way uploading a report can go wrong, and the one way it goes right.
 
-`publish.upload` is the share button: it sends one file to a host and gets
+`share.upload` is the share button: it sends one file to a host and gets
 a link back. It is aimed at somebody who wants to show a friend their
 campaign and would not know what to do with a stack trace, so almost all of
 it is error messages -- seven of them -- and none had ever been run.
@@ -30,7 +30,7 @@ import time
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import kit                                                  # noqa: E402
 
-import publish                                             # noqa: E402
+from vic2tools import share                                           # noqa: E402
 
 A_REPORT = b"<!doctype html><title>Not a real report</title><p>hello"
 
@@ -76,8 +76,8 @@ def a_closed_port():
 def refuses(path, endpoint, expect, name=None):
     """[what went wrong] when the upload should fail saying `expect`."""
     try:
-        url = publish.upload(path, endpoint, name=name)
-    except publish.PublishError as said:
+        url = share.upload(path, endpoint, name=name)
+    except share.PublishError as said:
         if expect in str(said):
             return [], str(said)
         return (["said %r, which does not mention %r" % (str(said), expect)],
@@ -121,26 +121,26 @@ def a_refused_token(holding, report):
     wrong = []
     try:
         try:
-            publish.publish(report, "ghp_expired", base=base)
+            share.publish(report, "ghp_expired", base=base)
             wrong.append("a refused token was published with")
-        except publish.TokenRefused:
+        except share.TokenRefused:
             pass
         except Exception as boom:                        # noqa: BLE001
             wrong.append("a refused token raised %s, not TokenRefused"
                          % type(boom).__name__)
 
         try:
-            import app
-            import settings
+            from vic2tools import __main__ as app
+            from vic2tools import settings
         except Exception:                                # noqa: BLE001
             print("  a refused token is forgotten: no tkinter here, not tried")
             return wrong
         real = settings.ANALYZER
         settings.ANALYZER = os.path.join(holding, "settings.json")
-        real_publish = publish.publish
+        real_publish = share.publish
         try:
             settings.remember(github_token="ghp_expired", saves="x")
-            publish.publish = lambda *a, **k: real_publish(*a, base=base,
+            share.publish = lambda *a, **k: real_publish(*a, base=base,
                                                            **{n: v for n, v in k.items()
                                                               if n != "base"})
             told = []
@@ -151,7 +151,7 @@ def a_refused_token(holding, report):
             app.Tools._publish(window, report, "ghp_expired", "a campaign", [])
             after = settings.load()
         finally:
-            publish.publish = real_publish
+            share.publish = real_publish
             settings.ANALYZER = real
         if "github_token" in after:
             wrong.append("a token GitHub refused is still held, so the next "
@@ -237,24 +237,24 @@ def a_github_that_misbehaves(report):
             pass
 
     servers = [other]
-    real_timeout = publish.TIMEOUT
+    real_timeout = share.TIMEOUT
     try:
         for name, handler, call in (
                 ("an API that redirects elsewhere", Redirects,
-                 lambda b: publish.publish(report, "ghp_secret", base=b)),
+                 lambda b: share.publish(report, "ghp_secret", base=b)),
                 ("a sign-in page answering for GitHub", SignIn,
-                 lambda b: publish.publish(report, "ghp_secret", base=b)),
+                 lambda b: share.publish(report, "ghp_secret", base=b)),
                 ("GitHub stalling mid-answer", Stalls,
-                 lambda b: publish.publish(report, "ghp_secret", base=b)),
+                 lambda b: share.publish(report, "ghp_secret", base=b)),
                 ("a report host stalling mid-answer", Stalls,
-                 lambda b: publish.upload(report, b))):
+                 lambda b: share.upload(report, b))):
             base, server = serve(handler)
             servers.append(server)
-            publish.TIMEOUT = 1
+            share.TIMEOUT = 1
             try:
                 call(base)
                 said = "published"
-            except publish.PublishError as err:
+            except share.PublishError as err:
                 said = "refused in a sentence"
             except Exception as boom:                    # noqa: BLE001
                 said = "raised %s" % type(boom).__name__
@@ -265,7 +265,7 @@ def a_github_that_misbehaves(report):
             wrong.append("the token was handed to the address a redirect "
                          "named: %s" % heard[0])
     finally:
-        publish.TIMEOUT = real_timeout
+        share.TIMEOUT = real_timeout
         for server in servers:
             server.shutdown()
     return wrong
@@ -326,7 +326,7 @@ def main():
         "application/json"))
     said = []
     try:
-        got = publish.upload(report, url, name="A campaign", say=said.append)
+        got = share.upload(report, url, name="A campaign", say=said.append)
     except Exception as boom:                            # noqa: BLE001
         got = None
         wrong.append("the working host failed: %s" % boom)

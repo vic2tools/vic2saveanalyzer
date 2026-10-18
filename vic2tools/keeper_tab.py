@@ -15,19 +15,17 @@ Press Start before you play and leave it sitting there. The watching happens on
 a worker thread so the window stays alive, and every save it copies out is
 reported into the log box as it goes. Both paths are remembered between runs.
 
-Built as one tab of the campaign tools by app.py, and still
-runnable on its own.
+Built as one tab of the campaign tools by `__main__`.
 """
 
 import os
 import queue
-import sys
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-import keeper
-import settings
+from vic2tools import keeper, settings
+
 
 APP = "Victoria 2 Autosave Keeper"
 
@@ -237,20 +235,3 @@ class Keeper:
         self.stop.set()
         self.root.destroy()
 
-
-def main():
-    root = tk.Tk()
-    try:
-        icon = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(
-            os.path.abspath(__file__))), "vic2keeper.ico")
-        if os.path.isfile(icon):
-            root.iconbitmap(icon)
-    except tk.TclError:
-        pass                        # an iconless window still keeps saves
-    Keeper(root)
-    root.mainloop()
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

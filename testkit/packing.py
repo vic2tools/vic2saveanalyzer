@@ -12,7 +12,7 @@ notices.
 
     python3 testkit/packing.py
 
-Walks the imports out from `app.py` the way the program does and compares
+Walks the imports out from `vic2tools/__main__.py` the way the program does and compares
 that against the list. Names either side of the difference, because a
 module in the list that nothing reaches is worth knowing about too: it is
 either dead or the walk is wrong.
@@ -28,7 +28,8 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def local_modules():
     """Every module of this program, by name."""
-    return {f[:-3] for f in os.listdir(HERE) if f.endswith(".py")}
+    return {"vic2tools." + f[:-3] for f in os.listdir(os.path.join(HERE, "vic2tools"))
+            if f.endswith(".py") and f != "__init__.py"}
 
 
 def carried():
@@ -40,7 +41,7 @@ def carried():
     return set(re.findall(r'"([^"]+)"', found.group(1)))
 
 
-def reached(start="app"):
+def reached(start="vic2tools.__main__"):
     """Every module of this program reachable from `start`, transitively."""
     local = local_modules()
     seen, todo = set(), [start]
@@ -49,13 +50,15 @@ def reached(start="app"):
         if name in seen or name not in local:
             continue
         seen.add(name)
-        tree = ast.parse(open(os.path.join(HERE, name + ".py"),
+        tree = ast.parse(open(os.path.join(HERE, *name.split(".")) + ".py",
                               encoding="utf-8").read())
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                todo += [a.name.split(".")[0] for a in node.names]
+                todo += [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module == "vic2tools":
+                todo += ["vic2tools." + a.name for a in node.names]
             elif isinstance(node, ast.ImportFrom) and node.module:
-                todo.append(node.module.split(".")[0])
+                todo.append(node.module)
     return seen
 
 
@@ -67,14 +70,13 @@ def the_scanner_opens_no_window():
     The executable is built windowed and the scanner is a console program,
     and on Windows that combination opens a console window for every run
     unless `Popen` is told `CREATE_NO_WINDOW`. Nothing here runs Windows, so
-    this asks what the window's run (`vic2_analyzer._front`, hosted) would
+    this asks what the window's run (`launch._front`, hosted) would
     hand `Popen` there -- and here, where the same flag is refused outright.
     """
     import kit  # noqa: F401  (puts the repo on the import path)
     import subprocess
     from unittest.mock import patch
-    import vic2_analyzer
-    from run import Run
+    from vic2tools import launch
 
     asked = []
 
@@ -87,12 +89,12 @@ def the_scanner_opens_no_window():
     wrong = []
     try:
         with patch.object(subprocess, "Popen", Popen), \
-                patch.object(vic2_analyzer.fastscan, "available", return_value=__file__):
+                patch.object(launch, "available", return_value=__file__):
             for platform in ("win32", real_platform):
                 del asked[:]
                 sys.platform = platform
                 try:
-                    vic2_analyzer._front(Run(saves="."), hosted=True)
+                    launch._front(launch.Run(saves="."), hosted=True)
                 except OSError:
                     pass
                 flags = asked[0].get("creationflags", 0) if asked else None
@@ -125,11 +127,11 @@ def main():
     need = reached()
     local = local_modules()
 
-    # `app` is the script handed to the bundler, not a hidden import.
-    missing = sorted(need - named - {"app"})
+    # `__main__` is the script handed to the bundler, not a hidden import.
+    missing = sorted(need - named - {"vic2tools.__main__"})
     unused = sorted((named & local) - need)
 
-    print("  app.py reaches %d of this program's modules" % len(need))
+    print("  vic2tools/__main__.py reaches %d of this program's modules" % len(need))
     print("  build_exe.py names %d" % len(named))
     if missing:
         print("\nPROBLEMS:")

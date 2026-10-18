@@ -19,10 +19,6 @@ play, a tab that turns a folder of them into a report, and along the bottom
 the one path they share and the one thing you do with a finished report, which
 is give it to somebody.
 
-Both halves still run on their own -- `gui.py` and `keeper_gui.py` each open
-their own window if started directly -- because nothing here is allowed to
-make either of them harder to test.
-
 Packaged as vic2saveanalyzer.exe by build_exe.py.
 """
 
@@ -42,11 +38,7 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
-import gui
-import keeper
-import keeper_gui
-import publish
-import settings
+from vic2tools import keeper, keeper_tab, report_tab, settings, share
 
 APP = "Victoria 2 campaign tools"
 
@@ -68,8 +60,8 @@ class Tools:
 
         # The analyzer first: it is what most runs are for, and a tab that
         # opens on the job in hand beats one that opens on the preparation.
-        self.analyzer = gui.App(root, parent=making)
-        self.keeper = keeper_gui.Keeper(root, parent=keeping)
+        self.analyzer = report_tab.App(root, parent=making)
+        self.keeper = keeper_tab.Keeper(root, parent=keeping)
 
         # The bar is packed before the tabs and against the bottom, because
         # pack hands out room in the order it is asked and the tabs, which
@@ -133,7 +125,7 @@ class Tools:
         elif ready:
             self.hint.configure(
                 text="%s · %s" % (os.path.basename(report),
-                                       gui.human_size(os.path.getsize(report))))
+                                       report_tab.human_size(os.path.getsize(report))))
         else:
             self.hint.configure(text="")
         self.tick = self.root.after(300, self.watch)
@@ -184,7 +176,7 @@ class Tools:
         self.open_folder(os.path.dirname(report))
         messagebox.showinfo(
             APP, "%s\n\n%s %s the path is on your clipboard, and the folder "
-                 "is open.%s" % (report, gui.human_size(size), "\u2014", note))
+                 "is open.%s" % (report, report_tab.human_size(size), "\u2014", note))
 
     def open_folder(self, where):
         """Show a folder in whatever this machine uses to look at folders."""
@@ -228,8 +220,8 @@ class Tools:
         """Off the UI thread, reporting through the queue like the rest."""
         tell = self.analyzer.log_queue.put
         try:
-            url = publish.upload(report, endpoint, name=name,
-                                 say=lambda line: tell("  " + line + "\n"))
+            url = share.upload(report, endpoint, name=name,
+                               say=lambda line: tell("  " + line + "\n"))
         except Exception as err:                     # noqa: BLE001
             tell("Could not upload it: %s\n" % err)
             self.root.after(0, self.publish_failed, str(err))
@@ -290,9 +282,9 @@ class Tools:
         """
         tell = self.analyzer.log_queue.put
         try:
-            url = publish.publish(report, token, name=name, extra=extra,
-                                  say=lambda line: tell("  " + line + "\n"))
-        except publish.TokenRefused as err:
+            url = share.publish(report, token, name=name, extra=extra,
+                                say=lambda line: tell("  " + line + "\n"))
+        except share.TokenRefused as err:
             # A token GitHub will not take is no use held. Kept, it was
             # handed straight back on every press, and the only way to a
             # new one was editing the settings file by hand -- which every
@@ -303,7 +295,7 @@ class Tools:
             tell("Could not publish it: %s\n" % said)
             self.root.after(0, self.publish_failed, said)
             return
-        except publish.PublishError as err:
+        except share.PublishError as err:
             tell("Could not publish it: %s\n" % err)
             self.root.after(0, self.publish_failed, str(err))
             return
@@ -358,9 +350,9 @@ def main():
     if len(sys.argv) > 1:
         # Handed arguments, the executable is the command line it was built
         # from, exactly as it was before these two became one window.
-        gui._attach_console()
-        import vic2_analyzer
-        return vic2_analyzer.main()
+        report_tab._attach_console()
+        from vic2tools import launch
+        return launch.main()
 
     for name in ("stdout", "stderr"):
         if getattr(sys, name, None) is None:

@@ -9,15 +9,236 @@
 # <https://www.gnu.org/licenses/> for the full text, or the LICENSE file beside
 # this one.
 """
-What one run of the analyzer is asked to do: every setting, declared once
-with whether it changes what the report says, and the command line that
-fills them in.
+Victoria 2 campaign analyzer.
+
+Reads a folder of .v2 saves from the same game and builds a per-nation time
+series: population, accepted-culture share, literacy, brigades, ships by type,
+industry, naval bases, and the usual country scalars.
+
+    python3 vic2_analyzer.py ~/Documents/Paradox\\ Interactive/Victoria2/save\\ games
+    python3 vic2_analyzer.py saves/ --out results --tags ENG FRA GER
+    python3 vic2_analyzer.py saves/ --no-html
+
+Saves must be plaintext. If yours are binary, launch the game in debug mode
+and re-save; the file gets about 10x bigger but becomes readable.
+
+The command line is read here (`command_line`, into a `Run`) and the run is
+made by the scanner (`vic2scan analyze`, in `scanner/`), which does all of it
+in Rust: this module finds the scanner, hands it the run, and relays what it
+says to whoever is listening -- a terminal, or the window's log.
 """
 
 import argparse
+import os
+import subprocess
+import sys
+import tempfile
+import threading
 from dataclasses import dataclass, field as _field, fields
 
 
+_REPORT_READY = None
+
+
+def set_report_ready(fn):
+    """
+    Give the analyzer somewhere to say the report is on disk.
+
+    It is written before the CSV tables are, and nothing in it comes out of
+    them, so it can be opened while they are still being written. That is
+    about a third of a second of a warm run -- the whole point of which is
+    that pressing the button and reading the report are the same moment.
+    """
+    global _REPORT_READY
+    _REPORT_READY = fn
+
+
+def _tell_report_ready(path):
+    if _REPORT_READY is not None:
+        try:
+            _REPORT_READY(path)
+        except Exception:             # a window that has gone away
+            pass
+
+
+
+
+def analyze(run, cancel=None, progress=None, ready=None):
+    """
+    One run, for a caller that is not a command line: the window.
+
+    It hands over a `Run` rather than rewriting `sys.argv` for the parser to
+    read back, and the three things it wants told -- whether to stop, how
+    far along the saves are, and where the report landed -- as arguments,
+    which are set for this run and cleared after it whatever happens.
+
+    A run refused comes back as the `RunError` it was refused with, for the
+    window to show, rather than as a request to end the process.
+    """
+    set_cancel_check(cancel)
+    set_progress(progress)
+    set_report_ready(ready)
+    try:
+        status = _front(run, hosted=True)
+        if status:
+            raise RuntimeError("the scanner stopped with status %s" % status)
+        return status
+    finally:
+        set_cancel_check(None)
+        set_progress(None)
+        set_report_ready(None)
+
+
+def main(run=None):
+    """
+    One run, as `run` declares it or as the command line does, for a
+    command line: a run refused ends the process with its sentence and a
+    non-zero status, which is how the command line has always said no.
+    """
+    try:
+        if run is None:
+            run = Run.from_command_line(command_line())
+        sys.exit(_front(run))
+    except RunError as refused:
+        sys.exit(str(refused))
+
+
+# What `cargo` is asked for when there is no scanner to hand a run to.
+BUILD = "cargo build --release --manifest-path scanner/Cargo.toml"
+
+
+def _front(run, hosted=False):
+    """
+    The run done by the scanner (`vic2scan analyze`): its exit status. With
+    no scanner to hand it to, the run is refused with how to build one.
+
+    `hosted` is the window's run: the scanner's lines go to `sys.stdout`
+    and `sys.stderr` as they come, its progress and "the report is on disk"
+    to the callbacks `analyze` set, and the Stop button kills it.
+    """
+    binary = available()
+    if not binary:
+        raise RunError(
+            "The scanner that makes the report is not built (%s, looked for beside this "
+            "program and in scanner/target/release). Build it with:\n\n    %s\n\nThat "
+            "needs Rust's cargo; see README.md." % (BINARY, BUILD))
+    import dataclasses
+    import json
+    import subprocess
+    import tempfile
+    fd, path = tempfile.mkstemp(prefix="vic2_run_", suffix=".json")
+    refused = path[:-len(".json")] + ".refused"
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            # The cache folder is named here, once, so the scanner keeps its
+            # entries where the window's "empty the cache" looks.
+            fh.write(json.dumps(dict(dataclasses.asdict(run), cache_dir=cache_dir())))
+        # A windowed build started with arguments and no console to attach
+        # to (a folder dropped on it) has no streams at all.
+        silent = sys.stdout is None or sys.stderr is None
+        for stream in (sys.stdout, sys.stderr):
+            if stream is not None:
+                stream.flush()
+        argv = [binary, "analyze", "--run", path, "--refused", refused]
+        if hosted:
+            argv.append("--protocol")
+        if silent:
+            # Nowhere to say anything: the scanner says it to nowhere too,
+            # and opens no window of its own to do it in.
+            status = subprocess.call(argv, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL,
+                                     creationflags=_no_window())
+        elif not hosted and sys.stdout is sys.__stdout__ and sys.stderr is sys.__stderr__:
+            # No CREATE_NO_WINDOW here. It gives a console program a hidden
+            # console of its own, and with no handles passed its output goes
+            # there: on Windows a run from a terminal printed nothing. Handed
+            # this process's own streams, it writes where Python would have --
+            # the console, or the file they were redirected to.
+            status = subprocess.call(argv, stdout=sys.stdout, stderr=sys.stderr)
+        else:
+            # Someone is catching what this prints -- the window's log, or a
+            # check running the analyzer in its own process -- and a child's
+            # output would go past them to the real streams, so it is passed
+            # on through.
+            status = _relayed(argv, _no_window(), hosted)
+        if status == REFUSED:
+            # A run refused, in its sentence, raised as it always was.
+            with open(refused, encoding="utf-8") as fh:
+                raise RunError(fh.read())
+    finally:
+        for leftover in (path, refused):
+            try:
+                os.remove(leftover)
+            except OSError:
+                pass
+    return status
+
+# The status `vic2scan analyze` exits with when it refused the run and wrote
+# the sentence to the file it was given.
+REFUSED = 4
+
+
+def _relayed(argv, flags, hosted=False):
+    """
+    Run `argv`, its output written to `sys.stdout` and `sys.stderr` as it
+    comes, and its status. Hosted, the protocol lines go to the progress and
+    report-ready callbacks instead, and a Stop asked for kills it and raises
+    `Cancelled` -- every save it had read by then is in the engine's cache.
+    """
+    import subprocess
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            creationflags=flags)
+    failed = []
+
+    def copy(source, target, lines):
+        try:
+            for raw in iter(source.readline, b""):
+                line = raw.decode("utf-8", "replace")
+                if lines and line.startswith("@"):
+                    word, _, rest = line.rstrip("\r\n").partition(" ")
+                    if word == "@progress":
+                        done, total = rest.split()[:2]
+                        tell_progress(int(done), int(total))
+                        continue
+                    if word == "@ready":
+                        _tell_report_ready(rest)
+                        continue
+                    if word == "@done":
+                        continue
+                target.write(line)
+        except Exception as exc:                     # noqa: BLE001
+            failed.append(exc)
+        finally:
+            source.close()
+
+    threads = [threading.Thread(target=copy, args=(proc.stdout, sys.stdout, hosted), daemon=True),
+               threading.Thread(target=copy, args=(proc.stderr, sys.stderr, False), daemon=True)]
+    for t in threads:
+        t.start()
+    try:
+        while threads[0].is_alive():
+            threads[0].join(0.1)
+            if hosted:
+                stop_if_asked()
+    except BaseException:
+        if proc.poll() is None:
+            proc.kill()
+        for t in threads:
+            t.join()
+        proc.wait()
+        raise
+    for t in threads:
+        t.join()
+    status = proc.wait()
+    if failed:
+        raise failed[0]
+    return status
+
+
+# ----------------------------------------------------------------------------
+# What one run of the analyzer is asked to do: every setting, declared once
+# with whether it changes what the report says, and the command line that
+# fills them in.
 
 class RunError(Exception):
     """
@@ -26,7 +247,7 @@ class RunError(Exception):
 
     The analyzer is a library to the window as much as a program to the
     command line, so it says no by raising this rather than by ending the
-    process. `vic2_analyzer.main` turns it into the message and the exit
+    process. `main` turns it into the message and the exit
     status the command line has always given; the window puts it in its
     log.
     """
@@ -286,3 +507,165 @@ def command_line():
                          "where to look for each campaign's mod.")
     ap.add_argument("-q", "--quiet", action="store_true")
     return ap.parse_args()
+
+
+# ----------------------------------------------------------------------------
+# Where the scanner is (`scanner/`, built with cargo), and how to start it
+# with no window of its own.
+#
+# The scanner makes every run: the command line and the window hand it the
+# run (`_front`). It is looked for beside the executable when frozen, beside
+# the program's own folder, and in the crate's own target directory.
+
+BINARY = "vic2scan.exe" if sys.platform == "win32" else "vic2scan"
+_FOUND = None
+
+
+def _candidates():
+    """Where the scanner might be, nearest first."""
+    # The folder holding this package: the checkout, or the unpacked exe.
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # Beside the executable when frozen, in the program's folder when not, and in
+    # the crate's own target directory when working on it.
+    yield os.path.join(getattr(sys, "_MEIPASS", here), BINARY)
+    yield os.path.join(here, BINARY)
+    yield os.path.join(here, "scanner", "target", "release", BINARY)
+
+
+def available():
+    """The scanner's path, or None. Looked for once."""
+    global _FOUND
+    if _FOUND is None:
+        _FOUND = ""
+        for path in _candidates():
+            if os.path.isfile(path) and os.access(path, os.X_OK):
+                _FOUND = path
+                break
+    return _FOUND or None
+
+
+def _no_window():
+    """
+    What `Popen` is told so the scanner opens no window of its own.
+
+    The executable is a windowed program and the scanner a console one, and
+    on Windows a windowed program that starts a console program gets a new
+    console window for it -- one flashed up for every run -- unless
+    it says `CREATE_NO_WINDOW`. Everywhere else there is no such flag, and
+    `Popen` refuses any.
+    """
+    if sys.platform != "win32":
+        return 0
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
+
+# ----------------------------------------------------------------------------
+# The two things a running analysis shares with whoever started it -- a Stop
+# button to ask between saves, a progress bar to tell -- and the folder the
+# scanner keeps what it has read in, which the window can measure and empty.
+
+class Cancelled(Exception):
+    """The caller asked for the run to stop before it finished."""
+
+
+# A window has a Stop button; a terminal has Ctrl-C. Whoever is driving hands a
+# callable in and it is asked, between saves, whether to carry on. Between
+# saves rather than inside one because a save is a few seconds at worst and
+# unwinding a half-read one buys nothing.
+_STOP = None
+
+
+def set_cancel_check(fn):
+    """Give the analyzer something to ask before it starts the next save."""
+    global _STOP
+    _STOP = fn
+
+
+def stop_if_asked():
+    if _STOP is not None and _STOP():
+        raise Cancelled()
+
+
+_PROGRESS = None
+
+
+def set_progress(fn):
+    """
+    Give the analyzer somewhere to say how far through the saves it is.
+
+    Counted in saves rather than in bytes or in stages, because a save is the
+    unit the work actually comes in and the one a reader can see going by. A
+    campaign of a few dozen does not need this; one of seven hundred is four
+    minutes of a window that otherwise looks stuck.
+    """
+    global _PROGRESS
+    _PROGRESS = fn
+
+
+def tell_progress(done, total):
+    if _PROGRESS is not None:
+        try:
+            _PROGRESS(done, total)
+        except Exception:             # a window that has gone away
+            pass
+
+
+def cache_dir():
+    """Where parsed saves are remembered between runs."""
+    return os.path.join(tempfile.gettempdir(), "vic2_analyzer_cache")
+
+
+def cache_stats():
+    """How many entries the cache holds and what they weigh, as (count, bytes).
+
+    Nothing here evicts anything. A slot is keyed by the save, the mod, and a
+    hash of the parser itself, so editing the parser does not replace the old
+    entries -- it stands a fresh generation up beside them, and the previous one
+    can never be read again. An install that has seen a few updates is therefore
+    mostly holding generations it has no use for, which is the case for offering
+    to empty it.
+    """
+    count = size = 0
+    try:
+        with os.scandir(cache_dir()) as entries:
+            for entry in entries:
+                if not entry.name.endswith(".pkl"):
+                    continue
+                try:
+                    size += entry.stat().st_size
+                except OSError:
+                    continue          # vanished under us; it is not in the total
+                count += 1
+    except OSError:
+        return 0, 0                   # no cache folder yet, which is not a fault
+    return count, size
+
+
+def clear_cache():
+    """Empty the cache. Returns (entries removed, bytes freed).
+
+    Only this program's own `.pkl` files go, and the folder itself stays: it
+    sits in the system temp directory, which belongs to everybody, so taking
+    the tree out wholesale is not this program's business. An entry another run
+    still has open is skipped rather than fought over -- it will be caught by
+    the next wipe.
+    """
+    removed = freed = 0
+    folder = cache_dir()
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return 0, 0
+    for name in names:
+        if not name.endswith(".pkl"):
+            continue
+        path = os.path.join(folder, name)
+        try:
+            size = os.path.getsize(path)
+            os.remove(path)
+        except OSError:
+            continue
+        removed += 1
+        freed += size
+    return removed, freed
+
