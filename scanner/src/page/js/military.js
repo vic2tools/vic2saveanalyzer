@@ -73,8 +73,7 @@ function militaryRivalRows(tag, branch, metric, date) {
     if (key === 'size') return branch === 'army' ? f.brigades || 0 : shipCount(t, date, '__all') || 0;
     if (key === 'tech') return f[branch + '_techs'] ?? null;
     if (key === 'power') {
-      const stats = navalStats(t,date), counts = (DATA.ships[t] || {})[date] || {};
-      return stats && Object.keys(counts).every(type => stats[type]) ? fleetPower([t],date,false,true) : null;
+      return powerKnown(t, date) ? fleetPower([t],date,false,true) : null;
     }
     return f.mobilization_brigades ?? null;
   };
@@ -129,14 +128,12 @@ function militaryRivals(tag, branch, date) {
       };
       difference(tr.insertCell(),r.size,branch === 'army' ? own.brigades : shipCount(tag,date,'__all'));
       difference(tr.insertCell(),r.tech,own[branch+'_techs']);
-      const stats = navalStats(r.tag,date), counts = (DATA.ships[r.tag] || {})[date] || {};
-      const known = stats && Object.keys(counts).every(type => stats[type]);
+      const known = powerKnown(r.tag, date);
       const measure = tr.insertCell();
       if (branch === 'army') difference(measure,r.mob,own.mobilization_brigades);
       else {
         measure.textContent = known ? fmtPower(fleetPower([r.tag],date,false,true)) : '—';
-        const ownStats = navalStats(tag,date), ownCounts = (DATA.ships[tag] || {})[date] || {};
-        if (known && ownStats && Object.keys(ownCounts).every(type => ownStats[type])) {
+        if (known && powerKnown(tag, date)) {
           const delta = document.createElement('small'); delta.className = 'military-delta';
           const n = fleetPower([r.tag],date,false,true)-fleetPower([tag],date,false,true);
           delta.textContent = n === 0 ? 'Equal to yours' : fmtPower(Math.abs(n))+(n > 0 ? ' above yours' : ' below yours');
@@ -187,7 +184,14 @@ function militaryInventory(row, branch, date) {
   wrap.appendChild(table); box.append(title,wrap); return box;
 }
 
-function militaryDossier(row, branch, sections, note) {
+// Whether a nation's fleet power can be estimated at a save: every ship type
+// it holds has stats.
+function powerKnown(tag, date) {
+  const stats = navalStats(tag, date), counts = (DATA.ships[tag] || {})[date] || {};
+  return !!stats && Object.keys(counts).every(type => stats[type]);
+}
+
+function militaryDossier(row, branch, note) {
   const date = fleetSave.value, facts = (DATA.facts[date] || {})[row.tag] || {};
   const page = document.createElement('div'); page.className = 'military-country-page';
   const header = document.createElement('div'); header.className = 'military-country-header';
@@ -214,7 +218,13 @@ function militaryDossier(row, branch, sections, note) {
   const title = document.createElement('div'); title.className = 'ibtitle';
   title.textContent = branch === 'army' ? 'Recruitment & mobilization' : 'Fleet capability';
   const content = document.createElement('div'); content.className = 'military-capacity-content';
-  const entries = branch === 'army' ? [[sections[0][0],sections[0][1].filter(([label]) => !['Unbuilt capacity','Total potential (estimate)'].includes(label))],sections[1]]
+  const entries = branch === 'army' ? [
+    ['Recruitment potential', [
+      ['Professional brigade cap', row.brigade_cap],
+      ['Mobilization ceiling (estimate)', row.mobilization_brigades], ['Mobilization queued', row.mobilizing]]],
+    ['Recruitment base', [['Soldier population', row.soldiers], ['Soldier share', row.soldier_pct.toFixed(2) + '%'],
+      ['Non-colonial soldier share', row.noncol_soldier_pct.toFixed(2) + '%'],
+      ['Mobilizable population', row.mobilization_pool], ['Mobilization rate', (row.mobilisation_size * 100).toFixed(2) + '%']]]]
     : [['Naval establishment',[['Naval technologies',facts.navy_techs ?? null],['Current power',row.power == null ? null : fmtPower(row.power)],['Full-strength power',row.design == null ? null : fmtPower(row.design)]]]];
   content.append(...strengthDetails(entries,''));
   if (branch === 'army') {
@@ -251,7 +261,7 @@ function refreshMilitaryCountry() {
   host.hidden = !militaryCountry;
   host.replaceChildren();
   if (row) {
-    host.appendChild(militaryDossier(row,overviewBranch,ledger.sections(row),ledger.note));
+    host.appendChild(militaryDossier(row,overviewBranch,ledger.note));
     const army = overviewBranch === 'army';
     stackedBars('military-composition','military-composition-legend',
       (army ? DATA.brigades : DATA.ships)[row.tag] || {},
@@ -262,9 +272,9 @@ function refreshMilitaryCountry() {
 
 // Preserve the selected country while rebuilding either branch at a new save.
 // Native buttons provide keyboard activation without making every cell focusable.
-function renderStrengthLedger(id, cols, rows, state, sections, note) {
+function renderStrengthLedger(id, cols, rows, state, note) {
   const branch = id === 'miltable' ? 'army' : 'navy';
-  militaryLedgers[branch] = {rows, sections, note};
+  militaryLedgers[branch] = {rows, note};
   if (branch === overviewBranch) refreshMilitaryCountry();
   const table = document.getElementById(id);
   const head = table.querySelector('thead tr'), body = table.querySelector('tbody');
@@ -277,7 +287,7 @@ function renderStrengthLedger(id, cols, rows, state, sections, note) {
     button.textContent = col.label;
     button.onclick = () => {
       nextSort(state, col.key);
-      renderStrengthLedger(id, cols, rows, state, sections, note);
+      renderStrengthLedger(id, cols, rows, state, note);
       head.children[index].querySelector('button').focus();
     };
     th.appendChild(button); head.appendChild(th);
@@ -355,16 +365,8 @@ function drawMilTable() {
     usedReg.forEach(rt => row[rt] = at[rt] || 0);
     return row;
   });
-  renderStrengthLedger('miltable', cols, rows, milState, row => [
-    ['Recruitment potential', [
-      ['Professional brigade cap', row.brigade_cap], ['Unbuilt capacity', row.cap_headroom],
-      ['Mobilization ceiling (estimate)', row.mobilization_brigades], ['Mobilization queued', row.mobilizing],
-      ['Total potential (estimate)', row.total_military_potential]]],
-    ['Recruitment base', [['Soldier population', row.soldiers], ['Soldier share', row.soldier_pct.toFixed(2) + '%'],
-      ['Non-colonial soldier share', row.noncol_soldier_pct.toFixed(2) + '%'],
-      ['Mobilizable population', row.mobilization_pool], ['Mobilization rate', (row.mobilisation_size * 100).toFixed(2) + '%']]],
-    ['Fielded composition', usedReg.filter(type => row[type]).map(type => [gameName(type), row[type]])],
-  ], 'Potential combines the professional brigade cap and population-based mobilization ceiling. Mobilized brigades are already included in that ceiling; it is not the remaining in-game mobilization count.');
+  renderStrengthLedger('miltable', cols, rows, milState,
+    'Potential combines the professional brigade cap and population-based mobilization ceiling. Mobilized brigades are already included in that ceiling; it is not the remaining in-game mobilization count.');
 }
 
 /* =============== FLEETS =============== */
@@ -438,17 +440,14 @@ function drawFleetTable() {
   const rows = milTags.map(tag => {
     const counts = (DATA.ships[tag] || {})[date] || {};
     const stats = navalStats(tag, date);
-    const known = stats && Object.keys(counts).every(type => stats[type]);
+    const known = powerKnown(tag, date);
     const total = shipCount(tag, date, '__all') || 0;
     const heavy = known ? Object.entries(counts).reduce((n, [type, count]) => n + (stats[type].heavy ? count : 0), 0) : null;
     return {tag, name:nameOf(tag), total, heavy, other:known ? total - heavy : null,
       power:known ? fleetPower([tag], date, false, true) : null,
       design:known ? fleetPower([tag], date, false, false) : null, counts};
   });
-  renderStrengthLedger('fleettable', cols, rows, fleetState, row => [
-    ['Fleet estimates', [['Current power', row.power == null ? 'Unavailable' : fmtPower(row.power)],
-      ['Full-strength power', row.design == null ? 'Unavailable' : fmtPower(row.design)]]],
-    ['Hull inventory', Object.entries(row.counts).filter(([,n]) => n).map(([type,n]) => [gameName(type),n])],
-  ], 'Power estimates use hull and gun statistics. Current power incorporates recorded strength and experience where available, otherwise full-strength hull counts. These are comparative estimates, not predicted battle outcomes.');
+  renderStrengthLedger('fleettable', cols, rows, fleetState,
+    'Power estimates use hull and gun statistics. Current power incorporates recorded strength and experience where available, otherwise full-strength hull counts. These are comparative estimates, not predicted battle outcomes.');
 }
 
