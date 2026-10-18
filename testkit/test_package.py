@@ -52,11 +52,26 @@ class Package(unittest.TestCase):
         # release that would refuse every run.
         from unittest.mock import patch
         import build_exe
-        with patch.object(build_exe, "scanner_binary", return_value=None), \
+        with patch.object(build_exe, "built_scanner", return_value=None), \
                 patch.object(build_exe.subprocess, "call") as bundle, \
                 contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(build_exe.build(), 1)
         bundle.assert_not_called()
+
+    def test_the_build_takes_the_scanner_from_launch(self):
+        # Where the crate leaves its scanner is written once, in `launch`,
+        # and the build reads it from there without bringing tkinter along.
+        import subprocess
+        import build_exe
+        from vic2tools import launch
+        self.assertIs(build_exe.built_scanner, launch.built_scanner)
+        self.assertFalse(hasattr(build_exe, "scanner_binary"))
+        crate = os.path.join(kit.ROOT, "scanner", "target", "release", launch.BINARY)
+        self.assertEqual(launch.built_scanner(), crate if os.path.isfile(crate) else None)
+        loaded = subprocess.run([sys.executable, "-c", "import sys, build_exe; "
+                                 "print(sorted(m for m in sys.modules if 'tkinter' in m))"],
+                                cwd=kit.ROOT, capture_output=True, text=True)
+        self.assertEqual(loaded.stdout.strip(), "[]", loaded.stderr)
 
     def test_nothing_starts_a_python_worker(self):
         # Every run is the scanner's, a subprocess: no module of the package

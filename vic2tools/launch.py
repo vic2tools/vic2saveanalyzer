@@ -509,17 +509,26 @@ def command_line():
 
 BINARY = "vic2scan.exe" if sys.platform == "win32" else "vic2scan"
 _FOUND = None
+# The folder holding this package: the checkout, or the unpacked exe.
+_HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def built_scanner():
+    """
+    The scanner the crate built (`scanner/target/release`), or None: what
+    a source run falls back on, and what `build_exe.py` packs.
+    """
+    built = os.path.join(_HERE, "scanner", "target", "release", BINARY)
+    return built if os.path.isfile(built) else None
 
 
 def _candidates():
     """Where the scanner might be, nearest first."""
-    # The folder holding this package: the checkout, or the unpacked exe.
-    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     # Beside the executable when frozen, in the program's folder when not, and in
     # the crate's own target directory when working on it.
-    yield os.path.join(getattr(sys, "_MEIPASS", here), BINARY)
-    yield os.path.join(here, BINARY)
-    yield os.path.join(here, "scanner", "target", "release", BINARY)
+    yield os.path.join(getattr(sys, "_MEIPASS", _HERE), BINARY)
+    yield os.path.join(_HERE, BINARY)
+    yield built_scanner() or ""
 
 
 def available():
