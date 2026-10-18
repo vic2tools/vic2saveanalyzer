@@ -345,18 +345,11 @@ impl Keep for Market {
     }
 }
 
-/// The ships, in the bytes the two maps they were (`ships_by_type`, then
-/// `ship_crew`) wrote: an entry made before the ships were one `Vec` reads
-/// the same, and the other way about.
 fn put_fleet(ships: &[Ship], w: &mut W) {
     w.u(ships.len() as u64);
     for s in ships {
         s.kind.put(w);
         s.count.put(w);
-    }
-    w.u(ships.len() as u64);
-    for s in ships {
-        s.kind.put(w);
         s.crew.put(w);
     }
 }
@@ -365,61 +358,26 @@ fn get_fleet(r: &mut R) -> X<Vec<Ship>> {
     let n = r.len()?;
     let mut ships = Vec::with_capacity(n.min(4096));
     for _ in 0..n {
-        ships.push(Ship { kind: Keep::get(r)?, count: Keep::get(r)?, crew: 0.0 });
-    }
-    if r.len()? != n {
-        return Err(());
-    }
-    for s in ships.iter_mut() {
-        if <Sym as Keep>::get(r)? != s.kind {
-            return Err(());
-        }
-        s.crew = Keep::get(r)?;
+        ships.push(Ship { kind: Keep::get(r)?, count: Keep::get(r)?, crew: Keep::get(r)? });
     }
     Ok(ships)
 }
 
-/// The stacks, in the bytes the two maps they were (`units_at`, then
-/// `men_at`: a province, its kinds, each kind's count; the same again with
-/// the men) wrote.
 fn put_stacks(stacks: &[Stack], w: &mut W) {
-    for men in [false, true] {
-        w.u(Stack::provinces(stacks).count() as u64);
-        for group in Stack::provinces(stacks) {
-            group[0].pid.put(w);
-            w.u(group.len() as u64);
-            for s in group {
-                s.kind.put(w);
-                if men { s.men.put(w) } else { s.n.put(w) }
-            }
-        }
+    w.u(stacks.len() as u64);
+    for s in stacks {
+        s.pid.put(w);
+        s.kind.put(w);
+        s.n.put(w);
+        s.men.put(w);
     }
 }
 
 fn get_stacks(r: &mut R) -> X<Vec<Stack>> {
-    let mut stacks: Vec<Stack> = Vec::new();
-    let groups = r.len()?;
-    for _ in 0..groups {
-        let pid = r.i()?;
-        for _ in 0..r.len()? {
-            stacks.push(Stack { pid, kind: Keep::get(r)?, n: Keep::get(r)?, men: 0 });
-        }
-    }
-    let groups = r.len()?;
-    let mut at = 0;
-    for _ in 0..groups {
-        let pid = r.i()?;
-        for _ in 0..r.len()? {
-            let s = stacks.get_mut(at).ok_or(())?;
-            if s.pid != pid || <Sym as Keep>::get(r)? != s.kind {
-                return Err(());
-            }
-            s.men = Keep::get(r)?;
-            at += 1;
-        }
-    }
-    if at != stacks.len() {
-        return Err(());
+    let n = r.len()?;
+    let mut stacks = Vec::with_capacity(n.min(4096));
+    for _ in 0..n {
+        stacks.push(Stack { pid: Keep::get(r)?, kind: Keep::get(r)?, n: Keep::get(r)?, men: Keep::get(r)? });
     }
     Ok(stacks)
 }
@@ -448,7 +406,6 @@ impl Keep for Nation {
         n.soldiers_noncolonial.put(w); n.pop_noncolonial.put(w);
         n.literacy_noncolonial.put(w); n.goods_supply.put(w); n.mob_excluded_culture.put(w);
         n.literacy_weighted.put(w); n.con_weighted.put(w); n.mil_weighted.put(w);
-        n.money_total.put(w);
     }
     fn get(r: &mut R) -> X<Self> {
         let mut n = Nation::default();
@@ -479,7 +436,6 @@ impl Keep for Nation {
         n.literacy_noncolonial = Keep::get(r)?; n.goods_supply = Keep::get(r)?;
         n.mob_excluded_culture = Keep::get(r)?; n.literacy_weighted = Keep::get(r)?;
         n.con_weighted = Keep::get(r)?; n.mil_weighted = Keep::get(r)?;
-        n.money_total = Keep::get(r)?;
         Ok(n)
     }
 }

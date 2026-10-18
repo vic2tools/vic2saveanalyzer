@@ -471,7 +471,6 @@ fn read_country(text_: &[u8], at: usize, tag: &str, tables: &Tables) -> Result<C
                             return Err("a state that is a list".into());
                         }
                         out.states += 1;
-                        let ordinal = out.states;
                         let ids = match get(&block, b"provinces") {
                             Some(p @ V::List(_)) | Some(p @ V::Multi(_)) | Some(p @ V::Dict(_)) => items_of_or_list(p),
                             _ => Vec::new(),
@@ -480,7 +479,6 @@ fn read_country(text_: &[u8], at: usize, tag: &str, tables: &Tables) -> Result<C
                         let level = if colonial { to_int(get(&block, b"is_colonial"), 0)? } else { 0 };
                         for pid in ids {
                             let pid = to_int(Some(pid), -1)?;
-                            out.province_state.push((pid, ordinal));
                             if colonial {
                                 out.colonial_provinces.push(pid);
                                 out.colonial_level.push((pid, level));
@@ -623,7 +621,6 @@ fn read_province(text_: &[u8], at: usize, pid: i64, pop_types: &[Vec<u8>], mob_t
                         id: field(b"id"),
                         size: field(b"size"),
                         culture: pop_culture(&pop),
-                        money: field(b"money"),
                         con: field(b"con"),
                         mil: field(b"mil"),
                         literacy: field(b"literacy"),

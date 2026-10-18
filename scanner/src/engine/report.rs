@@ -143,18 +143,12 @@ struct MapOut {
 }
 
 /// `build_map`, less its state chunks, which travel beside the payload.
-fn build_map(m: &Mod, parsed: &[Kept1], scale: i64) -> Option<MapOut> {
+fn build_map(m: &Mod, raster: &(i64, i64, Vec<(i64, i64)>), parsed: &[Kept1], scale: i64)
+             -> Option<MapOut> {
     if m.path.is_empty() {
         return None;
     }
-    let decoded;
-    let (width, height, runs) = match &m.raster {
-        Some((w, h, r)) => (*w, *h, r),
-        None => {
-            decoded = mapflags::province_raster(&m.map_bmp, &m.map_csv, scale);
-            (decoded.0, decoded.1, &decoded.2)
-        }
-    };
+    let (width, height, runs) = (raster.0, raster.1, &raster.2);
     if width == 0 {
         return None;
     }
@@ -938,7 +932,7 @@ pub struct CrossPart {
     pub names: Vec<(String, String)>,
 }
 
-pub fn run(run: &Run, m: &Mod, live: &FxSet<String>, spent: Vec<Spent>) -> Outcome {
+pub fn run(run: &Run, m: &Mod, spent: Vec<Spent>) -> Outcome {
     let c = walk(spent);
     crate::engine::phase("walked");
     let metas: Vec<&Meta> = c.parsed.iter().map(|k| &k.meta).collect();
@@ -963,7 +957,6 @@ pub fn run(run: &Run, m: &Mod, live: &FxSet<String>, spent: Vec<Spent>) -> Outco
         tables = csv.join().unwrap();
         crate::engine::phase("tables written");
     });
-    let _ = live;
     let (mut paths, refused, mut failed) = tables;
     if let Some(why) = page_failed {
         failed.insert(0, why);
@@ -1022,7 +1015,9 @@ fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]
                     .collect();
                 wars::build(&c.book, &owners, &mapping)
             });
-            let map_job = s.spawn(|| build_map(m, &c.parsed, run.map_scale));
+            // A run that makes a page decodes the map beside the mod (`engine::run`).
+            let raster = m.raster.as_ref().expect("the map is decoded for every page");
+            let map_job = s.spawn(move || build_map(m, raster, &c.parsed, run.map_scale));
             let flags_job = s.spawn(|| flags_for(m, &c.parsed, &c.book));
             let succession_job = s.spawn(|| succession(&c.parsed, m));
             let series_job = s.spawn(|| section_series_facts(run, rows, &dates, &tags));

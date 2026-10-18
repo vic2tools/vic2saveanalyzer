@@ -344,7 +344,6 @@ pub struct Country {
     pub invention_ids: Vec<i64>,
     pub mobilizing: i64,
     pub states: i64,
-    pub province_state: Vec<(i64, i64)>,
     pub colonial_provinces: Vec<i64>,
     pub colonial_level: Vec<(i64, i64)>,
     pub factory_count: i64,
@@ -706,7 +705,6 @@ pub fn read_country(bytes: &[u8], at: usize, stop: usize, tag: &str,
                 i = tok.pos;
                 if let Value::Dict(d) = block {
                     out.states += 1;
-                    let ordinal = out.states;
                     let ids: Vec<i64> = match d.get(b"provinces") {
                         Some(Value::List(items)) => items.iter().map(|v| match v {
                             Value::Text(s) => to_int_or(Some(s), -1),
@@ -726,7 +724,6 @@ pub fn read_country(bytes: &[u8], at: usize, stop: usize, tag: &str,
                         to_int_or(d.text(b"is_colonial"), 0)
                     } else { 0 };
                     for pid in ids {
-                        out.province_state.push((pid, ordinal));
                         if colonial {
                             out.colonial_provinces.push(pid);
                             out.colonial_level.push((pid, level));

@@ -766,7 +766,6 @@ pub fn say(line: &str) {
 /// would have crashed on too. Said as a sentence, and the run ends with
 /// status 1, the status of every other run that does not finish.
 pub fn decline(why: &str) -> ! {
-    out::release();
     crate::errln!("Stopped: {}. This is something the analyzer cannot read; if it came from a \
                    save or a mod the game itself loads, please report it with that file.", why);
     std::process::exit(1);
@@ -1027,7 +1026,6 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
         // which is now, with every save read once.
         Err(d) => match modread::raised_sentence(&d) {
             Some(sentence) if run.own_refusals => {
-                out::release();
                 return report::Outcome { html: None, refused: Vec::new(),
                                          run_error: Some(sentence.to_string()),
                                          cross_part: None };
@@ -1055,8 +1053,7 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
                                  cross_part: None };
     }
     if pres.is_empty() {
-        out::release();
-        return report::Outcome { html: None, refused: Vec::new(),
+            return report::Outcome { html: None, refused: Vec::new(),
                                  run_error: Some("No saves could be read.".into()), cross_part: None };
     }
     // A diagnostic is answered off the campaign as it stands, and ends the
@@ -1095,13 +1092,11 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
     }
     let spent: Vec<Spent> = spent.into_iter().map(|s| s.unwrap()).collect();
     phase("pass two: saves finished");
-    // Nothing from here on hands the run back.
-    out::release();
     if run.cross_part {
         return report::Outcome { html: None, refused: Vec::new(), run_error: None,
                                  cross_part: Some(cross_part(&run, &m, &held_names, &spent)) };
     }
-    let done = crate::engine::report::run(&run, &m, &live, spent);
+    let done = crate::engine::report::run(&run, &m, spent);
     // As the campaign in `report::run`: the process ends with this run. A
     // campaign of a `--cross` run, one of several, is freed as it returns.
     std::mem::forget((run, m, live));

@@ -188,12 +188,10 @@ pub struct Nation {
     pub mobilizable_pops: Vec<(Sym, Sym, i64, i64)>,
     pub mob_excluded_culture: i64,
     pub colonial_provinces: FxSet<i64>,
-    pub province_state: FxMap<i64, i64>,
     pub occupied_provinces: FxSet<i64>,
     pub literacy_weighted: f64,
     pub con_weighted: f64,
     pub mil_weighted: f64,
-    pub money_total: f64,
 }
 
 impl Default for Num {
@@ -203,10 +201,6 @@ impl Default for Num {
 }
 
 impl Nation {
-    fn blank() -> Nation {
-        Nation::default()
-    }
-
     /// The primary culture and every accepted one (`accepted_cultures_of`).
     pub fn accepts(&self, culture: Sym) -> bool {
         (!self.primary_culture.is_empty() && self.primary_culture == culture)
@@ -235,7 +229,6 @@ fn fold_provinces(nat: &mut Nation, n: &crate::province::Nation) {
     nat.literacy_weighted += n.literacy_weighted;
     nat.con_weighted += n.con_weighted;
     nat.mil_weighted += n.mil_weighted;
-    nat.money_total += n.money_total;
     nat.core_provinces.extend(n.cores.iter().copied());
     nat.occupied_provinces.extend(n.occupied.iter().copied());
     for (pid, flag) in &n.colonial {
@@ -325,9 +318,6 @@ fn fold_country(nat: &mut Nation, c: &Country) {
     }
     nat.mobilizing += c.mobilizing;
     nat.states += c.states;
-    for (a, b) in &c.province_state {
-        nat.province_state.insert(*a, *b);
-    }
     nat.colonial_provinces.extend(c.colonial_provinces.iter().copied());
     for (a, b) in &c.colonial_level {
         nat.colonial_level.insert(*a, *b);
@@ -383,7 +373,7 @@ pub fn build(file: String, date: String, player: String, scan: &Scan, countries:
         }
         let nat = nations.entry(tag.clone()).or_insert_with(|| {
             order.push(tag.clone());
-            Nation::blank()
+            Nation::default()
         });
         fold_provinces(nat, scanned);
     }

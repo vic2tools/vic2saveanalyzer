@@ -81,7 +81,6 @@ pub(crate) struct Nation {
     pub(crate) literacy_weighted: f64,
     pub(crate) con_weighted: f64,
     pub(crate) mil_weighted: f64,
-    pub(crate) money_total: f64,
     // Insertion-ordered, not sorted: the report sorts cultures by size with
     // a stable sort, so two cultures of equal size come out in the order the
     // file first mentioned them. A HashMap emitted alphabetically silently
@@ -124,7 +123,6 @@ pub(crate) struct Pop<'a> {
     pub(crate) id: Option<&'a [u8]>,
     pub(crate) size: Option<&'a [u8]>,
     pub(crate) culture: Option<&'a [u8]>,
-    pub(crate) money: Option<&'a [u8]>,
     pub(crate) con: Option<&'a [u8]>,
     pub(crate) mil: Option<&'a [u8]>,
     pub(crate) literacy: Option<&'a [u8]>,
@@ -282,7 +280,7 @@ pub(crate) fn read_province(
         if depth == 2 {
             if let Some(idx) = current {
                 let slot = &mut pops[idx];
-                let own = matches!(key, b"id" | b"size" | b"money" | b"con" | b"mil" | b"literacy"
+                let own = matches!(key, b"id" | b"size" | b"con" | b"mil" | b"literacy"
                                         | b"life_needs");
                 // `\t(id|size|...)=([^\r\n]+)` wants a value: with none the
                 // line matches nothing, and the field keeps what it had.
@@ -294,8 +292,6 @@ pub(crate) fn read_province(
                     slot.id = Some(trim_end_b(value));
                 } else if key == b"size" {
                     slot.size = Some(trim_end_b(value));
-                } else if key == b"money" {
-                    slot.money = Some(trim_end_b(value));
                 } else if key == b"con" {
                     slot.con = Some(trim_end_b(value));
                 } else if key == b"mil" {
@@ -498,7 +494,6 @@ pub(crate) fn accumulate(
         province_literate += literate;
         nat.con_weighted += pop.con.map_or(0.0, to_float_b) * size as f64;
         nat.mil_weighted += pop.mil.map_or(0.0, to_float_b) * size as f64;
-        nat.money_total += pop.money.map_or(0.0, to_float_b);
     }
     let nat = scan.nations.get_mut(owner).unwrap();
     if province_pop > 0 {

@@ -614,7 +614,6 @@ pub fn main(argv: &[String]) -> ! {
             }
         },
     };
-    out::release();
     std::process::exit(code);
 }
 

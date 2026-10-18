@@ -296,7 +296,6 @@ pub fn prepare(meta: Meta, nations: Vec<Nation>, keys: Vec<String>, spec: &Spec)
         nat.mobilizable_pops = Vec::new();
         nat.population_by_state = Vec::new();
         nat.soldier_pops_at = Vec::new();
-        nat.province_state = FxMap::default();
         nat.colonial_level = FxMap::default();
         nat.province_colonial = FxMap::default();
         nat.core_provinces = FxSet::default();
