@@ -264,7 +264,7 @@ MUTATIONS = [
         "run's copy stays in the folder",
         'staleness.py', (),
         [
-            ('scanner/src/engine/report/csv.rs', '    for (k, name, cols) in order {\n', '    for (k, name, cols) in order {\n        if k > 0 && k < 100 && c.text[k].iter().all(|s| s.is_empty()) { continue; }\n'),
+            ('scanner/src/engine/report/csv.rs', '    for (k, name, cols) in order {\n', '    for (k, name, cols) in order {\n        if let Table::PerSave(i) = k { if i > 0 && c.text[i].iter().all(|s| s.is_empty()) { continue; } }\n'),
         ]),
     Mutation(
         'goal-judged-before-first-save',
