@@ -13,7 +13,7 @@ change, and how to make a release. `README.md` is the guide to using it;
 | `vic2_analyzer.py` | The command line, a shim into `vic2tools.launch`. |
 | `vic2tools/` | The Python side: the window, the command line and the keeper, one package of seven modules. |
 | `vic2tools/launch.py` | Every setting of a run, declared once, and the command line that fills them; finding the scanner, handing it the run and relaying what it says. `analyze()` is the same for the window, with its Stop, progress and report-ready callbacks. The scanner's cache folder. |
-| `vic2tools/__main__.py` | The executable's entry: the window, or the command line when given arguments. Its share menu. |
+| `vic2tools/__main__.py` | The executable's entry, and `python -m vic2tools` from a checkout: the window, or the command line when given arguments. Its share menu. |
 | `vic2tools/report_tab.py` | The window's report tab: the folder pickers, the log, Analyze and Stop; and what it asks before a run: which folder is a game install, where a mod may be read from, which folders hold campaigns. |
 | `vic2tools/keeper.py`, `vic2tools/keeper_tab.py` | Keeping every autosave the game writes, with what the head of a save says and the game's dates; and its tab. |
 | `vic2tools/share.py`, `vic2tools/settings.py` | Sharing a report, and what the window remembers. |
@@ -91,3 +91,7 @@ push; it must print `clean`.
   recorded answers in `testkit/expected/` hold it to. Numbers are formatted
   the way Python formats them (`scanner/src/py/fmt.rs`) for that reason.
 - Saves, the game and the mod are read, never written.
+- Where the window and the scanner both decide something -- which install
+  and mod a run is read on, which folders hold campaigns -- the window asks
+  first so a wrong folder is a dialog, and `testkit/pairs.py` holds the two
+  answers to each other.
