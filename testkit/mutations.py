@@ -73,7 +73,7 @@ MUTATIONS = [
         'so the windowed executable flashes a console window per run',
         'packing.py', (),
         [
-            ('vic2tools/launch.py', '            status = _relayed(argv, _no_window(), hosted)', '            status = _relayed(argv, 0, hosted)'),
+            ('vic2tools/launch.py', '            status = _relayed(argv, _no_window(), hosted=hosted, say=say,', '            status = _relayed(argv, 0, hosted=hosted, say=say,'),
         ]),
     Mutation(
         'war-infobox-throws',

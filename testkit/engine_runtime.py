@@ -29,20 +29,19 @@ class Relay(unittest.TestCase):
     # Windows, so the stand-ins here are told which to use; the relay passes
     # on whatever it is given.
 
-    def relay(self, body, hosted=True):
+    def relay(self, body, hosted=True, **told):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            status = launch._relayed([sys.executable, "-c", body], 0, hosted)
+            status = launch._relayed([sys.executable, "-c", body], 0, hosted=hosted, **told)
         return status, out.getvalue(), err.getvalue()
 
     def test_large_pipes_are_drained_and_progress_told(self):
         seen = []
-        launch.set_progress(lambda *a: seen.append(a))
-        self.addCleanup(launch.set_progress, None)
         status, out, err = self.relay(
             "import sys; sys.stdout.reconfigure(newline='\\n'); "
             "sys.stderr.write('x' * 200000); "
-            "print('said'); print('@progress 1 2'); print('@done'); sys.exit(5)")
+            "print('said'); print('@progress 1 2'); print('@done'); sys.exit(5)",
+            progress=lambda *a: seen.append(a))
         self.assertEqual(status, 5)
         self.assertEqual(seen, [(1, 2)])
         self.assertEqual(out, "said\n")
@@ -50,9 +49,7 @@ class Relay(unittest.TestCase):
 
     def test_report_ready_is_told_its_path(self):
         ready = []
-        launch.set_report_ready(ready.append)
-        self.addCleanup(launch.set_report_ready, None)
-        self.relay("print('@ready /some/report.html')")
+        self.relay("print('@ready /some/report.html')", ready=ready.append)
         self.assertEqual(ready, ["/some/report.html"])
 
     def test_unhosted_lines_are_passed_on_as_they_are(self):
@@ -61,8 +58,6 @@ class Relay(unittest.TestCase):
         self.assertEqual(out, "@progress 1 2\n")
 
     def test_stop_kills_the_child(self):
-        launch.set_cancel_check(lambda: True)
-        self.addCleanup(launch.set_cancel_check, None)
         started = []
         real = subprocess.Popen
 
@@ -73,7 +68,8 @@ class Relay(unittest.TestCase):
         began = time.monotonic()
         with patch.object(subprocess, "Popen", side_effect=starting):
             with self.assertRaises(launch.Cancelled):
-                self.relay("import time; print('x', flush=True); time.sleep(30)")
+                self.relay("import time; print('x', flush=True); time.sleep(30)",
+                           cancel=lambda: True)
         # Stopped, not waited for: a scanner left reading would end on its
         # own in thirty seconds, with status 0, and Stop would have done
         # nothing but hide it.

@@ -161,30 +161,6 @@ def default_out():
                         "Victoria 2 Save Analyzer")
 
 
-class Pipe:
-    """Hands whatever is written straight to the log queue.
-
-    Chunks go through as they were written rather than being held back until a
-    line ends, because the analyzer prints "reading foo.v2 ..." and only
-    finishes that line once the save is parsed. Buffering would show the two
-    halves together, seconds after the interesting half was true.
-    """
-
-    def __init__(self, sink):
-        self.sink = sink
-
-    def write(self, text):
-        if text:
-            self.sink.put(text)
-        return len(text)
-
-    def flush(self):
-        pass
-
-    def isatty(self):
-        return False
-
-
 class App:
     def __init__(self, root, parent=None):
         # `parent` is the tab to build into when this is half of the campaign
@@ -695,18 +671,16 @@ class App:
             saves=saves, out=out, cross=cross, primary=primary or None,
             campaign_mod=tuple(told) if cross else (),
             game_root=game_root or None, mod_path=mod or None)
-        old_out, old_err = sys.stdout, sys.stderr
-        sys.stdout = sys.stderr = Pipe(self.log_queue)
         ok = True
         stopped = False
         try:
             # Everything the analyzer calls back into, handed over with the
-            # run rather than wired by hand around it. The report is written
-            # before the CSV tables are, so it can be opened while they are
-            # still being written.
-            launch.analyze(run, cancel=self.stop.is_set,
-                                  progress=self.on_progress,
-                                  ready=self.on_report_ready)
+            # run rather than wired by hand around it: every line it prints
+            # into the log's queue, never into a widget from this thread. The
+            # report is written before the CSV tables are, so it can be
+            # opened while they are still being written.
+            launch.analyze(run, say=self.log_queue.put, cancel=self.stop.is_set,
+                           progress=self.on_progress, ready=self.on_report_ready)
         except launch.Cancelled:
             ok = False
             stopped = True
@@ -721,8 +695,6 @@ class App:
             ok = False
             import traceback
             self.log_queue.put("\n" + traceback.format_exc())
-        finally:
-            sys.stdout, sys.stderr = old_out, old_err
         self.report = os.path.join(out, "report.html")
         if ok and os.path.isfile(self.report):
             self.log_queue.put(f"\nReport written to {self.report}\n")
@@ -755,7 +727,6 @@ class App:
         self.running = False
         self.button.configure(state="normal")
         self.stop_button.configure(state="disabled")
-        # `work` unhooks itself on the way out, including when it fails.
         self.seen = None
         self.progress.pack_forget()
         self.refresh_cache()          # the run just added to it

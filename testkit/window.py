@@ -4,8 +4,8 @@ Run the window's own code path, without showing a window.
 
 Everything else here drives the analyzer through its command line. Nobody
 drives it through the thing people actually click, and the two are not the
-same path: the window builds its own argument list, replaces stdout with a
-queue, hands over a cancel check and a progress callback, and opens the
+same path: the window builds its own `Run`, hands over its log's queue, a
+cancel check and a progress callback, and opens the
 report at the end. Each of those is a place to be wrong, and one of them
 was -- the report never opened at all on anything but Windows, which no
 command-line test could have noticed.
@@ -150,8 +150,6 @@ def opens_on_this_machine(app, report):
 
 def a_stopped_run(root, app, saves, out):
     """[what went wrong] when Stop is pressed before it starts."""
-    from vic2tools import launch
-
     app.show_report = lambda path: None
     app.open_after.set(False)
     app.stop.set()                       # as if Stop were pressed at once
@@ -159,7 +157,6 @@ def a_stopped_run(root, app, saves, out):
         app.work(saves, "", out, game_root=app.game.get())
     finally:
         app.stop.clear()
-        launch.set_cancel_check(None)
     for _ in range(20):
         root.update()
         time.sleep(0.02)

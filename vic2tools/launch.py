@@ -37,56 +37,35 @@ import threading
 from dataclasses import dataclass, field as _field, fields
 
 
-_REPORT_READY = None
-
-
-def set_report_ready(fn):
-    """
-    Give the analyzer somewhere to say the report is on disk.
-
-    It is written before the CSV tables are, and nothing in it comes out of
-    them, so it can be opened while they are still being written. That is
-    about a third of a second of a warm run -- the whole point of which is
-    that pressing the button and reading the report are the same moment.
-    """
-    global _REPORT_READY
-    _REPORT_READY = fn
-
-
-def _tell_report_ready(path):
-    if _REPORT_READY is not None:
-        try:
-            _REPORT_READY(path)
-        except Exception:             # a window that has gone away
-            pass
-
-
-
-
-def analyze(run, cancel=None, progress=None, ready=None):
+def analyze(run, *, say=None, cancel=None, progress=None, ready=None):
     """
     One run, for a caller that is not a command line: the window.
 
     It hands over a `Run` rather than rewriting `sys.argv` for the parser to
-    read back, and the three things it wants told -- whether to stop, how
-    far along the saves are, and where the report landed -- as arguments,
-    which are set for this run and cleared after it whatever happens.
+    read back, and what it wants told as arguments, for this run alone:
+
+    - `say(text)` takes each line the scanner prints, stdout and stderr
+      alike, as it arrives. Without it the lines go to `sys.stdout` and
+      `sys.stderr`.
+    - `cancel()` is asked, ten times a second, whether to stop. A window has
+      a Stop button; a terminal has Ctrl-C.
+    - `progress(done, total)` hears how far through the saves the run is,
+      counted in saves, because a save is the unit the work comes in and
+      the one a reader can see going by. A campaign of seven hundred is
+      minutes of a window that otherwise looks stuck.
+    - `ready(path)` hears that the report is on disk. It is written before
+      the CSV tables are, and nothing in it comes out of them, so it can be
+      opened while they are still being written: pressing the button and
+      reading the report are the same moment.
 
     A run refused comes back as the `RunError` it was refused with, for the
     window to show, rather than as a request to end the process.
     """
-    set_cancel_check(cancel)
-    set_progress(progress)
-    set_report_ready(ready)
-    try:
-        status = _front(run, hosted=True)
-        if status:
-            raise RuntimeError("the scanner stopped with status %s" % status)
-        return status
-    finally:
-        set_cancel_check(None)
-        set_progress(None)
-        set_report_ready(None)
+    status = _front(run, hosted=True, say=say, cancel=cancel, progress=progress,
+                    ready=ready)
+    if status:
+        raise RuntimeError("the scanner stopped with status %s" % status)
+    return status
 
 
 def main(run=None):
@@ -107,14 +86,14 @@ def main(run=None):
 BUILD = "cargo build --release --manifest-path scanner/Cargo.toml"
 
 
-def _front(run, hosted=False):
+def _front(run, hosted=False, *, say=None, cancel=None, progress=None, ready=None):
     """
     The run done by the scanner (`vic2scan analyze`): its exit status. With
     no scanner to hand it to, the run is refused with how to build one.
 
-    `hosted` is the window's run: the scanner's lines go to `sys.stdout`
-    and `sys.stderr` as they come, its progress and "the report is on disk"
-    to the callbacks `analyze` set, and the Stop button kills it.
+    `hosted` is the window's run: the scanner's lines go to `say` as they
+    come (or to `sys.stdout` and `sys.stderr`), its progress and "the report
+    is on disk" to `progress` and `ready`, and `cancel` saying stop kills it.
     """
     binary = available()
     if not binary:
@@ -135,7 +114,7 @@ def _front(run, hosted=False):
             fh.write(json.dumps(dict(dataclasses.asdict(run), cache_dir=cache_dir())))
         # A windowed build started with arguments and no console to attach
         # to (a folder dropped on it) has no streams at all.
-        silent = sys.stdout is None or sys.stderr is None
+        silent = say is None and (sys.stdout is None or sys.stderr is None)
         for stream in (sys.stdout, sys.stderr):
             if stream is not None:
                 stream.flush()
@@ -160,7 +139,8 @@ def _front(run, hosted=False):
             # check running the analyzer in its own process -- and a child's
             # output would go past them to the real streams, so it is passed
             # on through.
-            status = _relayed(argv, _no_window(), hosted)
+            status = _relayed(argv, _no_window(), hosted=hosted, say=say,
+                              cancel=cancel, progress=progress, ready=ready)
         if status == REFUSED:
             # A run refused, in its sentence, raised as it always was.
             with open(refused, encoding="utf-8") as fh:
@@ -178,12 +158,14 @@ def _front(run, hosted=False):
 REFUSED = 4
 
 
-def _relayed(argv, flags, hosted=False):
+def _relayed(argv, flags, *, hosted=False, say=None, cancel=None, progress=None,
+             ready=None):
     """
-    Run `argv`, its output written to `sys.stdout` and `sys.stderr` as it
-    comes, and its status. Hosted, the protocol lines go to the progress and
-    report-ready callbacks instead, and a Stop asked for kills it and raises
-    `Cancelled` -- every save it had read by then is in the engine's cache.
+    Run `argv`, each line it prints handed to `say` as it comes -- or
+    written to `sys.stdout` and `sys.stderr` -- and its status. Hosted, the
+    protocol lines go to `progress` and `ready` instead, and `cancel` saying
+    stop kills it and raises `Cancelled` -- every save it had read by then
+    is in the engine's cache.
     """
     import subprocess
     proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -198,14 +180,17 @@ def _relayed(argv, flags, hosted=False):
                     word, _, rest = line.rstrip("\r\n").partition(" ")
                     if word == "@progress":
                         done, total = rest.split()[:2]
-                        tell_progress(int(done), int(total))
+                        _tell(progress, int(done), int(total))
                         continue
                     if word == "@ready":
-                        _tell_report_ready(rest)
+                        _tell(ready, rest)
                         continue
                     if word == "@done":
                         continue
-                target.write(line)
+                if say is not None:
+                    say(line)
+                else:
+                    target.write(line)
         except Exception as exc:                     # noqa: BLE001
             failed.append(exc)
         finally:
@@ -218,8 +203,8 @@ def _relayed(argv, flags, hosted=False):
     try:
         while threads[0].is_alive():
             threads[0].join(0.1)
-            if hosted:
-                stop_if_asked()
+            if hosted and cancel is not None and cancel():
+                raise Cancelled()
     except BaseException:
         if proc.poll() is None:
             proc.kill()
@@ -233,6 +218,15 @@ def _relayed(argv, flags, hosted=False):
     if failed:
         raise failed[0]
     return status
+
+
+def _tell(callback, *news):
+    """Hand a caller's callback its news, if it gave one."""
+    if callback is not None:
+        try:
+            callback(*news)
+        except Exception:             # a window that has gone away
+            pass
 
 
 # ----------------------------------------------------------------------------
@@ -560,54 +554,11 @@ def _no_window():
 
 
 # ----------------------------------------------------------------------------
-# The two things a running analysis shares with whoever started it -- a Stop
-# button to ask between saves, a progress bar to tell -- and the folder the
-# scanner keeps what it has read in, which the window can measure and empty.
+# A run stopped by whoever started it, and the folder the scanner keeps what
+# it has read in, which the window can measure and empty.
 
 class Cancelled(Exception):
     """The caller asked for the run to stop before it finished."""
-
-
-# A window has a Stop button; a terminal has Ctrl-C. Whoever is driving hands a
-# callable in and it is asked, between saves, whether to carry on. Between
-# saves rather than inside one because a save is a few seconds at worst and
-# unwinding a half-read one buys nothing.
-_STOP = None
-
-
-def set_cancel_check(fn):
-    """Give the analyzer something to ask before it starts the next save."""
-    global _STOP
-    _STOP = fn
-
-
-def stop_if_asked():
-    if _STOP is not None and _STOP():
-        raise Cancelled()
-
-
-_PROGRESS = None
-
-
-def set_progress(fn):
-    """
-    Give the analyzer somewhere to say how far through the saves it is.
-
-    Counted in saves rather than in bytes or in stages, because a save is the
-    unit the work actually comes in and the one a reader can see going by. A
-    campaign of a few dozen does not need this; one of seven hundred is four
-    minutes of a window that otherwise looks stuck.
-    """
-    global _PROGRESS
-    _PROGRESS = fn
-
-
-def tell_progress(done, total):
-    if _PROGRESS is not None:
-        try:
-            _PROGRESS(done, total)
-        except Exception:             # a window that has gone away
-            pass
 
 
 def cache_dir():
