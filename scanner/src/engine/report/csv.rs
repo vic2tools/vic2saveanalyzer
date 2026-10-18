@@ -9,6 +9,7 @@
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 
 use super::*;
+use crate::engine::finish::csv_line;
 
 /// One CSV file: its heading, then `body`. False when it could not be
 /// opened for writing (a table open in Excel, on Windows).
@@ -40,6 +41,14 @@ pub(super) fn held_elsewhere(e: &std::io::Error) -> bool {
     cfg!(windows) && matches!(e.raw_os_error(), Some(32) | Some(33))
 }
 
+/// A CSV table: one of the per-save tables finishing wrote (by its place in
+/// `Tables::per_save`), or one of the two the campaign's market makes.
+enum Table {
+    PerSave(usize),
+    Prices,
+    Snapshot,
+}
+
 /// Every CSV table: (the paths written, the paths refused, what else failed).
 /// A failure is said by the caller once the page is on disk, rather than
 /// ending the process from this thread while the page is being written.
@@ -49,21 +58,23 @@ pub(super) fn write_outputs(out: &str, c: &Campaign, prices: &[PriceRow], snaps:
     let mut refused = Vec::new();
     let mut failed = Vec::new();
     // `per_save[:1] + [prices, snapshot] + per_save[1:]`, as `write_outputs` orders them.
-    let mut order: Vec<(usize, &str, &Vec<String>)> = vec![(0, &t.per_save[0].0, &t.per_save[0].1),
-        (100, "prices.csv", &t.price_columns), (101, "market_snapshot.csv", &t.snapshot_columns)];
+    let mut order: Vec<(Table, &str, &Vec<String>)> = vec![
+        (Table::PerSave(0), &t.per_save[0].0, &t.per_save[0].1),
+        (Table::Prices, "prices.csv", &t.price_columns),
+        (Table::Snapshot, "market_snapshot.csv", &t.snapshot_columns)];
     for (k, (name, cols)) in t.per_save.iter().enumerate().skip(1) {
-        order.push((k, name, cols));
+        order.push((Table::PerSave(k), name, cols));
     }
     for (k, name, cols) in order {
         let refs: Vec<&str> = cols.iter().map(|s| s.as_str()).collect();
         let path = std::path::Path::new(out).join(name);
         let got = write_table(&path, &refs, |w| {
             match k {
-                100 => {
+                Table::Prices => {
                     let mut s = String::with_capacity(1 << 20);
                     for (d, y, g, cat, p) in prices {
                         let vals = [Val::S(d), Val::S(y), Val::S(g), Val::S(cat), Val::F(*p)];
-                        line(&mut s, &vals);
+                        csv_line(&mut s, &vals);
                         if s.len() > 1 << 20 {
                             w.write_all(s.as_bytes())?;
                             s.clear();
@@ -71,18 +82,18 @@ pub(super) fn write_outputs(out: &str, c: &Campaign, prices: &[PriceRow], snaps:
                     }
                     w.write_all(s.as_bytes())
                 }
-                101 => {
+                Table::Snapshot => {
                     let mut s = String::with_capacity(1 << 20);
                     for r in snaps {
                         let vals = [Val::S(&r.date), Val::S(&r.year), Val::S(&r.good),
                                     Val::S(r.category), Val::F(r.price), Val::F(r.world_pool),
                                     Val::F(r.supply), Val::F(r.demand), Val::F(r.real_demand),
                                     Val::F(r.actual_sold), Val::I(r.discovered)];
-                        line(&mut s, &vals);
+                        csv_line(&mut s, &vals);
                     }
                     w.write_all(s.as_bytes())
                 }
-                k => {
+                Table::PerSave(k) => {
                     for chunk in &c.text[k] {
                         w.write_all(chunk.as_bytes())?;
                     }
@@ -100,12 +111,3 @@ pub(super) fn write_outputs(out: &str, c: &Campaign, prices: &[PriceRow], snaps:
     (paths, refused, failed)
 }
 
-pub(super) fn line(out: &mut String, vals: &[Val]) {
-    for (i, v) in vals.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
-        v.push_csv(out);
-    }
-    out.push_str("\r\n");
-}

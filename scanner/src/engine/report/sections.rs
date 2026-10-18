@@ -109,7 +109,7 @@ pub(super) fn succession(parsed: &[Kept1], m: &Mod) -> String {
 }
 
 /// `name_for(tag, government, localisation)`.
-pub(super) fn name_for(tag: &str, government: &str, m: &Mod) -> String {
+pub(crate) fn name_for(tag: &str, government: &str, m: &Mod) -> String {
     if !government.is_empty() {
         if let Some(s) = m.localisation.get(&format!("{}_{}", tag, government)) {
             if !s.is_empty() {
@@ -122,6 +122,7 @@ pub(super) fn name_for(tag: &str, government: &str, m: &Mod) -> String {
         _ => tag.to_string(),
     }
 }
+
 pub fn growth_series(readings: &[(&str, Option<f64>)], span: f64) -> OMap<String, f64> {
     let mut out = OMap::new();
     let mut anchor: Option<(&str, f64)> = None;

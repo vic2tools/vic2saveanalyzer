@@ -439,15 +439,10 @@ fn cross_part(run: &Run, m: &Mod, held: &[(String, String)], spent: &[Spent]) ->
             rows.push((r.date.clone(), r.key.clone(), keys.iter().map(|k| r.get(k).float()).collect()));
         }
     }
-    // `name_for(tag, government, localisation)`, where it names the nation
-    // other than by its tag.
+    // The nations the mod names other than by their tags.
     let mut names = Vec::new();
     for (tag, government) in held {
-        let label = if !government.is_empty() {
-            m.localisation.get(&format!("{}_{}", tag, government)).filter(|s| !s.is_empty()).cloned()
-        } else { None };
-        let label = label.or_else(|| m.localisation.get(tag).filter(|s| !s.is_empty()).cloned())
-            .unwrap_or_else(|| tag.clone());
+        let label = report::name_for(tag, government, m);
         if label != *tag {
             names.push((tag.clone(), label));
         }

@@ -37,6 +37,7 @@ mod sections;
 
 pub use say::{say_mod, thousands};
 pub use sections::{gain_series, growth_series};
+pub(crate) use sections::name_for;
 use csv::*;
 use map::*;
 use say::*;

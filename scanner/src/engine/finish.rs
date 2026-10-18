@@ -644,7 +644,8 @@ fn profile_key(p: &Profile) -> String {
     out
 }
 
-fn csv_line(out: &mut String, vals: &[Val]) {
+/// One CSV row, as the tables are written: comma-separated, CRLF-ended.
+pub(crate) fn csv_line(out: &mut String, vals: &[Val]) {
     for (i, v) in vals.iter().enumerate() {
         if i > 0 {
             out.push(',');
