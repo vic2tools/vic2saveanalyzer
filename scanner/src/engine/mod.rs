@@ -30,20 +30,19 @@ pub mod market;
 pub mod model;
 pub mod modread;
 pub mod out;
-pub mod walk;
 pub mod report;
 pub mod rules;
 pub mod tables;
 pub mod wars;
 
-use crate::country::{read_country, Country, Tables};
+use crate::save::country::{read_country, Country, Tables};
 use finish::{Pre, Spec, Spent};
-use crate::jsonr::{self, J};
+use crate::py::json::{self, J};
 use model::Save;
-use crate::fx::{FxMap, FxSet};
-use crate::province::{read_province, top_level_blocks, PopulationRules, Scan};
+use crate::util::fx::{FxMap, FxSet};
+use crate::save::province::{read_province, top_level_blocks, PopulationRules, Scan};
 use rules::{Decline, Mod, D};
-use crate::text::{latin1, tag_bytes, to_int_b, trim_b, unquote_b};
+use crate::save::text::{latin1, tag_bytes, to_int_b, trim_b, unquote_b};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
@@ -127,7 +126,7 @@ fn string_list(v: &J) -> Vec<String> {
 fn reading_context_of(j: &J) -> String {
     let mut text = String::new();
     j.at("reading").write(&mut text);
-    let mut h = crate::hash::TwoLane::new();
+    let mut h = crate::util::hash::TwoLane::new();
     h.update(text.as_bytes());
     h.hex()
 }
@@ -145,7 +144,7 @@ fn context_of(j: &J) -> String {
     j.at("head").write(&mut text);
     text.push('|');
     j.at("tables").at("strata").write(&mut text);
-    let mut h = crate::hash::TwoLane::new();
+    let mut h = crate::util::hash::TwoLane::new();
     h.update(text.as_bytes());
     h.hex()
 }
@@ -180,7 +179,7 @@ fn parse_run(j: &J) -> Run {
         spec: Spec {
 
             pop_per_regiment: f.at("pop_per_regiment").int(),
-            mob_types: string_list(f.at("mob_types")).iter().map(|s| crate::names::intern_str(s)).collect(),
+            mob_types: string_list(f.at("mob_types")).iter().map(|s| crate::save::names::intern_str(s)).collect(),
             include_occupied: f.at("include_occupied").truthy(),
             player_nations: if f.at("player_nations").is_null() { None }
                             else { Some(string_list(f.at("player_nations"))) },
@@ -571,7 +570,7 @@ fn read_bytes(path: &str, reading: &Reading, raw: &[u8],
         // Not the game's layout: walked a token at a time, as the Python
         // that this replaced walked it.
         None => {
-            let w = walk::read(text, &reading.pop_types, &reading.mob_types, &tables, &mut scan,
+            let w = crate::save::walk::read(text, &reading.pop_types, &reading.mob_types, &tables, &mut scan,
                                &reading.population_groups)
                 .map_err(|why| Refused::Back(format!("{}: {}", path, why)))?;
             (w.blocks, w.date, w.player, w.countries)
@@ -620,7 +619,7 @@ fn read_flat(text: &[u8], blocks: &[(&[u8], usize, usize)], reading: &Reading, t
             rule.accepted.extend(country.accepted_cultures.iter().copied());
             for (name, value) in &country.scalars {
                 if name == "primary_culture" && !value.is_empty() {
-                    rule.accepted.insert(crate::names::intern_str(value));
+                    rule.accepted.insert(crate::save::names::intern_str(value));
                 }
             }
             rule.colonial.extend(&country.colonial_provinces);
@@ -807,7 +806,7 @@ fn read_mod(path: &str) -> D<J> {
 /// timing reading, scanning, building the record and preparing it.
 pub fn bench(args: &[String]) {
     let text = std::fs::read_to_string(&args[2]).unwrap();
-    let run = parse_run(&jsonr::parse(&text).unwrap());
+    let run = parse_run(&json::parse(&text).unwrap());
     let n: usize = args.get(3).and_then(|a| a.parse().ok()).unwrap_or(10);
     let mut raw = Vec::new();
     let (mut t_read, mut t_prep) = (0.0, 0.0);
@@ -961,7 +960,7 @@ pub fn run_spec(spec_j: &J) -> report::Outcome {
                     } else if workers > 1 {
                         crate::outln!("  [{}/{}] {} ... {}", done, n, basename(&run.files[i]), pre.meta.date);
                     } else {
-                        let months: FxSet<crate::names::Sym> = pre.meta.market.as_ref()
+                        let months: FxSet<crate::save::names::Sym> = pre.meta.market.as_ref()
                             .map(|m| m.history.iter().map(|h| h.0).collect())
                             .unwrap_or_default();
                         let extra = if months.is_empty() { String::new() }

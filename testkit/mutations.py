@@ -325,7 +325,7 @@ MUTATIONS = [
         'longer decompresses',
         'enginecompress.py', ('scanner\\target\\release\\vic2scan.exe',),
         [
-            ('scanner/src/deflate.rs', '"gz5" => gzip_level(&data, &LEVEL5),', '"gz5" => gzip_level(&data, &LEVEL5)[1..].to_vec(),'),
+            ('scanner/src/util/deflate.rs', '"gz5" => gzip_level(&data, &LEVEL5),', '"gz5" => gzip_level(&data, &LEVEL5)[1..].to_vec(),'),
         ]),
     Mutation(
         'save-key-drops-reading',
@@ -402,14 +402,14 @@ MUTATIONS = [
         'the latin-1 letters too',
         'modread.py', ('--rounds', '40'),
         [
-            ('scanner/src/pyre.rs', '        | 0xb9 | 0xba | 0xbc..=0xbe | 0xc0..=0xd6 | 0xd8..=0xf6 | 0xf8..=0xff)', '        | 0xb9 | 0xba | 0xbc..=0xbe)'),
+            ('scanner/src/py/re.rs', '        | 0xb9 | 0xba | 0xbc..=0xbe | 0xc0..=0xd6 | 0xd8..=0xf6 | 0xf8..=0xff)', '        | 0xb9 | 0xba | 0xbc..=0xbe)'),
         ]),
     Mutation(
         'modread-lazy-is-greedy',
         'a lazy repeat is tried longest first',
         'modread.py', ('--rounds', '40'),
         [
-            ('scanner/src/pyre.rs', '                            for c in *min..=run {', '                            for c in (*min..=run).rev() {'),
+            ('scanner/src/py/re.rs', '                            for c in *min..=run {', '                            for c in (*min..=run).rev() {'),
         ]),
     Mutation(
         'modread-file-case-counted-twice',
@@ -485,14 +485,14 @@ MUTATIONS = [
         'inside its navies',
         'frontcheck.py', (),
         [
-            ('scanner/src/engine/walk.rs', '        } else if key == b"army" || key == b"navy" {', '        } else if key == b"army" {'),
+            ('scanner/src/save/walk.rs', '        } else if key == b"army" || key == b"navy" {', '        } else if key == b"army" {'),
         ]),
     Mutation(
         'walk-colonies-ignored',
         'a save laid out another way reads no state as colonial',
         'frontcheck.py', (),
         [
-            ('scanner/src/engine/walk.rs', '                        let colonial = get(&block, b"is_colonial").is_some();', '                        let colonial = false;'),
+            ('scanner/src/save/walk.rs', '                        let colonial = get(&block, b"is_colonial").is_some();', '                        let colonial = false;'),
         ]),
     Mutation(
         'cross-last-fit-wins',
@@ -516,7 +516,7 @@ MUTATIONS = [
         'their names, not by name',
         'enginecheck.py', (),
         [
-            ('scanner/src/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
+            ('scanner/src/save/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
             ('scanner/src/engine/market.rs', '        goods.sort_by(|a, b| names::cmp(*a, *b));\n        let get', '        goods.sort_by_key(|g| names::id(*g));\n        let get'),
         ]),
     Mutation(
@@ -525,7 +525,7 @@ MUTATIONS = [
         'not by name',
         'enginecheck.py', (),
         [
-            ('scanner/src/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
+            ('scanner/src/save/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
             ('scanner/src/engine/market.rs', '        goods.sort_by(|a, b| names::cmp(*a, *b));\n        for good in goods {', '        goods.sort_by_key(|g| names::id(*g));\n        for good in goods {'),
         ]),
     Mutation(
@@ -646,7 +646,7 @@ MUTATIONS = [
         'order last met first',
         'enginecheck.py', (),
         [
-            ('scanner/src/country.rs', '        None => {\n            stacks.push(stack);\n            return;\n        }', '        None => {\n            stacks.insert(0, stack);\n            return;\n        }'),
+            ('scanner/src/save/country.rs', '        None => {\n            stacks.push(stack);\n            return;\n        }', '        None => {\n            stacks.insert(0, stack);\n            return;\n        }'),
         ]),
     Mutation(
         'ship-types-by-id',
@@ -654,7 +654,7 @@ MUTATIONS = [
         'the names, not by name',
         'enginecheck.py', (),
         [
-            ('scanner/src/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
+            ('scanner/src/save/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
             ('scanner/src/engine/finish.rs', '        ship_types.sort_by(|a, b| names::cmp(a.kind, b.kind));', '        ship_types.sort_by_key(|s| names::id(s.kind));'),
         ]),
     Mutation(
@@ -663,7 +663,7 @@ MUTATIONS = [
         'run met the names, not by name',
         'enginecheck.py', (),
         [
-            ('scanner/src/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
+            ('scanner/src/save/names.rs', '/// Order by what the names say', 'pub fn id(s: Sym) -> u32 {\n    s.0\n}\n\n/// Order by what the names say'),
             ('scanner/src/engine/finish.rs', '        regiments.sort_by(|a, b| names::cmp(a.0, b.0));', '        regiments.sort_by_key(|r| names::id(r.0));'),
         ]),
     Mutation(

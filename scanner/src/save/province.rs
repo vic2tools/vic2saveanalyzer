@@ -13,10 +13,10 @@
 // reads it by, and the save-wide bookkeeping -- who owns what, each pop's
 // type by its id, the world's people -- that no one nation's record holds.
 
-use crate::text::{find, find_pair, is_number_b, to_float_b, to_int_b, trim_b, trim_end_b,
+use crate::save::text::{find, find_pair, is_number_b, to_float_b, to_int_b, trim_b, trim_end_b,
                   unquote_b};
-use crate::fx::{FxMap, FxSet};
-use crate::names::{self, Sym};
+use crate::util::fx::{FxMap, FxSet};
+use crate::save::names::{self, Sym};
 
 
 
@@ -250,7 +250,7 @@ pub(crate) fn read_province(
             depth += 1;
             p += 1;
         }
-        let end = crate::text::find_newline(bytes, p, stop).unwrap_or(stop);
+        let end = crate::save::text::find_newline(bytes, p, stop).unwrap_or(stop);
         let line = &bytes[p..end];
         i = end;
         // Python's province pattern reaches exactly two levels -- one tab for

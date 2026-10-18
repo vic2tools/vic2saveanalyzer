@@ -1,4 +1,4 @@
-"""Hold pyfmt.rs to Python: repr, round(x, n), //, json.dumps of strings,
+"""Hold scanner/src/py/fmt.rs to Python: repr, round(x, n), //, json.dumps of strings,
 float() of text, on random and awkward values.
 
     python3 fmtcheck.py BINARY [COUNT]

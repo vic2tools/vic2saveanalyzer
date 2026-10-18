@@ -14,8 +14,8 @@
 // engine as it reaches the Python, with no rebuild and no second copy to
 // forget. What is written here is only what a spec without them gets.
 
-use crate::jsonr::J;
-use crate::fx::FxMap;
+use crate::py::json::J;
+use crate::util::fx::FxMap;
 
 pub struct Tables {
     /// (key, label, format)

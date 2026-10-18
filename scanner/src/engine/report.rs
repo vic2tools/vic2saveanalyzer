@@ -13,20 +13,20 @@
 // its dicts, rather than built as a tree first: it is thirty megabytes on a
 // long campaign, and the order of every key is part of what is compared.
 
-use crate::country::Stack;
+use crate::save::country::Stack;
 use crate::engine::dates::{date_key, year_fraction};
 use crate::engine::dump::{int_keyed, obj};
 use crate::engine::{say, Run};
 use crate::engine::finish::{escape_angles, Kept, Profile, Row, Spent, Val};
 use crate::engine::tables::Tables;
-use crate::jsonr::J;
+use crate::py::json::J;
 use crate::engine::mapflags;
 use crate::engine::market::{self, PriceRow, SnapRow};
 use crate::engine::model::Meta;
-use crate::names::{self, Sym};
-use crate::omap::OMap;
-use crate::fx::{FxMap, FxSet};
-use crate::pyfmt::{push_csv_field, push_int, push_json_float, push_json_str, round};
+use crate::save::names::{self, Sym};
+use crate::util::omap::OMap;
+use crate::util::fx::{FxMap, FxSet};
+use crate::py::fmt::{push_csv_field, push_int, push_json_float, push_json_str, round};
 use crate::engine::rules::{self, Mod};
 use crate::engine::wars::{self, Book, Mapping};
 use std::io::Write;
@@ -1164,7 +1164,7 @@ fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow]
         let html = fill(t.template.clone()).replace("__DATAURL__", "")
             .replace("__STATES__", &chunks_text);
         let mut b64 = String::with_capacity(packed.len() * 4 / 3 + 4);
-        crate::deflate::base64_into(&mut b64, &packed);
+        crate::util::deflate::base64_into(&mut b64, &packed);
         html.replace("__DATA__", &b64)
     };
     let path = std::path::Path::new(&run.out).join("report.html");
@@ -1619,7 +1619,7 @@ fn section_market(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: 
             if !keep.contains(d.as_str()) {
                 continue;
             }
-            let total = crate::pyfmt::py_sum(by_tag.values().copied()).unwrap_or(0.0);
+            let total = crate::py::fmt::py_sum(by_tag.values().copied()).unwrap_or(0.0);
             if total <= 0.0 {
                 continue;
             }
@@ -1670,6 +1670,6 @@ fn section_market(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: 
 fn pack_bytes(payload: &str) -> Vec<u8> {
     let raw = escape_angles(payload);
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).clamp(1, 16);
-    crate::deflate::gzip_parallel(raw.as_bytes(), threads)
+    crate::util::deflate::gzip_parallel(raw.as_bytes(), threads)
 }
 

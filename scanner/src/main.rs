@@ -21,20 +21,11 @@
 // either a bare pair or a dict. Where they look strange, that is why, and
 // the recorded answers in `testkit/expected/` hold them to it.
 
-mod clause;
-mod country;
-mod deflate;
 mod engine;
 mod front;
-mod fx;
-mod hash;
-mod jsonr;
-mod names;
-mod omap;
-mod province;
-mod pyfmt;
-mod pyre;
-mod text;
+mod py;
+mod save;
+mod util;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -42,11 +33,11 @@ fn main() {
         Some("analyze") => front::main(&args),
         Some("mod-export") if args.len() == 3 => engine::modread::main(&args),
         Some("bench-engine") => engine::bench(&args),
-        Some("selftest-fmt") => pyfmt::selftest(),
+        Some("selftest-fmt") => py::fmt::selftest(),
         Some("selftest-signature") => front::signature_main(&args),
         Some("selftest-sniff") => front::cross::selftest(&args[2..]),
-        Some("selftest-re") => pyre::selftest(),
-        Some("selftest-deflate") if args.len() == 4 => deflate::selftest(&args[2], &args[3]),
+        Some("selftest-re") => py::re::selftest(),
+        Some("selftest-deflate") if args.len() == 4 => util::deflate::selftest(&args[2], &args[3]),
         _ => {
             eprintln!("usage: vic2scan analyze --run RUN.json [--refused FILE] [--protocol]\n\
                        \x20      vic2scan mod-export MOD");

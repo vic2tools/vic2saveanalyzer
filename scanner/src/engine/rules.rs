@@ -16,13 +16,13 @@
 // addition is not associative and the mobilisation size is printed to five
 // places.
 
-use crate::jsonr::J;
+use crate::py::json::J;
 use crate::engine::finish::PreNation;
 use crate::engine::model::{Meta, Nation};
-use crate::names::{self, Sym};
-use crate::omap::OMap;
-use crate::fx::{FxMap, FxSet};
-use crate::pyfmt::{py_float, py_sum, trunc_int};
+use crate::save::names::{self, Sym};
+use crate::util::omap::OMap;
+use crate::util::fx::{FxMap, FxSet};
+use crate::py::fmt::{py_float, py_sum, trunc_int};
 
 /// Something Python would have raised over, which the engine does not copy:
 /// the run is handed back to Python, which does what it always did.
@@ -479,7 +479,7 @@ fn conditions(block: &J) -> Vec<(&str, &J)> {
 }
 
 fn unquote(s: &str) -> &str {
-    crate::text::unquote(s)
+    crate::save::text::unquote(s)
 }
 
 /// `to_int(text, default)`: `int(float(text))`, its ValueError the default

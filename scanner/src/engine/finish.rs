@@ -18,13 +18,13 @@
 // the inventions -- the mobilisation size and everything counted from it,
 // the cap, the ships -- is finished after (`finish`).
 
-use crate::deflate;
-use crate::country::{Ship, Stack};
+use crate::util::deflate;
+use crate::save::country::{Ship, Stack};
 use crate::engine::model::{Meta, Nation};
-use crate::names::{self, Sym};
-use crate::omap::OMap;
-use crate::fx::{FxMap, FxSet};
-use crate::pyfmt::{floordiv, push_csv_field, push_float, push_int, push_json_float,
+use crate::save::names::{self, Sym};
+use crate::util::omap::OMap;
+use crate::util::fx::{FxMap, FxSet};
+use crate::py::fmt::{floordiv, push_csv_field, push_float, push_int, push_json_float,
                    push_json_str, round, trunc_int, Num};
 use crate::engine::rules::{impact_for, naval_profile, rate_for, save_world, Mod, World, D};
 
@@ -333,7 +333,7 @@ impl Val<'_> {
     /// `float(val)`.
     pub fn float(&self) -> Option<f64> {
         match self {
-            Val::S(s) => crate::pyfmt::py_float(s),
+            Val::S(s) => crate::py::fmt::py_float(s),
             Val::I(i) => Some(*i as f64),
             Val::F(f) => Some(*f),
             Val::N(n) => Some(n.as_f64()),

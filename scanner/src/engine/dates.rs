@@ -9,7 +9,7 @@
 // even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 
-use crate::pyfmt::py_space_char;
+use crate::py::fmt::py_space_char;
 
 /// Python's `int(s)` for a str: None for the ValueError.
 pub fn py_int(s: &str) -> Option<i64> {

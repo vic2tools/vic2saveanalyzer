@@ -22,8 +22,8 @@
 // culture, a flag, a technology's name -- is decoded into a `String`. It used
 // to decode every country block whole before reading a word of it.
 
-use crate::text::{find, latin1, unquote_b};
-use crate::names::{self, Sym};
+use crate::save::text::{find, latin1, unquote_b};
+use crate::save::names::{self, Sym};
 
 /// Whether a byte of the save is whitespace, as Python's `\s` judged the
 /// latin-1 text it decoded -- the ASCII spaces, NEL and the no-break space --

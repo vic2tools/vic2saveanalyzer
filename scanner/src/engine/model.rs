@@ -15,14 +15,14 @@
 // naval base keeps the blank record's `0`, one with a base gets `47.0` --
 // the field is a `Num`, because the tables print the two differently.
 
-use crate::clause::{self, Tree, V};
-use crate::country::{add_count, add_ship, add_stack, Country, Ship, Stack};
-use crate::names::{self, Sym};
-use crate::omap::OMap;
-use crate::fx::{FxMap, FxSet};
-use crate::province::Scan;
-use crate::pyfmt::Num;
-use crate::text::latin1;
+use crate::save::clause::{self, Tree, V};
+use crate::save::country::{add_count, add_ship, add_stack, Country, Ship, Stack};
+use crate::save::names::{self, Sym};
+use crate::util::omap::OMap;
+use crate::util::fx::{FxMap, FxSet};
+use crate::save::province::Scan;
+use crate::py::fmt::Num;
+use crate::save::text::latin1;
 
 pub type R<T> = Result<T, ()>;
 
@@ -210,7 +210,7 @@ impl Nation {
 
 // ------------------------------------------------------------------ folds
 
-fn fold_provinces(nat: &mut Nation, n: &crate::province::Nation) {
+fn fold_provinces(nat: &mut Nation, n: &crate::save::province::Nation) {
     nat.provinces += n.provinces;
     nat.ports += n.ports;
     nat.total_pop += n.total_pop;
@@ -243,7 +243,7 @@ fn fold_provinces(nat: &mut Nation, n: &crate::province::Nation) {
     // `_population_rows`: the field replaced, one row a group.
     nat.population_by_state = n.population_order.iter().map(|group| {
         let st = &n.population_by_state[group];
-        let pairs = |c: &crate::province::Counter| -> Vec<(Sym, i64)> {
+        let pairs = |c: &crate::save::province::Counter| -> Vec<(Sym, i64)> {
             // A dict built from pairs: a name met twice keeps its first place
             // and its last value, which a Counter never gives it anyway.
             c.order.iter().zip(&c.total).map(|(k, t)| (*k, *t)).collect()

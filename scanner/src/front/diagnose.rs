@@ -15,12 +15,12 @@
 // and ends the Python run with a traceback; those are handed back to it
 // before anything is printed, so the Python says what it says.
 
-use crate::clause::{unquote, V};
+use crate::save::clause::{unquote, V};
 use crate::engine::modread::py_float;
-use crate::engine::walk::{looks_like_country_tag, parse_block, Tokens};
+use crate::save::walk::{looks_like_country_tag, parse_block, Tokens};
 use crate::engine::{basename, read_save, Reading, Refused};
-use crate::fx::FxMap;
-use crate::pyre::space;
+use crate::util::fx::FxMap;
+use crate::py::re::space;
 
 const VANILLA_POP_TYPES: [&str; 12] = ["aristocrats", "artisans", "bureaucrats", "capitalists",
     "clergymen", "clerks", "craftsmen", "farmers", "labourers", "officers", "slaves", "soldiers"];
@@ -79,7 +79,7 @@ fn isdigit(k: &[u8]) -> bool {
 fn pop_culture(pop: &V) -> (String, String) {
     if let V::Dict(d) = pop {
         for (key, val) in &d.pairs {
-            if crate::province::pop_known(key) || key.first() == Some(&b'_') {
+            if crate::save::province::pop_known(key) || key.first() == Some(&b'_') {
                 continue;
             }
             if let V::Str(v) = val {
@@ -285,7 +285,7 @@ pub fn verify_save(path: &str, reading: &Reading) -> Result<(String, usize), Str
             if head_line(line, |c| c.is_ascii_digit()) {
                 in_province = true;
                 owner = None;
-            } else if head_line(line, crate::pyre::word) {
+            } else if head_line(line, crate::py::re::word) {
                 in_province = false;
                 owner = None;
             }

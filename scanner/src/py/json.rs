@@ -15,7 +15,7 @@
 // writing a value back out gives the text `json.dumps(value,
 // separators=(",", ":"))` gave.
 
-use crate::pyfmt::{push_int, push_json_float, push_json_str};
+use crate::py::fmt::{push_int, push_json_float, push_json_str};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum J {

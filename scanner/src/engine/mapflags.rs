@@ -16,10 +16,10 @@
 // is wanted and not kept.
 
 use crate::engine::dates::py_int;
-use crate::deflate;
-use crate::omap::OMap;
-use crate::fx::{FxMap, FxSet};
-use crate::pyfmt::{floordiv, round};
+use crate::util::deflate;
+use crate::util::omap::OMap;
+use crate::util::fx::{FxMap, FxSet};
+use crate::py::fmt::{floordiv, round};
 use std::io::{Read, Seek, SeekFrom};
 
 /// (width, height, runs) of the bitmap at 1/`scale`, or (0, 0, []) without one.
@@ -35,7 +35,7 @@ pub fn province_raster(bmp: &str, csv: &str, scale: i64) -> (i64, i64, Vec<(i64,
         Ok(r) => r,
         Err(_) => return none,
     };
-    let text = crate::text::latin1(&raw);
+    let text = crate::save::text::latin1(&raw);
     // `next(fh)` skips the first line; the rest are split on `\n`, each
     // keeping its line ending in its last field.
     for line in text.split_inclusive('\n').skip(1) {

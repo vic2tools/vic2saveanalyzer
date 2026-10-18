@@ -551,7 +551,7 @@ pub fn selftest() {
                     None => s.push('0'),
                 }
             }
-            "b" => push_float(&mut s, crate::text::to_float_b(line.get(2..).unwrap_or("").as_bytes())),
+            "b" => push_float(&mut s, crate::save::text::to_float_b(line.get(2..).unwrap_or("").as_bytes())),
             "p" => match py_float(line.get(2..).unwrap_or("")) {
                 Some(v) => push_float(&mut s, v),
                 None => s.push('E'),

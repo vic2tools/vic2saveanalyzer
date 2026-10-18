@@ -40,8 +40,8 @@ change, and how to make a release. `README.md` is the guide to using it;
    mod, finds and orders the saves, answers the diagnostics (`--peek`,
    `--verify`, `--explain-mob`, …) and lays out a `--cross` comparison.
 4. **The engine** (`scanner/src/engine/`) reads the mod (`modread.rs`,
-   `rules.rs`), reads every save on every core (`walk.rs`, `model.rs`, the
-   readers in `scanner/src/`), keeps each read save in its cache (`cache.rs`),
+   `rules.rs`), reads every save on every core (`model.rs`, and the
+   readers in `scanner/src/save/`), keeps each read save in its cache (`cache.rs`),
    finishes each nation (`finish.rs`, `wars.rs`, `market.rs`), and writes the
    tables and the page (`report.rs`, `tables.rs`).
 5. **The page** is the template with the campaign's data packed into it: one
@@ -91,5 +91,5 @@ push; it must print `clean`.
   that has never reached crates.io.
 - The numbers the scanner writes match the Python it replaced, which the
   recorded answers in `testkit/expected/` hold it to. Numbers are formatted
-  the way Python formats them (`scanner/src/pyfmt.rs`) for that reason.
+  the way Python formats them (`scanner/src/py/fmt.rs`) for that reason.
 - Saves, the game and the mod are read, never written.

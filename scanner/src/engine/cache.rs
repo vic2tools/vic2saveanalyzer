@@ -24,13 +24,13 @@
 // small -- a campaign's names are a few hundred tags, cultures and goods
 // repeated a hundred thousand times.
 
-use crate::country::{Ship, Stack};
+use crate::save::country::{Ship, Stack};
 use crate::engine::finish::{Pre, PreNation};
 use crate::engine::model::{Battle, FirstGoal, Goal, Market, Meta, Nation, Side, War};
-use crate::names::{self, Sym};
-use crate::omap::OMap;
-use crate::fx::{FxMap, FxSet};
-use crate::pyfmt::Num;
+use crate::save::names::{self, Sym};
+use crate::util::omap::OMap;
+use crate::util::fx::{FxMap, FxSet};
+use crate::py::fmt::Num;
 use std::io::Write;
 
 const MAGIC: &[u8; 8] = b"V2ENGC02";
@@ -576,7 +576,7 @@ pub fn mod_slot(store: &Store, path: &str, signature: Option<&str>) -> Option<(S
 }
 
 /// The mod as it was read, or None: missing, from another key, or damaged.
-pub fn mod_load(slot: &(String, String)) -> Option<crate::jsonr::J> {
+pub fn mod_load(slot: &(String, String)) -> Option<crate::py::json::J> {
     let raw = std::fs::read(&slot.0).ok()?;
     let body = raw.strip_prefix(MOD_MAGIC)?;
     let n = u32::from_le_bytes(body.get(..4)?.try_into().ok()?) as usize;
@@ -585,11 +585,11 @@ pub fn mod_load(slot: &(String, String)) -> Option<crate::jsonr::J> {
         return None;
     }
     let text = std::str::from_utf8(&body[4 + n..]).ok()?;
-    crate::jsonr::parse(text).ok()
+    crate::py::json::parse(text).ok()
 }
 
 /// Keep the mod as it was read. A failure costs the next run the read.
-pub fn mod_store(slot: &(String, String), mod_json: &crate::jsonr::J) {
+pub fn mod_store(slot: &(String, String), mod_json: &crate::py::json::J) {
     let mut text = String::new();
     mod_json.write(&mut text);
     let mut out = MOD_MAGIC.to_vec();

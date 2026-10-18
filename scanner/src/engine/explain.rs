@@ -21,9 +21,9 @@ use crate::engine::finish::Pre;
 use crate::engine::model::Nation;
 use crate::engine::rules::{self, Mod};
 use crate::engine::{read_save, Reading, Refused};
-use crate::jsonr::J;
-use crate::fx::FxSet;
-use crate::names::{self, Sym};
+use crate::py::json::J;
+use crate::util::fx::FxSet;
+use crate::save::names::{self, Sym};
 
 /// What was asked, and the settings the answers read.
 pub struct Ask {
@@ -161,7 +161,7 @@ fn brigades(sizes: &[i64], rate: f64, ppr: i64) -> i64 {
             continue;
         }
         if manpower >= ppr {
-            total += crate::pyfmt::floordiv(manpower, ppr) as i64;
+            total += crate::py::fmt::floordiv(manpower, ppr) as i64;
             pool = 0.0;
         } else {
             pool += manpower;
@@ -276,7 +276,7 @@ fn explain_mob_pool(ask: &Ask, tag: &str, m: &Mod, live: &FxSet<String>, pres: &
         for (pid, _t, size) in biggest {
             let manpower = *size as f64 * rate;
             crate::outln!("    {} {} {}", right(&pid.to_string(), 6), right(&commas_f0(manpower), 10),
-                          right(&(crate::pyfmt::floordiv(manpower, ppr as f64) as i64).to_string(), 8));
+                          right(&(crate::py::fmt::floordiv(manpower, ppr as f64) as i64).to_string(), 8));
         }
     }
     Ok(())
@@ -286,7 +286,7 @@ fn explain_mob_pool(ask: &Ask, tag: &str, m: &Mod, live: &FxSet<String>, pres: &
 /// index held at least eight times.
 fn index_holdings(pres: &[Pre]) -> Vec<(i64, Vec<FxSet<&str>>)> {
     let mut out: Vec<(i64, Vec<FxSet<&str>>)> = Vec::new();
-    let mut at: crate::fx::FxMap<i64, usize> = crate::fx::FxMap::default();
+    let mut at: crate::util::fx::FxMap<i64, usize> = crate::util::fx::FxMap::default();
     for pre in pres {
         for pn in &pre.nations {
             let h = &pn.nat;

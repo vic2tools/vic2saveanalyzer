@@ -19,13 +19,13 @@
 // a repeated key kept at its first place with its values gathered -- and
 // what they find goes into the same record the scan fills.
 
-use crate::clause::{unquote, V};
-use crate::country::{Country, Tables, Units};
+use crate::save::clause::{unquote, V};
+use crate::save::country::{Country, Tables, Units};
 use crate::engine::modread::{block_end, py_float, str_of};
-use crate::fx::{FxMap, FxSet};
-use crate::province::{accumulate, pop_known, Parts, Pop, PopulationRules, Scan};
-use crate::names;
-use crate::pyre::space;
+use crate::util::fx::{FxMap, FxSet};
+use crate::save::province::{accumulate, pop_known, Parts, Pop, PopulationRules, Scan};
+use crate::save::names;
+use crate::py::re::space;
 
 /// `v2parse.Tokens`: a cursor over `TOKEN_RE`, one token of pushback, and a
 /// whole-block skip.
@@ -213,7 +213,7 @@ pub fn parse_block(tok: &mut Tokens, skip: &[&[u8]]) -> V {
             None => out.push((b"_items".to_vec(), v)),
         }
     }
-    let mut tree = crate::clause::Tree::default();
+    let mut tree = crate::save::clause::Tree::default();
     tree.pairs = out;
     V::Dict(tree)
 }
@@ -314,7 +314,7 @@ fn sub_blocks(v: &V) -> Vec<&V> {
 
 /// `as_list(value)`.
 fn as_list(v: Option<&V>) -> Vec<&V> {
-    crate::clause::as_list(v)
+    crate::save::clause::as_list(v)
 }
 
 /// The `_items` of a block, or the block when it is a bare list.
@@ -413,7 +413,7 @@ fn read_country(text_: &[u8], at: usize, tag: &str, tables: &Tables) -> Result<C
                 match key {
                     b"army" | b"navy" => {
                         let block = parse_block(&mut sub, UNIT_SKIP);
-                        let mut wrapper = crate::clause::Tree::default();
+                        let mut wrapper = crate::save::clause::Tree::default();
                         wrapper.pairs.push((key.to_vec(), block));
                         count_units(&V::Dict(wrapper), &mut units, None)?;
                     }
@@ -421,7 +421,7 @@ fn read_country(text_: &[u8], at: usize, tag: &str, tables: &Tables) -> Result<C
                         let block = parse_block(&mut sub, &[]);
                         if matches!(block, V::List(_) | V::Dict(_)) {
                             out.accepted_cultures = items_of(&block).iter()
-                                .map(|c| crate::names::intern_str(&text(&str_of(c)))).collect();
+                                .map(|c| crate::save::names::intern_str(&text(&str_of(c)))).collect();
                         }
                     }
                     b"flags" => {
@@ -436,7 +436,7 @@ fn read_country(text_: &[u8], at: usize, tag: &str, tables: &Tables) -> Result<C
                     b"modifier" => {
                         let block = parse_block(&mut sub, &[]);
                         if let Some(m) = get(&block, b"modifier") {
-                            out.modifiers.push(crate::names::intern_str(&text(unquote(&str_of(m)))));
+                            out.modifiers.push(crate::save::names::intern_str(&text(unquote(&str_of(m)))));
                         }
                     }
                     b"saved_country_supply" => {
@@ -509,7 +509,7 @@ fn read_country(text_: &[u8], at: usize, tag: &str, tables: &Tables) -> Result<C
                                 } else if tables.navy_techs.iter().any(|t| *t == name) {
                                     out.navy_techs += 1;
                                 }
-                                out.tech_list.push(crate::names::intern_str(&name));
+                                out.tech_list.push(crate::save::names::intern_str(&name));
                             }
                         }
                     }
@@ -522,7 +522,7 @@ fn read_country(text_: &[u8], at: usize, tag: &str, tables: &Tables) -> Result<C
                 } else if key == b"human" {
                     out.human = clean.eq_ignore_ascii_case(b"yes");
                 } else if tables.reform_keys.iter().any(|r| r.as_bytes() == key) {
-                    out.reforms.push((crate::names::intern_str(&text(key)), crate::names::intern_str(&text(unquote(clean)))));
+                    out.reforms.push((crate::save::names::intern_str(&text(key)), crate::save::names::intern_str(&text(unquote(clean)))));
                 } else if let Some((_, name)) = SCALARS.iter().find(|(k, _)| *k == key) {
                     out.scalars.push((name.to_string(), text(clean)));
                 } else if let Some((_, name)) = NUMERICS.iter().find(|(k, _)| *k == key) {
@@ -656,10 +656,10 @@ fn read_province(text_: &[u8], at: usize, pid: i64, pop_types: &[Vec<u8>], mob_t
 /// `looks_like_country_tag`, for latin-1 keys: three characters, the first
 /// an upper-case letter, all letters or digits, not all digits.
 pub fn looks_like_country_tag(key: &[u8]) -> bool {
-    let alpha = |c: u8| crate::pyre::word(c) && c != b'_' && !c.is_ascii_digit()
+    let alpha = |c: u8| crate::py::re::word(c) && c != b'_' && !c.is_ascii_digit()
         && !matches!(c, 0xb2 | 0xb3 | 0xb9 | 0xbc..=0xbe);
     let upper = |c: u8| c.is_ascii_uppercase() || matches!(c, 0xc0..=0xd6 | 0xd8..=0xde);
-    let alnum = |c: u8| crate::pyre::word(c) && c != b'_';
+    let alnum = |c: u8| crate::py::re::word(c) && c != b'_';
     key.len() == 3 && alpha(key[0]) && upper(key[0]) && key.iter().all(|&c| alnum(c))
         && !key.iter().all(|&c| c.is_ascii_digit() || matches!(c, 0xb2 | 0xb3 | 0xb9))
 }
@@ -711,7 +711,7 @@ pub fn read<'a>(text_: &'a [u8], pop_types: &[Vec<u8>], mob_types: &[Vec<u8>], t
             rule.accepted.extend(country.accepted_cultures.iter().copied());
             for (name, value) in &country.scalars {
                 if name == "primary_culture" && !value.is_empty() {
-                    rule.accepted.insert(crate::names::intern_str(value));
+                    rule.accepted.insert(crate::save::names::intern_str(value));
                 }
             }
             rule.colonial.extend(&country.colonial_provinces);

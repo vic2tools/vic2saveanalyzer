@@ -14,19 +14,19 @@
 // engine reads either one the same way.
 //
 // Each function below is its namesake in `mod_reader.py`, rule for rule,
-// and the regular expressions are Python's own, run by `pyre`. The texts
+// and the regular expressions are Python's own, run by `py::re`. The texts
 // are latin-1, a byte to a character, except the localisation, which the
 // game writes in Windows-1252 and Python decodes that way. Where Python
 // would raise -- a number `float()` refuses, a file it cannot open -- this
 // declines, and the analyzer reads the mod in Python, which raises as it
 // always did.
 
-use crate::clause::{parse, tokens, unquote, V};
+use crate::save::clause::{parse, tokens, unquote, V};
 use crate::engine::rules::{Decline, D};
-use crate::jsonr::J;
-use crate::omap::OMap;
-use crate::pyfmt::py_space_char;
-use crate::pyre::{space, word, Re};
+use crate::py::json::J;
+use crate::util::omap::OMap;
+use crate::py::fmt::py_space_char;
+use crate::py::re::{space, word, Re};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
@@ -1108,7 +1108,7 @@ fn trigger_conditions(trigger: &V, out: &mut HashSet<Vec<u8>>) {
     }
     for (key, value) in pairs(trigger) {
         if key == b"AND" || key == b"OR" || key == b"NOT" {
-            for part in crate::clause::as_list(Some(value)) {
+            for part in crate::save::clause::as_list(Some(value)) {
                 trigger_conditions(part, out);
             }
         } else if is_dict(value) {
@@ -1420,7 +1420,7 @@ impl Reader {
             if !is_dict(block) {
                 continue;
             }
-            for pid in crate::clause::as_list(get(block, b"provinces")) {
+            for pid in crate::save::clause::as_list(get(block, b"provinces")) {
                 if let V::Str(_) = pid {
                     out.set(to_int(Some(pid), -1)?, name.clone());
                 }

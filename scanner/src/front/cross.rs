@@ -14,12 +14,12 @@
 // invention array, by elimination); and the nations two or more of them
 // share are compared, measure by measure, in the block the report carries.
 // Python's rules and words throughout, its regular expressions run by
-// `pyre` -- `savehead`'s as bytes patterns, whose classes are ASCII.
+// `py::re` -- `savehead`'s as bytes patterns, whose classes are ASCII.
 
 use super::{abspath, basename, join, pypath, refuse, Args, RunError, R};
 use crate::engine::modread;
-use crate::jsonr::J;
-use crate::pyre::Re;
+use crate::py::json::J;
+use crate::py::re::Re;
 use std::collections::{BTreeSet, HashMap};
 
 fn hand_back(why: &str) -> ! {
@@ -229,7 +229,7 @@ pub fn sniff_pops(t: &[u8]) -> Vec<Hit> {
 /// `active_inventions=\s*\{([^}]*)\}`
 pub fn sniff_ids(t: &[u8]) -> Vec<Hit> {
     scan(t, b"active_inventions=", |i| {
-        let j = run(t, i + 18, crate::pyre::space);
+        let j = run(t, i + 18, crate::py::re::space);
         if t.get(j) != Some(&b'{') {
             return None;
         }
@@ -251,11 +251,11 @@ pub fn sniff_tech_blocks(t: &[u8]) -> Vec<Hit> {
 pub fn sniff_tech_names(t: &[u8]) -> Vec<Hit> {
     scan(t, b"\n\t\t", |i| {
         let s = i + 3;
-        let e = run(t, s, crate::pyre::word);
+        let e = run(t, s, crate::py::re::word);
         if e == s || t.get(e) != Some(&b'=') {
             return None;
         }
-        let j = run(t, e + 1, crate::pyre::space);
+        let j = run(t, e + 1, crate::py::re::space);
         if t.get(j) != Some(&b'{') {
             return None;
         }
@@ -288,7 +288,7 @@ fn sniff(path: &str) -> Result<Sniffed, String> {
     let mut top = 0i64;
     let mut any = false;
     for h in sniff_ids(&text) {
-        for n in g(&h).split(|&c| crate::pyre::space(c)).filter(|w| !w.is_empty()) {
+        for n in g(&h).split(|&c| crate::py::re::space(c)).filter(|w| !w.is_empty()) {
             if n.iter().all(|c| c.is_ascii_digit()) {
                 let v = modread::py_int(n).map_err(|e| e.0)?.unwrap_or(0);
                 top = if any { top.max(v) } else { v };
@@ -319,7 +319,7 @@ fn sniff(path: &str) -> Result<Sniffed, String> {
 }
 
 /// `vic2scan selftest-sniff [FILE...]`: the scanners against the patterns
-/// they stand for (`pyre`, itself held to Python's `re`), on the files given
+/// they stand for (`py::re`, itself held to Python's `re`), on the files given
 /// and on random text built from the pieces a save is made of.
 pub fn selftest(files: &[String]) {
     let p = pats();
@@ -823,7 +823,7 @@ pub fn run_cross(parent: &str, found: &[Surveyed], args: &Args, verbose: bool, p
 fn series_payload(results: &[(String, String, Vec<(String, String, Vec<Option<f64>>)>)],
                   names: &[(String, String)]) -> (J, usize, usize) {
     use crate::engine::dates::year_fraction;
-    use crate::pyfmt::round;
+    use crate::py::fmt::round;
     let tables = crate::engine::tables::Tables::builtin(&[], String::new());
     let metrics = &tables.metrics;
     let mut seen: Vec<(String, BTreeSet<&str>)> = Vec::new();
@@ -860,7 +860,7 @@ fn series_payload(results: &[(String, String, Vec<(String, String, Vec<Option<f6
         dates.sort_by(|a, b| year_fraction(a).partial_cmp(&year_fraction(b)).unwrap());
         let start = dates.first().map(|d| year_fraction(d)).unwrap_or(0.0);
         // {tag: {key: {date: value}}}
-        let mut by_tag: Vec<(String, Vec<(String, crate::omap::OMap<String, f64>)>)> = Vec::new();
+        let mut by_tag: Vec<(String, Vec<(String, crate::util::omap::OMap<String, f64>)>)> = Vec::new();
         for (date, tag, values) in rows {
             if !keep.contains(tag.as_str()) {
                 continue;
@@ -878,7 +878,7 @@ fn series_payload(results: &[(String, String, Vec<(String, String, Vec<Option<f6
                     let j = match slot.iter().position(|(n, _)| n == key) {
                         Some(j) => j,
                         None => {
-                            slot.push((key.clone(), crate::omap::OMap::new()));
+                            slot.push((key.clone(), crate::util::omap::OMap::new()));
                             slot.len() - 1
                         }
                     };
@@ -985,8 +985,8 @@ fn series_payload(results: &[(String, String, Vec<(String, String, Vec<Option<f6
     ]), n_campaigns, n_tags)
 }
 
-fn set_slot(slot: &mut Vec<(String, crate::omap::OMap<String, f64>)>, key: &str,
-            value: crate::omap::OMap<String, f64>) {
+fn set_slot(slot: &mut Vec<(String, crate::util::omap::OMap<String, f64>)>, key: &str,
+            value: crate::util::omap::OMap<String, f64>) {
     match slot.iter_mut().find(|(n, _)| n == key) {
         Some(s) => s.1 = value,
         None => slot.push((key.to_string(), value)),

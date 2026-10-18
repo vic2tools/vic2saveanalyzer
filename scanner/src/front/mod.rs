@@ -25,12 +25,12 @@
 
 pub mod cross;
 pub mod diagnose;
-pub mod pypath;
 
 use crate::engine::modread;
 use crate::engine::out;
-use crate::jsonr::J;
-use crate::hash::TwoLane;
+use crate::py::json::J;
+use crate::util::hash::TwoLane;
+use crate::py::path as pypath;
 use pypath::{abspath, basename, isdir, join};
 
 /// A run refused, in the sentence Python gives (`run.RunError`).
@@ -366,7 +366,7 @@ fn stamp_matches(outdir: &str, stamp: &str) -> bool {
     }
     match std::fs::read(join(outdir, STAMP_FILE)) {
         Ok(b) => match String::from_utf8(b) {
-            Ok(s) => s.trim_matches(crate::pyfmt::py_space_char) == stamp,
+            Ok(s) => s.trim_matches(crate::py::fmt::py_space_char) == stamp,
             Err(_) => false,
         },
         Err(_) => false,
@@ -593,7 +593,7 @@ pub fn main(argv: &[String]) -> ! {
         (Some("--run"), Some(file)) => {
             let text = std::fs::read_to_string(file)
                 .unwrap_or_else(|e| hand_back(&format!("cannot read {}: {}", file, e)));
-            let j = crate::jsonr::parse(&text).unwrap_or_else(|e| hand_back(&format!("{}: {}", file, e)));
+            let j = crate::py::json::parse(&text).unwrap_or_else(|e| hand_back(&format!("{}: {}", file, e)));
             Args::from_json(&j)
         }
         _ => hand_back("usage: vic2scan analyze --run RUN.json"),
