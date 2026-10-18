@@ -35,7 +35,7 @@ import subprocess
 import sys
 import tempfile
 import threading
-from dataclasses import asdict, dataclass, field as _field, fields
+from dataclasses import asdict, dataclass, field as _field
 
 
 def analyze(run, *, say=None, cancel=None, progress=None, ready=None):
@@ -237,9 +237,8 @@ class RunError(Exception):
 
     The analyzer is a library to the window as much as a program to the
     command line, so it says no by raising this rather than by ending the
-    process. `main` turns it into the message and the exit
-    status the command line has always given; the window puts it in its
-    log.
+    process. `main` turns it into the message and the exit status the
+    command line has always given; the window puts it in its log.
     """
 
 def _number(read, least, most=None):
@@ -251,10 +250,9 @@ def _number(read, least, most=None):
     goes all the way through and writes a report saying every nation in the
     game can mobilize minus a hundred percent of itself.
 
-    All three were accepted: the first two came out as a stack trace from
-    somewhere deep in a worker, and the third came out as a report. A
-    number the program cannot use is worth refusing at the edge, where
-    argparse can say which option it was and what would have been allowed.
+    A number the program cannot use is worth refusing at the edge, where
+    argparse can say which option it was and what would have been allowed,
+    rather than as a stack trace or a report saying something impossible.
     """
     def take(text):
         try:
@@ -282,22 +280,15 @@ def _setting(default=None, *, report):
 @dataclass(frozen=True)
 class Run:
     """
-    Everything one run of the analyzer was asked to do, declared once.
+    Everything one run of the analyzer is asked to do, declared once.
 
-    This was argparse's namespace, handed from file to file: twenty-seven
-    settings read across four modules, declared nowhere but the parser,
-    written back onto by `main` once the mod had had its say, and hashed
-    into the report stamp by fifteen names written out by hand -- so a new
-    setting that changed a number, and was not added to that list, would
-    have been answered "nothing has changed" with the old report, and no
-    check would have said so. And the window could only reach any of it by
-    rewriting `sys.argv`, building `"name=path"` strings for the parser to
-    take apart again.
-
-    Now each setting is declared here with whether it changes the report,
-    the stamp hashes exactly those, the command line and the window each
-    build one of these, and what the mod settles is a new `Run` rather
-    than a write onto the old one. The model is `keeper.Options`.
+    The command line builds one from argparse (`from_command_line`), the
+    window builds one from its boxes, and `_front` hands it to the scanner
+    as RUN.json. Each setting says whether it changes what the report says
+    (`report`): those are the ones the scanner's report stamp must cover,
+    or a run that changes one is answered "nothing has changed" with the
+    old report. `testkit/staleness.py` holds the declaration to the stamp
+    through real runs.
     """
 
     saves: str = _field(metadata={"report": False})   # hashed file by file
@@ -353,18 +344,14 @@ class Run:
         return cls(**values)
 
 
-REPORTED = tuple(f.name for f in fields(Run) if f.metadata["report"])
-
 
 def command_line():
     """
     Every flag the program takes, and what each one is allowed to be.
 
-    A hundred and twenty lines of it, which is a hundred and twenty
-    lines a reader of `main` had to scroll past to reach the first
-    thing that happens. The numeric flags carry their own bounds
-    through `_number`, so a regiment of nought people is refused here
-    by name rather than dividing by zero inside a worker.
+    The numeric flags carry their own bounds through `_number`, so a
+    regiment of nought people is refused here by name rather than dividing
+    by zero in the scanner.
     """
     ap = argparse.ArgumentParser(
         description="Aggregate Victoria 2 saves from one campaign into per-nation time series.",
@@ -401,10 +388,8 @@ def command_line():
                          "does not store it; read it off the in-game military "
                          "panel. Default 1.0 reports the absolute ceiling.")
     # Both default to None rather than to the value they fall back to, so
-    # `mod_defaults` can tell "the caller said nothing" from "the caller
-    # asked for exactly what vanilla does". `main` writes the settled answer
-    # back onto `args` below, so everything downstream still reads a number
-    # and a list here.
+    # the scanner can tell "the caller said nothing", which the mod's own
+    # rules answer, from "the caller asked for exactly what vanilla does".
     ap.add_argument("--pop-per-regiment", type=_number(int, 1), default=None,
                     help="POP_SIZE_PER_REGIMENT from defines.lua (default 3000, "
                          "or the mod's own where --mod-path gives one)")
