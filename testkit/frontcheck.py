@@ -149,7 +149,7 @@ def cross_world(holding):
 
 def signature_problems(binary, mod, game, away=None):
     """
-    [what is wrong] with `vic2scan mod-signature`, which keys the engine's
+    [what is wrong] with `vic2scan selftest-signature`, the signature that keys the engine's
     copy of a mod and goes into the stamp: it must change when a file the
     mod or its game's rule folders hold is edited, added or removed, stay
     put when the game gains a file outside those folders, and come back when
@@ -157,13 +157,16 @@ def signature_problems(binary, mod, game, away=None):
     change with the game's files.
     """
     def sign(folder=mod):
-        done = subprocess.run([binary, "mod-signature", folder], capture_output=True, text=True)
+        done = subprocess.run([binary, "selftest-signature", folder], capture_output=True, text=True)
         return done.stdout.strip() if done.returncode == 0 else None
 
     first = sign()
     if not first:
-        return ["mod-signature gave no signature for %s" % mod]
+        return ["selftest-signature gave no signature for %s" % mod]
     wrong = []
+    gone = subprocess.run([binary, "mod-signature", mod], capture_output=True, text=True)
+    if gone.returncode != 2:
+        wrong.append("vic2scan mod-signature is still a mode")
     for path in (os.path.join(mod, "common", "countries.txt"),
                  os.path.join(game, "map", "default.map")):
         st = os.stat(path)

@@ -19,14 +19,14 @@ old build's entries.
 
 | | |
 |---|---|
-| `main.rs` | The modes: `analyze` (every run), and the self-tests and `mod-export`/`mod-signature` the checks call. |
+| `main.rs` | The modes: `analyze` (every run), and the self-tests and `mod-export` the checks call. |
 | `province.rs`, `text.rs` | Reading a save's provinces and its pops, fast, from the bytes. |
 | `country.rs` | Reading country blocks: everything a nation's row needs, its armies and its fleets. |
 | `clause.rs` | A save block as a generic tree, for the parts read that way. |
 | `names.rs` | Every name a run meets, interned once as a small number (`Sym`). |
 | `fx.rs`, `omap.rs` | The hash every map uses, and a map that keeps insertion order. |
 | `deflate.rs` | Deflate, gzip, zlib, CRC-32 and base64, for the page's packed data. |
-| `md5.rs` | MD5, for the mod's signature. |
+| `hash.rs` | The two-lane hash that names a mod's signature, the report's stamp and a cache entry's context. |
 | `jsonr.rs` | JSON in, and out the way the recorded answers were written. |
 | `pyfmt.rs`, `pyre.rs` | Numbers formatted, and the mod reader's patterns matched, exactly as the recorded answers expect. |
 

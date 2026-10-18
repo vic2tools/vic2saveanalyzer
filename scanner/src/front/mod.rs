@@ -30,7 +30,7 @@ pub mod pypath;
 use crate::engine::modread;
 use crate::engine::out;
 use crate::jsonr::J;
-use crate::md5::Md5;
+use crate::hash::TwoLane;
 use pypath::{abspath, basename, isdir, join};
 
 /// A run refused, in the sentence Python gives (`run.RunError`).
@@ -76,6 +76,8 @@ pub struct Args {
     pub primary: Option<String>,
     pub game_root: Option<String>,
     pub quiet: bool,
+    /// Where read saves are kept between runs: the launcher names it.
+    pub cache_dir: String,
 }
 
 fn opt_str(v: &J) -> Option<String> {
@@ -128,6 +130,7 @@ impl Args {
             primary: opt_str(j.at("primary")),
             game_root: opt_str(j.at("game_root")),
             quiet: j.at("quiet").truthy(),
+            cache_dir: j.at("cache_dir").str().to_string(),
         }
     }
 
@@ -239,15 +242,16 @@ fn mod_signature(mod_path: Option<&str>) -> String {
             roots.push(join(&base, folder));
         }
     }
-    let mut digest = Md5::new();
+    let mut digest = TwoLane::new();
     for root in &roots {
         digest.update(root.as_bytes());
         sign_folder(&mut digest, root, "");
     }
-    digest.hexdigest()
+    digest.hex()
 }
 
-/// `vic2scan mod-signature PATH`: `mod_signature`, for holding to Python's.
+/// `vic2scan selftest-signature PATH`: `mod_signature`, for `frontcheck` to
+/// hold to its rules.
 pub fn signature_main(argv: &[String]) -> ! {
     println!("{}", mod_signature(argv.get(2).map(|s| s.as_str())));
     std::process::exit(0);
@@ -264,7 +268,7 @@ fn mtime_ns(m: &std::fs::Metadata) -> i128 {
     }
 }
 
-fn sign_folder(digest: &mut Md5, folder: &str, under: &str) {
+fn sign_folder(digest: &mut TwoLane, folder: &str, under: &str) {
     let rd = match std::fs::read_dir(folder) {
         Ok(rd) => rd,
         Err(_) => return,
@@ -305,7 +309,7 @@ const STAMP_FILE: &str = "report.stamp";
 /// setting that changes a number in the report. Not Python's stamp -- that
 /// one hashes the Python -- but the same things, by the same rule.
 fn report_stamp(files: &[String], args: &Args, world: &str) -> String {
-    let mut digest = Md5::new();
+    let mut digest = TwoLane::new();
     let mut sorted: Vec<&String> = files.iter().collect();
     sorted.sort();
     for path in sorted {
@@ -348,7 +352,7 @@ fn report_stamp(files: &[String], args: &Args, world: &str) -> String {
         settings.push('\n');
     }
     digest.update(settings.as_bytes());
-    digest.hexdigest()
+    digest.hex()
 }
 
 fn stamp_matches(outdir: &str, stamp: &str) -> bool {
@@ -918,7 +922,7 @@ pub(crate) fn spec_for(args: &Args, set: &Setup, files: &[String], protocol: boo
         ("jobs".into(), args.jobs.map_or(J::Null, J::Int)),
         ("cross".into(), J::Null),
         ("cache".into(), J::Obj(vec![
-            ("dir".into(), J::Str(join(&pypath::gettempdir(), "vic2_analyzer_cache"))),
+            ("dir".into(), J::Str(args.cache_dir.clone())),
             ("version".into(), J::Str(env!("VIC2_BUILD_ID").to_string())),
             ("on".into(), J::Bool(!args.no_cache)),
         ])),

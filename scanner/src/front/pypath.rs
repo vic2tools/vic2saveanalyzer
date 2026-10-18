@@ -506,39 +506,3 @@ pub fn expandvars(path: &str) -> String {
     res
 }
 
-/// `tempfile.gettempdir()`: the first of Python's candidates this process
-/// can write a file in.
-pub fn gettempdir() -> String {
-    let mut candidates: Vec<String> = Vec::new();
-    for name in ["TMPDIR", "TEMP", "TMP"] {
-        if let Some(v) = env(name) {
-            if !v.is_empty() {
-                candidates.push(v);
-            }
-        }
-    }
-    #[cfg(windows)]
-    {
-        candidates.push(expanduser("~\\AppData\\Local\\Temp"));
-        candidates.push(expandvars("%SYSTEMROOT%\\Temp"));
-        for c in ["c:\\temp", "c:\\tmp", "\\temp", "\\tmp"] {
-            candidates.push(c.to_string());
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        for c in ["/tmp", "/var/tmp", "/usr/tmp"] {
-            candidates.push(c.to_string());
-        }
-    }
-    candidates.push(cwd());
-    for dir in candidates {
-        let dir = if dir != "." { abspath(&dir) } else { dir };
-        let probe = join(&dir, &format!("vic2probe{}", std::process::id()));
-        if std::fs::OpenOptions::new().write(true).create_new(true).open(&probe).is_ok() {
-            let _ = std::fs::remove_file(&probe);
-            return dir;
-        }
-    }
-    cwd()
-}

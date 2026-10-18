@@ -12,7 +12,6 @@
 //     vic2scan analyze --run RUN.json ...   a run, as the launcher hands it
 //                                           over (`front`)
 //     vic2scan mod-export MOD               the mod folder as JSON
-//     vic2scan mod-signature MOD            what keys a mod's read
 //     vic2scan bench-engine RUN.json [N]    pass one's parts, timed
 //     vic2scan selftest-...                 what the checks hold the parts to
 //
@@ -28,8 +27,8 @@ mod deflate;
 mod engine;
 mod front;
 mod fx;
+mod hash;
 mod jsonr;
-mod md5;
 mod names;
 mod omap;
 mod province;
@@ -42,15 +41,15 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("analyze") => front::main(&args),
         Some("mod-export") if args.len() == 3 => engine::modread::main(&args),
-        Some("mod-signature") => front::signature_main(&args),
         Some("bench-engine") => engine::bench(&args),
         Some("selftest-fmt") => pyfmt::selftest(),
+        Some("selftest-signature") => front::signature_main(&args),
         Some("selftest-sniff") => front::cross::selftest(&args[2..]),
         Some("selftest-re") => pyre::selftest(),
         Some("selftest-deflate") if args.len() == 4 => deflate::selftest(&args[2], &args[3]),
         _ => {
             eprintln!("usage: vic2scan analyze --run RUN.json [--refused FILE] [--protocol]\n\
-                       \x20      vic2scan mod-export MOD | mod-signature MOD");
+                       \x20      vic2scan mod-export MOD");
             std::process::exit(2);
         }
     }

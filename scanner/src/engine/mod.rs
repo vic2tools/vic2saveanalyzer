@@ -127,12 +127,9 @@ fn string_list(v: &J) -> Vec<String> {
 fn reading_context_of(j: &J) -> String {
     let mut text = String::new();
     j.at("reading").write(&mut text);
-    let (mut a, mut b) = (0xcbf2_9ce4_8422_2325u64, 0x9e37_79b9_7f4a_7c15u64);
-    for &c in text.as_bytes() {
-        a = (a ^ c as u64).wrapping_mul(0x0000_0100_0000_01b3);
-        b = (b.rotate_left(5) ^ c as u64).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
-    }
-    format!("{:016x}{:016x}", a, b)
+    let mut h = crate::hash::TwoLane::new();
+    h.update(text.as_bytes());
+    h.hex()
 }
 
 fn context_of(j: &J) -> String {
@@ -148,12 +145,9 @@ fn context_of(j: &J) -> String {
     j.at("head").write(&mut text);
     text.push('|');
     j.at("tables").at("strata").write(&mut text);
-    let (mut a, mut b) = (0xcbf2_9ce4_8422_2325u64, 0x9e37_79b9_7f4a_7c15u64);
-    for &c in text.as_bytes() {
-        a = (a ^ c as u64).wrapping_mul(0x0000_0100_0000_01b3);
-        b = (b.rotate_left(5) ^ c as u64).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
-    }
-    format!("{:016x}{:016x}", a, b)
+    let mut h = crate::hash::TwoLane::new();
+    h.update(text.as_bytes());
+    h.hex()
 }
 
 fn parse_run(j: &J) -> Run {
