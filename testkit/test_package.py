@@ -73,6 +73,34 @@ class Package(unittest.TestCase):
                                 cwd=kit.ROOT, capture_output=True, text=True)
         self.assertEqual(loaded.stdout.strip(), "[]", loaded.stderr)
 
+    def test_mock_host_takes_its_marks_from_the_worker(self):
+        # A copy of the stand-in beside a copy of the Worker whose size cap
+        # and marks are edited: the stand-in follows the edit.
+        import importlib.util
+        import shutil
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "testkit"))
+            os.makedirs(os.path.join(tmp, "host"))
+            shutil.copy(os.path.join(kit.ROOT, "testkit", "mock_host.py"),
+                        os.path.join(tmp, "testkit"))
+            with open(os.path.join(kit.ROOT, "host", "worker.js"), encoding="utf-8") as fh:
+                worker = fh.read()
+            for old, new in (("const MAX_BYTES = 32 * 1024 * 1024;", "const MAX_BYTES = 5 * 1024;"),
+                             ("const HEAD_BYTES = 96 * 1024;", "const HEAD_BYTES = 7;"),
+                             ('"const PACKED",', '"const PACKED",\n  "a mark of its own",')):
+                self.assertIn(old, worker)
+                worker = worker.replace(old, new)
+            with open(os.path.join(tmp, "host", "worker.js"), "w", encoding="utf-8") as fh:
+                fh.write(worker)
+            spec = importlib.util.spec_from_file_location(
+                "edited_mock_host", os.path.join(tmp, "testkit", "mock_host.py"))
+            host = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(host)
+        self.assertEqual(host.MAX_BYTES, 5 * 1024)
+        self.assertEqual(host.HEAD_BYTES, 7)
+        self.assertEqual(host.WANTED_HEAD, [b"<!DOCTYPE html>", b"<title>Campaign returns</title>",
+                                            b"const PACKED", b"a mark of its own"])
+
     def test_nothing_starts_a_python_worker(self):
         # Every run is the scanner's, a subprocess: no module of the package
         # starts a multiprocessing worker, or needs freeze_support for one.

@@ -5,8 +5,9 @@ A stand-in for the report host, for testing the Share button without deploying.
 Speaks the same two things `host/worker.js` speaks -- POST /upload, and GET
 /r/<id> -- and applies the same checks: the size cap, the marks that say this
 is one of the analyzer's own reports, and the Content-Security-Policy that
-sandboxes whatever it serves. The policy is read out of worker.js at startup
-rather than copied here, so the two cannot drift apart.
+sandboxes whatever it serves. The cap, the marks and the policy are read
+out of worker.js at startup rather than copied here, so the two cannot drift
+apart; a cap or a mark it cannot find there stops it starting.
 
     python3 mock_host.py 8753
 
@@ -25,11 +26,33 @@ import sys
 # The Worker sits next to this, whatever the checkout is called.
 WORKER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                       "host", "worker.js")
-MAX_BYTES = 32 * 1024 * 1024
-HEAD_BYTES = 96 * 1024
-WANTED_HEAD = [b"<!DOCTYPE html>", b"<title>Campaign returns</title>",
-               b"const PACKED"]
 HELD = {}
+
+
+def _worker(pattern):
+    """What `pattern` finds in the Worker, or a refusal to start: a mark this
+    stand-in cannot find is one it would quietly stop holding uploads to."""
+    with open(WORKER, encoding="utf-8") as fh:
+        found = re.search(pattern, fh.read(), re.S)
+    if not found:
+        raise RuntimeError("%s has no %r: the Worker changed shape, so the mock "
+                           "host cannot take its marks from it" % (WORKER, pattern))
+    return found.group(1)
+
+
+def _bytes(name):
+    """A size the Worker declares as a product, `32 * 1024 * 1024`."""
+    size = 1
+    for factor in _worker(r"const %s = ([\d\s*]+);" % name).split("*"):
+        size *= int(factor)
+    return size
+
+
+# The size cap and the marks every report carries, as the Worker has them.
+MAX_BYTES = _bytes("MAX_BYTES")
+HEAD_BYTES = _bytes("HEAD_BYTES")
+WANTED_HEAD = [mark.encode() for mark in
+               re.findall(r'"([^"]+)"', _worker(r"const WANTED_HEAD = \[(.*?)\];"))]
 
 
 def policy():
