@@ -37,10 +37,10 @@ class Verdicts(unittest.TestCase):
 
 
 class Table(unittest.TestCase):
-    def test_84_mutations_with_unique_names(self):
+    def test_85_mutations_with_unique_names(self):
         names = [m.name for m in mutations.MUTATIONS]
-        self.assertEqual(len(names), 84)
-        self.assertEqual(len(set(names)), 84)
+        self.assertEqual(len(names), 85)
+        self.assertEqual(len(set(names)), 85)
 
     def test_every_patch_finds_its_text_as_often_as_it_expects(self):
         for m in mutations.MUTATIONS:

@@ -145,14 +145,27 @@ def a_refused_token(holding, report):
                                                               if n != "base"})
             told = []
             window = types.SimpleNamespace(
-                analyzer=types.SimpleNamespace(log_queue=queue.Queue()),
+                analyzer=types.SimpleNamespace(log_queue=queue.Queue(), say=lambda text: None),
                 root=types.SimpleNamespace(after=lambda _ms, fn, *a: told.append(a)),
+                share_button=types.SimpleNamespace(state=lambda flags: None),
+                current_report=lambda: report, token=lambda: "ghp_expired",
                 publish_failed=None, published=None)
-            # The publish button's worker, with what `Tools.share` hands it.
-            app.Tools._share(window, "publish",
-                             lambda say: share.publish(report, "ghp_expired", name="a campaign",
-                                                       extra=[], say=say),
-                             forget=lambda refused: app.Tools.forget_token(window, refused))
+            window._share = lambda *a, **k: app.Tools._share(window, *a, **k)
+            window.forget_token = lambda refused: app.Tools.forget_token(window, refused)
+
+            class AtOnce:
+                """The publish button's thread, run where it is started."""
+                def __init__(self, target, args=(), kwargs=None, daemon=None):
+                    self.run = lambda: target(*args, **(kwargs or {}))
+
+                def start(self):
+                    self.run()
+
+            real_thread, app.threading.Thread = app.threading.Thread, AtOnce
+            try:
+                app.Tools.share(window)              # the Publish button
+            finally:
+                app.threading.Thread = real_thread
             after = settings.load()
         finally:
             share.publish = real_publish

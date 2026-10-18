@@ -60,6 +60,14 @@ MUTATIONS = [
             ('vic2tools/settings.py', '    held = load(path)\n', '    held = {}\n'),
         ]),
     Mutation(
+        'publish-forgets-nothing',
+        'the Publish button hands its worker no way to forget a token, so '
+        'a refused one stays held and is handed back on every press',
+        'sharing.py', (),
+        [
+            ('vic2tools/__main__.py', '            kwargs={"forget": self.forget_token}).start()', '            kwargs={}).start()'),
+        ]),
+    Mutation(
         'refused-token-kept',
         'a token GitHub refuses stays held and is handed back on every '
         'press',
