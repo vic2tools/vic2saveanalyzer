@@ -417,14 +417,14 @@ MUTATIONS = [
         'army_tech.txt',
         'modread.py', ('--rounds', '40'),
         [
-            ('scanner/src/engine/modread.rs', '                chosen.set(lower(&name), (name, full));', '                chosen.set(name.clone(), (name, full));'),
+            ('scanner/src/engine/modread/reader.rs', '                chosen.set(lower(&name), (name, full));', '                chosen.set(name.clone(), (name, full));'),
         ]),
     Mutation(
         'modread-no-underscores',
         "the Rust's float() refuses 1_000, which Python reads as a thousand",
         'modread.py', ('--rounds', '40'),
         [
-            ('scanner/src/engine/modread.rs', '    let t = no_underscores(num_trim(s))?;', '    let t = num_trim(s).to_vec();'),
+            ('scanner/src/engine/modread/values.rs', '    let t = no_underscores(num_trim(s))?;', '    let t = num_trim(s).to_vec();'),
         ]),
     Mutation(
         'modread-block-name-empty',
@@ -432,7 +432,7 @@ MUTATIONS = [
         'keeps its repr',
         'modread.py', ('--rounds', '40'),
         [
-            ('scanner/src/engine/modread.rs', '                Some(v) => unquote(unquote(&str_of(v))).to_vec(),', '                Some(V::Str(v)) => unquote(v).to_vec(),\n                Some(_) => Vec::new(),'),
+            ('scanner/src/engine/modread/pieces.rs', '                Some(v) => unquote(unquote(&str_of(v))).to_vec(),', '                Some(V::Str(v)) => unquote(v).to_vec(),\n                Some(_) => Vec::new(),'),
         ]),
     Mutation(
         'modread-ellipsis-is-space',
@@ -440,14 +440,14 @@ MUTATIONS = [
         'makes it an ellipsis',
         'modread.py', ('--rounds', '40'),
         [
-            ('scanner/src/engine/modread.rs', '    let sp = |c: u8| matches!(c, 0x09..=0x0d | 0x1c..=0x20 | 0xa0);', '    let sp = |c: u8| matches!(c, 0x09..=0x0d | 0x1c..=0x20 | 0x85 | 0xa0);'),
+            ('scanner/src/engine/modread/reader.rs', '    let sp = |c: u8| matches!(c, 0x09..=0x0d | 0x1c..=0x20 | 0xa0);', '    let sp = |c: u8| matches!(c, 0x09..=0x0d | 0x1c..=0x20 | 0x85 | 0xa0);'),
         ]),
     Mutation(
         'modread-last-name-wins',
         'a name defined twice in the localisation takes the later one',
         'modread.py', ('--rounds', '40'),
         [
-            ('scanner/src/engine/modread.rs', '            if wanted.contains(&l.key) && !out.contains_key(&l.key) {', '            if wanted.contains(&l.key) {'),
+            ('scanner/src/engine/modread/reader.rs', '            if wanted.contains(&l.key) && !out.contains_key(&l.key) {', '            if wanted.contains(&l.key) {'),
         ]),
     Mutation(
         'modread-kept-copy-unsigned',
