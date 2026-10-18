@@ -71,7 +71,7 @@ MUTATIONS = [
         'scanner-opens-console-window',
         'on Windows the window starts the scanner without CREATE_NO_WINDOW, '
         'so the windowed executable flashes a console window per run',
-        'packing.py', (),
+        'engine_runtime.py', (),
         [
             ('vic2tools/launch.py', '            status = _relayed(argv, _no_window(), hosted=hosted, say=say,', '            status = _relayed(argv, 0, hosted=hosted, say=say,'),
         ]),

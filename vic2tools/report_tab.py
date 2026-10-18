@@ -23,6 +23,7 @@ import queue
 import sys
 import threading
 import time
+import traceback
 import tkinter as tk
 from collections import Counter
 from tkinter import filedialog, messagebox, ttk
@@ -693,7 +694,6 @@ class App:
             self.log_queue.put(f"\n{refused}\n")
         except Exception:
             ok = False
-            import traceback
             self.log_queue.put("\n" + traceback.format_exc())
         self.report = os.path.join(out, "report.html")
         if ok and os.path.isfile(self.report):
@@ -755,7 +755,7 @@ def _attach_console():
     """
     if not getattr(sys, "frozen", False) or os.name != "nt":
         return
-    import ctypes
+    import ctypes                     # here, not at the top: Windows only
     ATTACH_PARENT_PROCESS = -1
     if not ctypes.windll.kernel32.AttachConsole(ATTACH_PARENT_PROCESS):
         return

@@ -21,6 +21,7 @@ The keeper's half is a file of its own beside it.
 
 import json
 import os
+import re
 
 
 def _settings_path(app):
@@ -136,7 +137,6 @@ def steam_libraries():
         (".var", "app", "com.valvesoftware.Steam", ".local", "share", "Steam"),
         ("snap", "steam", "common", ".local", "share", "Steam"),
         ("Library", "Application Support", "Steam"))]
-    import re
     out = list(seen)
     for root in seen:
         vdf = os.path.join(root, "steamapps", "libraryfolders.vdf")

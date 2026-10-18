@@ -46,13 +46,6 @@ def build():
               "cargo build --release --manifest-path scanner/Cargo.toml",
               file=sys.stderr)
         return 1
-    # These are imported inside functions rather than at the top of the file, so
-    # they are named here in case the bundler's scan ever stops following them.
-    carried = ["vic2tools.launch",
-               # the window's two halves, what they remember, and the one
-               # thing that leaves the machine, all reached from __main__.py
-               "vic2tools.report_tab", "vic2tools.keeper", "vic2tools.keeper_tab",
-               "vic2tools.settings", "vic2tools.share"]
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
            "--onefile", "--windowed", "--name", NAME, "--icon", ICON,
            "--distpath", os.path.join(HERE, "dist"),
@@ -60,9 +53,7 @@ def build():
            "--specpath", os.path.join(HERE, "build"),
            # the package is found from here, beside this file
            "--paths", HERE]
-    for module in carried:
-        cmd += ["--hidden-import", module]
-    # `.` puts it beside the unpacked modules, where fastscan looks first:
+    # `.` puts it beside the unpacked modules, where `launch` looks first:
     # the scanner makes every run, so a release without it makes none.
     cmd += ["--add-binary", "%s%s." % (scanner, os.pathsep)]
     print("carrying the Rust scanner: %s" % scanner)

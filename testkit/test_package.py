@@ -35,6 +35,31 @@ class Package(unittest.TestCase):
         found = {os.path.basename(p) for p in glob.glob(os.path.join(kit.ROOT, "*.py"))}
         self.assertEqual(found, {"vic2_analyzer.py", "build_exe.py"})
 
+    def test_a_release_without_the_scanner_is_refused_before_bundling(self):
+        # Refused before PyInstaller is started, not after a slow build of a
+        # release that would refuse every run.
+        from unittest.mock import patch
+        import build_exe
+        with patch.object(build_exe, "scanner_binary", return_value=None), \
+                patch.object(build_exe.subprocess, "call") as bundle, \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(build_exe.build(), 1)
+        bundle.assert_not_called()
+
+    def test_nothing_starts_a_python_worker(self):
+        # Every run is the scanner's, a subprocess: no module of the package
+        # starts a multiprocessing worker, or needs freeze_support for one.
+        import ast
+        for path in sorted(glob.glob(os.path.join(kit.ROOT, "vic2tools", "*.py"))):
+            with open(path, encoding="utf-8") as fh:
+                tree = ast.parse(fh.read())
+            for node in ast.walk(tree):
+                names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                         else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
+                for name in names:
+                    with self.subTest(module=os.path.basename(path)):
+                        self.assertNotEqual(name.split(".")[0], "multiprocessing")
+
     def test_analyze_hands_every_line_to_say(self):
         # A stand-in scanner: two lines out, one line err, and a progress
         # mark, each a moment apart so their order of arrival is theirs.

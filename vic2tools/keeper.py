@@ -273,6 +273,8 @@ class Changes:
         if os.name != "nt":
             return
         try:
+            # Here, not at the top: Windows only, and a failed import is the
+            # same answer as a missing call.
             import ctypes
             from ctypes import wintypes
             api = ctypes.WinDLL("kernel32", use_last_error=True)

@@ -85,6 +85,39 @@ class Relay(unittest.TestCase):
         self.assertIn("cargo build --release --manifest-path scanner/Cargo.toml",
                       str(said.exception))
 
+    def test_the_scanner_opens_no_window(self):
+        # The executable is built windowed and the scanner is a console
+        # program, and on Windows that combination opens a console window
+        # for every run unless `Popen` is told `CREATE_NO_WINDOW`. This asks
+        # what the window's run would hand `Popen` there -- and here, where
+        # the same flag is refused outright.
+        asked = []
+
+        def refuse(argv, **kwargs):
+            asked.append(kwargs)
+            raise OSError("not really started")
+
+        real_platform = sys.platform
+        self.addCleanup(setattr, sys, "platform", real_platform)
+        with patch.object(subprocess, "Popen", refuse), \
+                patch.object(launch, "available", return_value=__file__):
+            for platform in ("win32", real_platform):
+                del asked[:]
+                sys.platform = platform
+                with self.assertRaises(OSError):
+                    launch._front(launch.Run(saves="."), hosted=True, say=lambda line: None)
+                sys.platform = real_platform
+                with self.subTest(platform=platform):
+                    self.assertTrue(asked, "the window's run never called Popen")
+                    flags = asked[0].get("creationflags", 0)
+                    if platform == "win32":
+                        self.assertTrue(flags & 0x08000000, "on Windows the scanner is "
+                                        "started without CREATE_NO_WINDOW, so every run "
+                                        "opens a console window")
+                    else:
+                        self.assertFalse(flags, "here the scanner is started with "
+                                         "Windows-only creation flags, which Popen refuses")
+
 
 class Fixtures(unittest.TestCase):
     def test_fixture_builder_refuses_links(self):

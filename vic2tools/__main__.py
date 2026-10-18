@@ -22,23 +22,13 @@ is give it to somebody.
 Packaged as vic2saveanalyzer.exe by build_exe.py.
 """
 
-import multiprocessing
 import os
 import sys
-
-# Before anything else is imported. A worker in the packaged program starts
-# by running this file again from the top, and stops only here: every import
-# above this line is made again in every worker. The window's are not needed
-# to read a save -- tkinter, and `publish` bringing the web and mail modules
-# with it, about 45 ms of each worker's start -- so they come after.
-if __name__ == "__main__":
-    multiprocessing.freeze_support()
-
 import threading
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
-from vic2tools import keeper, keeper_tab, report_tab, settings, share
+from vic2tools import keeper, keeper_tab, launch, report_tab, settings, share
 
 APP = "Victoria 2 campaign tools"
 
@@ -341,17 +331,10 @@ class Tools:
 
 
 def main():
-    # Saves are read on several cores, and a worker on Windows starts by
-    # re-running this program. Without this it would open a second window
-    # instead of reading a save -- once per core, forever.
-    import multiprocessing
-    multiprocessing.freeze_support()
-
     if len(sys.argv) > 1:
         # Handed arguments, the executable is the command line it was built
         # from, exactly as it was before these two became one window.
         report_tab._attach_console()
-        from vic2tools import launch
         return launch.main()
 
     for name in ("stdout", "stderr"):

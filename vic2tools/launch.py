@@ -29,12 +29,13 @@ says to whoever is listening -- a terminal, or the window's log.
 """
 
 import argparse
+import json
 import os
 import subprocess
 import sys
 import tempfile
 import threading
-from dataclasses import dataclass, field as _field, fields
+from dataclasses import asdict, dataclass, field as _field, fields
 
 
 def analyze(run, *, say=None, cancel=None, progress=None, ready=None):
@@ -101,17 +102,13 @@ def _front(run, hosted=False, *, say=None, cancel=None, progress=None, ready=Non
             "The scanner that makes the report is not built (%s, looked for beside this "
             "program and in scanner/target/release). Build it with:\n\n    %s\n\nThat "
             "needs Rust's cargo; see README.md." % (BINARY, BUILD))
-    import dataclasses
-    import json
-    import subprocess
-    import tempfile
     fd, path = tempfile.mkstemp(prefix="vic2_run_", suffix=".json")
     refused = path[:-len(".json")] + ".refused"
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             # The cache folder is named here, once, so the scanner keeps its
             # entries where the window's "empty the cache" looks.
-            fh.write(json.dumps(dict(dataclasses.asdict(run), cache_dir=cache_dir())))
+            fh.write(json.dumps(dict(asdict(run), cache_dir=cache_dir())))
         # A windowed build started with arguments and no console to attach
         # to (a folder dropped on it) has no streams at all.
         silent = say is None and (sys.stdout is None or sys.stderr is None)
@@ -167,7 +164,6 @@ def _relayed(argv, flags, *, hosted=False, say=None, cancel=None, progress=None,
     stop kills it and raises `Cancelled` -- every save it had read by then
     is in the engine's cache.
     """
-    import subprocess
     proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             creationflags=flags)
     failed = []

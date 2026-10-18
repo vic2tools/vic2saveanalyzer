@@ -55,7 +55,6 @@ CHECKS = [
     _c("histories.py", "one game's saves told from another's", ["scanner"]),
     _c("mangled.py", "damaged saves", ["scanner"], records=True),
     _c("sharing.py", "sharing a report", ["display"], exclusive=True),
-    _c("packing.py", "what the executable carries", ["scanner"]),
     _c("matching.py", "matching a campaign to its mod", ["scanner"]),
     _c("engine_runtime.py", "the engine process and test fixtures", ["scanner"]),
     _c("modread.py", "the mod reader", ["scanner"], records=True),
