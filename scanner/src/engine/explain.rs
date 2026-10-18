@@ -17,7 +17,7 @@
 // these, the last save read again whole where one nation is asked about.
 // Err is the `RunError` Python raises, in its words.
 
-use crate::engine::finish::{Pre, Spec};
+use crate::engine::finish::{in_pool, Pre, Spec};
 use crate::engine::model::Nation;
 use crate::engine::rules::{self, Mod};
 use crate::engine::{Reading, readsave::read_save, readsave::Refused};
@@ -137,29 +137,6 @@ fn explain_mob(tag: &str, m: &Mod, live: &FxSet<String>, pres: &[Pre], files: &[
     Ok(())
 }
 
-/// `brigades_from_clusters`, over sizes in save order.
-fn brigades(sizes: &[i64], rate: f64, ppr: i64) -> i64 {
-    let (mut total, mut pool) = (0i64, 0.0f64);
-    let ppr = ppr as f64;
-    for &size in sizes {
-        let manpower = size as f64 * rate;
-        if manpower <= 0.0 {
-            continue;
-        }
-        if manpower >= ppr {
-            total += crate::py::fmt::floordiv(manpower, ppr) as i64;
-            pool = 0.0;
-        } else {
-            pool += manpower;
-            if pool >= ppr {
-                total += 1;
-                pool = 0.0;
-            }
-        }
-    }
-    total
-}
-
 #[allow(clippy::too_many_arguments)]
 fn explain_mob_pool(spec: &Spec, tag: &str, m: &Mod, live: &FxSet<String>, pres: &[Pre],
                     files: &[String], reading: &Reading) -> Result<(), String> {
@@ -174,10 +151,7 @@ fn explain_mob_pool(spec: &Spec, tag: &str, m: &Mod, live: &FxSet<String>, pres:
     let mut per_pop: Vec<(i64, i64)> = Vec::new();
     let mut pool = 0i64;
     for (poptype, culture, size, pid) in &nat.mobilizable_pops {
-        if !mob_types.contains(names::text(*poptype)) || !nat.accepts(*culture) {
-            continue;
-        }
-        if nat.colonial_provinces.contains(pid) || (!occ && nat.occupied_provinces.contains(pid)) {
+        if !in_pool(&nat, spec, *poptype, *culture, *pid) {
             continue;
         }
         pool += size;
@@ -187,10 +161,7 @@ fn explain_mob_pool(spec: &Spec, tag: &str, m: &Mod, live: &FxSet<String>, pres:
     let mut per_pt: Vec<(i64, Sym, i64)> = Vec::new();
     {
         for (poptype, culture, size, pid) in &nat.mobilizable_pops {
-            if !mob_types.contains(names::text(*poptype)) || !nat.accepts(*culture) {
-                continue;
-            }
-            if nat.colonial_provinces.contains(pid) || (!occ && nat.occupied_provinces.contains(pid)) {
+            if !in_pool(&nat, spec, *poptype, *culture, *pid) {
                 continue;
             }
             match per_pt.iter_mut().find(|(p, t, _)| p == pid && t == poptype) {
@@ -243,8 +214,8 @@ fn explain_mob_pool(spec: &Spec, tag: &str, m: &Mod, live: &FxSet<String>, pres:
     for (reason, size) in order {
         crate::outln!("  excluded: {} {}", left(reason, 20), right(&commas(*size), 12));
     }
-    let per_pop_n = brigades(&per_pop.iter().map(|p| p.1).collect::<Vec<_>>(), rate, ppr);
-    let per_pt_n = brigades(&per_pt.iter().map(|p| p.2).collect::<Vec<_>>(), rate, ppr);
+    let per_pop_n = crate::engine::finish::brigades_from_clusters(&per_pop.iter().map(|p| p.1).collect::<Vec<_>>(), rate, ppr);
+    let per_pt_n = crate::engine::finish::brigades_from_clusters(&per_pt.iter().map(|p| p.2).collect::<Vec<_>>(), rate, ppr);
     let untruncated = pool as f64 * rate / ppr as f64;
     crate::outln!("\n  ceiling, grouped per pop               {}", right(&per_pop_n.to_string(), 6));
     crate::outln!("  ceiling, grouped per province and type {}   ({}{})", right(&per_pt_n.to_string(), 6),

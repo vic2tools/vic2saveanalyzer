@@ -75,6 +75,40 @@ pub struct PreNation {
     pub cap_rule: i64,
 }
 
+/// `mobilization_clusters`' test: whether a mobilizable pop counts toward a
+/// nation's pool -- a type the run mobilizes, a culture the nation accepts,
+/// and a province neither colonial nor, unless asked, occupied.
+pub(crate) fn in_pool(nat: &Nation, spec: &Spec, poptype: Sym, culture: Sym, pid: i64) -> bool {
+    spec.mob_types.contains(&poptype) && nat.accepts(culture)
+        && !nat.colonial_provinces.contains(&pid)
+        && (spec.include_occupied || !nat.occupied_provinces.contains(&pid))
+}
+
+/// `brigades_from_clusters`: the brigades the pops of `sizes` (in save order)
+/// raise at `rate`. A pop big enough raises its own; smaller ones pool until
+/// the pool is a regiment's worth.
+pub(crate) fn brigades_from_clusters(sizes: &[i64], rate: f64, ppr: i64) -> i64 {
+    let mut brigades = 0i64;
+    let mut pooled = 0.0f64;
+    for &size in sizes {
+        let manpower = size as f64 * rate;
+        if manpower <= 0.0 {
+            continue;
+        }
+        if manpower >= ppr as f64 {
+            brigades += trunc_int(floordiv(manpower, ppr as f64)).unwrap_or(0);
+            pooled = 0.0;
+        } else {
+            pooled += manpower;
+            if pooled >= ppr as f64 {
+                brigades += 1;
+                pooled = 0.0;
+            }
+        }
+    }
+    brigades
+}
+
 /// One save, read and prepared.
 pub struct Pre {
     pub meta: Meta,
@@ -278,11 +312,7 @@ pub fn prepare(meta: Meta, nations: Vec<Nation>, keys: Vec<String>, spec: &Spec)
             pre.is_player = playing.contains(&tag);
             // `mobilization_clusters`.
             for (poptype, culture, size, pid) in &nat.mobilizable_pops {
-                if !spec.mob_types.contains(poptype) || !nat.accepts(*culture) {
-                    continue;
-                }
-                if nat.colonial_provinces.contains(pid)
-                    || (!spec.include_occupied && nat.occupied_provinces.contains(pid)) {
+                if !in_pool(&nat, spec, *poptype, *culture, *pid) {
                     continue;
                 }
                 pre.pool += size;
@@ -646,25 +676,7 @@ pub fn finish(pre: Pre, spec: &Spec, m: &Mod, live: Option<&FxSet<String>>) -> D
         }
         let rate = rate_for(&nat, m, live, Some(&world), is_player)?;
         let ppr = spec.pop_per_regiment;
-        // `brigades_from_clusters`.
-        let mut brigades = 0i64;
-        let mut pooled = 0.0f64;
-        for &size in &buckets {
-            let manpower = size as f64 * rate;
-            if manpower <= 0.0 {
-                continue;
-            }
-            if manpower >= ppr as f64 {
-                brigades += trunc_int(floordiv(manpower, ppr as f64)).unwrap_or(0);
-                pooled = 0.0;
-            } else {
-                pooled += manpower;
-                if pooled >= ppr as f64 {
-                    brigades += 1;
-                    pooled = 0.0;
-                }
-            }
-        }
+        let brigades = brigades_from_clusters(&buckets, rate, ppr);
         let total = nat.total_pop;
         let pct = |part: i64, digits: u32| -> f64 {
             if total != 0 { round(100.0 * part as f64 / total as f64, digits) } else { 0.0 }
@@ -835,3 +847,15 @@ fn trim(tag: &str, nat: &mut Nation) -> Kept {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn small_pops_pool_into_a_brigade_and_big_ones_count_alone() {
+        // 1,000 waits in the pool, 3,000 is a brigade alone and empties it,
+        // then 2,000 and 1,500 pool into one more.
+        assert_eq!(super::brigades_from_clusters(&[1000, 3000, 2000, 1500], 1.0, 3000), 2);
+        assert_eq!(super::brigades_from_clusters(&[7000], 1.0, 3000), 2);
+        assert_eq!(super::brigades_from_clusters(&[7000], 0.0, 3000), 0);
+    }
+}
