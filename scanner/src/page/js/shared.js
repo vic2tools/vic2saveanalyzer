@@ -186,3 +186,35 @@ const fmtPower = v => !v ? '0'
   : v >= 100 ? Math.round(v).toLocaleString()
   : v >= 10 ? v.toFixed(1) : v.toFixed(2);
 
+
+// Use the report's embedded flags; a nation-colour swatch is the honest fallback.
+// A nation's flag as the payload carries it: the one `key` names (the great
+// powers' cards name the flag of their government), else its usual one,
+// else ''.
+function flagSrc(tag, key) {
+  return (key && DATA.flags[key]) || DATA.flags[tag + '|'] || '';
+}
+
+function nationFlag(tag, key) {
+  const src = flagSrc(tag, key);
+  const flag = document.createElement(src ? 'img' : 'span');
+  flag.className = 'military-flag' + (src ? '' : ' blank');
+  if (src) { flag.src = src; flag.alt = ''; }
+  else { flag.style.backgroundColor = colourFor(tag); flag.setAttribute('aria-hidden', 'true'); }
+  return flag;
+}
+
+function nationIdentity(tag) {
+  const identity = document.createElement('span'); identity.className = 'nation-identity';
+  const name = document.createElement('span'); name.textContent = nameOf(tag);
+  name.style.color = colourFor(tag);
+  identity.append(nationFlag(tag),name);
+  return identity;
+}
+
+const shipCount = (tag, date, type) => {
+  const at = (DATA.ships[tag] || {})[date];
+  if (!at) return undefined;
+  if (type === '__all') return Object.values(at).reduce((a, b) => a + b, 0);
+  return at[type];
+};

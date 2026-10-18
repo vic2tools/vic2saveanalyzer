@@ -1,3 +1,42 @@
+/* =============== MILITARY =============== */
+let milTags = defaultTags.slice(0, 6);
+
+const fleetSave = document.getElementById('fleetsave');
+fillSelect(fleetSave, DATA.dates);
+fleetSave.value = DATA.lastDate;
+fleetSave.onchange = () => {
+  milPicker.refresh();
+  drawMilTable(); drawFleetTable();
+};
+
+
+let overviewBranch = 'army';
+function showMilitaryOverview(branch) {
+  for (const kind of ['army', 'navy']) {
+    const selected = kind === branch;
+    document.getElementById('overview-' + kind).setAttribute('aria-pressed', selected);
+    document.getElementById('overview-' + kind + '-view').hidden = !selected;
+  }
+  overviewBranch = branch;
+  if (branch === 'navy') { drawFleetTable(); }
+  else { drawMilTable(); }
+}
+for (const branch of ['army', 'navy']) {
+  document.getElementById('overview-' + branch).onclick = () => showMilitaryOverview(branch);
+}
+
+document.getElementById('mil-compare').onclick = () => {
+  milSave.value = fleetSave.value;
+  pickerA.refresh(); pickerB.refresh();
+  setHeadBranch(overviewBranch);
+  selectTab('tab-compare'); showCompareView('head');
+  document.getElementById('compare-head-button').focus();
+};
+
+const milPicker = makePicker(document.getElementById('pick-military'),
+  tagPickerCfg(milTags, sel => { milTags = sel; drawMilTable(); drawFleetTable(); },
+               () => fleetSave.value));
+
 let militaryCountry = null;
 const militaryLedgers = {};
 const strengthValue = value => value == null ? '—'
@@ -30,30 +69,6 @@ function strengthDetails(sections, note) {
   return [grid, help];
 }
 
-// Use the report's embedded flags; a nation-colour swatch is the honest fallback.
-// A nation's flag as the payload carries it: the one `key` names (the great
-// powers' cards name the flag of their government), else its usual one,
-// else ''.
-function flagSrc(tag, key) {
-  return (key && DATA.flags[key]) || DATA.flags[tag + '|'] || '';
-}
-
-function nationFlag(tag, key) {
-  const src = flagSrc(tag, key);
-  const flag = document.createElement(src ? 'img' : 'span');
-  flag.className = 'military-flag' + (src ? '' : ' blank');
-  if (src) { flag.src = src; flag.alt = ''; }
-  else { flag.style.backgroundColor = colourFor(tag); flag.setAttribute('aria-hidden', 'true'); }
-  return flag;
-}
-
-function nationIdentity(tag) {
-  const identity = document.createElement('span'); identity.className = 'nation-identity';
-  const name = document.createElement('span'); name.textContent = nameOf(tag);
-  name.style.color = colourFor(tag);
-  identity.append(nationFlag(tag),name);
-  return identity;
-}
 
 function compareMilitaryNations(tag, rival, branch) {
   milSave.value = fleetSave.value;
@@ -367,68 +382,6 @@ function drawMilTable() {
   });
   renderStrengthLedger('miltable', cols, rows, milState,
     'Potential combines the professional brigade cap and population-based mobilization ceiling. Mobilized brigades are already included in that ceiling; it is not the remaining in-game mobilization count.');
-}
-
-/* =============== FLEETS =============== */
-
-const shipSel = document.getElementById('shiptype');
-fillSelect(shipSel, ['__all', ...[...DATA.shipTypes].sort(byGameName)],
-           s => s === '__all' ? 'All ships' : gameName(s));
-shipSel.onchange = drawChart;
-
-const shipCount = (tag, date, type) => {
-  const at = (DATA.ships[tag] || {})[date];
-  if (!at) return undefined;
-  if (type === '__all') return Object.values(at).reduce((a, b) => a + b, 0);
-  return at[type];
-};
-
-function drawFleetChart() {
-  const type = shipSel.value;
-  document.getElementById('chart-title').textContent = (type === '__all' ? 'Ships' : gameName(type)) + ' over time';
-  document.getElementById('chart').setAttribute('aria-label', document.getElementById('chart-title').textContent + ' by nation');
-  const shown = DATA.tags.filter(t => natTags.includes(t));
-  const series = shown.map(tag => ({
-    name: tag, colour: colourFor(tag),
-    pts: DATA.dates.map((d, i) => [years[i], shipCount(tag, d, type)])
-                   .filter(p => p[1] !== undefined),
-  }));
-  /* A hull nobody had before 1882 spent two thirds of this chart as empty
-     floor, with the years that actually had ships crushed into the last
-     third. The axis starts where the first one was launched and stops where
-     the last one was still afloat, so the span the hull existed for is the
-     span the chart draws. Doing it off the plotted points rather than off a
-     date in the tech tree also covers the other end: a hull every navy has
-     since scrapped stops the axis there instead of trailing off flat. */
-  const seen = [].concat(...series.map(x => x.pts.map(pt => pt[0])));
-  const lo = seen.length ? Math.min(...seen) : xMin;
-  const hi = seen.length ? Math.max(...seen) : xMax;
-  // No padding either side: the first reading sits on the vertical axis and
-  // the last on the right edge, the way it does on every other chart here.
-  const a = lo, b = hi;
-  const xOf = y => M.l + (b === a ? 0.5 : (y - a) / (b - a)) * (W - M.l - M.r);
-  plot(document.getElementById('chart'), {
-    series,
-    xOf, xTicks: yearTicks(a, b),
-    hoverXs: saveHovers.filter(h => h.v >= a && h.v <= b),
-    fmt: fmtCount, log: logScale, markers: true,
-    readout: document.getElementById('readout'),
-    idle: 'Hover the plot to read fleet sizes at a date.',
-    emptyMsg: shown.length ? 'No ships of this type in these saves.' : 'Select a nation.',
-  });
-  const note = document.getElementById('fleetspan');
-  const whole = !seen.length || (lo <= years[0] && hi >= years[years.length - 1]);
-  note.hidden = whole;
-  if (!whole) {
-    const at = v => DATA.dates[years.indexOf(v)] || '';
-    // Mods name hulls, so the article cannot be baked into the sentence.
-    const name = type === '__all' ? 'ship' : gameName(type);
-    const one = (/^[aeiou]/i.test(name) ? 'an ' : 'a ') + name;
-    note.textContent = lo === hi
-      ? `The ${at(lo)} save is the only one with ${one} in it.`
-      : `Nobody in these saves held ${one} outside `
-        + `${at(lo)} – ${at(hi)}, so the chart stops there.`;
-  }
 }
 
 const fleetState = {key: 'total', dir: -1};

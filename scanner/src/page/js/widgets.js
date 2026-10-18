@@ -410,3 +410,32 @@ function renderTable(table, cols, rows, state, onRow) {
   });
 }
 
+
+/* A long <select> of nations is unusable without one. Filters the options in
+   place and jumps to the first match, so the select stays the source of truth
+   and every existing onchange keeps working. */
+function searchSelect(select, placeholder) {
+  if (!select) return;
+  const box = document.createElement('input');
+  box.type = 'search';
+  box.className = 'selsearch';
+  box.placeholder = placeholder || 'search';
+  box.setAttribute('aria-label', placeholder || 'search');
+  select.parentNode.insertBefore(box, select);
+  box.oninput = () => {
+    const q = box.value.trim().toLowerCase();
+    let first = null;
+    for (const o of select.options) {
+      // `off` is set by limitSelect for nations this save does not have; the
+      // search must not bring them back.
+      const hit = o.dataset.off !== '1'
+        && (!q || o.textContent.toLowerCase().includes(q));
+      o.hidden = !hit;
+      if (hit && !first) first = o;
+    }
+    if (q && first && select.value !== first.value) {
+      select.value = first.value;
+      if (select.onchange) select.onchange();
+    }
+  };
+}
