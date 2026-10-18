@@ -39,11 +39,11 @@ change, and how to make a release. `README.md` is the guide to using it;
 3. **The scanner's front end** (`scanner/src/front/`) settles the game and the
    mod, finds and orders the saves, answers the diagnostics (`--peek`,
    `--verify`, `--explain-mob`, …) and lays out a `--cross` comparison.
-4. **The engine** (`scanner/src/engine/`) reads the mod (`modread.rs`,
+4. **The engine** (`scanner/src/engine/`) reads the mod (`modread/`,
    `rules.rs`), reads every save on every core (`model.rs`, and the
    readers in `scanner/src/save/`), keeps each read save in its cache (`cache.rs`),
    finishes each nation (`finish.rs`, `wars.rs`, `market.rs`), and writes the
-   tables and the page (`report.rs`, `tables.rs`).
+   tables and the page (`report/`, `tables.rs`).
 5. **The page** is the template with the campaign's data packed into it: one
    `report.html` that works offline.
 

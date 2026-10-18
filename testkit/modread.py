@@ -1,5 +1,5 @@
 """
-Hold the engine's mod reader (`scanner/src/engine/modread.rs`) to its
+Hold the engine's mod reader (`scanner/src/engine/modread/`) to its
 recorded answers.
 
 What `vic2scan mod-export` makes of a folder, as JSON text, must be what is

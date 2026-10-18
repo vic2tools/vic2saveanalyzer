@@ -23,7 +23,8 @@
 // `int()` of an infinity, a number past 64 bits), and there the Python,
 // doing the run again, says again what had been said.
 
-pub mod cross;
+pub mod compare;
+pub mod survey;
 pub mod diagnose;
 
 use crate::engine::modread;
@@ -642,13 +643,13 @@ fn run(mut args: Args, protocol: bool) -> R<i32> {
     let mut stamp: Option<String> = None;
     let mut cross_payload: Option<String> = None;
     if args.cross {
-        let found = cross::survey_cross(&saves_path, &args, verbose)?;
-        let taken = cross::cross_stamp(&found, &args);
+        let found = survey::survey_cross(&saves_path, &args, verbose)?;
+        let taken = survey::cross_stamp(&found, &args);
         if !args.verify && already_built(&args, &taken) {
             return Ok(0);
         }
         let (payload, primary_files, primary_mod) =
-            cross::run_cross(&saves_path, &found, &args, verbose, protocol)?;
+            compare::run_cross(&saves_path, &found, &args, verbose, protocol)?;
         args.mod_path = primary_mod;
         files = primary_files;
         if files.is_empty() {

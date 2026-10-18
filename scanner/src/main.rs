@@ -35,7 +35,7 @@ fn main() {
         Some("bench-engine") => engine::bench(&args),
         Some("selftest-fmt") => py::fmt::selftest(),
         Some("selftest-signature") => front::signature_main(&args),
-        Some("selftest-sniff") => front::cross::selftest(&args[2..]),
+        Some("selftest-sniff") => front::survey::selftest(&args[2..]),
         Some("selftest-re") => py::re::selftest(),
         Some("selftest-deflate") if args.len() == 4 => util::deflate::selftest(&args[2], &args[3]),
         _ => {

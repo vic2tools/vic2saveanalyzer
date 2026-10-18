@@ -233,7 +233,7 @@ MUTATIONS = [
         'in another is answered with the old report',
         'staleness.py', (),
         [
-            ('scanner/src/front/cross.rs', '    let read: Vec<&Surveyed> = found.iter().filter(|e| e.mod_path.is_some()).collect();', '    let read: Vec<&Surveyed> = found.iter().max_by_key(|e| e.files.len()).into_iter().collect();'),
+            ('scanner/src/front/survey.rs', '    let read: Vec<&Surveyed> = found.iter().filter(|e| e.mod_path.is_some()).collect();', '    let read: Vec<&Surveyed> = found.iter().max_by_key(|e| e.files.len()).into_iter().collect();'),
         ]),
     Mutation(
         'stamp-outlives-unfinished-run',
@@ -500,7 +500,7 @@ MUTATIONS = [
         'wins',
         'frontcheck.py', (),
         [
-            ('scanner/src/front/cross.rs', '    fits.sort_by(|a, b| a.partial_cmp(b).unwrap());\n    let (_r, label, root) = fits.remove(0);', '    fits.sort_by(|a, b| a.partial_cmp(b).unwrap());\n    let (_r, label, root) = fits.pop().unwrap();'),
+            ('scanner/src/front/survey.rs', '    fits.sort_by(|a, b| a.partial_cmp(b).unwrap());\n    let (_r, label, root) = fits.remove(0);', '    fits.sort_by(|a, b| a.partial_cmp(b).unwrap());\n    let (_r, label, root) = fits.pop().unwrap();'),
         ]),
     Mutation(
         'cross-flags-never-break',
@@ -508,7 +508,7 @@ MUTATIONS = [
         'it lacks',
         'frontcheck.py', (),
         [
-            ('scanner/src/front/cross.rs', '        if worst >= 6 {', '        if worst >= 600 {'),
+            ('scanner/src/front/survey.rs', '        if worst >= 6 {', '        if worst >= 600 {'),
         ]),
     Mutation(
         'market-snapshot-goods-by-id',
