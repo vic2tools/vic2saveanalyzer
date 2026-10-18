@@ -44,7 +44,8 @@ use crate::util::fx::{FxMap, FxSet};
 use rules::{Decline, Mod, D};
 use std::io::Write;
 use pool::{in_order, worker_count};
-use readsave::{basename, read_save, Refused};
+use crate::py::path::basename;
+use readsave::{read_save, Refused};
 
 /// Phase times, when `VIC2_ENGINE_TIMES` is set: appended to the file it
 /// names, or on stderr when it names none (`1`).

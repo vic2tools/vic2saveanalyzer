@@ -261,45 +261,9 @@ impl Mod {
 /// repr of a list or a block (`['a', 'b']`), which is what a condition
 /// holding a list where one value belongs is judged by.
 fn str_j(v: &J) -> String {
-    fn repr(v: &J, out: &mut String) {
-        match v {
-            J::Str(s) => out.push_str(&crate::engine::modread::py_repr(s)),
-            J::List(x) => {
-                out.push('[');
-                for (i, e) in x.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
-                    }
-                    repr(e, out);
-                }
-                out.push(']');
-            }
-            J::Obj(pairs) => {
-                out.push('{');
-                for (i, (k, e)) in pairs.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
-                    }
-                    out.push_str(&crate::engine::modread::py_repr(k));
-                    out.push_str(": ");
-                    repr(e, out);
-                }
-                out.push('}');
-            }
-            other => {
-                let mut t = String::new();
-                other.write(&mut t);
-                out.push_str(&t);
-            }
-        }
-    }
     match v {
         J::Str(s) => s.clone(),
-        other => {
-            let mut out = String::new();
-            repr(other, &mut out);
-            out
-        }
+        other => crate::py::repr::Repr::repr(other),
     }
 }
 

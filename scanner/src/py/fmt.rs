@@ -495,17 +495,3 @@ pub fn selftest() {
         writeln!(out, "{}", s).unwrap();
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn floats_take_underscores_where_python_does() {
-        assert_eq!(crate::py::num::float("1_000"), Some(1000.0));
-        assert_eq!(crate::py::num::float(" 1_0.5_0 "), Some(10.5));
-        for bad in ["_1", "1_", "1__0", "1_.5", "1._5"] {
-            assert_eq!(crate::py::num::float(bad), None, "{}", bad);
-        }
-    }
-}

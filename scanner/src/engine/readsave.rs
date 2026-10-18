@@ -18,15 +18,6 @@ use crate::save::province::{read_province, top_level_blocks, PopulationRules, Sc
 use crate::save::text::{latin1, tag_bytes, to_int_b, trim_b, unquote_b};
 use std::io::Read;
 
-/// `os.path.basename`, as the analyzer names a save.
-pub fn basename(path: &str) -> &str {
-    let cut: &[char] = if cfg!(windows) { &['/', '\\', ':'] } else { &['/'] };
-    match path.rfind(cut) {
-        Some(i) => &path[i + 1..],
-        None => path,
-    }
-}
-
 fn stamp(path: &str) -> Option<(u64, std::time::SystemTime)> {
     let m = std::fs::metadata(path).ok()?;
     Some((m.len(), m.modified().ok()?))
@@ -279,7 +270,7 @@ pub fn os_error_text(e: &std::io::Error, path: &str) -> String {
     };
     #[cfg(not(windows))]
     let errno = e.raw_os_error().unwrap_or(0);
-    format!("[Errno {}] {}: {}", errno, strerror, crate::engine::modread::py_repr(path))
+    format!("[Errno {}] {}: {}", errno, strerror, crate::py::repr::str_repr(path))
 }
 
 /// One save read whole: read again once if it
@@ -377,7 +368,7 @@ fn read_bytes(path: &str, reading: &Reading, raw: &[u8],
     };
     let rest = model::read_rest(text, &blocks)
         .map_err(|_| Refused::Back(format!("{}: the wars or the market hold something it cannot make out", path)))?;
-    let save = model::build(basename(path).to_string(), date, player, &scan, &countries, rest)
+    let save = model::build(crate::py::path::basename(path), date, player, &scan, &countries, rest)
         .map_err(|_| Refused::Back(format!("{}: the record could not be built", path)))?;
     // Again after the scan, not only after the read: a mapped file is read
     // as it is scanned, and one the game rewrote meanwhile would be half of

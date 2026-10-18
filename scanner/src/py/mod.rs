@@ -7,3 +7,4 @@ pub mod json;
 pub mod num;
 pub mod path;
 pub mod re;
+pub mod repr;

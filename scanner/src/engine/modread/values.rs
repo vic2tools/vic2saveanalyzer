@@ -10,13 +10,14 @@
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 
 use super::*;
+use crate::py::repr::Repr;
 use crate::py::num::float_latin1;
 
 /// `float(text)` where Python lets the ValueError out.
 pub(super) fn must_float(s: &[u8]) -> D<f64> {
     match float_latin1(s) {
         Some(v) => Ok(v),
-        None => raised(format!("could not convert string to float: {}", py_repr(&l1(s)))),
+        None => raised(format!("could not convert string to float: {}", crate::py::repr::str_repr(&l1(s)))),
     }
 }
 
@@ -52,7 +53,7 @@ pub(super) fn digit_word(w: &[u8]) -> D<bool> {
         return Ok(false);
     }
     if w.iter().any(|&c| !c.is_ascii_digit()) {
-        return raised(format!("invalid literal for int() with base 10: {}", py_repr(&l1(w))));
+        return raised(format!("invalid literal for int() with base 10: {}", crate::py::repr::str_repr(&l1(w))));
     }
     Ok(true)
 }
@@ -84,63 +85,12 @@ pub(super) fn lower1(b: &[u8]) -> Vec<u8> {
     }).collect()
 }
 
-/// `repr()` of a value, for the places Python calls `str()` on what may be
-/// a block.
-pub(super) fn repr(v: &V, out: &mut String) {
-    match v {
-        V::Str(s) => repr_str(s, out),
-        V::List(x) | V::Multi(x) => {
-            out.push('[');
-            for (i, e) in x.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                repr(e, out);
-            }
-            out.push(']');
-        }
-        V::Dict(d) => {
-            out.push('{');
-            for (i, (k, e)) in d.pairs.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                repr_str(k, out);
-                out.push_str(": ");
-                repr(e, out);
-            }
-            out.push('}');
-        }
-    }
-}
-
-pub(super) fn repr_str(s: &[u8], out: &mut String) {
-    let q = if s.contains(&b'\'') && !s.contains(&b'"') { '"' } else { '\'' };
-    out.push(q);
-    for &c in s {
-        match c {
-            b'\\' => out.push_str("\\\\"),
-            b'\t' => out.push_str("\\t"),
-            b'\n' => out.push_str("\\n"),
-            b'\r' => out.push_str("\\r"),
-            c if c as char == q => {
-                out.push('\\');
-                out.push(q);
-            }
-            0x00..=0x1f | 0x7f..=0xa0 | 0xad => out.push_str(&format!("\\x{:02x}", c)),
-            c => out.push(c as char),
-        }
-    }
-    out.push(q);
-}
-
 /// `str(value)`, latin-1.
 pub(crate) fn str_of(v: &V) -> Vec<u8> {
     match v {
         V::Str(s) => s.clone(),
         other => {
-            let mut s = String::new();
-            repr(other, &mut s);
+            let s = other.repr();
             // A repr of latin-1 text is latin-1 again.
             s.chars().map(|c| c as u32 as u8).collect()
         }

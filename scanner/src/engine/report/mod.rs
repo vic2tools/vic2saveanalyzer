@@ -202,7 +202,7 @@ pub fn run(run: &Run, m: &Mod, spent: Vec<Spent>) -> Outcome {
     }
     let _ = std::io::stdout().flush();
     say(&format!("@done html={} refused={}", html_path.is_some() as i32,
-                 refused.iter().map(|p| crate::engine::readsave::basename(p).to_string())
+                 refused.iter().map(|p| crate::py::path::basename(p))
                      .collect::<Vec<_>>().join("\t")));
     // The process ends with this run, and the system takes its memory back
     // whole: freeing the campaign a string at a time first cost ~0.3 s.

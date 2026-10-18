@@ -222,7 +222,7 @@ fn explain_mob_pool(spec: &Spec, tag: &str, m: &Mod, live: &FxSet<String>, pres:
     }
     let ppr = spec.pop_per_regiment;
     crate::outln!("\nMobilization pool for {} at {} ({})", tag, meta.date,
-                  crate::engine::readsave::basename(&meta.file));
+                  crate::py::path::basename(&meta.file));
     crate::outln!("  primary culture   {}", names::text(nat.primary_culture));
     let mut accepted: Vec<&str> = nat.accepted_cultures.iter().map(|s| names::text(*s)).collect();
     accepted.sort();

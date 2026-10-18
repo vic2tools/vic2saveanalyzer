@@ -38,7 +38,7 @@ pub fn say_mod(m: &Mod, live: &FxSet<String>, held: &[&[crate::engine::finish::P
                     }
                 }
                 if !past.is_empty() {
-                    let name = crate::engine::readsave::basename(file).to_string();
+                    let name = crate::py::path::basename(file);
                     let lo = *past.iter().min().unwrap();
                     let hi = *past.iter().max().unwrap();
                     odd.retain(|o| o.0 != name);

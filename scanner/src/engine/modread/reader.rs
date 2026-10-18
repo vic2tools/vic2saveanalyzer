@@ -108,7 +108,7 @@ pub fn base_game_path(path: &str) -> Option<String> {
     }
     let parent = dirname(path);
     let root = dirname(&parent);
-    if lower(basename(&parent)) != "mod" {
+    if lower(&basename(&parent)) != "mod" {
         return None;
     }
     if !is_install(&root) {

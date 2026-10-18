@@ -38,7 +38,6 @@ mod reader;
 mod values;
 
 pub use export::export;
-pub use paths::join;
 pub use reader::{base_game_path, block_end, is_install, Reader};
 pub(crate) use values::str_of;
 use paths::*;
@@ -214,49 +213,3 @@ pub fn main(args: &[String]) {
     }
 }
 
-/// `repr(s)` of a str: quoted the way Python quotes it, with what Python
-/// does not print escaped. Printable is Python's rule exactly for the first
-/// 256 characters, and past them for the spaces, separators and format
-/// characters a path could hold.
-pub fn py_repr(s: &str) -> String {
-    let q = if s.contains('\'') && !s.contains('"') { '"' } else { '\'' };
-    let mut out = String::new();
-    out.push(q);
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '\t' => out.push_str("\\t"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            c if c == q => {
-                out.push('\\');
-                out.push(q);
-            }
-            c if !printable(c) => {
-                let n = c as u32;
-                if n < 0x100 {
-                    out.push_str(&format!("\\x{:02x}", n));
-                } else if n < 0x10000 {
-                    out.push_str(&format!("\\u{:04x}", n));
-                } else {
-                    out.push_str(&format!("\\U{:08x}", n));
-                }
-            }
-            c => out.push(c),
-        }
-    }
-    out.push(q);
-    out
-}
-
-/// `str.isprintable()` for one character.
-fn printable(c: char) -> bool {
-    let n = c as u32;
-    match n {
-        0x00..=0x1f | 0x7f..=0xa0 | 0xad => false,
-        0x20..=0x7e | 0xa1..=0xff => true,
-        0x1680 | 0x2000..=0x200f | 0x2028..=0x202f | 0x205f..=0x2064 | 0x3000 | 0xfeff => false,
-        0xe000..=0xf8ff | 0xf0000..=0x10ffff => false,
-        _ => true,
-    }
-}

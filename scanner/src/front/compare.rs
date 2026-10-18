@@ -13,7 +13,6 @@
 use super::{refuse, Args, R};
 use super::stop;
 use super::survey::Surveyed;
-use crate::engine::modread;
 use crate::py::json::J;
 use std::collections::BTreeSet;
 
@@ -79,7 +78,7 @@ pub fn run_cross(parent: &str, found: &[Surveyed], args: &Args, verbose: bool)
     if let (Some(p), None, false) = (&args.primary, &primary, results.is_empty()) {
         let known: Vec<&str> = results.iter().map(|r| r.0.as_str()).collect();
         return refuse(format!("No campaign called {} under {}. There is: {}",
-                              modread::py_repr(p), parent, known.join(", ")));
+                              crate::py::repr::str_repr(p), parent, known.join(", ")));
     }
     let (entry, files) = match primary {
         Some(p) if !results.is_empty() => p,

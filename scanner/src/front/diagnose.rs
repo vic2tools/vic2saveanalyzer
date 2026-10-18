@@ -18,7 +18,8 @@
 use crate::save::clause::{unquote, V};
 use crate::py::num::float_latin1;
 use crate::save::walk::{looks_like_country_tag, parse_block, Tokens};
-use crate::engine::{Reading, readsave::basename, readsave::read_save, readsave::Refused};
+use crate::engine::{Reading, readsave::read_save, readsave::Refused};
+use crate::py::path::basename;
 use crate::util::fx::FxMap;
 use crate::py::re::space;
 
