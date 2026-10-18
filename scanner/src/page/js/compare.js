@@ -399,14 +399,9 @@ function centreText(svg, cx, cy, big, small) {
   svg.appendChild(b);
 }
 
-function drawMilPies() {
-  const svg = document.getElementById('milpies');
-  svg.textContent = '';
-  const legend = document.getElementById('millegend');
-  legend.textContent = '';
-  const readout = document.getElementById('milreadout');
-  const date = milSave.value;
-  document.getElementById('mildate').textContent = date;
+// One figure per side of the head-to-head at one save: every number the pies
+// and the readout draw on.
+function milSides(date) {
   const noun = milMode === 'army' ? 'brigades' : 'ships';
 
   const raised = [groupTotal(sideA, date), groupTotal(sideB, date)];
@@ -422,12 +417,6 @@ function drawMilPies() {
     ? [0, 1].map(i => Math.max(0, caps[i] - standing[i])) : [0, 0];
   const mobilized = [groupMobilized(sideA, date), groupMobilized(sideB, date)];
   const totals = [sideTotal(sideA, date), sideTotal(sideB, date)];
-  if (!sideA.length && !sideB.length) {
-    svgMessage(svg, 500, 200, 'Pick at least one nation for a side.');
-    readout.textContent = '';
-    return;
-  }
-
   const ratioText = totals[1] ? (totals[0] / totals[1]).toFixed(2) + '×' : '—';
   // Hulls are not interchangeable: five frigates are not a cruiser. Fleet power
   // is what a side's ships are worth in a fight, so it sits beside the count
@@ -446,6 +435,13 @@ function drawMilPies() {
     Math.abs(nowPowers[i] - powers[i]) > Math.max(0.5, powers[i] * 0.005));
   const powerRatio = powers && powers[1]
     ? (powers[0] / powers[1]).toFixed(2) + '×' : '—';
+  return {date, noun, raised, standing, mobs, caps, unbuilt, mobilized, totals, ratioText, powers, heavyPowers, nowPowers, powersDiffer, powerRatio};
+}
+
+// The readout's resting text -- totals, ratio, and what is behind them -- and
+// the standing/mobilized line the totals view also shows under its pie.
+function milSummary(sides) {
+  const {date, noun, raised, standing, mobs, caps, unbuilt, mobilized, totals, ratioText, powers, heavyPowers, nowPowers, powersDiffer, powerRatio} = sides;
   const powerBits = !powers ? ''
     : `<span><span class="rk">fleet power</span> `
       + `<b style="color:${SIDE_COLOUR[0]}">${fmtPower(powers[0])}</b>`
@@ -486,223 +482,251 @@ function drawMilPies() {
     + powerBits
     + mobBits
     + `<span class="rk">${totals[0] + totals[1] ? '' : 'no ' + noun + ' at this save'}</span>`;
-  const setIdle = () => readout.innerHTML = idle;
+  return {idle, split};
+}
 
-  if (milView === 'totals') {
-    // One pie, one slice per side: the broad "who has more" view.
-    const slices = [
-      {label: sideLabel(sideA), value: totals[0], colour: SIDE_COLOUR[0], tags: sideA, side: 0},
-      {label: sideLabel(sideB), value: totals[1], colour: SIDE_COLOUR[1], tags: sideB, side: 1},
-    ];
-    donut(svg, 500, 196, 84, 138, slices, slice => {
-      const share = (totals[0] + totals[1])
-        ? (slice.value / (totals[0] + totals[1]) * 100).toFixed(1) : '0.0';
-      const parts = slice.tags.map(tag => {
-        const n = sideTotal([tag], date);
-        return `<span><span class="rk">${tag}</span> <b style="color:${colourFor(tag)}">`
-             + `${n.toLocaleString()}</b></span>`;
-      });
-      readout.innerHTML = `<span class="rk">${slice.label}</span>`
-        + `<span><b style="color:${slice.colour}">${slice.value.toLocaleString()}</b> `
-        + `<span class="rk">${noun} (${share}% of both)</span></span>`
-        + (slice.tags.length > 1 ? parts.join('') : '');
-    }, {split: true});
-    // The donut hole is only ~2x its inner radius wide, so the centre label
-    // has to stay short -- "both sides" fits; tacking the noun and a
-    // mobilization note on (as this used to) ran past the ring itself. That
-    // detail moves to sit under each side's own number instead, where there
-    // is room for it and it reads as "how this side's total breaks down"
-    // rather than a caption on the aggregate.
-    centreText(svg, 500, 196, (totals[0] + totals[1]).toLocaleString(), 'both sides');
-
-    [[sideA, 0, 232], [sideB, 1, 768]].forEach(([tags, side, x]) => {
-      const head = el('text', {x, y: 34, 'text-anchor': 'middle', fill: SIDE_COLOUR[side],
-        'font-family': 'IBM Plex Mono, monospace', 'font-size': 13});
-      head.textContent = sideLabel(tags);
-      svg.appendChild(head);
-      const val = el('text', {x, y: 82, 'text-anchor': 'middle', fill: 'var(--ink)',
-        'font-family': 'Barlow Condensed, sans-serif', 'font-size': 40, 'font-weight': 600});
-      val.textContent = totals[side].toLocaleString();
-      svg.appendChild(val);
-      const sub = el('text', {x, y: 104, 'text-anchor': 'middle', fill: 'var(--ink-dim)',
-        'font-family': 'IBM Plex Mono, monospace', 'font-size': 11});
-      sub.textContent = noun;
-      svg.appendChild(sub);
-      // A second line under each side's number only when there is something
-      // to split it into -- a side with no mobilization ceiling (navy, or a
-      // nation that can't mobilize) has nothing worth breaking out.
-      if (milMode === 'army'
-          && (milPotential ? (mobs[side] || unbuilt[side]) : mobilized[side])) {
-        const breakdown = el('text', {x, y: 122, 'text-anchor': 'middle',
-          fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
-        breakdown.textContent = milPotential
-          ? `${standing[side].toLocaleString()} standing `
-            + (unbuilt[side] ? `+ ${unbuilt[side].toLocaleString()} unbuilt ` : '')
-            + `+ ${mobs[side].toLocaleString()} mob ceiling`
-          : `${standing[side].toLocaleString()} standing `
-            + `+ ${mobilized[side].toLocaleString()} mobilized`;
-        svg.appendChild(breakdown);
-      }
-      // The same slot under the navy's count carries what those hulls are
-      // worth, which is the number that actually decides a battle.
-      if (powers) {
-        const worth = el('text', {x, y: 122, 'text-anchor': 'middle',
-          fill: 'var(--brass)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 11});
-        worth.textContent = `${fmtPower(powers[side])} fleet power`;
-        svg.appendChild(worth);
-        let line = 138;
-        if (powersDiffer) {
-          const now = el('text', {x, y: line, 'text-anchor': 'middle',
-            fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
-          const pct = powers[side]
-            ? Math.round(100 * nowPowers[side] / powers[side]) : 100;
-          now.textContent = `${fmtPower(nowPowers[side])} at current strength `
-            + `(${pct}%)`;
-          svg.appendChild(now);
-          line += 15;
-        }
-        if (heavyPowers && heavyPowers[side] > powers[side] + 0.5) {
-          const vs = el('text', {x, y: line, 'text-anchor': 'middle',
-            fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
-          vs.textContent = `${fmtPower(heavyPowers[side])} against heavy ships`;
-          svg.appendChild(vs);
-        }
-      }
+// The totals view: one pie, a slice per side.
+function drawMilTotals(sides, view, split) {
+  const {date, noun, raised, standing, mobs, caps, unbuilt, mobilized, totals, ratioText, powers, heavyPowers, nowPowers, powersDiffer, powerRatio} = sides;
+  const {svg, legend, readout} = view;
+  // One pie, one slice per side: the broad "who has more" view.
+  const slices = [
+    {label: sideLabel(sideA), value: totals[0], colour: SIDE_COLOUR[0], tags: sideA, side: 0},
+    {label: sideLabel(sideB), value: totals[1], colour: SIDE_COLOUR[1], tags: sideB, side: 1},
+  ];
+  donut(svg, 500, 196, 84, 138, slices, slice => {
+    const share = (totals[0] + totals[1])
+      ? (slice.value / (totals[0] + totals[1]) * 100).toFixed(1) : '0.0';
+    const parts = slice.tags.map(tag => {
+      const n = sideTotal([tag], date);
+      return `<span><span class="rk">${tag}</span> <b style="color:${colourFor(tag)}">`
+           + `${n.toLocaleString()}</b></span>`;
     });
-    const ratio = el('text', {x: 500, y: 362, 'text-anchor': 'middle', fill: 'var(--brass)',
-      'font-family': 'IBM Plex Mono, monospace', 'font-size': 16, 'font-weight': 600});
-    ratio.textContent = ratioText;
-    svg.appendChild(ratio);
-    const ratioLabel = el('text', {x: 500, y: 380, 'text-anchor': 'middle',
-      fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
-    ratioLabel.textContent = 'ratio';
-    svg.appendChild(ratioLabel);
+    readout.innerHTML = `<span class="rk">${slice.label}</span>`
+      + `<span><b style="color:${slice.colour}">${slice.value.toLocaleString()}</b> `
+      + `<span class="rk">${noun} (${share}% of both)</span></span>`
+      + (slice.tags.length > 1 ? parts.join('') : '');
+  }, {split: true});
+  // The donut hole is only ~2x its inner radius wide, so the centre label
+  // has to stay short -- "both sides" fits; tacking the noun and a
+  // mobilization note on (as this used to) ran past the ring itself. That
+  // detail moves to sit under each side's own number instead, where there
+  // is room for it and it reads as "how this side's total breaks down"
+  // rather than a caption on the aggregate.
+  centreText(svg, 500, 196, (totals[0] + totals[1]).toLocaleString(), 'both sides');
 
-    slices.forEach(slice => {
-      const item = document.createElement('span');
-      item.className = 'slegend';
-      item.innerHTML = `<i style="background:${slice.colour}"></i>${slice.label} `
-        + `(${slice.value.toLocaleString()})`;
-      legend.appendChild(item);
-    });
-  } else {
-    // Two pies broken down by unit type, shared colour scale. The unit-type
-    // counts already include every brigade a side has raised so far,
-    // mobilized ones among them -- so the ceiling can only be added on top
-    // as *remaining* headroom (ceiling minus what's mobilized already), and
-    // only in Potential mode. Adding the full ceiling regardless of mode, as
-    // this used to, double-counted a nation's already-mobilized brigades:
-    // once inside its unit-type slices, again as part of "the ceiling".
-    const counts = [groupCounts(sideA, date), groupCounts(sideB, date)];
-    const remainingMob = milPotential
-      ? [0, 1].map(i => Math.max(0, mobs[i] - mobilized[i])) : [0, 0];
-    const present = milTypes().filter(t => counts.some(c => c[t]));
-    const setType = type => {
-      const parts = [0, 1].map(i => {
-        const n = type === '__mob' ? remainingMob[i]
-              : type === '__unbuilt' ? unbuilt[i] : (counts[i][type] || 0);
-        const pct = totals[i] ? (n / totals[i] * 100).toFixed(1) : '0.0';
-        return `<span><span class="rk">${i ? 'right' : 'left'}</span> `
-             + `<b style="color:${SIDE_COLOUR[i]}">${n.toLocaleString()}</b> `
-             + `<span class="rk">(${pct}%)</span></span>`;
-      });
-      const [x, y] = type === '__mob' ? remainingMob
-                   : type === '__unbuilt' ? unbuilt
-                   : [counts[0][type] || 0, counts[1][type] || 0];
-      const r = y ? (x / y).toFixed(2) + '×' : (x ? '—' : '');
-      const label = type === '__mob' ? 'still mobilizable'
-                  : type === '__unbuilt' ? 'cap not yet raised' : gameName(type);
-      // What one of these hulls is worth, side by side. The two sides can
-      // differ on the same hull type: inventions upgrade guns and armour, so
-      // one nation's cruiser is not another's.
-      let worth = '';
-      if (powers && type !== '__mob' && type !== '__unbuilt') {
-        const each = [0, 1].map(i => {
-          const per = sideCount[i] ? shipPowerOf(sideCount[i], date, type, false) : 0;
-          return `<span><span class="rk">${i ? 'right' : 'left'} each</span> `
-               + `<b style="color:${SIDE_COLOUR[i]}">${fmtPower(per)}</b> `
-               + `<span class="rk">x${(counts[i][type] || 0).toLocaleString()} `
-               + `= ${fmtPower(per * (counts[i][type] || 0))}</span></span>`;
-        });
-        worth = `<span class="rk">power</span>` + each.join('');
-      }
-      readout.innerHTML = `<span class="rk">${label}</span>` + parts.join('')
-        + (r ? `<span><span class="rk">ratio</span> <b>${r}</b></span>` : '')
-        + worth;
-    };
-    // A side is one nation or several. Power per hull belongs to a nation, so
-    // the readout quotes the side's largest fleet rather than pretending a
-    // coalition of nations on different technology shares one cruiser.
-    const shipsOf = t => ((DATA.facts[date] || {})[t] || {}).ships || 0;
-    const sideCount = [sideA, sideB].map(
-      tags => tags.slice().sort((a, b) => shipsOf(b) - shipsOf(a))[0]);
-
-    [[sideA, 0, 268], [sideB, 1, 732]].forEach(([tags, side, cx]) => {
-      const head = el('text', {x: cx, y: 34, 'text-anchor': 'middle', fill: SIDE_COLOUR[side],
-        'font-family': 'IBM Plex Mono, monospace', 'font-size': 13});
-      head.textContent = sideLabel(tags);
-      svg.appendChild(head);
-      const slices = present.map(type => ({
-        label: `${sideLabel(tags)} · ${gameName(type)}`, value: counts[side][type] || 0,
-        colour: milColour(type), type,
-      }));
-      if (unbuilt[side]) slices.push({
-        label: `${sideLabel(tags)} · cap not yet raised`, value: unbuilt[side],
-        colour: CAP_COLOUR, type: '__unbuilt',
-      });
-      if (remainingMob[side]) slices.push({
-        label: `${sideLabel(tags)} · still mobilizable`, value: remainingMob[side],
-        colour: MOB_COLOUR, type: '__mob',
-      });
-      donut(svg, cx, 196, 74, 122, slices, slice => setType(slice.type));
-      centreText(svg, cx, 196, totals[side].toLocaleString(), noun);
-      if (powers) {
-        const worth = el('text', {x: cx, y: 348, 'text-anchor': 'middle',
-          fill: 'var(--brass)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 13});
-        worth.textContent = fmtPower(powers[side]);
-        svg.appendChild(worth);
-        const cap = el('text', {x: cx, y: 364, 'text-anchor': 'middle',
-          fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
-        cap.textContent = 'fleet power';
-        svg.appendChild(cap);
-      }
-    });
-
-    const ratio = el('text', {x: 500, y: 190, 'text-anchor': 'middle', fill: 'var(--brass)',
-      'font-family': 'IBM Plex Mono, monospace', 'font-size': 15});
-    ratio.textContent = ratioText;
-    svg.appendChild(ratio);
-    const ratioLabel = el('text', {x: 500, y: 208, 'text-anchor': 'middle',
-      fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
-    ratioLabel.textContent = 'ratio';
-    svg.appendChild(ratioLabel);
-
-    present.forEach(type => {
-      const item = document.createElement('span');
-      item.className = 'slegend';
-      item.innerHTML = `<i style="background:${milColour(type)}"></i>${gameName(type)}`;
-      item.style.cursor = 'pointer';
-      item.onmouseenter = () => setType(type);
-      legend.appendChild(item);
-    });
-    if (unbuilt[0] || unbuilt[1]) {
-      const item = document.createElement('span');
-      item.className = 'slegend';
-      item.innerHTML = `<i style="background:${CAP_COLOUR}"></i>cap not yet raised`;
-      item.style.cursor = 'pointer';
-      item.onmouseenter = () => setType('__unbuilt');
-      legend.appendChild(item);
+  [[sideA, 0, 232], [sideB, 1, 768]].forEach(([tags, side, x]) => {
+    const head = el('text', {x, y: 34, 'text-anchor': 'middle', fill: SIDE_COLOUR[side],
+      'font-family': 'IBM Plex Mono, monospace', 'font-size': 13});
+    head.textContent = sideLabel(tags);
+    svg.appendChild(head);
+    const val = el('text', {x, y: 82, 'text-anchor': 'middle', fill: 'var(--ink)',
+      'font-family': 'Barlow Condensed, sans-serif', 'font-size': 40, 'font-weight': 600});
+    val.textContent = totals[side].toLocaleString();
+    svg.appendChild(val);
+    const sub = el('text', {x, y: 104, 'text-anchor': 'middle', fill: 'var(--ink-dim)',
+      'font-family': 'IBM Plex Mono, monospace', 'font-size': 11});
+    sub.textContent = noun;
+    svg.appendChild(sub);
+    // A second line under each side's number only when there is something
+    // to split it into -- a side with no mobilization ceiling (navy, or a
+    // nation that can't mobilize) has nothing worth breaking out.
+    if (milMode === 'army'
+        && (milPotential ? (mobs[side] || unbuilt[side]) : mobilized[side])) {
+      const breakdown = el('text', {x, y: 122, 'text-anchor': 'middle',
+        fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
+      breakdown.textContent = milPotential
+        ? `${standing[side].toLocaleString()} standing `
+          + (unbuilt[side] ? `+ ${unbuilt[side].toLocaleString()} unbuilt ` : '')
+          + `+ ${mobs[side].toLocaleString()} mob ceiling`
+        : `${standing[side].toLocaleString()} standing `
+          + `+ ${mobilized[side].toLocaleString()} mobilized`;
+      svg.appendChild(breakdown);
     }
-    if (remainingMob[0] || remainingMob[1]) {
-      const item = document.createElement('span');
-      item.className = 'slegend';
-      item.innerHTML = `<i style="background:${MOB_COLOUR}"></i>still mobilizable`;
-      item.style.cursor = 'pointer';
-      item.onmouseenter = () => setType('__mob');
-      legend.appendChild(item);
+    // The same slot under the navy's count carries what those hulls are
+    // worth, which is the number that actually decides a battle.
+    if (powers) {
+      const worth = el('text', {x, y: 122, 'text-anchor': 'middle',
+        fill: 'var(--brass)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 11});
+      worth.textContent = `${fmtPower(powers[side])} fleet power`;
+      svg.appendChild(worth);
+      let line = 138;
+      if (powersDiffer) {
+        const now = el('text', {x, y: line, 'text-anchor': 'middle',
+          fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
+        const pct = powers[side]
+          ? Math.round(100 * nowPowers[side] / powers[side]) : 100;
+        now.textContent = `${fmtPower(nowPowers[side])} at current strength `
+          + `(${pct}%)`;
+        svg.appendChild(now);
+        line += 15;
+      }
+      if (heavyPowers && heavyPowers[side] > powers[side] + 0.5) {
+        const vs = el('text', {x, y: line, 'text-anchor': 'middle',
+          fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
+        vs.textContent = `${fmtPower(heavyPowers[side])} against heavy ships`;
+        svg.appendChild(vs);
+      }
     }
+  });
+  const ratio = el('text', {x: 500, y: 362, 'text-anchor': 'middle', fill: 'var(--brass)',
+    'font-family': 'IBM Plex Mono, monospace', 'font-size': 16, 'font-weight': 600});
+  ratio.textContent = ratioText;
+  svg.appendChild(ratio);
+  const ratioLabel = el('text', {x: 500, y: 380, 'text-anchor': 'middle',
+    fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
+  ratioLabel.textContent = 'ratio';
+  svg.appendChild(ratioLabel);
+
+  slices.forEach(slice => {
+    const item = document.createElement('span');
+    item.className = 'slegend';
+    item.innerHTML = `<i style="background:${slice.colour}"></i>${slice.label} `
+      + `(${slice.value.toLocaleString()})`;
+    legend.appendChild(item);
+  });
+}
+
+// The composition view: a ring per side, a slice per unit type.
+function drawMilComposition(sides, view) {
+  const {date, noun, raised, standing, mobs, caps, unbuilt, mobilized, totals, ratioText, powers, heavyPowers, nowPowers, powersDiffer, powerRatio} = sides;
+  const {svg, legend, readout, setIdle} = view;
+  // Two pies broken down by unit type, shared colour scale. The unit-type
+  // counts already include every brigade a side has raised so far,
+  // mobilized ones among them -- so the ceiling can only be added on top
+  // as *remaining* headroom (ceiling minus what's mobilized already), and
+  // only in Potential mode. Adding the full ceiling regardless of mode, as
+  // this used to, double-counted a nation's already-mobilized brigades:
+  // once inside its unit-type slices, again as part of "the ceiling".
+  const counts = [groupCounts(sideA, date), groupCounts(sideB, date)];
+  const remainingMob = milPotential
+    ? [0, 1].map(i => Math.max(0, mobs[i] - mobilized[i])) : [0, 0];
+  const present = milTypes().filter(t => counts.some(c => c[t]));
+  const setType = type => {
+    const parts = [0, 1].map(i => {
+      const n = type === '__mob' ? remainingMob[i]
+            : type === '__unbuilt' ? unbuilt[i] : (counts[i][type] || 0);
+      const pct = totals[i] ? (n / totals[i] * 100).toFixed(1) : '0.0';
+      return `<span><span class="rk">${i ? 'right' : 'left'}</span> `
+           + `<b style="color:${SIDE_COLOUR[i]}">${n.toLocaleString()}</b> `
+           + `<span class="rk">(${pct}%)</span></span>`;
+    });
+    const [x, y] = type === '__mob' ? remainingMob
+                 : type === '__unbuilt' ? unbuilt
+                 : [counts[0][type] || 0, counts[1][type] || 0];
+    const r = y ? (x / y).toFixed(2) + '×' : (x ? '—' : '');
+    const label = type === '__mob' ? 'still mobilizable'
+                : type === '__unbuilt' ? 'cap not yet raised' : gameName(type);
+    // What one of these hulls is worth, side by side. The two sides can
+    // differ on the same hull type: inventions upgrade guns and armour, so
+    // one nation's cruiser is not another's.
+    let worth = '';
+    if (powers && type !== '__mob' && type !== '__unbuilt') {
+      const each = [0, 1].map(i => {
+        const per = sideCount[i] ? shipPowerOf(sideCount[i], date, type, false) : 0;
+        return `<span><span class="rk">${i ? 'right' : 'left'} each</span> `
+             + `<b style="color:${SIDE_COLOUR[i]}">${fmtPower(per)}</b> `
+             + `<span class="rk">x${(counts[i][type] || 0).toLocaleString()} `
+             + `= ${fmtPower(per * (counts[i][type] || 0))}</span></span>`;
+      });
+      worth = `<span class="rk">power</span>` + each.join('');
+    }
+    readout.innerHTML = `<span class="rk">${label}</span>` + parts.join('')
+      + (r ? `<span><span class="rk">ratio</span> <b>${r}</b></span>` : '')
+      + worth;
+  };
+  // A side is one nation or several. Power per hull belongs to a nation, so
+  // the readout quotes the side's largest fleet rather than pretending a
+  // coalition of nations on different technology shares one cruiser.
+  const shipsOf = t => ((DATA.facts[date] || {})[t] || {}).ships || 0;
+  const sideCount = [sideA, sideB].map(
+    tags => tags.slice().sort((a, b) => shipsOf(b) - shipsOf(a))[0]);
+
+  [[sideA, 0, 268], [sideB, 1, 732]].forEach(([tags, side, cx]) => {
+    const head = el('text', {x: cx, y: 34, 'text-anchor': 'middle', fill: SIDE_COLOUR[side],
+      'font-family': 'IBM Plex Mono, monospace', 'font-size': 13});
+    head.textContent = sideLabel(tags);
+    svg.appendChild(head);
+    const slices = present.map(type => ({
+      label: `${sideLabel(tags)} · ${gameName(type)}`, value: counts[side][type] || 0,
+      colour: milColour(type), type,
+    }));
+    if (unbuilt[side]) slices.push({
+      label: `${sideLabel(tags)} · cap not yet raised`, value: unbuilt[side],
+      colour: CAP_COLOUR, type: '__unbuilt',
+    });
+    if (remainingMob[side]) slices.push({
+      label: `${sideLabel(tags)} · still mobilizable`, value: remainingMob[side],
+      colour: MOB_COLOUR, type: '__mob',
+    });
+    donut(svg, cx, 196, 74, 122, slices, slice => setType(slice.type));
+    centreText(svg, cx, 196, totals[side].toLocaleString(), noun);
+    if (powers) {
+      const worth = el('text', {x: cx, y: 348, 'text-anchor': 'middle',
+        fill: 'var(--brass)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 13});
+      worth.textContent = fmtPower(powers[side]);
+      svg.appendChild(worth);
+      const cap = el('text', {x: cx, y: 364, 'text-anchor': 'middle',
+        fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
+      cap.textContent = 'fleet power';
+      svg.appendChild(cap);
+    }
+  });
+
+  const ratio = el('text', {x: 500, y: 190, 'text-anchor': 'middle', fill: 'var(--brass)',
+    'font-family': 'IBM Plex Mono, monospace', 'font-size': 15});
+  ratio.textContent = ratioText;
+  svg.appendChild(ratio);
+  const ratioLabel = el('text', {x: 500, y: 208, 'text-anchor': 'middle',
+    fill: 'var(--ink-dim)', 'font-family': 'IBM Plex Mono, monospace', 'font-size': 10});
+  ratioLabel.textContent = 'ratio';
+  svg.appendChild(ratioLabel);
+
+  present.forEach(type => {
+    const item = document.createElement('span');
+    item.className = 'slegend';
+    item.innerHTML = `<i style="background:${milColour(type)}"></i>${gameName(type)}`;
+    item.style.cursor = 'pointer';
+    item.onmouseenter = () => setType(type);
+    legend.appendChild(item);
+  });
+  if (unbuilt[0] || unbuilt[1]) {
+    const item = document.createElement('span');
+    item.className = 'slegend';
+    item.innerHTML = `<i style="background:${CAP_COLOUR}"></i>cap not yet raised`;
+    item.style.cursor = 'pointer';
+    item.onmouseenter = () => setType('__unbuilt');
+    legend.appendChild(item);
   }
+  if (remainingMob[0] || remainingMob[1]) {
+    const item = document.createElement('span');
+    item.className = 'slegend';
+    item.innerHTML = `<i style="background:${MOB_COLOUR}"></i>still mobilizable`;
+    item.style.cursor = 'pointer';
+    item.onmouseenter = () => setType('__mob');
+    legend.appendChild(item);
+  }
+}
 
+function drawMilPies() {
+  const svg = document.getElementById('milpies');
+  svg.textContent = '';
+  const legend = document.getElementById('millegend');
+  legend.textContent = '';
+  const readout = document.getElementById('milreadout');
+  const date = milSave.value;
+  document.getElementById('mildate').textContent = date;
+  if (!sideA.length && !sideB.length) {
+    svgMessage(svg, 500, 200, 'Pick at least one nation for a side.');
+    readout.textContent = '';
+    return;
+  }
+  const sides = milSides(date);
+  const {idle, split} = milSummary(sides);
+  const setIdle = () => readout.innerHTML = idle;
+  const view = {svg, legend, readout, setIdle};
+  if (milView === 'totals') drawMilTotals(sides, view, split);
+  else drawMilComposition(sides, view);
   svg.onpointerleave = setIdle;
   setIdle();
 }
