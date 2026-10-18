@@ -26,7 +26,7 @@ use crate::util::omap::OMap;
 use crate::util::fx::{FxMap, FxSet};
 use crate::py::fmt::{floordiv, push_csv_field, push_float, push_int, push_json_float,
                    push_json_str, round, trunc_int, Num};
-use crate::engine::rules::{impact_for, naval_profile, rate_for, save_world, Mod, World, D};
+use crate::engine::rules::{impact_for, naval_profile, rate_for, save_world, Rules, World, D};
 
 /// `finishing.Finish`, and the few things of the run the tables need.
 /// Its `rate` is not here: it is the rate a run with no mod uses, and the
@@ -656,7 +656,7 @@ pub(crate) fn csv_line(out: &mut String, vals: &[Val]) {
 }
 
 /// The rest of finishing, and `save_rows`: one prepared save spent.
-pub fn finish(pre: Pre, spec: &Spec, m: &Mod, live: Option<&FxSet<String>>) -> D<Spent> {
+pub fn finish(pre: Pre, spec: &Spec, m: &Rules, live: Option<&FxSet<String>>) -> D<Spent> {
     let Pre { meta, nations, chunk, .. } = pre;
     let world: World = save_world(&meta, m);
     let date = meta.date.clone();
@@ -757,7 +757,7 @@ pub fn finish(pre: Pre, spec: &Spec, m: &Mod, live: Option<&FxSet<String>>) -> D
         }
         let mut techs: Vec<Sym> = nat.tech_list.clone();
         techs.sort_by(|a, b| names::cmp(*a, *b));
-        let dense = m.dense();
+        let dense = &m.dense;
         let mut names: Vec<String> = Vec::with_capacity(techs.len());
         for tech in &techs {
             let (branch, line) = dense.tech_group(*tech).unwrap_or(("other", "Other"));

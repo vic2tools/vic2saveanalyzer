@@ -11,7 +11,7 @@
 use super::*;
 
 /// `_say_mod`, once the inventions are settled.
-pub fn say_mod(m: &Mod, live: &FxSet<String>, held: &[&[crate::engine::finish::PreNation]], files: &[String]) {
+pub fn say_mod(m: &Rules, live: &FxSet<String>, held: &[&[crate::engine::finish::PreNation]], files: &[String]) {
     let seq = &m.invention_sequence;
     match m.index_base {
         None => crate::outln!("\nInvention indices could not be decoded from {} inventions; falling back \

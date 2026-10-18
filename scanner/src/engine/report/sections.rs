@@ -516,7 +516,7 @@ pub(super) fn section_tables(run: &Run, c: &Campaign) -> String {
 }
 
 /// `priceDates` to `supply`: the market; and the first and last price dates.
-pub(super) fn section_market(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow],
+pub(super) fn section_market(run: &Run, m: &Rules, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow],
                   dates: &[String]) -> (String, Option<(String, String)>) {
     let t = &run.tables;
     let mut p = String::with_capacity(8 << 20);

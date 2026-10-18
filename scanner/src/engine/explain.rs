@@ -19,7 +19,7 @@
 
 use crate::engine::finish::{in_pool, Pre, Spec};
 use crate::engine::model::Nation;
-use crate::engine::rules::{self, Mod};
+use crate::engine::rules::{self, Mod, Rules};
 use crate::engine::{Reading, readsave::read_save, readsave::Refused};
 use crate::util::fx::FxSet;
 use crate::save::names::{self, Sym};
@@ -88,7 +88,7 @@ fn last_nation(pres: &[Pre], files: &[String], reading: &Reading, tag: &str)
 
 /// `explain(args, mod, live, parsed)`, for the one that was asked.
 #[allow(clippy::too_many_arguments)]
-pub fn answer(ask: &Ask, spec: &Spec, m: &Mod, live: &FxSet<String>, pres: &[Pre],
+pub fn answer(ask: &Ask, spec: &Spec, m: &Rules, live: &FxSet<String>, pres: &[Pre],
               files: &[String], reading: &Reading) -> Result<(), String> {
     match ask {
         Ask::MobPool(tag) => explain_mob_pool(spec, &tag.to_uppercase(), m, live, pres, files, reading),
@@ -98,7 +98,7 @@ pub fn answer(ask: &Ask, spec: &Spec, m: &Mod, live: &FxSet<String>, pres: &[Pre
     }
 }
 
-fn explain_mob(tag: &str, m: &Mod, live: &FxSet<String>, pres: &[Pre], files: &[String],
+fn explain_mob(tag: &str, m: &Rules, live: &FxSet<String>, pres: &[Pre], files: &[String],
                reading: &Reading) -> Result<(), String> {
     let (nat, player) = last_nation(pres, files, reading, tag)?;
     let meta = &pres.last().unwrap().meta;
@@ -138,7 +138,7 @@ fn explain_mob(tag: &str, m: &Mod, live: &FxSet<String>, pres: &[Pre], files: &[
 }
 
 #[allow(clippy::too_many_arguments)]
-fn explain_mob_pool(spec: &Spec, tag: &str, m: &Mod, live: &FxSet<String>, pres: &[Pre],
+fn explain_mob_pool(spec: &Spec, tag: &str, m: &Rules, live: &FxSet<String>, pres: &[Pre],
                     files: &[String], reading: &Reading) -> Result<(), String> {
     let (nat, player) = last_nation(pres, files, reading, tag)?;
     let meta = &pres.last().unwrap().meta;
@@ -298,7 +298,7 @@ fn alignment_score(m: &Mod, holdings: &[(i64, Vec<FxSet<&str>>)], base: i64)
     (counts, detail)
 }
 
-fn check_inventions(m: &Mod, pres: &[Pre]) -> Result<(), String> {
+fn check_inventions(m: &Rules, pres: &[Pre]) -> Result<(), String> {
     let holdings = index_holdings(pres);
     let seq = &m.invention_sequence;
     crate::outln!("\nChecking {} inventions against {} saves.", seq.len(), pres.len());
@@ -395,7 +395,7 @@ fn check_inventions(m: &Mod, pres: &[Pre]) -> Result<(), String> {
     Ok(())
 }
 
-fn inventions(tag: &str, m: &Mod, pres: &[Pre], files: &[String], reading: &Reading)
+fn inventions(tag: &str, m: &Rules, pres: &[Pre], files: &[String], reading: &Reading)
               -> Result<(), String> {
     let (nat, _player) = last_nation(pres, files, reading, tag)?;
     let meta = &pres.last().unwrap().meta;

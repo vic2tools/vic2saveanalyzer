@@ -297,9 +297,6 @@ impl Mod {
             flag_roots: strings(j.at("flag_roots")),
             map_bmp: j.at("map_bmp").str().to_string(),
             map_csv: j.at("map_csv").str().to_string(),
-            index_base: None,
-            raster: None,
-            dense: None,
         };
         Ok(m)
     }

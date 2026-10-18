@@ -147,19 +147,27 @@ pub struct Mod {
     pub flag_roots: Vec<String>,
     pub map_bmp: String,
     pub map_csv: String,
-    /// Settled against the campaign (`decode_indices`); None is "cannot".
-    pub index_base: Option<i64>,
-    /// The map's bitmap as (width, height, runs), when it was decoded ahead.
-    pub raster: Option<(i64, i64, Vec<(i64, i64)>)>,
-    /// The rates' lookups as tables indexed by name, made once the campaign
-    /// is settled (`Dense::build`); None until then.
-    pub dense: Option<Dense>,
 }
 
-impl Mod {
-    /// The dense tables. A run makes them before anything asks for a rate.
-    pub fn dense(&self) -> &Dense {
-        self.dense.as_ref().expect("the mod's dense tables are made after the campaign is settled")
+/// A mod settled against one campaign: the mod as read, and what the
+/// campaign decides of it. It reads as the mod (`Deref`) wherever only the
+/// mod is wanted.
+pub struct Rules {
+    pub m: Mod,
+    /// How the saves number the mod's inventions (`decode_indices`); None
+    /// is "cannot".
+    pub index_base: Option<i64>,
+    /// The rates' lookups, as tables indexed by name.
+    pub dense: Dense,
+    /// The map's bitmap as (width, height, runs), for a run that makes a page.
+    pub raster: Option<(i64, i64, Vec<(i64, i64)>)>,
+}
+
+impl std::ops::Deref for Rules {
+    type Target = Mod;
+
+    fn deref(&self) -> &Mod {
+        &self.m
     }
 }
 
@@ -363,7 +371,7 @@ fn capital(nat: &Nation) -> D<i64> {
 }
 
 pub struct Asker<'a> {
-    pub m: &'a Mod,
+    pub m: &'a Rules,
     pub world: Option<&'a World>,
     /// The inventions a nation holds, by name; made the first time a trigger asks.
     pub inventions: std::cell::OnceCell<Option<FxSet<&'a str>>>,
@@ -597,7 +605,7 @@ impl<'a> Asker<'a> {
 // ------------------------------------------------------------ the rates
 
 /// `held_inventions`: the names a nation's indices decode to, or None.
-pub fn held_inventions<'a>(nat: &Nation, m: &'a Mod) -> Option<FxSet<&'a str>> {
+pub fn held_inventions<'a>(nat: &Nation, m: &'a Rules) -> Option<FxSet<&'a str>> {
     let base = m.index_base?;
     let seq = &m.invention_sequence;
     let mut out = FxSet::default();
@@ -615,10 +623,10 @@ fn subset(need: &[String], have: &FxSet<String>) -> bool {
 }
 
 /// `breakdown(...)`: every contribution, as (kind, name, value).
-pub fn breakdown(nat: &Nation, m: &Mod, live: Option<&FxSet<String>>, world: Option<&World>,
+pub fn breakdown(nat: &Nation, m: &Rules, live: Option<&FxSet<String>>, world: Option<&World>,
                  is_player: bool) -> D<Vec<(&'static str, String, f64)>> {
     let mut parts = Vec::new();
-    let d = m.dense();
+    let d = &m.dense;
     for tech in &nat.tech_list {
         let v = d.tech_mob(*tech);
         if v != 0.0 {
@@ -691,7 +699,7 @@ pub fn breakdown(nat: &Nation, m: &Mod, live: Option<&FxSet<String>>, world: Opt
 
 /// `rate_for`: the sum, floored at zero -- `max(0.0, sum(...))`, where an
 /// empty sum is the int 0 and `max` keeps the first of equals: 0.0.
-pub fn rate_for(nat: &Nation, m: &Mod, live: Option<&FxSet<String>>, world: Option<&World>,
+pub fn rate_for(nat: &Nation, m: &Rules, live: Option<&FxSet<String>>, world: Option<&World>,
                 is_player: bool) -> D<f64> {
     let parts = breakdown(nat, m, live, world, is_player)?;
     let total = py_sum(parts.iter().map(|p| p.2)).unwrap_or(0.0);
@@ -699,10 +707,10 @@ pub fn rate_for(nat: &Nation, m: &Mod, live: Option<&FxSet<String>>, world: Opti
 }
 
 /// `impact_for`.
-pub fn impact_for(nat: &Nation, m: &Mod, world: Option<&World>, is_player: bool) -> D<f64> {
+pub fn impact_for(nat: &Nation, m: &Rules, world: Option<&World>, is_player: bool) -> D<f64> {
     let inventions = std::cell::OnceCell::new();
     let mut total = 0.0;
-    let d = m.dense();
+    let d = &m.dense;
     for name in &nat.modifiers {
         total += d.modifier_impact(*name);
     }
@@ -722,7 +730,7 @@ pub fn impact_for(nat: &Nation, m: &Mod, world: Option<&World>, is_player: bool)
 
 /// `naval_profile`: {ship: [hull, gun_power, evasion, torpedo_attack,
 /// score], heavy}, in the mod's order.
-pub fn naval_profile(nat: &Nation, m: &Mod) -> Vec<(String, [f64; 5], i64)> {
+pub fn naval_profile(nat: &Nation, m: &Rules) -> Vec<(String, [f64; 5], i64)> {
     let mut out: Vec<(String, [f64; 5], i64)> =
         m.naval_units.iter().map(|s| (s.name.clone(), s.stats, s.heavy)).collect();
     if out.is_empty() {
@@ -746,7 +754,7 @@ pub fn naval_profile(nat: &Nation, m: &Mod) -> Vec<(String, [f64; 5], i64)> {
         }
     };
     for tech in &nat.tech_list {
-        if let Some(ch) = m.dense().naval_tech(*tech) {
+        if let Some(ch) = &m.dense.naval_tech(*tech) {
             apply(&mut out, ch);
         }
     }
@@ -886,8 +894,11 @@ pub fn index_base_for(m: &Mod, every: &[&PreNation]) -> Option<i64> {
     if best_rate <= 0.05 { best } else { None }
 }
 
-/// `settle_campaign`: the live inventions; the base is written onto `m`.
-pub fn settle_campaign(m: &mut Mod, saves: &[&[PreNation]]) -> FxSet<String> {
+/// `settle_campaign`: the mod settled against the campaign's saves, and the
+/// inventions the campaign can reach. `tech_group` is the run's tech ->
+/// (branch, line); `raster` the map, when the run decoded it.
+pub fn settle_campaign(m: Mod, saves: &[&[PreNation]], tech_group: &FxMap<String, (String, String)>,
+                       raster: Option<(i64, i64, Vec<(i64, i64)>)>) -> (Rules, FxSet<String>) {
     let mut all_techs: OMap<&str, FxSet<&str>> = OMap::new();
     let mut every: Vec<&PreNation> = Vec::new();
     for nations in saves {
@@ -897,9 +908,10 @@ pub fn settle_campaign(m: &mut Mod, saves: &[&[PreNation]]) -> FxSet<String> {
                 .extend(pn.nat.tech_list.iter().map(|t| names::text(*t)));
         }
     }
-    let live = attainable_inventions(m, &all_techs);
-    m.index_base = index_base_for(m, &every);
-    live
+    let live = attainable_inventions(&m, &all_techs);
+    let index_base = index_base_for(&m, &every);
+    let dense = Dense::build(&m, tech_group);
+    (Rules { m, index_base, dense, raster }, live)
 }
 
 #[cfg(test)]

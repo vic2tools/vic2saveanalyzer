@@ -26,7 +26,7 @@ use crate::save::names::{self, Sym};
 use crate::util::omap::OMap;
 use crate::util::fx::{FxMap, FxSet};
 use crate::py::fmt::{push_csv_field, push_int, push_json_float, push_json_str, round};
-use crate::engine::rules::{self, Mod};
+use crate::engine::rules::{self, Mod, Rules};
 use crate::engine::wars::{self, Book, Mapping};
 use std::io::Write;
 
@@ -158,7 +158,7 @@ pub struct CrossPart {
     pub names: Vec<(String, String)>,
 }
 
-pub fn run(run: &Run, m: &Mod, spent: Vec<Spent>) -> Outcome {
+pub fn run(run: &Run, m: &Rules, spent: Vec<Spent>) -> Outcome {
     let c = walk(spent);
     crate::engine::phase("walked");
     let metas: Vec<&Meta> = c.parsed.iter().map(|k| &k.meta).collect();
@@ -210,7 +210,7 @@ pub fn run(run: &Run, m: &Mod, spent: Vec<Spent>) -> Outcome {
 }
 
 /// `build_html` and `build_report`: the page, written; its path.
-fn page(run: &Run, m: &Mod, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow])
+fn page(run: &Run, m: &Rules, c: &Campaign, prices: &[PriceRow], snaps: &[SnapRow])
         -> Result<String, String> {
     let t = &run.tables;
     let rows = &c.rows;
