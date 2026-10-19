@@ -90,7 +90,10 @@ fn relpath(root: &str, parent: &str) -> String {
     rest.trim_start_matches(pypath::SEP).to_string()
 }
 
-/// `installed_mods(game_root)`: the game, and every mod folder beside it.
+/// `installed_mods(game_root)`: the game, every mod folder in its mod
+/// folder, and then every other mod folder a .mod file there points to
+/// inside the install -- a mod kept a level down, as a clone of its
+/// repository is. Each by its folder's name.
 fn installed_mods(game_root: &str) -> Vec<(String, String)> {
     let mut out = vec![("(unmodded)".to_string(), game_root.to_string())];
     let home = join(game_root, "mod");
@@ -103,6 +106,13 @@ fn installed_mods(game_root: &str) -> Vec<(String, String)> {
         let path = join(&home, &name);
         if pypath::isdir(&path) && pypath::isdir(&join(&path, "common")) {
             out.push((name, path));
+        }
+    }
+    for d in modread::place::descriptors(game_root) {
+        let known = out[1..].iter().any(|(_, p)| modread::place::same_folder(p, &d.path));
+        if !known && pypath::isdir(&join(&d.path, "common"))
+            && modread::place::lies_in(&d.path, game_root) {
+            out.push((basename(&d.path), d.path));
         }
     }
     out

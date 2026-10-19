@@ -690,4 +690,46 @@ MUTATIONS = [
         [
             ('vic2tools/report_tab.py', "            f\"{mod_path} is not in a Victoria II install's mod folder. Put the \"", "            f\"{mod_path} is not in a Victoria II install's mods folder. Put the \""),
         ]),
+    Mutation(
+        'mod-install-two-folders-up',
+        "a mod's install is looked for two folders up only, so a mod kept a "
+        'level down, as a clone of its repository, sits in no install and is '
+        'refused',
+        'modplaces.py', (),
+        [
+            ('scanner/src/engine/modread/place.rs', '    let mut up = dirname(path);\n', '    let mut up = dirname(&dirname(path));\n'),
+            ('scanner/src/engine/modread/place.rs', '        up = next;\n', '        let _ = next;\n        return None;\n'),
+        ]),
+    Mutation(
+        'cross-ignores-mod-files',
+        "--cross searches only the mod folder's own children, so a mod a "
+        '.mod file points to a level down is never a candidate',
+        'modplaces.py', (),
+        [
+            ('scanner/src/front/survey.rs', '    for d in modread::place::descriptors(game_root) {\n', '    for d in modread::place::descriptors(game_root).into_iter().take(0) {\n'),
+        ]),
+    Mutation(
+        'window-ignores-mod-files',
+        "the window's campaign rows offer only the mod folder's own "
+        'children, so a mod a level down is never offered',
+        'modplaces.py', (),
+        [
+            ('vic2tools/report_tab.py', '    for path in _mod_files(install):\n', '    for path in _mod_files(install)[:0]:\n'),
+        ]),
+    Mutation(
+        'replace-path-ignored',
+        "a folder a mod's .mod file replaces is still filled in from the "
+        'game, so the game\'s cultures and formations leak into the mod',
+        'modplaces.py', (),
+        [
+            ('scanner/src/engine/modread/reader.rs', '        if gone { None } else { self.base.as_deref() }\n', '        let _ = gone;\n        self.base.as_deref()\n'),
+        ]),
+    Mutation(
+        'replace-path-not-in-key',
+        "the kept copy of a mod is keyed without its .mod file's "
+        'replace_path, so an edit to it is answered with the mod as read before',
+        'modplaces.py', (),
+        [
+            ('scanner/src/front/mod.rs', '    for folder in &replaced {\n', '    for folder in replaced.iter().take(0) {\n'),
+        ]),
 ]

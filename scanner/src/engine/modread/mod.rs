@@ -34,11 +34,13 @@ use std::rc::Rc;
 mod export;
 mod paths;
 mod pieces;
+pub mod place;
 mod reader;
 mod values;
 
 pub use export::export;
-pub use reader::{base_game_path, block_end, is_install, Reader};
+pub use place::base_game_path;
+pub use reader::{block_end, is_install, Reader};
 pub(crate) use values::str_of;
 use paths::*;
 use pieces::set_pair;

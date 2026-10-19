@@ -360,9 +360,9 @@ def command_line():
     ap.add_argument("-o", "--out", default="vic2_report", help="output folder")
     ap.add_argument("--tags", nargs="*", help="only keep these country tags")
     ap.add_argument("--mod-path",
-                    help="the mod the campaign was played on, in the mod "
-                         "folder of the game it runs on: <Victoria 2>/mod/"
-                         "<name>. Each nation's mobilisation size is computed "
+                    help="the mod the campaign was played on, inside the "
+                         "game it runs on: <Victoria 2>/mod/<name>, or wherever "
+                         "its .mod file there points. Each nation's mobilisation size is computed "
                          "from its own rules, and --mobilisation-size becomes "
                          "a fallback only. Leave it out for the unmodded game.")
     ap.add_argument("--check-inventions", action="store_true",

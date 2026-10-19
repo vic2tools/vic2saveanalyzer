@@ -90,6 +90,9 @@ pub(super) struct Loc {
 pub struct Reader {
     pub(super) path: String,
     pub(super) base: Option<String>,
+    /// The folders the mod's .mod file replaces (`place::folder_key`):
+    /// the game's copy of each is not read.
+    pub(super) replaced: Vec<String>,
     pub(super) re: Pats,
     pub(super) plain: RefCell<HashMap<String, Rc<Vec<u8>>>>,
     pub(super) trees: RefCell<HashMap<String, Top>>,
@@ -101,27 +104,14 @@ pub fn is_install(path: &str) -> bool {
     !path.is_empty() && is_file(&joins(path, &["map", "default.map"]))
 }
 
-/// `_base_game_path`, for a path already made absolute.
-pub fn base_game_path(path: &str) -> Option<String> {
-    if path.is_empty() {
-        return None;
-    }
-    let parent = dirname(path);
-    let root = dirname(&parent);
-    if lower(&basename(&parent)) != "mod" {
-        return None;
-    }
-    if !is_install(&root) {
-        return None;
-    }
-    Some(root)
-}
-
 impl Reader {
     pub fn new(path: &str) -> Reader {
+        let base = base_game_path(path);
+        let replaced = base.as_deref().map(|b| place::replaced(path, b)).unwrap_or_default();
         Reader {
             path: path.to_string(),
-            base: base_game_path(path),
+            base,
+            replaced,
             re: Pats::new(),
             plain: RefCell::new(HashMap::new()),
             trees: RefCell::new(HashMap::new()),
@@ -129,21 +119,30 @@ impl Reader {
         }
     }
 
+    /// The install beneath the mod, for a file in `folder` (`a/b`): None
+    /// when there is none, or the mod's .mod file replaces the folder or one
+    /// it lies in, as the game then reads that folder from the mod alone.
+    pub(super) fn base_for(&self, folder: &str) -> Option<&str> {
+        let key = place::folder_key(folder);
+        let gone = self.replaced.iter().any(|r| key == *r || key.starts_with(&format!("{}/", r)));
+        if gone { None } else { self.base.as_deref() }
+    }
+
     /// The base game first, then the mod: the order most things are laid
-    /// over each other in.
-    pub(super) fn game_then_mod(&self) -> Vec<&str> {
+    /// over each other in. For files in `folder`.
+    pub(super) fn game_then_mod(&self, folder: &str) -> Vec<&str> {
         let mut v = Vec::new();
-        if let Some(b) = &self.base {
-            v.push(b.as_str());
+        if let Some(b) = self.base_for(folder) {
+            v.push(b);
         }
         v.push(self.path.as_str());
         v
     }
 
-    pub(super) fn mod_then_game(&self) -> Vec<&str> {
+    pub(super) fn mod_then_game(&self, folder: &str) -> Vec<&str> {
         let mut v = vec![self.path.as_str()];
-        if let Some(b) = &self.base {
-            v.push(b.as_str());
+        if let Some(b) = self.base_for(folder) {
+            v.push(b);
         }
         v
     }
@@ -153,7 +152,7 @@ impl Reader {
         if is_file(&own) {
             return own;
         }
-        if let Some(root) = &self.base {
+        if let Some(root) = self.base_for(&parts[..parts.len() - 1].join("/")) {
             let inherited = joins(root, parts);
             if is_file(&inherited) {
                 return inherited;
@@ -178,7 +177,7 @@ impl Reader {
     /// `resolved_files`: (name, the copy the game reads), in load order.
     pub(super) fn resolved_files(&self, folder: &str) -> D<Vec<(String, String)>> {
         let mut chosen: OMap<String, (String, String)> = OMap::new();
-        for root in self.game_then_mod() {
+        for root in self.game_then_mod(folder) {
             let target = join(root, folder);
             for name in Reader::files(&target)? {
                 let full = join(&target, &name);
@@ -396,7 +395,7 @@ impl Reader {
             return Ok(l.clone());
         }
         let mut out = Vec::new();
-        for root in self.mod_then_game() {
+        for root in self.mod_then_game("localisation") {
             let folder = join(root, "localisation");
             if !is_dir(&folder) {
                 continue;

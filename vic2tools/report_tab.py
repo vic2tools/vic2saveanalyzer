@@ -80,33 +80,104 @@ def mod_kind(path):
     bare = os.path.normpath(path)
     home = bare if os.path.basename(bare).lower() == "mod" \
         else os.path.join(bare, "mod")
-    if os.path.isdir(home):
-        try:
-            for name in os.listdir(home):
-                if os.path.isdir(os.path.join(home, name, "common")):
-                    return "home", os.path.dirname(home)
-        except OSError:
-            pass
+    if os.path.isdir(home) and installed_mods(os.path.dirname(home)):
+        return "home", os.path.dirname(home)
     return "bad", None
 
 
 def search_root(path):
     """The install to search for mods, given whatever is in the mod box.
 
-    The folder of mods answers this outright. One mod answers it too: a mod
-    lives in `Victoria 2/mod/<name>`, so the install is two folders up. That
-    is what lets one campaign be left on "work it out" while the rest are
-    read under the mod that was picked. Returns None when there is nowhere
-    to search, which is the mod box holding a mod kept off on its own.
+    The folder of mods answers this outright. One mod answers it too: its
+    install is the nearest one above it, two folders up for a mod at
+    `Victoria 2/mod/<name>` and three for one kept a level down. That is
+    what lets one campaign be left on "work it out" while the rest are read
+    under the mod that was picked. Returns None when there is nowhere to
+    search, which is the mod box holding a mod kept off on its own.
     """
     kind, where = mod_kind(path)
     if kind == "home":
         return where
     if kind == "mod":
-        home = os.path.dirname(os.path.normpath(path))
-        if os.path.basename(home).lower() == "mod":
-            return os.path.dirname(home)
+        return _base_game_path(path)
     return None
+
+
+def _folder_mods(home):
+    """[(name, path)] of the folders in `home` that are mods, by name."""
+    out = []
+    try:
+        for name in sorted(os.listdir(home)):
+            path = os.path.join(home, name)
+            if os.path.isdir(os.path.join(path, "common")):
+                out.append((name, path))
+    except OSError:
+        pass
+    return out
+
+
+def _mod_files(install):
+    """The folder each .mod file in `<install>/mod/` points to, in file-name
+    order.
+
+    `path` is relative to the install, or absolute. The scanner reads them
+    the same way (`scanner/src/engine/modread/place.rs`), and also reads
+    their `replace_path`s, which only the mod reader needs.
+    """
+    home = os.path.join(install, "mod")
+    try:
+        names = sorted((n for n in os.listdir(home) if n.lower().endswith(".mod")),
+                       key=str.lower)
+    except OSError:
+        return []
+    out = []
+    for name in names:
+        try:
+            with open(os.path.join(home, name), encoding="latin-1") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        said = {}
+        for line in text.splitlines():
+            key, eq, value = line.partition("=")
+            value = value.strip()
+            if value.startswith('"'):
+                value = value[1:].split('"', 1)[0]
+            else:
+                value = value.split("#", 1)[0].strip()
+            if eq and "#" not in key:
+                said.setdefault(key.strip().lower(), []).append(value)
+        path = next((v for v in said.get("path", []) if v), None)
+        if path:
+            path = path.replace("/", os.sep).replace("\\", os.sep)
+            out.append(os.path.normpath(os.path.join(install, path)))
+    return out
+
+
+def installed_mods(install):
+    """[(label, path)]: the mods a campaign can be read under on an install.
+
+    Every folder in its mod folder that is a mod, and then every other one a
+    .mod file there points to inside the install -- a mod kept a level
+    down, as a clone of its repository is. Each is labelled by its folder's
+    name, as the run's log and the report name it; a second folder of the
+    same name goes by its path under the mod folder. The scanner's
+    `--cross` searches the same list (`installed_mods` in
+    `scanner/src/front/survey.rs`).
+    """
+    out = _folder_mods(os.path.join(install, "mod"))
+    for path in _mod_files(install):
+        if (os.path.isdir(os.path.join(path, "common"))
+                and _lies_in(path, install)
+                and not any(_same_folder(path, p) for _n, p in out)):
+            out.append((os.path.basename(path), path))
+    labelled, taken = [], set()
+    for name, path in out:
+        if name in taken:
+            name = os.path.relpath(path, os.path.join(install, "mod")).replace(os.sep, "/")
+        taken.add(name)
+        labelled.append((name, path))
+    return labelled
 
 
 def default_saves():
@@ -335,25 +406,18 @@ class App:
         mod = self.mod.get().strip()
         kind, where = mod_kind(mod)
         game = self.game.get().strip()
-        # Every mod a campaign can be read under is in the game's mod folder,
+        # Every mod a campaign can be read under is on the game's install,
         # so that is where the list comes from once the game is named.
-        if game:
-            home = os.path.join(game, "mod")
-        elif kind == "home":
-            home = os.path.join(where, "mod")
+        install = game or (where if kind == "home"
+                           else search_root(mod) if kind == "mod" else None)
+        if install:
+            out = dict(installed_mods(install))
         elif kind == "mod":
-            home = os.path.dirname(os.path.normpath(mod))
+            # A mod kept off on its own: its neighbours, for what they are.
+            out = dict(_folder_mods(os.path.dirname(os.path.normpath(mod))))
         else:
             self.mod_paths = {}
             return [AUTO], AUTO
-        out = {}
-        try:
-            for name in sorted(os.listdir(home)):
-                path = os.path.join(home, name)
-                if os.path.isdir(os.path.join(path, "common")):
-                    out[name] = path
-        except OSError:
-            pass
         self.mod_paths = out
         if kind != "mod":
             return [AUTO] + list(out), AUTO
@@ -858,20 +922,28 @@ def settle_game(mod_path, game_root):
     return mod_path, home
 
 
+def _lies_in(path, folder):
+    inner = os.path.normcase(os.path.realpath(path))
+    outer = os.path.normcase(os.path.realpath(folder))
+    return inner != outer and inner.startswith(outer.rstrip(os.sep) + os.sep)
+
+
 def _base_game_path(path):
     """
     The Victoria II install a mod sits inside, or None when there isn't one.
 
-    Mods live at `<install>/mod/<name>`, so the install is two levels up.
-    Confirmed by looking for files no mod folder holds on its own, rather
-    than trusting the shape of the path.
+    The nearest install above it, however far up: a mod is wherever its
+    .mod file points, `<install>/mod/<name>` for most and a level deeper for
+    one kept as a clone of its repository. Confirmed by looking for files no
+    mod folder holds on its own, rather than trusting the shape of the path.
     """
     if not path:
         return None
-    root = os.path.dirname(os.path.dirname(os.path.abspath(path)))
-    if os.path.basename(os.path.dirname(os.path.abspath(path))).lower() != "mod":
-        return None
-    if not is_install(root):
-        return None
-    return root
-
+    here = os.path.abspath(path)
+    while True:
+        up = os.path.dirname(here)
+        if up == here or not up:
+            return None
+        if is_install(up):
+            return up
+        here = up

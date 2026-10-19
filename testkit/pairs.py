@@ -41,9 +41,21 @@ def settle_cases(holding):
     other = fixtures.a_vanilla(os.path.join(holding, "other"))
     away = os.path.join(holding, "elsewhere", "mod", "Away")
     shutil.copytree(mod, away)
+    # A clone of a mod's repository: the mod a level down, where its .mod
+    # file points.
+    deep = fixtures.a_mod(os.path.join(game, "mod", "GGG", "GGG"))
+    with open(os.path.join(game, "mod", "GGG.mod"), "w") as fh:
+        fh.write('name = "GGG"\npath = "mod/GGG/GGG"\n')
+    # And a .mod file pointing out of the install altogether.
+    outside = fixtures.a_mod(os.path.join(holding, "elsewhere", "Outside"))
+    with open(os.path.join(game, "mod", "Outside.mod"), "w") as fh:
+        fh.write('name = "Outside"\npath = "%s"\n' % outside.replace("\\", "/"))
     return [
         ("a mod in an install", mod, None),
         ("a mod in an install, the install named", mod, game),
+        ("a mod a level down, where its .mod points", deep, None),
+        ("a mod a level down, the install named", deep, game),
+        ("a .mod pointing out of the install", outside, game),
         ("a mod outside any install", away, None),
         ("an install named as its own mod", game, None),
         ("a mod in another install than --game-root", mod, other),

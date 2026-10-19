@@ -9,7 +9,7 @@
 // PURPOSE. See <https://www.gnu.org/licenses/> for the full text.
 
 use super::*;
-pub(super) use crate::py::path::{basename, dirname, join};
+pub(super) use crate::py::path::{dirname, join};
 
 #[cfg(windows)]
 pub(super) const SEP: char = '\\';
