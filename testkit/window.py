@@ -4,8 +4,8 @@ Run the window's own code path, without showing a window.
 
 Everything else here drives the analyzer through its command line. Nobody
 drives it through the thing people actually click, and the two are not the
-same path: the window builds its own argument list, replaces stdout with a
-queue, hands over a cancel check and a progress callback, and opens the
+same path: the window builds its own `Run`, hands over its log's queue, a
+cancel check and a progress callback, and opens the
 report at the end. Each of those is a place to be wrong, and one of them
 was -- the report never opened at all on anything but Windows, which no
 command-line test could have noticed.
@@ -45,8 +45,8 @@ def a_window():
     except Exception:                                    # noqa: BLE001
         return None                                      # no display
     root.withdraw()
-    import gui
-    return root, gui.App(root)
+    from vic2tools import report_tab
+    return root, report_tab.App(root)
 
 
 def a_full_run(root, app, saves, out):
@@ -150,8 +150,6 @@ def opens_on_this_machine(app, report):
 
 def a_stopped_run(root, app, saves, out):
     """[what went wrong] when Stop is pressed before it starts."""
-    import vic2_analyzer
-
     app.show_report = lambda path: None
     app.open_after.set(False)
     app.stop.set()                       # as if Stop were pressed at once
@@ -159,7 +157,6 @@ def a_stopped_run(root, app, saves, out):
         app.work(saves, "", out, game_root=app.game.get())
     finally:
         app.stop.clear()
-        vic2_analyzer.set_cancel_check(None)
     for _ in range(20):
         root.update()
         time.sleep(0.02)
@@ -212,7 +209,7 @@ def a_start_keeps_other_settings(app, holding):
     analysis erased both. The file is pointed somewhere of this check's own
     first; the real one is never touched.
     """
-    import settings
+    from vic2tools import settings
     real = settings.ANALYZER
     settings.ANALYZER = os.path.join(holding, "settings.json")
     saves = os.path.join(holding, "keep-saves")
@@ -254,6 +251,56 @@ def a_start_keeps_other_settings(app, holding):
     return wrong
 
 
+def mod_folders_it_refuses(app, holding):
+    """
+    [what went wrong] when the mod box names a folder of mods the game box
+    does not run: the mod folder of another install, or one in no install
+    at all. Each is refused before a run, in its own sentence.
+    """
+    from tkinter import messagebox
+    import fixtures
+    saves = os.path.join(holding, "refuse-saves")
+    os.makedirs(saves)
+    open(os.path.join(saves, "a.v2"), "w").write('date="1836.1.1"\n')
+    game = fixtures.a_game(os.path.join(holding, "refuse-game"))
+    other = fixtures.a_game(os.path.join(holding, "refuse-other"))
+    loose = os.path.join(holding, "refuse-loose", "mod")
+    for home in (os.path.join(game, "mod"), os.path.join(other, "mod"), loose):
+        os.makedirs(os.path.join(home, "a mod", "common"), exist_ok=True)
+    cases = [
+        ("the mod folder of another install", os.path.join(other, "mod"),
+         "%s is the mod folder of %s, not of the Victoria 2 folder above."
+         % (os.path.join(other, "mod"), os.path.normpath(other))),
+        ("a folder of mods in no install", loose,
+         "%s is not the mod folder of a Victoria II install." % loose),
+    ]
+    wrong = []
+    shown, real_error = [], messagebox.showerror
+    ran = []
+    work, app.work = app.work, lambda *a, **k: ran.append(a)
+    messagebox.showerror = lambda _title, text, **_k: shown.append(text)
+    try:
+        app.saves.set(saves)
+        app.game.set(game)
+        for what, mod, sentence in cases:
+            del shown[:]
+            app.mod.set(mod)
+            app.start()
+            if ran:
+                wrong.append("%s was not refused: the run started" % what)
+                break
+            if not shown or not shown[0].startswith(sentence + "\n\n"):
+                wrong.append("%s was refused with %r, not %r"
+                             % (what, (shown or ["nothing"])[0][:120], sentence))
+    finally:
+        messagebox.showerror = real_error
+        app.work = work
+        app.running = False
+    print("  a mod folder of another install, or of none, is refused: %s"
+          % ("FAILED" if wrong else "ok"))
+    return wrong
+
+
 def the_keeper_opens_its_folder(root, holding):
     """
     [what went wrong] when the keeper's "Open the folder" is pressed here.
@@ -265,11 +312,11 @@ def the_keeper_opens_its_folder(root, holding):
     """
     import subprocess
     from tkinter import messagebox, ttk
-    import keeper_gui
+    from vic2tools import keeper_tab
 
     launched, errors = [], []
     frame = ttk.Frame(root)
-    keeping = keeper_gui.Keeper(root, parent=frame)
+    keeping = keeper_tab.Keeper(root, parent=frame)
     keeping.out.set(os.path.join(holding, "kept"))
     real_popen, real_start = subprocess.Popen, getattr(os, "startfile", None)
     real_error = messagebox.showerror
@@ -317,12 +364,13 @@ def main():
         messagebox.showerror = unexpected_dialog
         out = os.path.join(holding, "out")
         wrong = a_full_run(root, app, saves, out)
-        import gui
-        app.show_report = gui.App.show_report.__get__(app)   # the real one
+        from vic2tools import report_tab
+        app.show_report = report_tab.App.show_report.__get__(app)   # the real one
         wrong += opens_on_this_machine(app, os.path.join(out, "report.html"))
         wrong += a_stopped_run(root, app, saves, os.path.join(holding, "two"))
         wrong += a_refused_run(root, app, holding)
         wrong += a_start_keeps_other_settings(app, holding)
+        wrong += mod_folders_it_refuses(app, holding)
         wrong += the_keeper_opens_its_folder(root, holding)
     finally:
         shutil.rmtree(holding, ignore_errors=True)

@@ -18,8 +18,7 @@ not configurable and never was.
 Leave this running while you play. It watches the save folder, and each time an
 autosave appears it copies it out under the in-game date it holds, into a folder
 per campaign -- which is the shape the analyzer wants to be pointed at.
-
-    python autosave_export.py
+The window's keeper tab (`keeper_tab`) drives it through `watch`.
 
 Windows says when the save folder changes, so the copy starts within
 milliseconds of the game finishing one rather than at the end of some poll --
@@ -38,18 +37,12 @@ campaigns apart, and the folder is retitled `SAR-ITA 1836` when that happens.
 The same test keeps a second run as the same country in its own folder.
 """
 
-import argparse
 import os
 import re
 import shutil
 import subprocess
 import sys
 import time
-
-# What a save's first few hundred kilobytes say, and the measured rule for
-# telling one campaign's history from another's.
-from dates import ymd
-from savehead import FLAG_GAP, flags_lost, header
 
 HOME = os.path.expanduser("~")
 SAVES = os.path.join(
@@ -280,6 +273,8 @@ class Changes:
         if os.name != "nt":
             return
         try:
+            # Here, not at the top: Windows only, and a failed import is the
+            # same answer as a missing call.
             import ctypes
             from ctypes import wintypes
             api = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -470,44 +465,111 @@ def watch(args, report=None, stopped=None, tally=None):
     return tuple(tally)
 
 
-def main(argv=None):
-    ap = argparse.ArgumentParser(
-        description="Keep every Victoria 2 autosave, not just the last three.")
-    ap.add_argument("--saves", default=SAVES,
-                    help="the game's save folder (default: %(default)s)")
-    ap.add_argument("--out", default=EXPORT,
-                    help="where to keep them (default: %(default)s)")
-    ap.add_argument("--every", type=int, default=1, metavar="N",
-                    help="keep one autosave every N months, counting from "
-                         "January (default: every one)")
-    ap.add_argument("--all", action="store_true",
-                    help="copy hand-made saves out too, not just autosaves")
-    ap.add_argument("--campaign", metavar="NAME",
-                    help="put everything in this folder, instead of one worked "
-                         "out from each save")
-    ap.add_argument("--once", action="store_true",
-                    help="sweep the folder once and stop, rather than watch")
-    ap.add_argument("--poll", type=float, default=POLL, metavar="SECONDS",
-                    help="how long to wait before looking anyway, when the "
-                         "folder has said nothing (default: %(default)s)")
-    args = ap.parse_args(argv)
+# ----------------------------------------------------------------------------
+# The front of a save: what its first few hundred kilobytes say, without
+# reading the rest.
+#
+# The keeper reads a save this way to decide which campaign an autosave
+# continues. `--cross`, in the scanner, holds a campaign folder's saves to the
+# same measured rule about event flags (`FLAG_GAP`, `FLAG_FLOOR`) to name one
+# that may be from another game; `scanner/src/front/survey.rs` copies the
+# numbers, and `testkit/histories.py` holds both to them.
 
-    bad = trouble(args)
-    if bad:
-        sys.exit(bad)
-    os.makedirs(args.out, exist_ok=True)
+# Everything the game writes above the first province block, with room to
+# spare: the date, the player, the start date and the event flags.
+HEADER_BYTES = 400_000
 
-    say("Watching %s" % args.saves)
-    say("Keeping   %s" % args.out)
-    if args.every > 1:
-        say("Keeping one save every %d months." % args.every)
-    say("Leave this running while you play. Ctrl-C to stop.\n")
+_FIELD = re.compile(rb'(date|player|start_date)\s*=\s*"([^"]*)"')
+_FLAGS = re.compile(rb'^flags=\s*\{(.*?)^\}', re.M | re.S)
+_FLAG_NAME = re.compile(rb'^\s*([A-Za-z_]\w*)\s*=', re.M)
 
-    kept, size = watch(args)
-    say("Kept %d save%s, %s in all, in %s" % (
-        kept, "" if kept == 1 else "s", human_size(size), args.out))
-    return 0
+# Global event flags accumulate, so an earlier save's flags should all be in
+# a later save of the same game. Flags do get cleared on purpose --
+# `money_setup_done` and the rest are one-shot setup flags -- so a few lost
+# prove nothing. Two saves from one campaign never disagreed by more than
+# five flags across the 2,850 real pairs this was measured on; two from
+# different campaigns disagreed by twelve at the median. `FLAG_GAP` is that
+# gap. Below `FLAG_FLOOR` flags there is nothing to measure -- an 1836 save
+# has none at all.
+#
+# What `FLAG_FLOOR` costs, said plainly: in the opening year or two of a
+# campaign there are barely any flags, so a nation formed that early cannot
+# be shown to be the same campaign and the keeper starts a folder of its
+# own. Nothing in the game forms in 1836, so this has never come up in play
+# -- it turned up against a fake campaign written to test the keeper, whose
+# saves carried two flags.
+FLAG_GAP = 6
+FLAG_FLOOR = 3
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+def head_of(path, size=HEADER_BYTES):
+    """The first `size` bytes of a save, or None if it cannot be read."""
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(size)
+    except OSError:
+        return None
+
+
+def fields(head):
+    """{"date", "player", "start_date"}: the first of each the head has."""
+    found = {}
+    for match in _FIELD.finditer(head):
+        found.setdefault(match.group(1).decode(),
+                         match.group(2).decode("latin-1"))
+        if len(found) == 3:
+            break
+    return found
+
+
+def flags_in(head):
+    """The global event flags a head carries, as a set of names."""
+    block = _FLAGS.search(head)
+    return set(_FLAG_NAME.findall(block.group(1))) if block else set()
+
+
+def header(path):
+    """
+    The date, the player's tag, the start date and the event flags of a save.
+
+    Returns None if the file cannot be read yet or does not look like a
+    plaintext save -- both of which mean "not now" rather than "never": the
+    game holds the file while it writes, and a save caught mid-write has no
+    header.
+    """
+    head = head_of(path)
+    if head is None or head[:2] == b"PK" or b"date=" not in head[:4096]:
+        return None
+    found = fields(head)
+    if "date" not in found or "player" not in found:
+        return None
+    found["flags"] = flags_in(head)
+    return found
+
+
+def flags_lost(earlier, later):
+    """
+    How many of the earlier save's flags the later one lacks, or None when
+    either has too few flags to be evidence (`FLAG_FLOOR`). Under `FLAG_GAP`
+    the two can be one history; at or over it they are two games.
+    """
+    if len(earlier) < FLAG_FLOOR or len(later) < FLAG_FLOOR:
+        return None
+    return len(earlier - later)
+
+
+# ----------------------------------------------------------------------------
+# The game's dates, `1847.1.1`, as (year, month, day): `ymd`, which says None
+# for anything it cannot read, for the keeper deciding things about one save
+# at a time.
+
+def ymd(stamp):
+    """`1847.1.1` as (1847, 1, 1), or None."""
+    parts = (stamp or "").split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        return tuple(int(p) for p in parts)
+    except ValueError:
+        return None
+

@@ -34,7 +34,7 @@ MUTATIONS = [
         'analyzer refused it with reaches the log as a traceback',
         'window.py', ('saves',),
         [
-            ('gui.py', '        except RunError as refused:\n', '        except ZeroDivisionError as refused:\n'),
+            ('vic2tools/report_tab.py', '        except RunError as refused:\n', '        except ZeroDivisionError as refused:\n'),
         ]),
     Mutation(
         'flag-gap-too-wide',
@@ -42,14 +42,14 @@ MUTATIONS = [
         'a second game joins the first',
         'histories.py', (),
         [
-            ('savehead.py', 'FLAG_GAP = 6\n', 'FLAG_GAP = 60\n'),
+            ('vic2tools/keeper.py', 'FLAG_GAP = 6\n', 'FLAG_GAP = 60\n'),
         ]),
     Mutation(
         'keeper-ignores-flag-gap',
         'the keeper files a save with the campaign whatever its flags say',
         'histories.py', (),
         [
-            ('keeper.py', '        elif gap < FLAG_GAP:\n', '        elif True:\n'),
+            ('vic2tools/keeper.py', '        elif gap < FLAG_GAP:\n', '        elif True:\n'),
         ]),
     Mutation(
         'analyze-erases-share-settings',
@@ -57,7 +57,15 @@ MUTATIONS = [
         'file, erasing the GitHub token and the report host',
         'window.py', ('saves',),
         [
-            ('settings.py', '    held = load(path)\n', '    held = {}\n'),
+            ('vic2tools/settings.py', '    held = load(path)\n', '    held = {}\n'),
+        ]),
+    Mutation(
+        'publish-forgets-nothing',
+        'the Publish button hands its worker no way to forget a token, so '
+        'a refused one stays held and is handed back on every press',
+        'sharing.py', (),
+        [
+            ('vic2tools/__main__.py', '            kwargs={"forget": self.forget_token}).start()', '            kwargs={}).start()'),
         ]),
     Mutation(
         'refused-token-kept',
@@ -65,15 +73,15 @@ MUTATIONS = [
         'press',
         'sharing.py', (),
         [
-            ('app.py', '            settings.remember(github_token=None)\n', ''),
+            ('vic2tools/__main__.py', '        settings.remember(github_token=None)\n', ''),
         ]),
     Mutation(
         'scanner-opens-console-window',
         'on Windows the window starts the scanner without CREATE_NO_WINDOW, '
         'so the windowed executable flashes a console window per run',
-        'packing.py', (),
+        'engine_runtime.py', (),
         [
-            ('vic2_analyzer.py', '            status = _relayed(argv, fastscan._no_window(), hosted)', '            status = _relayed(argv, 0, hosted)'),
+            ('vic2tools/launch.py', '            status = _relayed(argv, _no_window(), hosted=hosted, say=say,', '            status = _relayed(argv, 0, hosted=hosted, say=say,'),
         ]),
     Mutation(
         'war-infobox-throws',
@@ -121,7 +129,7 @@ MUTATIONS = [
         'a redirect to another address is handed the GitHub token',
         'sharing.py', (),
         [
-            ('publish.py', '        with _OPENER.open(request, timeout=TIMEOUT) as answer:', '        with urllib.request.urlopen(request, timeout=TIMEOUT) as answer:'),
+            ('vic2tools/share.py', '        with _OPENER.open(request, timeout=TIMEOUT) as answer:', '        with urllib.request.urlopen(request, timeout=TIMEOUT) as answer:'),
         ]),
     Mutation(
         'publish-stall-raw',
@@ -129,7 +137,7 @@ MUTATIONS = [
         'sentence',
         'sharing.py', (),
         [
-            ('publish.py', '    except (OSError, http.client.HTTPException) as err:\n        # Once connected', '    except ZeroDivisionError as err:\n        # Once connected'),
+            ('vic2tools/share.py', '    except (OSError, http.client.HTTPException) as err:\n        # Once connected', '    except ZeroDivisionError as err:\n        # Once connected'),
         ]),
     Mutation(
         'keeper-folder-windows-only',
@@ -137,7 +145,7 @@ MUTATIONS = [
         'on Windows',
         'window.py', ('saves',),
         [
-            ('keeper_gui.py', '            keeper.open_with_system(where)\n        except OSError as err:', '            os.startfile(where)\n        except (OSError, AttributeError) as err:'),
+            ('vic2tools/keeper_tab.py', '            keeper.open_with_system(where)\n        except OSError as err:', '            os.startfile(where)\n        except (OSError, AttributeError) as err:'),
         ]),
     Mutation(
         'stamp-leaves-out-min-pop',
@@ -145,7 +153,7 @@ MUTATIONS = [
         'changes it is answered with the old one',
         'staleness.py', (),
         [
-            ('run.py', '    min_pop: int = _setting(0, report=True)', '    min_pop: int = _setting(0, report=False)'),
+            ('vic2tools/launch.py', '    min_pop: int = _setting(0, report=True)', '    min_pop: int = _setting(0, report=False)'),
         ]),
     Mutation(
         'relay-progress-lost',
@@ -153,7 +161,7 @@ MUTATIONS = [
         'the bar',
         'engine_runtime.py', (),
         [
-            ('vic2_analyzer.py', '                    if word == "@progress":', '                    if word == "@progresss":'),
+            ('vic2tools/launch.py', '                    if word == "@progress":', '                    if word == "@progresss":'),
         ]),
     Mutation(
         'fixture-writes-through-link',
@@ -167,7 +175,7 @@ MUTATIONS = [
         'Stop raises in the window but leaves the scanner reading',
         'engine_runtime.py', (),
         [
-            ('vic2_analyzer.py', '        if proc.poll() is None:\n            proc.kill()\n', ''),
+            ('vic2tools/launch.py', '        if proc.poll() is None:\n            proc.kill()\n', ''),
         ]),
     Mutation(
         'cross-min-pop',
@@ -673,5 +681,13 @@ MUTATIONS = [
         'enginecheck.py', (),
         [
             ('scanner/src/engine/finish.rs', '            let effective = Num::F(round(ship.crew, 3));', '            let effective = Num::I(ship.count);'),
+        ]),
+    Mutation(
+        'settle-game-sentence-drifts',
+        "the window refuses a mod outside any install in words that are no "
+        "longer the scanner's",
+        'pairs.py', (),
+        [
+            ('vic2tools/report_tab.py', "            f\"{mod_path} is not in a Victoria II install's mod folder. Put the \"", "            f\"{mod_path} is not in a Victoria II install's mods folder. Put the \""),
         ]),
 ]

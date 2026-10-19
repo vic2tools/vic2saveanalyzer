@@ -19,34 +19,16 @@ play, a tab that turns a folder of them into a report, and along the bottom
 the one path they share and the one thing you do with a finished report, which
 is give it to somebody.
 
-Both halves still run on their own -- `gui.py` and `keeper_gui.py` each open
-their own window if started directly -- because nothing here is allowed to
-make either of them harder to test.
-
 Packaged as vic2saveanalyzer.exe by build_exe.py.
 """
 
-import multiprocessing
 import os
 import sys
-
-# Before anything else is imported. A worker in the packaged program starts
-# by running this file again from the top, and stops only here: every import
-# above this line is made again in every worker. The window's are not needed
-# to read a save -- tkinter, and `publish` bringing the web and mail modules
-# with it, about 45 ms of each worker's start -- so they come after.
-if __name__ == "__main__":
-    multiprocessing.freeze_support()
-
 import threading
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
-import gui
-import keeper
-import keeper_gui
-import publish
-import settings
+from vic2tools import keeper, keeper_tab, launch, report_tab, settings, share
 
 APP = "Victoria 2 campaign tools"
 
@@ -68,8 +50,8 @@ class Tools:
 
         # The analyzer first: it is what most runs are for, and a tab that
         # opens on the job in hand beats one that opens on the preparation.
-        self.analyzer = gui.App(root, parent=making)
-        self.keeper = keeper_gui.Keeper(root, parent=keeping)
+        self.analyzer = report_tab.App(root, parent=making)
+        self.keeper = keeper_tab.Keeper(root, parent=keeping)
 
         # The bar is packed before the tabs and against the bottom, because
         # pack hands out room in the order it is asked and the tabs, which
@@ -133,7 +115,7 @@ class Tools:
         elif ready:
             self.hint.configure(
                 text="%s · %s" % (os.path.basename(report),
-                                       gui.human_size(os.path.getsize(report))))
+                                       report_tab.human_size(os.path.getsize(report))))
         else:
             self.hint.configure(text="")
         self.tick = self.root.after(300, self.watch)
@@ -184,7 +166,7 @@ class Tools:
         self.open_folder(os.path.dirname(report))
         messagebox.showinfo(
             APP, "%s\n\n%s %s the path is on your clipboard, and the folder "
-                 "is open.%s" % (report, gui.human_size(size), "\u2014", note))
+                 "is open.%s" % (report, report_tab.human_size(size), "\u2014", note))
 
     def open_folder(self, where):
         """Show a folder in whatever this machine uses to look at folders."""
@@ -221,21 +203,8 @@ class Tools:
         name = os.path.basename(os.path.dirname(os.path.abspath(report)))
         self.share_button.state(["disabled"])
         self.analyzer.say("\nUploading the report%s\n" % "\u2026")
-        threading.Thread(target=self._upload, daemon=True,
-                         args=(report, endpoint, name)).start()
-
-    def _upload(self, report, endpoint, name):
-        """Off the UI thread, reporting through the queue like the rest."""
-        tell = self.analyzer.log_queue.put
-        try:
-            url = publish.upload(report, endpoint, name=name,
-                                 say=lambda line: tell("  " + line + "\n"))
-        except Exception as err:                     # noqa: BLE001
-            tell("Could not upload it: %s\n" % err)
-            self.root.after(0, self.publish_failed, str(err))
-            return
-        tell("\nUploaded: %s\n" % url)
-        self.root.after(0, self.published, url)
+        threading.Thread(target=self._share, daemon=True, args=(
+            "upload", lambda say: share.upload(report, endpoint, name=name, say=say))).start()
 
     def token(self):
         """The GitHub token, asked for once and remembered after that."""
@@ -277,12 +246,27 @@ class Tools:
         name = os.path.basename(os.path.dirname(os.path.abspath(report)))
         self.share_button.state(["disabled"])
         self.analyzer.say("\nPublishing the report…\n")
-        threading.Thread(target=self._publish, daemon=True,
-                         args=(report, token, name, extra)).start()
+        threading.Thread(target=self._share, daemon=True, args=(
+            "publish", lambda say: share.publish(report, token, name=name, extra=extra,
+                                                 say=say)),
+            kwargs={"forget": self.forget_token}).start()
 
-    def _publish(self, report, token, name, extra):
+    def forget_token(self, refused):
         """
-        Off the UI thread: uploading 20 MB is not instant.
+        A token GitHub will not take is no use held. Kept, it was handed
+        straight back on every press, and the only way to a new one was
+        editing the settings file by hand -- which every fine-grained token,
+        expiring by default, comes to. Returns what to tell the person.
+        """
+        settings.remember(github_token=None)
+        return ("%s It has been forgotten here, so the next publish asks for a "
+                "new one." % refused)
+
+    def _share(self, verb, send, forget=None):
+        """
+        Off the UI thread: uploading 20 MB is not instant. `send(say)` does
+        the upload or the publish and returns the link; `forget`, when given,
+        is handed a refused token and says what became of it.
 
         Nothing here touches a widget. `say` writes into the log box directly
         and belongs to the UI thread alone, so everything this thread has to
@@ -290,28 +274,14 @@ class Tools:
         """
         tell = self.analyzer.log_queue.put
         try:
-            url = publish.publish(report, token, name=name, extra=extra,
-                                  say=lambda line: tell("  " + line + "\n"))
-        except publish.TokenRefused as err:
-            # A token GitHub will not take is no use held. Kept, it was
-            # handed straight back on every press, and the only way to a
-            # new one was editing the settings file by hand -- which every
-            # fine-grained token, expiring by default, comes to.
-            settings.remember(github_token=None)
-            said = "%s It has been forgotten here, so the next publish " \
-                   "asks for a new one." % err
-            tell("Could not publish it: %s\n" % said)
+            url = send(lambda line: tell("  " + line + "\n"))
+        except Exception as err:                     # noqa: BLE001
+            said = (forget(err) if forget is not None and isinstance(err, share.TokenRefused)
+                    else str(err))
+            tell("Could not %s it: %s\n" % (verb, said))
             self.root.after(0, self.publish_failed, said)
             return
-        except publish.PublishError as err:
-            tell("Could not publish it: %s\n" % err)
-            self.root.after(0, self.publish_failed, str(err))
-            return
-        except Exception as err:                     # noqa: BLE001
-            tell("Could not publish it: %s\n" % err)
-            self.root.after(0, self.publish_failed, str(err))
-            return
-        tell("\nPublished: %s\n" % url)
+        tell("\n%sed: %s\n" % (verb.capitalize(), url))
         self.root.after(0, self.published, url)
 
     def publish_failed(self, message):
@@ -349,18 +319,11 @@ class Tools:
 
 
 def main():
-    # Saves are read on several cores, and a worker on Windows starts by
-    # re-running this program. Without this it would open a second window
-    # instead of reading a save -- once per core, forever.
-    import multiprocessing
-    multiprocessing.freeze_support()
-
     if len(sys.argv) > 1:
         # Handed arguments, the executable is the command line it was built
         # from, exactly as it was before these two became one window.
-        gui._attach_console()
-        import vic2_analyzer
-        return vic2_analyzer.main()
+        report_tab._attach_console()
+        return launch.main()
 
     for name in ("stdout", "stderr"):
         if getattr(sys, name, None) is None:

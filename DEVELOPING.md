@@ -10,16 +10,13 @@ change, and how to make a release. `README.md` is the guide to using it;
 |---|---|
 | `scanner/` | The Rust that makes every run: finding and reading the saves, reading the game and the mod, every number, the tables and the report. See `scanner/README.md`. |
 | `scanner/src/page/` | The report page: its HTML, CSS and JavaScript, one file per part, joined in the order `order.txt` gives and built into the scanner by `scanner/build.rs`. |
-| `vic2_analyzer.py` | The command line. Hands a run to the scanner and relays what it says; `analyze()` is the same for the window, with the report-ready callback. |
-| `run.py` | Every setting of a run, declared once, and the command line that fills them. |
-| `fastscan.py` | Where the scanner binary is, and how to start it with no console window. |
-| `readfolder.py` | The Stop and progress callbacks a hosted run calls, and the scanner's cache folder. |
-| `app.py` | The executable's entry: the window, or the command line when given arguments. |
-| `gui.py` | The window's report tab: the folder pickers, the log, Analyze and Stop. |
-| `mod_reader.py`, `cross.py` | What the window asks before a run: which folder is a game install, where a mod may be read from, which folders hold campaigns. |
-| `keeper.py`, `keeper_gui.py` | Keeping every autosave the game writes, and its tab. |
-| `savehead.py`, `dates.py` | What the head of a save says, and the game's dates, for the keeper. |
-| `publish.py`, `settings.py` | Sharing a report, and what the window remembers. |
+| `vic2_analyzer.py` | The command line, a shim into `vic2tools.launch`. |
+| `vic2tools/` | The Python side: the window, the command line and the keeper, one package of seven modules. |
+| `vic2tools/launch.py` | Every setting of a run, declared once, and the command line that fills them; finding the scanner, handing it the run and relaying what it says. `analyze()` is the same for the window, with its Stop, progress and report-ready callbacks. The scanner's cache folder. |
+| `vic2tools/__main__.py` | The executable's entry, and `python -m vic2tools` from a checkout: the window, or the command line when given arguments. Its share menu. |
+| `vic2tools/report_tab.py` | The window's report tab: the folder pickers, the log, Analyze and Stop; and what it asks before a run: which folder is a game install, where a mod may be read from, which folders hold campaigns. |
+| `vic2tools/keeper.py`, `vic2tools/keeper_tab.py` | Keeping every autosave the game writes, with what the head of a save says and the game's dates; and its tab. |
+| `vic2tools/share.py`, `vic2tools/settings.py` | Sharing a report, and what the window remembers. |
 | `build_exe.py`, `vic2.ico` | Packing the executable for a release, and its icon. |
 | `host/` | An optional place to upload reports to: a Cloudflare worker. See `host/README.md`. |
 | `testkit/` | Every check, the recorded answers they are held to, a campaign baseline, and the mutation run. See `testkit/README.md`. |
@@ -28,11 +25,12 @@ change, and how to make a release. `README.md` is the guide to using it;
 
 ## How a run flows
 
-1. **The window or the command line** (`app.py` → `gui.py`, or
-   `vic2_analyzer.py`) fills a `Run` (`run.py`): the saves, the game, the
-   mod, the output folder and every setting.
-2. **`vic2_analyzer.py`** writes the `Run` to a temporary JSON file and starts
-   `vic2scan analyze --run FILE` (found by `fastscan.py`). It relays every
+1. **The window or the command line** (`vic2tools/__main__.py` →
+   `vic2tools/report_tab.py`, or `vic2_analyzer.py`) fills a `Run`
+   (`vic2tools/launch.py`): the saves, the game, the mod, the output folder
+   and every setting.
+2. **`vic2tools/launch.py`** writes the `Run` to a temporary JSON file and
+   starts `vic2scan analyze --run FILE`, the scanner it finds. It relays every
    line the scanner prints; a run hosted by the window turns the protocol
    lines (`@progress`, `@ready`, `@done`) into callbacks and never shows
    them.
@@ -93,3 +91,7 @@ push; it must print `clean`.
   recorded answers in `testkit/expected/` hold it to. Numbers are formatted
   the way Python formats them (`scanner/src/py/fmt.rs`) for that reason.
 - Saves, the game and the mod are read, never written.
+- Where the window and the scanner both decide something -- which install
+  and mod a run is read on, which folders hold campaigns -- the window asks
+  first so a wrong folder is a dialog, and `testkit/pairs.py` holds the two
+  answers to each other.

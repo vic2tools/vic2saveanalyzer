@@ -21,6 +21,7 @@ The keeper's half is a file of its own beside it.
 
 import json
 import os
+import re
 
 
 def _settings_path(app):
@@ -90,6 +91,15 @@ def remember(path=None, **changes):
         pass                      # remembering is a convenience, not a duty
 
 
+def first_folder(candidates):
+    """The first of these that is actually there, or "": where a first run
+    starts looking, from the usual places in order."""
+    for path in candidates:
+        if path and os.path.isdir(path):
+            return os.path.normpath(path)
+    return ""
+
+
 def documents():
     """
     The user's Documents folders, OneDrive's copy first.
@@ -136,7 +146,6 @@ def steam_libraries():
         (".var", "app", "com.valvesoftware.Steam", ".local", "share", "Steam"),
         ("snap", "steam", "common", ".local", "share", "Steam"),
         ("Library", "Application Support", "Steam"))]
-    import re
     out = list(seen)
     for root in seen:
         vdf = os.path.join(root, "steamapps", "libraryfolders.vdf")

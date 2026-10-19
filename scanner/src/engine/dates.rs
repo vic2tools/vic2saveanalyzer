@@ -1,5 +1,5 @@
 // The game's dates, `1847.1.1`, turned into things that sort and plot:
-// `dates.py`.
+// `vic2tools/keeper.py`'s `ymd`.
 // Copyright (C) 2026 vic2tools
 //
 // This program is free software: you can redistribute it and/or modify it

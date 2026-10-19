@@ -38,7 +38,7 @@ And a table has to be from this run even when this run has nothing to put
 in it: an empty one used to be skipped, and the last run's copy stayed in
 the folder beside the new ones.
 
-And the settings. Each is declared in `run.Run` with whether it changes the
+And the settings. Each is declared in `launch.Run` with whether it changes the
 report, and the stamp hashes those by name. This holds the declaration to
 account through real runs: a run that changes any setting declared to
 change the report must be built again, and every setting left out is on a
@@ -341,12 +341,12 @@ def the_settings_the_stamp_covers():
     """[what went wrong] in which settings the report stamp covers."""
     import dataclasses
     import kit  # noqa: F401  (puts the repo on the import path)
-    import run as settings
+    from vic2tools import launch
     import fixtures
     import savefmt
 
     wrong = []
-    declared = dataclasses.fields(settings.Run)
+    declared = dataclasses.fields(launch.Run)
     for setting in declared:
         if "report" not in setting.metadata:
             wrong.append("%s does not say whether it changes the report" % setting.name)

@@ -10,7 +10,7 @@
 //
 //     vic2scan analyze --run RUN.json [--refused FILE] [--protocol]
 //
-// RUN is the launcher's settings (`run.Run`, written by `vic2_analyzer.py`).
+// RUN is the launcher's settings (`launch.Run`, written by `vic2tools/launch.py`).
 // From them this finds the saves, settles the game and the mod, takes the
 // stamp and answers "nothing has changed" when it can, reads the mod's head,
 // puts the saves in date order, and runs the engine (`engine::run`); or it
@@ -34,7 +34,7 @@ use crate::util::hash::TwoLane;
 use crate::py::path as pypath;
 use pypath::{abspath, basename, isdir, join};
 
-/// A run refused, in the sentence Python gives (`run.RunError`).
+/// A run refused, in the sentence Python gives (`launch.RunError`).
 pub struct RunError(pub String);
 
 type R<T> = Result<T, RunError>;
@@ -48,7 +48,7 @@ fn stop(why: &str) -> ! {
     crate::engine::decline(why)
 }
 
-/// The settings of a run (`run.Run`).
+/// The settings of a run (`launch.Run`).
 pub struct Args {
     pub saves: String,
     pub out: String,
@@ -322,7 +322,7 @@ fn report_stamp(files: &[String], args: &Args, world: &str) -> String {
     }
     digest.update(format!("engine={}", env!("VIC2_BUILD_ID")).as_bytes());
     digest.update(format!("world={}", world).as_bytes());
-    // `run.REPORTED`, in its order.
+    // `launch.Run`'s settings that change the report, in its order.
     let mut settings = String::new();
     let list = |v: &Option<Vec<String>>| match v {
         None => J::Null,

@@ -4,7 +4,7 @@ Tell one game's saves from another's by the event flags they carry.
 
 Global event flags accumulate as a game runs, so an earlier save's flags are
 all in a later save of the same game, and two different games lose many of
-each other's. `savehead` holds that rule and the measured numbers behind it,
+each other's. `vic2tools/keeper.py` holds that rule and the measured numbers behind it,
 and two parts of the program lean on it:
 
 - the keeper, which files an autosave under the campaign it continues, and
@@ -28,7 +28,7 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import kit                                                  # noqa: E402
 
 import fake_game                                           # noqa: E402
-import keeper                                              # noqa: E402
+from vic2tools import keeper                                            # noqa: E402
 
 # Another game's history: as many flags as the fake game grants, and none of
 # the same ones.

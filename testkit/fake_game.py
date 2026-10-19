@@ -31,7 +31,7 @@ FLAGS = ["the_great_trek", "liberal_revolution_somewhere", "MozartFest1838",
          "sonderbund_crisis", "risorgimento_started", "meiji_restoration"]
 
 # A real save carries a good handful of these within a few years, and the
-# keeper needs at least `savehead.FLAG_FLOOR` of them on both sides before it
+# keeper needs at least `keeper.FLAG_FLOOR` of them on both sides before it
 # can tell two readings of one campaign from two campaigns. Granting only
 # two, as this did at first, made a formation look like a new game -- which
 # is a true thing about the keeper worth knowing, but not what this is here

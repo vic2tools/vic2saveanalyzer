@@ -27,7 +27,7 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import kit                                                  # noqa: E402
 
 import fake_game                                           # noqa: E402
-import keeper                                              # noqa: E402
+from vic2tools import keeper                                            # noqa: E402
 
 
 def play(folder, out, months=18, forms_at=9, size=40000):

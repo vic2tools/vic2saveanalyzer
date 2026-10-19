@@ -1,4 +1,4 @@
-// Several campaigns at once: `cross.py`, the survey and the comparison.
+// Several campaigns at once: `report_tab.campaigns_in`'s survey, and the comparison.
 // Copyright (C) 2026 vic2tools
 //
 // This program is free software: you can redistribute it and/or modify it
@@ -14,7 +14,7 @@
 // invention array, by elimination); and the nations two or more of them
 // share are compared, measure by measure, in the block the report carries.
 // Python's rules and words throughout, its regular expressions run by
-// `py::re` -- `savehead`'s as bytes patterns, whose classes are ASCII.
+// `py::re` -- `keeper`'s save-head ones as bytes patterns, whose classes are ASCII.
 
 use super::{abspath, basename, join, pypath, refuse, stop, Args, RunError, R};
 use crate::engine::modread::l1;
@@ -490,7 +490,7 @@ fn head_of(path: &str) -> Option<Vec<u8>> {
     Some(buf)
 }
 
-/// `savehead.fields(head)["date"]`, parsed by `ymd`.
+/// `keeper.fields(head)["date"]`, parsed by `ymd`.
 fn head_key(head: &[u8]) -> Result<Vec<i64>, String> {
     let re = Re::ascii(r#"(date|player|start_date)\s*=\s*"([^"]*)""#, false, false);
     let mut date = None;
@@ -524,7 +524,7 @@ fn head_key(head: &[u8]) -> Result<Vec<i64>, String> {
     Ok(out)
 }
 
-/// `savehead.flags_in(head)`.
+/// `keeper.flags_in(head)`.
 fn flags_in(head: &[u8]) -> BTreeSet<Vec<u8>> {
     let block = Re::ascii(r"^flags=\s*\{(.*?)^\}", true, true);
     let name = Re::ascii(r"^\s*([A-Za-z_]\w*)\s*=", true, false);

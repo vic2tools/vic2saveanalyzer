@@ -23,17 +23,17 @@ import queue
 import sys
 import threading
 import time
+import traceback
 import tkinter as tk
+from collections import Counter
 from tkinter import filedialog, messagebox, ttk
 
-import readfolder
-import settings
-import vic2_analyzer
-from run import RunError
+from vic2tools import launch, settings
+from vic2tools.launch import RunError
 # `human_size` lives in `keeper`, which is the lower of the two and imports
 # nothing but the standard library, so taking it from there costs this
 # module nothing and keeps one definition of how a byte count is said.
-from keeper import human_size, open_with_system
+from vic2tools.keeper import human_size, open_with_system
 
 APP = "Victoria 2 Save Analyzer"
 AUTO = "(work it out from the saves)"
@@ -55,8 +55,7 @@ def saves_kind(path):
     Returns (kind, how many campaigns).
     """
     try:
-        import cross
-        found = cross.campaigns_in(path)
+        found = campaigns_in(path)
     except Exception:
         return "bad", 0
     if not found:
@@ -110,14 +109,6 @@ def search_root(path):
     return None
 
 
-def _first_folder(candidates):
-    """The first of these that is actually there, or ""."""
-    for path in candidates:
-        if path and os.path.isdir(path):
-            return os.path.normpath(path)
-    return ""
-
-
 def default_saves():
     """Where Victoria II keeps saves, if this machine has them.
 
@@ -127,7 +118,7 @@ def default_saves():
     away, and the dialog opens there.
     """
     roots = settings.game_folders()
-    return _first_folder([os.path.join(r, "save games") for r in roots] + roots)
+    return settings.first_folder([os.path.join(r, "save games") for r in roots] + roots)
 
 
 def default_game_home():
@@ -136,8 +127,8 @@ def default_game_home():
     Like `default_mod_home`, a place to start browsing and not an answer:
     the box stays empty until the install is picked.
     """
-    return _first_folder([os.path.join(lib, "steamapps", "common")
-                          for lib in settings.steam_libraries()])
+    return settings.first_folder([os.path.join(lib, "steamapps", "common")
+                                  for lib in settings.steam_libraries()])
 
 
 def default_mod_home():
@@ -146,7 +137,7 @@ def default_mod_home():
     This is where to *start browsing*, not an answer: `mod/` holds mods, it is
     not one. The entry box stays empty until a mod is picked.
     """
-    return _first_folder([
+    return settings.first_folder([
         os.path.join(lib, "steamapps", "common", "Victoria 2", "mod")
         for lib in settings.steam_libraries()])
 
@@ -158,33 +149,8 @@ def default_out():
     backed up as the game's, and a campaign folder that has quietly grown an
     `analysis` directory inside it is a folder someone has to tidy later.
     """
-    return os.path.join(_first_folder(settings.documents())
-                        or os.path.expanduser("~"),
-                        "Victoria 2 Save Analyzer")
-
-
-class Pipe:
-    """Hands whatever is written straight to the log queue.
-
-    Chunks go through as they were written rather than being held back until a
-    line ends, because the analyzer prints "reading foo.v2 ..." and only
-    finishes that line once the save is parsed. Buffering would show the two
-    halves together, seconds after the interesting half was true.
-    """
-
-    def __init__(self, sink):
-        self.sink = sink
-
-    def write(self, text):
-        if text:
-            self.sink.put(text)
-        return len(text)
-
-    def flush(self):
-        pass
-
-    def isatty(self):
-        return False
+    return os.path.join(settings.first_folder(settings.documents())
+                        or os.path.expanduser("~"), "Victoria 2 Save Analyzer")
 
 
 class App:
@@ -413,8 +379,7 @@ class App:
         found = []
         if path and os.path.isdir(path):
             try:
-                import cross
-                found = sorted(cross.campaigns_in(path),
+                found = sorted(campaigns_in(path),
                                key=lambda e: -len(e[2]))
             except Exception:
                 found = []
@@ -456,7 +421,7 @@ class App:
 
     def refresh_cache(self):
         """Put what the cache currently weighs on the footer."""
-        count, size = readfolder.cache_stats()
+        count, size = launch.cache_stats()
         if not count:
             self.cache_label.configure(text="Parse cache: empty")
             self.cache_button.configure(state="disabled")
@@ -471,7 +436,7 @@ class App:
         """Empty the cache, having said plainly what that costs."""
         if self.running:
             return
-        count, size = readfolder.cache_stats()
+        count, size = launch.cache_stats()
         if not count:
             self.refresh_cache()
             return
@@ -488,7 +453,7 @@ class App:
                 "leaves the previous entries behind unread."
                 % human_size(size)):
             return
-        removed, freed = readfolder.clear_cache()
+        removed, freed = launch.clear_cache()
         self.say("\nWiped %s from the parse cache, freeing %s.\n"
                  % (_plural(removed, "entry", "entries"),
                     human_size(freed)))
@@ -580,8 +545,7 @@ class App:
             return
 
         # The game first: every report is read on it, and a mod only ever
-        # inside its mod folder. See `mod_reader.settle_game`.
-        from mod_reader import is_install, settle_game
+        # inside its mod folder. See `settle_game`.
         game = self.game.get().strip()
         if not is_install(game):
             messagebox.showerror(
@@ -607,12 +571,9 @@ class App:
             elif kind == "home" and not is_install(where):
                 raise ValueError("%s is not the mod folder of a Victoria II "
                                  "install." % mod)
-            elif kind == "home":
-                settle_game(None, where)
-                if os.path.normcase(os.path.realpath(where)) != \
-                        os.path.normcase(os.path.realpath(game)):
-                    raise ValueError("%s is the mod folder of %s, not of the "
-                                     "Victoria 2 folder above." % (mod, where))
+            elif kind == "home" and not _same_folder(where, game):
+                raise ValueError("%s is the mod folder of %s, not of the "
+                                 "Victoria 2 folder above." % (mod, where))
         except ValueError as exc:
             messagebox.showerror(
                 APP, "%s\n\nMods are read where the game loads them from, "
@@ -695,23 +656,21 @@ class App:
         # A `Run`, not an argv: this used to rewrite `sys.argv` for the
         # analyzer's parser to read back, and join each campaign's name and
         # mod into a "name=path" string for it to split apart again.
-        run = vic2_analyzer.Run(
+        run = launch.Run(
             saves=saves, out=out, cross=cross, primary=primary or None,
             campaign_mod=tuple(told) if cross else (),
             game_root=game_root or None, mod_path=mod or None)
-        old_out, old_err = sys.stdout, sys.stderr
-        sys.stdout = sys.stderr = Pipe(self.log_queue)
         ok = True
         stopped = False
         try:
             # Everything the analyzer calls back into, handed over with the
-            # run rather than wired by hand around it. The report is written
-            # before the CSV tables are, so it can be opened while they are
-            # still being written.
-            vic2_analyzer.analyze(run, cancel=self.stop.is_set,
-                                  progress=self.on_progress,
-                                  ready=self.on_report_ready)
-        except vic2_analyzer.Cancelled:
+            # run rather than wired by hand around it: every line it prints
+            # into the log's queue, never into a widget from this thread. The
+            # report is written before the CSV tables are, so it can be
+            # opened while they are still being written.
+            launch.analyze(run, say=self.log_queue.put, cancel=self.stop.is_set,
+                           progress=self.on_progress, ready=self.on_report_ready)
+        except launch.Cancelled:
             ok = False
             stopped = True
             self.log_queue.put("\nStopped. Every save read so far is cached, so "
@@ -723,10 +682,7 @@ class App:
             self.log_queue.put(f"\n{refused}\n")
         except Exception:
             ok = False
-            import traceback
             self.log_queue.put("\n" + traceback.format_exc())
-        finally:
-            sys.stdout, sys.stderr = old_out, old_err
         self.report = os.path.join(out, "report.html")
         if ok and os.path.isfile(self.report):
             self.log_queue.put(f"\nReport written to {self.report}\n")
@@ -759,7 +715,6 @@ class App:
         self.running = False
         self.button.configure(state="normal")
         self.stop_button.configure(state="disabled")
-        # `work` unhooks itself on the way out, including when it fails.
         self.seen = None
         self.progress.pack_forget()
         self.refresh_cache()          # the run just added to it
@@ -788,7 +743,7 @@ def _attach_console():
     """
     if not getattr(sys, "frozen", False) or os.name != "nt":
         return
-    import ctypes
+    import ctypes                     # here, not at the top: Windows only
     ATTACH_PARENT_PROCESS = -1
     if not ctypes.windll.kernel32.AttachConsole(ATTACH_PARENT_PROCESS):
         return
@@ -800,34 +755,123 @@ def _attach_console():
             pass
 
 
-def main():
-    # Saves are read on several cores, and a worker on Windows starts by
-    # re-running this program. Without this it would open a second window
-    # instead of waiting for a save to read -- once per core, forever.
-    import multiprocessing
-    multiprocessing.freeze_support()
+# ----------------------------------------------------------------------------
+# The campaigns in a folder: every folder at or under it that holds saves.
+#
+# The window asks this to tell one campaign's saves from a folder of several,
+# before it decides whether a run is `--cross`. `--cross` itself -- matching
+# each campaign to its mod, reading them all and comparing them -- is the
+# scanner's (`scanner/src/front/survey.rs`), which finds the folders the same
+# way.
 
-    if len(sys.argv) > 1:
-        # Handed arguments, the executable is the command line it was built
-        # from -- every flag, --explain-mob and all.
-        _attach_console()
-        return vic2_analyzer.main()
+def campaigns_in(parent, depth=6):
+    """
+    Every folder at or under `parent` that holds saves, as (name, path, files).
 
-    # Otherwise there are no streams at all: Python hands a windowed build None
-    # for both. Anything printed before the worker swaps in the log box -- a
-    # warning raised while a module is imported, say -- would land on None.
-    for name in ("stdout", "stderr"):
-        if getattr(sys, name, None) is None:
-            setattr(sys, name, open(os.devnull, "w"))
+    The whole tree, not just the children: campaigns get grouped into folders of
+    their own -- the two Divergences games sitting together under `dodgames` --
+    and scanning one level deep would walk straight past them and report the
+    parent as holding two campaigns when it holds four.
 
-    root = tk.Tk()
-    try:
-        ttk.Style().theme_use("vista")
-    except tk.TclError:
-        pass
-    App(root)
-    root.mainloop()
+    The parent itself counts, so pointing this at a single campaign behaves the
+    way the single-campaign path always did. A campaign is named by its own
+    folder, or by the path down to it when two folders share a name.
+    """
+    found = []
+    parent = os.path.normpath(parent)
+    for root, dirs, files in os.walk(parent):
+        rel = os.path.relpath(root, parent)
+        if rel != "." and rel.count(os.sep) >= depth - 1:
+            dirs[:] = []                  # deep enough; a save tree is not this deep
+        dirs.sort()
+        saves = sorted(f for f in files if f.lower().endswith(".v2"))
+        if saves:
+            found.append([os.path.basename(root) or root, rel, root,
+                          [os.path.join(root, f) for f in saves]])
+    seen = Counter(entry[0] for entry in found)
+    out = []
+    for leaf, rel, root, files in found:
+        name = leaf if seen[leaf] == 1 or rel == "." else rel.replace(os.sep, "/")
+        out.append((name, root, files))
+    return out
 
 
-if __name__ == "__main__":
-    main()
+# ----------------------------------------------------------------------------
+# What makes a folder a Victoria II install, and the one way a run is read on
+# one: `settle_game`, which the window asks before it starts a run so that a
+# wrong folder is a sentence there and then. The scanner reads the mod itself
+# (`scanner/src/engine/modread/`) and settles the game again the same way
+# (`scanner/src/front/`).
+
+def is_install(path):
+    """Whether a folder is a Victoria II install: it holds the game's map."""
+    return bool(path) and os.path.isfile(os.path.join(path, "map", "default.map"))
+
+
+def _same_folder(a, b):
+    return (os.path.normcase(os.path.realpath(a))
+            == os.path.normcase(os.path.realpath(b)))
+
+
+def settle_game(mod_path, game_root):
+    """
+    (the folder to read as the mod, the install it runs on) for a run, or
+    ValueError saying in a sentence what to do instead.
+
+    A report is read on an installed Victoria II, and a mod is read where the
+    game loads it from: `<install>/mod/<name>`. Every file a mod does not
+    ship comes from the install beneath it -- the map, most of the flags,
+    whatever rules and names it leaves alone -- so a mod anywhere else is
+    missing all of that, and a report built from a stray copy says things the
+    game would not. So there is exactly one way to run: name the install
+    with `game_root`, and a mod inside its mod folder with `mod_path`, or no
+    mod for the unmodded game. A mod inside an install names that install
+    itself, and the install asked for as its own mod is vanilla.
+    """
+    game = None
+    if game_root:
+        game = os.path.abspath(os.path.expanduser(os.path.expandvars(game_root)))
+        if not is_install(game):
+            raise ValueError(
+                f"{game_root} is not a Victoria II install: there is no "
+                f"map/default.map in it. Point --game-root at the folder the "
+                f"game is installed in, the one holding map/, gfx/ and mod/.")
+    if not mod_path:
+        if not game:
+            raise ValueError(
+                "Say where Victoria II is installed, with --game-root. The "
+                "report is read on the game's own rules, or on a mod's when "
+                "--mod-path names one inside the game's mod folder.")
+        return game_root, game
+    mod = os.path.abspath(os.path.expanduser(os.path.expandvars(mod_path)))
+    home = mod if is_install(mod) else _base_game_path(mod)
+    if not home:
+        raise ValueError(
+            f"{mod_path} is not in a Victoria II install's mod folder. Put the "
+            f"mod -- its folder and its .mod file -- in the mod folder of the "
+            f"game it runs on, where the game loads it from, and point "
+            f"--mod-path at it there.")
+    if game and not _same_folder(home, game):
+        raise ValueError(
+            f"{mod_path} is in the mod folder of {home}, not of {game_root}. "
+            f"Point --game-root at the install the mod is in, or leave it out.")
+    return mod_path, home
+
+
+def _base_game_path(path):
+    """
+    The Victoria II install a mod sits inside, or None when there isn't one.
+
+    Mods live at `<install>/mod/<name>`, so the install is two levels up.
+    Confirmed by looking for files no mod folder holds on its own, rather
+    than trusting the shape of the path.
+    """
+    if not path:
+        return None
+    root = os.path.dirname(os.path.dirname(os.path.abspath(path)))
+    if os.path.basename(os.path.dirname(os.path.abspath(path))).lower() != "mod":
+        return None
+    if not is_install(root):
+        return None
+    return root
+
