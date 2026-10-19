@@ -120,11 +120,13 @@ impl Reader {
     }
 
     /// The install beneath the mod, for a file in `folder` (`a/b`): None
-    /// when there is none, or the mod's .mod file replaces the folder or one
-    /// it lies in, as the game then reads that folder from the mod alone.
+    /// when there is none, or the mod's .mod file replaces that folder, as
+    /// the game then reads it from the mod alone. Only the folder named:
+    /// the game is told each one, `history/pops/1836.1.1` and not
+    /// `history/pops`, so `gfx` leaves `gfx/flags` to the game.
     pub(super) fn base_for(&self, folder: &str) -> Option<&str> {
         let key = place::folder_key(folder);
-        let gone = self.replaced.iter().any(|r| key == *r || key.starts_with(&format!("{}/", r)));
+        let gone = self.replaced.iter().any(|r| key == *r);
         if gone { None } else { self.base.as_deref() }
     }
 

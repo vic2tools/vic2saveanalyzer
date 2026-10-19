@@ -36,11 +36,15 @@ import fixtures
 from fixtures import TAGS, TECHS
 
 
+# `gfx` replaces that folder's own files and not the folders inside it, so
+# the game's gfx/flags are still read: the game names each folder it
+# replaces, `history/pops/1836.1.1` and not `history/pops`.
 GGG_MOD = """name = "GGG: Gozomedes' Great Game 1.0"
 path = "mod/GGG/GGG"
 user_dir = "GGG"
 replace_path = "common"
 replace_path = "decisions"
+replace_path = "gfx"
 """
 
 
@@ -79,7 +83,17 @@ def the_world(holding):
     write(os.path.join(game, "mod", "GGG.mod"), GGG_MOD)
     # What a clone of a repository carries beside the mod.
     write(os.path.join(game, "mod", "GGG", "README.md"), "GGG\n")
+    # A second mod whose folder is also called Plain, behind a .mod file
+    # saved the way an editor might leave it: a byte-order mark, CRLF
+    # line ends and a comment.
+    fixtures.a_mod(os.path.join(game, "mod", "Dup", "Plain"), tags=TAGS + ["DUP"])
+    with open(os.path.join(game, "mod", "Dup.mod"), "w", encoding="utf-8-sig",
+              newline="\r\n") as fh:
+        fh.write('# kept beside the other Plain\nname = "Dup"\npath = "mod/Dup/Plain"\n')
     return game, plain, ggg
+
+
+DUP_LABEL = "mod/Dup/Plain"
 
 
 def same(a, b):
@@ -101,6 +115,9 @@ def window_problems(report_tab, game, plain, ggg):
         wrong.append("the window no longer offers Plain at mod/Plain: it offers %s" % offered)
     if "GGG" not in paths or "Plain" not in paths:
         wrong.append("the window's labels are not the mods' folder names: %s" % sorted(paths))
+    if DUP_LABEL not in paths or not same(paths[DUP_LABEL], os.path.join(game, "mod", "Dup", "Plain")):
+        wrong.append("the second folder called Plain is not offered as %s: %s"
+                     % (DUP_LABEL, sorted(paths)))
     kind = report_tab.mod_kind(ggg)
     if kind != ("mod", ggg):
         wrong.append("mod_kind(mod/GGG/GGG) is %r, not one mod" % (kind,))
@@ -155,18 +172,21 @@ def scanner_problems(game, plain, ggg, holding, env):
 
     # A campaign only GGG explains: it holds a country only GGG lists.
     top = os.path.join(holding, "campaigns")
-    for name in ("gozo", "plain"):
+    for name in ("gozo", "plain", "dup"):
         os.makedirs(os.path.join(top, name))
     fixtures.a_save(os.path.join(top, "gozo", "1.v2"), tags=TAGS + ["BAV"])
     fixtures.a_save(os.path.join(top, "plain", "1.v2"), provinces=range(1, 41))
+    # And one only the second Plain explains, named as the window names it.
+    fixtures.a_save(os.path.join(top, "dup", "1.v2"), tags=TAGS + ["DUP"])
     done = kit.analyze(top, "--cross", "--game-root", game, "--out",
                        os.path.join(holding, "out-cross"), "--no-html", "--no-cache", env=env)
     said = done.stdout + done.stderr
     lines = {l.split()[0]: l for l in said.splitlines() if l.startswith("  ") and "->" in l}
-    gozo = lines.get("gozo", "")
-    if done.returncode or not gozo.split("->")[-1].strip().startswith("GGG"):
-        wrong.append("--cross did not read the campaign under GGG: %r -- %s"
-                     % (gozo.strip(), said[-800:]))
+    for campaign, label in (("gozo", "GGG"), ("dup", DUP_LABEL)):
+        line = lines.get(campaign, "")
+        if done.returncode or line.split("->")[-1].split()[:1] != [label]:
+            wrong.append("--cross did not read %s under %s: %r -- %s"
+                         % (campaign, label, line.strip(), said[-800:]))
     return wrong
 
 

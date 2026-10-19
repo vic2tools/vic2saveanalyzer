@@ -46,8 +46,10 @@ pub fn base_game_path(path: &str) -> Option<String> {
     }
 }
 
-/// `key = value` and `key = "value"` lines, comments cut.
+/// `key = value` and `key = "value"` lines, comments cut, a byte-order
+/// mark an editor left at the start skipped.
 fn pairs(text: &[u8]) -> Vec<(String, String)> {
+    let text = text.strip_prefix(b"\xef\xbb\xbf").unwrap_or(text);
     let mut out = Vec::new();
     for line in text.split(|&c| c == b'\n') {
         let line = l1(line);
@@ -142,6 +144,14 @@ mod tests {
             ("path".to_string(), "mod/GGG/GGG".to_string()),
             ("replace_path".to_string(), "common".to_string()),
             ("replace_path".to_string(), "history/pops/1836.1.1".to_string()),
+        ]);
+    }
+
+    #[test]
+    fn a_byte_order_mark_and_crlf_are_read_past() {
+        assert_eq!(pairs(b"\xef\xbb\xbfpath = \"mod/A\"\r\nname = A\r\n"), vec![
+            ("path".to_string(), "mod/A".to_string()),
+            ("name".to_string(), "A".to_string()),
         ]);
     }
 

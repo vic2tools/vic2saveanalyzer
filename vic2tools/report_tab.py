@@ -133,12 +133,16 @@ def _mod_files(install):
     out = []
     for name in names:
         try:
-            with open(os.path.join(home, name), encoding="latin-1") as fh:
+            # Lines end at \n alone, as the scanner splits them; a
+            # byte-order mark an editor left at the start is skipped.
+            with open(os.path.join(home, name), encoding="latin-1", newline="") as fh:
                 text = fh.read()
         except OSError:
             continue
+        if text.startswith("\xef\xbb\xbf"):
+            text = text[3:]
         said = {}
-        for line in text.splitlines():
+        for line in text.split("\n"):
             key, eq, value = line.partition("=")
             value = value.strip()
             if value.startswith('"'):
@@ -161,8 +165,8 @@ def installed_mods(install):
     .mod file there points to inside the install -- a mod kept a level
     down, as a clone of its repository is. Each is labelled by its folder's
     name, as the run's log and the report name it; a second folder of the
-    same name goes by its path under the mod folder. The scanner's
-    `--cross` searches the same list (`installed_mods` in
+    same name goes by its path under the install (`mod/Dup/Plain`). The
+    scanner's `--cross` searches the same list, named the same way (`installed_mods` in
     `scanner/src/front/survey.rs`).
     """
     out = _folder_mods(os.path.join(install, "mod"))
@@ -174,7 +178,7 @@ def installed_mods(install):
     labelled, taken = [], set()
     for name, path in out:
         if name in taken:
-            name = os.path.relpath(path, os.path.join(install, "mod")).replace(os.sep, "/")
+            name = os.path.relpath(path, install).replace(os.sep, "/")
         taken.add(name)
         labelled.append((name, path))
     return labelled
