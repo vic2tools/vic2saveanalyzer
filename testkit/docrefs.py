@@ -18,8 +18,7 @@ What counts as a path to check:
 - a bare file name with one of those endings, which has to exist somewhere
   in the repository.
 Anything with `~`, `$`, `<`, `*`, a drive or a scheme, or a stand-in like
-`testkit/NAME.py` (`PLACEHOLDERS`), is an example, not a path. docs/superpowers/
-is the record of the cleanup that made these docs, and is not read.
+`testkit/NAME.py` (`PLACEHOLDERS`), is an example, not a path.
 """
 import os
 import re
@@ -43,7 +42,7 @@ def tracked():
 
 def docs(files):
     out = [p for p in files if p.endswith(".md") and "/" not in p]
-    out += [p for p in files if p.endswith("/README.md") and not p.startswith("docs/superpowers/")]
+    out += [p for p in files if p.endswith("/README.md")]
     out += [p for p in files if p.startswith("docs/how-it-works/") and p.endswith(".md")]
     return sorted(set(out))
 
