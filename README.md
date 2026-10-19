@@ -167,14 +167,15 @@ underneath. That matters for the partial ones — Divergences of Darkness names
 two localisation files and no pop types at all. It is also where the map and
 most of the flags come from: a mod rarely ships either.
 
-A mod inside `Victoria 2/mod/`, where the game keeps it, is read on that
-install. A copy kept anywhere else, such as a mod unpacked into Downloads, is
-read on the Victoria 2 this machine has installed through Steam, found in
-Steam's usual places on Windows, Linux and macOS, including a library on
-another drive. The log says which install it used. `--game-root` names one
-instead: an install bought somewhere other than Steam, or a second copy. With
-no game found at all, the report has no map and only the flags the mod ships
-itself.
+A mod is read on the Victoria 2 install it sits in, the nearest one above its
+folder, which is where the game loads it from. Most mods sit at
+`Victoria 2/mod/<name>`, but the game goes by the mod's `.mod` file in
+`Victoria 2/mod/`, and its `path` can point deeper: a mod kept as a clone of its
+repository sits at `mod/<name>/<name>`. Such a mod is offered beside the others,
+and can be named directly. A folder the `.mod` file names with `replace_path`
+is read from the mod alone, as the game reads it. A copy of a mod outside any
+install is refused, because nothing it leaves to the game could be read.
+`--game-root` names the install; a mod inside one names it for you.
 
 ### Saves must be plaintext
 

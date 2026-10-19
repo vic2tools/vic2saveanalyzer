@@ -237,16 +237,24 @@ fn mod_signature(mod_path: Option<&str>) -> String {
         Some(p) => mod_root(p),
     };
     let mut roots = vec![path.clone()];
+    let mut replaced = Vec::new();
     if let Some(base) = modread::base_game_path(&path) {
         for folder in ["common", "decisions", "gfx/flags", "inventions", "localisation", "map",
                        "poptypes", "technologies", "units"] {
             roots.push(join(&base, folder));
         }
+        replaced = modread::place::replaced(&path, &base);
     }
     let mut digest = TwoLane::new();
     for root in &roots {
         digest.update(root.as_bytes());
         sign_folder(&mut digest, root, "");
+    }
+    // What the .mod file takes from the game changes what is read, though
+    // no file of the mod or the game does. Only said when it says anything,
+    // so a mod replacing nothing keeps the key it always had.
+    for folder in &replaced {
+        digest.update(format!("replace_path|{}\n", folder).as_bytes());
     }
     digest.hex()
 }

@@ -193,7 +193,7 @@ impl Reader {
     }
 
     pub(super) fn culture_blocks(&self, mut each: impl FnMut(&[u8], &[u8])) -> D<()> {
-        for root in self.game_then_mod() {
+        for root in self.game_then_mod("common") {
             let target = joins(root, &["common", "cultures.txt"]);
             if !is_file(&target) {
                 continue;
@@ -385,7 +385,7 @@ impl Reader {
         if is_file(&join(&own, "provinces.bmp")) && is_file(&join(&own, "definition.csv")) {
             return self.path.clone();
         }
-        self.base.clone().unwrap_or_else(|| self.path.clone())
+        self.base_for("map").unwrap_or(&self.path).to_string()
     }
 
     pub(super) fn map_file(&self, name: &str) -> String {
@@ -394,7 +394,7 @@ impl Reader {
 
     pub(super) fn country_files(&self) -> D<OMap<Vec<u8>, String>> {
         let mut out = OMap::new();
-        for root in self.game_then_mod() {
+        for root in self.game_then_mod("common") {
             let listing = joins(root, &["common", "countries.txt"]);
             if !is_file(&listing) {
                 continue;
@@ -402,7 +402,12 @@ impl Reader {
             let text = self.plain(&listing)?;
             for m in self.re.country_entry.find_all(&text) {
                 let rel = l1(strip(m.group(&text, 2))).replace('/', &SEP.to_string());
+                let under = format!("common/{}", dirname(&rel));
+                let game = self.base_for(&under);
                 for home in [self.path.as_str(), root] {
+                    if home != self.path && game != Some(home) {
+                        continue;
+                    }
                     let target = joins(home, &["common", &rel]);
                     if is_file(&target) {
                         out.set(m.group(&text, 1).to_vec(), target);
@@ -531,10 +536,8 @@ impl Reader {
 
     pub(super) fn flag_roots(&self) -> Vec<J> {
         let mut roots = vec![joins(&self.path, &["gfx", "flags"])];
-        let parts: Vec<&str> = self.path.split(SEP).collect();
-        if parts.len() >= 2 && lower(parts[parts.len() - 2]) == "mod" {
-            let up = parts[..parts.len() - 2].join(&SEP.to_string());
-            roots.push(joins(&up, &["gfx", "flags"]));
+        if let Some(game) = self.base_for("gfx/flags") {
+            roots.push(joins(game, &["gfx", "flags"]));
         }
         roots.into_iter().filter(|r| is_dir(r)).map(J::Str).collect()
     }
@@ -571,7 +574,7 @@ impl Reader {
 
     pub(super) fn display_names(&self) -> D<OMap<String, String>> {
         let mut keys: HashSet<String> = HashSet::new();
-        for root in self.game_then_mod() {
+        for root in self.game_then_mod("common") {
             let target = joins(root, &["common", "goods.txt"]);
             if is_file(&target) {
                 for (_c, block) in self.clausewitz(&target)?.iter() {
